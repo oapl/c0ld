@@ -45,39 +45,10 @@
     /* ─── Main ───────────────────────────────────────────────────────── */
     main { padding: 20px 0 40px; }
 
-    /* ─── Battle Selector ────────────────────────────────────────────── */
-    .section-label {
-      font-size: 0.72rem;
-      font-weight: bold;
-      text-transform: uppercase;
-      color: #666;
-      margin-bottom: 6px;
-    }
-    .battle-bar {
-      margin-bottom: 16px;
-    }
-    .battle-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-    .battle-tab {
-      padding: 5px 14px;
-      border: 1px solid #ccc;
-      background: #fff;
-      color: #444;
-      font-size: 0.82rem;
-      cursor: pointer;
-      border-radius: 3px;
-    }
-    .battle-tab:hover { background: #e8e8e8; }
-    .battle-tab.active {
-      background: #2c2c2c;
-      border-color: #2c2c2c;
-      color: #fff;
-    }
-
     /* ─── Toolbar ────────────────────────────────────────────────────── */
     .toolbar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 10px;
       margin-bottom: 10px;
       flex-wrap: wrap;
@@ -95,11 +66,6 @@
     }
     #search-input:focus { border-color: #888; }
     #search-input::placeholder { color: #aaa; }
-    .toolbar-right { display: flex; align-items: center; gap: 8px; }
-    .count-badge {
-      font-size: 0.78rem;
-      color: #666;
-    }
     #refresh-btn {
       background: #fff;
       border: 1px solid #ccc;
@@ -197,17 +163,6 @@
     }
     a { color: #555; }
 
-    /* ─── Footer ─────────────────────────────────────────────────────── */
-    footer {
-      border-top: 1px solid #ddd;
-      padding: 14px 0;
-      text-align: center;
-      font-size: 0.75rem;
-      color: #999;
-    }
-    footer a { text-decoration: none; color: #888; }
-    footer a:hover { text-decoration: underline; }
-
     /* ─── Responsive ─────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       .clan-name { font-size: 1.1rem; }
@@ -236,12 +191,7 @@ const CONFIG = {
   /* ---- Named tabs to expose as "battles" ----
      Each entry: { label: "Display Name", gid: 0 }
      Leave empty to load the first sheet only.           */
-  TABS: [
-    { label: "5 Min",    gid: 0 },
-    { label: "60 Min",   gid: 0 },
-    { label: "12 Hours", gid: 0 },
-    { label: "24 Hours", gid: 0 },
-  ],
+  TABS: [],
 
   /* ---- Optional: Apps Script published web app URL ----
      Leave empty ("") to use the Google Sheets gviz API instead.
@@ -274,8 +224,7 @@ const CONFIG = {
       <div class="clan-sub" id="clan-sub"></div>
     </div>
     <div class="header-meta">
-      Last updated: <span id="last-updated">—</span><br>
-      <a id="sheet-link" href="#" target="_blank" rel="noopener">View Source Sheet ↗</a>
+      Last updated: <span id="last-updated">—</span>
     </div>
   </div>
 </header>
@@ -283,23 +232,12 @@ const CONFIG = {
 <main>
   <div class="container">
 
-    <!-- Battle selector -->
-    <div id="battle-bar-wrap" style="display:none">
-      <div class="section-label">Clan Battle History</div>
-      <div class="battle-bar">
-        <div class="battle-tabs" id="battle-tabs"></div>
-      </div>
-    </div>
-
     <!-- Toolbar -->
     <div class="toolbar">
       <div class="search-wrap">
         <input id="search-input" type="text" placeholder="Search member…" autocomplete="off" />
       </div>
-      <div class="toolbar-right">
-        <div class="count-badge">Showing <span id="visible-count">0</span> members</div>
-        <button id="refresh-btn" title="Refresh data">↻ Refresh</button>
-      </div>
+      <button id="refresh-btn" title="Refresh data">↻ Refresh</button>
     </div>
 
     <!-- Table -->
@@ -318,15 +256,6 @@ const CONFIG = {
   </div>
 </main>
 
-<footer>
-  <div class="container">
-    <p>
-      Data: <a id="footer-sheet-link" href="#" target="_blank" rel="noopener">Google Sheets</a> ·
-      <a href="https://github.com/OpalApocalypse/NONG_Leaderboard" target="_blank" rel="noopener">GitHub</a>
-    </p>
-  </div>
-</footer>
-
 <!-- ─── JAVASCRIPT ─────────────────────────────────────────────────── -->
 <script>
 /* =====================================================================
@@ -336,7 +265,6 @@ let allRows    = [];   // raw parsed rows [{col: value, ...}]
 let columns    = [];   // column descriptors [{key, label, type, role}]
 let sortCol    = null; // key of currently sorted column
 let sortAsc    = false;
-let activeTab  = 0;    // index into CONFIG.TABS
 let maxPrimary = 1;    // max value in the primary numeric column (for bars)
 
 /* =====================================================================
@@ -346,11 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Populate static text from config
   document.getElementById("clan-name").textContent = CONFIG.CLAN_NAME;
   document.getElementById("clan-sub").textContent  = CONFIG.CLAN_SUBTITLE;
-  const sheetUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/edit`;
-  document.getElementById("sheet-link").href       = sheetUrl;
-  document.getElementById("footer-sheet-link").href = sheetUrl;
 
-  buildBattleTabs();
   loadData();
 
   document.getElementById("search-input").addEventListener("input", renderTable);
@@ -358,28 +282,6 @@ document.addEventListener("DOMContentLoaded", () => {
     loadData();
   });
 });
-
-/* =====================================================================
-   Battle tabs
-   ===================================================================== */
-function buildBattleTabs() {
-  if (!CONFIG.TABS || CONFIG.TABS.length === 0) return;
-  const wrap = document.getElementById("battle-bar-wrap");
-  const tabs = document.getElementById("battle-tabs");
-  wrap.style.display = "block";
-  CONFIG.TABS.forEach((tab, i) => {
-    const btn = document.createElement("button");
-    btn.className = "battle-tab" + (i === activeTab ? " active" : "");
-    btn.textContent = tab.label;
-    btn.addEventListener("click", () => {
-      activeTab = i;
-      document.querySelectorAll(".battle-tab").forEach((b, j) =>
-        b.classList.toggle("active", j === i));
-      loadData();
-    });
-    tabs.appendChild(btn);
-  });
-}
 
 /* =====================================================================
    Data loading
@@ -405,8 +307,7 @@ async function loadData() {
 /* ---- AppScript JSON endpoint ---- */
 async function loadFromAppScript() {
   const sep = CONFIG.APPSCRIPT_URL.includes("?") ? "&" : "?";
-  const url = CONFIG.APPSCRIPT_URL +
-    (CONFIG.TABS.length ? `${sep}battle=${encodeURIComponent(CONFIG.TABS[activeTab].label)}` : "");
+  const url = CONFIG.APPSCRIPT_URL;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`AppScript returned HTTP ${res.status}`);
   const data = await res.json();
@@ -418,7 +319,7 @@ async function loadFromAppScript() {
 
 /* ---- Google Sheets gviz API ---- */
 async function loadFromGviz() {
-  const gid = (CONFIG.TABS.length > 0) ? CONFIG.TABS[activeTab].gid : 0;
+  const gid = 0;
   const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${gid}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Google Sheets returned HTTP ${res.status}. Ensure the sheet is publicly shared (View access).`);
@@ -612,8 +513,6 @@ function renderTable() {
 
     tbody.appendChild(tr);
   });
-
-  document.getElementById("visible-count").textContent = rows.length;
 
   if (rows.length === 0 && allRows.length > 0) {
     tbody.innerHTML = `<tr><td colspan="${columns.length + (hasRankCol ? 0 : 1)}" style="text-align:center;padding:32px;color:var(--text-muted);">No members match your search.</td></tr>`;
