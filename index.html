@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NONG_ Clan Leaderboard</title>
+  <title>NONG Clan Leaderboard</title>
   <style>
     /* ─── Reset & Base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -144,7 +144,7 @@
     }
     tbody tr:nth-child(even) { background: #f9f9f9; }
     tbody tr:hover { background: #f0f0f0; }
-    tbody tr:first-child td { font-weight: bold; }
+
 
     /* Rank cell */
     .rank-cell {
@@ -237,11 +237,10 @@ const CONFIG = {
      Each entry: { label: "Display Name", gid: 0 }
      Leave empty to load the first sheet only.           */
   TABS: [
-    /* Examples — replace with real gid values from the sheet URL:
-    { label: "Current Battle", gid: 0    },
-    { label: "Battle 12",      gid: 123456789 },
-    { label: "Battle 11",      gid: 987654321 },
-    */
+    { label: "5 Min",    gid: 0 },
+    { label: "60 Min",   gid: 0 },
+    { label: "12 Hours", gid: 0 },
+    { label: "24 Hours", gid: 0 },
   ],
 
   /* ---- Optional: Apps Script published web app URL ----
@@ -261,7 +260,7 @@ const CONFIG = {
   },
 
   /* ---- Clan display name shown in the header ---- */
-  CLAN_NAME: "NONG_",
+  CLAN_NAME: "NONG",
   CLAN_SUBTITLE: "Pet Simulator 99 · Clan Leaderboard",
 };
 </script>
@@ -290,14 +289,6 @@ const CONFIG = {
       <div class="battle-bar">
         <div class="battle-tabs" id="battle-tabs"></div>
       </div>
-    </div>
-
-    <!-- Stats summary row -->
-    <div id="stats-row" style="display:flex;gap:24px;margin-bottom:14px;font-size:0.82rem;color:#555;flex-wrap:wrap;">
-      <span>Members: <strong id="stat-members">—</strong></span>
-      <span>Total Diamonds: <strong id="stat-total">—</strong></span>
-      <span>Top: <strong id="stat-top">—</strong></span>
-      <span>Average: <strong id="stat-avg">—</strong></span>
     </div>
 
     <!-- Toolbar -->
@@ -480,10 +471,9 @@ function processData(cols, rows) {
     sortAsc = false;
   }
 
-  updateStats(primCol);
+  updateTimestamp();
   buildTableHeader();
   renderTable();
-  updateTimestamp();
   hideState();
 }
 
@@ -496,37 +486,6 @@ function detectRole(label) {
     if (hints.some(h => l.includes(h))) return role;
   }
   return "generic";
-}
-
-/* =====================================================================
-   Stats cards
-   ===================================================================== */
-function updateStats(primCol) {
-  const members = allRows.length;
-  document.getElementById("stat-members").textContent = members;
-
-  if (!primCol) {
-    document.getElementById("stat-total").textContent = "—";
-    document.getElementById("stat-top").textContent   = "—";
-    document.getElementById("stat-avg").textContent   = "—";
-    return;
-  }
-
-  const vals  = allRows.map(r => toNum(r[primCol.key])).filter(v => isFinite(v));
-  const total = vals.reduce((a, b) => a + b, 0);
-  const avg   = members ? Math.round(total / members) : 0;
-
-  // Find top contributor name
-  let topName = "—";
-  const nameCol = columns.find(c => c.role === "name");
-  if (nameCol && allRows.length > 0) {
-    const topRow = allRows.reduce((best, r) => toNum(r[primCol.key]) > toNum(best[primCol.key]) ? r : best, allRows[0]);
-    topName = topRow ? String(topRow[nameCol.key] || "—") : "—";
-  }
-
-  document.getElementById("stat-total").textContent = fmtNum(total);
-  document.getElementById("stat-top").textContent   = topName;
-  document.getElementById("stat-avg").textContent   = fmtNum(avg);
 }
 
 /* =====================================================================
