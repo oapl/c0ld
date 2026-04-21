@@ -4,172 +4,73 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NONG_ Clan Leaderboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     /* ─── Reset & Base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg:        #0d0f1a;
-      --surface:   #161929;
-      --surface2:  #1f2338;
-      --border:    #2a2f4a;
-      --gold:      #f5c842;
-      --gold-dim:  #c9992a;
-      --diamond:   #5be5ff;
-      --diamond2:  #38b2cc;
-      --text:      #e8eaf6;
-      --text-muted:#8892b0;
-      --green:     #56d494;
-      --red:       #ff6b6b;
-      --rank1:     #ffd700;
-      --rank2:     #c0c0c0;
-      --rank3:     #cd7f32;
-      --radius:    10px;
-      --shadow:    0 4px 24px rgba(0,0,0,0.5);
-    }
-    html { scroll-behavior: smooth; }
     body {
-      font-family: 'Inter', sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f4f4;
+      color: #222;
       min-height: 100vh;
-      line-height: 1.6;
+      font-size: 14px;
     }
 
     /* ─── Layout ─────────────────────────────────────────────────────── */
-    .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 
     /* ─── Header ─────────────────────────────────────────────────────── */
     header {
-      background: linear-gradient(135deg, #0d0f1a 0%, #1a1f3a 50%, #0d0f1a 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 24px 0;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      backdrop-filter: blur(8px);
+      background: #2c2c2c;
+      color: #fff;
+      padding: 14px 0;
+      border-bottom: 3px solid #444;
     }
     .header-inner {
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 12px;
-    }
-    .clan-logo {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .diamond-icon {
-      width: 44px; height: 44px;
-      background: linear-gradient(135deg, var(--diamond), var(--diamond2));
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 24px;
-      box-shadow: 0 0 16px rgba(91, 229, 255, 0.4);
+      gap: 8px;
     }
     .clan-name {
-      font-size: 1.6rem;
-      font-weight: 800;
-      background: linear-gradient(135deg, var(--gold), var(--diamond));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #fff;
+      letter-spacing: 0.02em;
     }
-    .clan-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
-    .header-meta {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      text-align: right;
-    }
-    #last-updated { color: var(--diamond); font-weight: 600; }
+    .clan-sub { font-size: 0.78rem; color: #aaa; margin-top: 2px; }
+    .header-meta { font-size: 0.75rem; color: #bbb; text-align: right; }
+    #last-updated { color: #ddd; }
 
     /* ─── Main ───────────────────────────────────────────────────────── */
-    main { padding: 28px 0 60px; }
+    main { padding: 20px 0 40px; }
 
     /* ─── Battle Selector ────────────────────────────────────────────── */
     .section-label {
       font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
+      font-weight: bold;
       text-transform: uppercase;
-      color: var(--text-muted);
-      margin-bottom: 10px;
+      color: #666;
+      margin-bottom: 6px;
     }
     .battle-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 28px;
-      flex-wrap: wrap;
+      margin-bottom: 16px;
     }
-    .battle-tabs {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+    .battle-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .battle-tab {
-      padding: 7px 18px;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      font-weight: 600;
+      padding: 5px 14px;
+      border: 1px solid #ccc;
+      background: #fff;
+      color: #444;
+      font-size: 0.82rem;
       cursor: pointer;
-      transition: all 0.2s;
+      border-radius: 3px;
     }
-    .battle-tab:hover { border-color: var(--diamond2); color: var(--diamond); }
+    .battle-tab:hover { background: #e8e8e8; }
     .battle-tab.active {
-      background: linear-gradient(135deg, var(--diamond2), #2a8da3);
-      border-color: transparent;
+      background: #2c2c2c;
+      border-color: #2c2c2c;
       color: #fff;
-      box-shadow: 0 0 12px rgba(56, 178, 204, 0.35);
-    }
-
-    /* ─── Stats Cards ────────────────────────────────────────────────── */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
-    }
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px;
-      position: relative;
-      overflow: hidden;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      border-radius: var(--radius) var(--radius) 0 0;
-    }
-    .stat-card.gold::before   { background: linear-gradient(90deg, var(--gold), var(--gold-dim)); }
-    .stat-card.blue::before   { background: linear-gradient(90deg, var(--diamond), var(--diamond2)); }
-    .stat-card.green::before  { background: linear-gradient(90deg, var(--green), #3aaa72); }
-    .stat-card.purple::before { background: linear-gradient(90deg, #9b6dff, #6b4fc3); }
-    .stat-icon { font-size: 1.8rem; margin-bottom: 8px; }
-    .stat-value {
-      font-size: 1.7rem;
-      font-weight: 800;
-      color: var(--text);
-      line-height: 1.1;
-    }
-    .stat-label {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin-top: 4px;
-      font-weight: 500;
     }
 
     /* ─── Toolbar ────────────────────────────────────────────────────── */
@@ -177,203 +78,141 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 10px;
       flex-wrap: wrap;
     }
-    .search-wrap {
-      position: relative;
-      flex: 1;
-      min-width: 200px;
-      max-width: 340px;
-    }
-    .search-wrap svg {
-      position: absolute;
-      left: 12px; top: 50%;
-      transform: translateY(-50%);
-      opacity: 0.4;
-    }
+    .search-wrap { position: relative; }
     #search-input {
-      width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 9px 12px 9px 38px;
-      color: var(--text);
-      font-size: 0.88rem;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    #search-input:focus { border-color: var(--diamond2); }
-    #search-input::placeholder { color: var(--text-muted); }
-    .toolbar-right { display: flex; align-items: center; gap: 10px; }
-    .count-badge {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 14px;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-    }
-    .count-badge span { color: var(--diamond); font-weight: 700; }
-    #refresh-btn {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px 16px;
-      color: var(--text-muted);
+      width: 220px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 6px 10px;
       font-size: 0.82rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex; align-items: center; gap: 6px;
-      transition: all 0.2s;
+      color: #333;
+      background: #fff;
+      outline: none;
     }
-    #refresh-btn:hover { border-color: var(--diamond2); color: var(--diamond); }
-    #refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+    #search-input:focus { border-color: #888; }
+    #search-input::placeholder { color: #aaa; }
+    .toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .count-badge {
+      font-size: 0.78rem;
+      color: #666;
+    }
+    #refresh-btn {
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 6px 12px;
+      color: #444;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    #refresh-btn:hover { background: #e8e8e8; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    #refresh-btn.spinning { opacity: 0.6; }
 
     /* ─── Table ──────────────────────────────────────────────────────── */
     .table-wrap {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: var(--shadow);
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      overflow-x: auto;
     }
     table { width: 100%; border-collapse: collapse; }
-    thead { background: var(--surface2); }
+    thead { background: #e8e8e8; }
     th {
-      padding: 14px 16px;
+      padding: 10px 12px;
       text-align: left;
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-weight: bold;
+      color: #444;
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
-      transition: color 0.15s;
+      border-bottom: 1px solid #ccc;
     }
-    th:hover { color: var(--diamond); }
-    th.sorted { color: var(--diamond); }
-    th .sort-icon { display: inline-block; margin-left: 4px; opacity: 0.5; }
-    th.sorted .sort-icon { opacity: 1; }
+    th:hover { background: #ddd; }
+    th.sorted { background: #ddd; }
+    th .sort-icon { display: inline-block; margin-left: 3px; color: #888; font-size: 0.7rem; }
     td {
-      padding: 13px 16px;
-      font-size: 0.88rem;
-      border-top: 1px solid var(--border);
+      padding: 9px 12px;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #eee;
       vertical-align: middle;
     }
-    tr { transition: background 0.15s; }
-    tbody tr:hover { background: var(--surface2); }
+    tbody tr:nth-child(even) { background: #f9f9f9; }
+    tbody tr:hover { background: #f0f0f0; }
+    tbody tr:first-child td { font-weight: bold; }
 
     /* Rank cell */
     .rank-cell {
-      font-weight: 800;
-      font-size: 1rem;
-      width: 50px;
+      font-weight: bold;
+      width: 44px;
       text-align: center;
+      color: #555;
     }
-    .rank-medal { font-size: 1.3rem; }
-    .rank-num { color: var(--text-muted); }
 
     /* Name cell */
-    .name-cell { font-weight: 600; color: var(--text); }
-    .name-cell small { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
+    .name-cell { font-weight: bold; color: #222; }
 
     /* Numeric cell */
-    .num-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
-    .num-cell.highlight { color: var(--diamond); }
-    .num-cell.gold-val { color: var(--gold); }
-
-    /* Bar cell */
-    .bar-wrap {
-      display: flex; align-items: center; gap: 10px;
-      min-width: 140px;
-    }
-    .bar-bg {
-      flex: 1;
-      height: 6px;
-      background: var(--bg);
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--diamond2), var(--diamond));
-      border-radius: 3px;
-      transition: width 0.6s ease;
-    }
-    .bar-pct { font-size: 0.72rem; color: var(--text-muted); min-width: 36px; text-align: right; }
-
-    /* Change badge */
-    .change-badge {
-      display: inline-flex; align-items: center; gap: 3px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 0.75rem;
-      font-weight: 700;
-    }
-    .change-up   { background: rgba(86,212,148,.15); color: var(--green); }
-    .change-down { background: rgba(255,107,107,.15); color: var(--red); }
-    .change-same { background: var(--surface2); color: var(--text-muted); }
+    .num-cell { font-variant-numeric: tabular-nums; text-align: right; }
 
     /* ─── Loading / Error States ──────────────────────────────────────── */
     .state-box {
       text-align: center;
-      padding: 60px 20px;
+      padding: 50px 20px;
+      color: #666;
     }
-    .state-box .icon { font-size: 3rem; margin-bottom: 14px; }
-    .state-box h3 { font-size: 1.1rem; margin-bottom: 8px; }
-    .state-box p { color: var(--text-muted); font-size: 0.88rem; max-width: 440px; margin: 0 auto; }
+    .state-box h3 { font-size: 1rem; margin-bottom: 8px; color: #444; }
+    .state-box p { font-size: 0.85rem; color: #888; max-width: 440px; margin: 0 auto; }
     .loader {
       display: inline-block;
-      width: 42px; height: 42px;
-      border: 3px solid var(--border);
-      border-top-color: var(--diamond);
+      width: 32px; height: 32px;
+      border: 3px solid #ddd;
+      border-top-color: #666;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     .config-hint {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 20px;
-      margin-top: 16px;
-      font-size: 0.82rem;
-      color: var(--text-muted);
+      background: #f8f8f8;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 12px 16px;
+      font-size: 0.8rem;
+      color: #666;
       text-align: left;
-      max-width: 560px;
-      margin: 16px auto 0;
+      max-width: 500px;
+      margin: 14px auto 0;
     }
     .config-hint code {
-      background: var(--bg);
-      padding: 1px 5px;
-      border-radius: 4px;
+      background: #efefef;
+      padding: 1px 4px;
+      border-radius: 2px;
       font-family: monospace;
-      color: var(--diamond);
+      color: #333;
     }
-    a { color: var(--diamond); }
+    a { color: #555; }
 
     /* ─── Footer ─────────────────────────────────────────────────────── */
     footer {
-      border-top: 1px solid var(--border);
-      padding: 20px 0;
+      border-top: 1px solid #ddd;
+      padding: 14px 0;
       text-align: center;
-      font-size: 0.78rem;
-      color: var(--text-muted);
+      font-size: 0.75rem;
+      color: #999;
     }
-    footer a { text-decoration: none; }
+    footer a { text-decoration: none; color: #888; }
     footer a:hover { text-decoration: underline; }
 
     /* ─── Responsive ─────────────────────────────────────────────────── */
-    @media (max-width: 640px) {
-      .clan-name { font-size: 1.3rem; }
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-      .bar-wrap { min-width: 90px; }
-      th, td { padding: 10px 10px; }
+    @media (max-width: 600px) {
+      .clan-name { font-size: 1.1rem; }
+      th, td { padding: 7px 8px; }
+      #search-input { width: 160px; }
       .hide-mobile { display: none; }
     }
   </style>
@@ -431,16 +270,13 @@ const CONFIG = {
 
 <header>
   <div class="container header-inner">
-    <div class="clan-logo">
-      <div class="diamond-icon">💎</div>
-      <div>
-        <div class="clan-name" id="clan-name"></div>
-        <div class="clan-sub" id="clan-sub"></div>
-      </div>
+    <div>
+      <div class="clan-name" id="clan-name"></div>
+      <div class="clan-sub" id="clan-sub"></div>
     </div>
     <div class="header-meta">
-      Updated: <span id="last-updated">—</span><br>
-      <a id="sheet-link" href="#" target="_blank" rel="noopener" style="font-size:0.75rem;color:var(--text-muted);">View Source Sheet ↗</a>
+      Last updated: <span id="last-updated">—</span><br>
+      <a id="sheet-link" href="#" target="_blank" rel="noopener">View Source Sheet ↗</a>
     </div>
   </div>
 </header>
@@ -456,47 +292,22 @@ const CONFIG = {
       </div>
     </div>
 
-    <!-- Stats cards -->
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat-card blue">
-        <div class="stat-icon">👥</div>
-        <div class="stat-value" id="stat-members">—</div>
-        <div class="stat-label">Active Members</div>
-      </div>
-      <div class="stat-card gold">
-        <div class="stat-icon">💎</div>
-        <div class="stat-value" id="stat-total">—</div>
-        <div class="stat-label">Total Diamonds</div>
-      </div>
-      <div class="stat-card green">
-        <div class="stat-icon">🏆</div>
-        <div class="stat-value" id="stat-top">—</div>
-        <div class="stat-label">Top Contributor</div>
-      </div>
-      <div class="stat-card purple">
-        <div class="stat-icon">📊</div>
-        <div class="stat-value" id="stat-avg">—</div>
-        <div class="stat-label">Average Diamonds</div>
-      </div>
+    <!-- Stats summary row -->
+    <div id="stats-row" style="display:flex;gap:24px;margin-bottom:14px;font-size:0.82rem;color:#555;flex-wrap:wrap;">
+      <span>Members: <strong id="stat-members">—</strong></span>
+      <span>Total Diamonds: <strong id="stat-total">—</strong></span>
+      <span>Top: <strong id="stat-top">—</strong></span>
+      <span>Average: <strong id="stat-avg">—</strong></span>
     </div>
 
     <!-- Toolbar -->
     <div class="toolbar">
       <div class="search-wrap">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
         <input id="search-input" type="text" placeholder="Search member…" autocomplete="off" />
       </div>
       <div class="toolbar-right">
         <div class="count-badge">Showing <span id="visible-count">0</span> members</div>
-        <button id="refresh-btn" title="Refresh data">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-          </svg>
-          Refresh
-        </button>
+        <button id="refresh-btn" title="Refresh data">↻ Refresh</button>
       </div>
     </div>
 
@@ -519,9 +330,8 @@ const CONFIG = {
 <footer>
   <div class="container">
     <p>
-      Data source: <a id="footer-sheet-link" href="#" target="_blank" rel="noopener">Google Sheets</a> ·
-      Built for <strong>NONG_</strong> clan ·
-      <a href="https://github.com/OpalApocalypse/NONG-_Leaderboard" target="_blank" rel="noopener">GitHub</a>
+      Data: <a id="footer-sheet-link" href="#" target="_blank" rel="noopener">Google Sheets</a> ·
+      <a href="https://github.com/OpalApocalypse/NONG_Leaderboard" target="_blank" rel="noopener">GitHub</a>
     </p>
   </div>
 </footer>
@@ -808,10 +618,7 @@ function renderTable() {
     if (!hasRankCol) {
       const td = document.createElement("td");
       td.className = "rank-cell";
-      if (displayRank === 1) td.innerHTML = '<span class="rank-medal">🥇</span>';
-      else if (displayRank === 2) td.innerHTML = '<span class="rank-medal">🥈</span>';
-      else if (displayRank === 3) td.innerHTML = '<span class="rank-medal">🥉</span>';
-      else td.innerHTML = `<span class="rank-num">${displayRank}</span>`;
+      td.textContent = displayRank;
       tr.appendChild(td);
     }
 
@@ -822,10 +629,7 @@ function renderTable() {
       if (col.role === "rank") {
         td.className = "rank-cell";
         const r = parseInt(val, 10);
-        if (r === 1) td.innerHTML = '<span class="rank-medal">🥇</span>';
-        else if (r === 2) td.innerHTML = '<span class="rank-medal">🥈</span>';
-        else if (r === 3) td.innerHTML = '<span class="rank-medal">🥉</span>';
-        else td.innerHTML = `<span class="rank-num">${r || val}</span>`;
+        td.textContent = r || val;
 
       } else if (col.role === "name") {
         td.className = "name-cell";
@@ -833,13 +637,8 @@ function renderTable() {
 
       } else if (col.isPrimary) {
         const num = toNum(val);
-        const pct = maxPrimary > 0 ? Math.round((num / maxPrimary) * 100) : 0;
-        td.innerHTML = `
-          <div class="bar-wrap">
-            <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
-            <span class="bar-pct">${pct}%</span>
-          </div>`;
-        td.insertAdjacentHTML("afterbegin", `<span class="num-cell highlight">${fmtNum(num)}</span><br>`);
+        td.className = "num-cell";
+        td.textContent = fmtNum(num);
 
       } else if (typeof val === "number" || (typeof val === "string" && val !== "" && !isNaN(Number(val)))) {
         td.className = "num-cell";
@@ -873,7 +672,6 @@ function showState(type, msg) {
     el.innerHTML = `<div class="loader"></div><h3>Loading leaderboard…</h3><p>Fetching data from Google Sheets.</p>`;
   } else if (type === "error") {
     el.innerHTML = `
-      <div class="icon">⚠️</div>
       <h3>Could not load data</h3>
       <p>${escHtml(msg || "An unknown error occurred.")}</p>
       <div class="config-hint">
