@@ -103,10 +103,14 @@
     th.sorted { background: #ddd; }
     th .sort-icon { display: inline-block; margin-left: 3px; color: #888; font-size: 0.7rem; }
     td {
-      padding: 9px 12px;
+      padding: 0 12px;
+      height: 40px;
       font-size: 0.85rem;
       border-bottom: 1px solid #eee;
       vertical-align: middle;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     tbody tr:nth-child(even) { background: #f9f9f9; }
     tbody tr:hover { background: #f0f0f0; }
@@ -200,13 +204,26 @@ const CONFIG = {
   */
   APPSCRIPT_URL: "",
 
-  /* ---- Column hints (case-insensitive partial match) ----
-     Columns whose names match these patterns get special formatting.  */
+  /* ---- Explicit column list ----
+     Only these columns are shown, in this order.
+     "match" is a regex tested against the sheet's column label.
+     "label" is the header text displayed on the page.             */
+  COLUMNS: [
+    { match: /rank/i,                       label: "RANK" },
+    { match: /user|username/i,              label: "USERNAME" },
+    { match: /total/i,                      label: "TOTAL POINTS" },
+    { match: /inactive/i,                   label: "INACTIVE TIME" },
+    { match: /5.{0,6}min/i,                label: "5 MINUTES" },
+    { match: /60.{0,6}min/i,               label: "60 MINUTES" },
+    { match: /12.{0,6}h/i,                 label: "12 HOURS" },
+    { match: /24.{0,6}h/i,                 label: "24 HOURS" },
+  ],
+
+  /* ---- Column role hints (used for formatting only) ---- */
   COL_HINTS: {
     rank:     ["rank","#","place","pos"],
     name:     ["name","user","player","member","ign"],
     diamonds: ["diamond","gem","total","score","contrib","point"],
-    battle:   ["battle","event","week","season"],
   },
 
   /* ---- Clan display name shown in the header ---- */
@@ -350,6 +367,16 @@ function parseGvizResponse(text) {
    Data processing
    ===================================================================== */
 function processData(cols, rows) {
+  // Filter to only the configured columns, in the declared order, renamed
+  if (CONFIG.COLUMNS && CONFIG.COLUMNS.length > 0) {
+    const mapped = [];
+    CONFIG.COLUMNS.forEach(cfg => {
+      const found = cols.find(c => cfg.match.test(c.label));
+      if (found) mapped.push({ ...found, label: cfg.label, key: found.key });
+    });
+    if (mapped.length > 0) cols = mapped;
+  }
+
   columns = cols;
   allRows = rows;
 
