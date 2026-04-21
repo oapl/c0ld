@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NONG_ Clan Leaderboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0d0f1a;
+      --surface:   #161929;
+      --surface2:  #1f2338;
+      --border:    #2a2f4a;
+      --gold:      #f5c842;
+      --gold-dim:  #c9992a;
+      --diamond:   #5be5ff;
+      --diamond2:  #38b2cc;
+      --text:      #e8eaf6;
+      --text-muted:#8892b0;
+      --green:     #56d494;
+      --red:       #ff6b6b;
+      --rank1:     #ffd700;
+      --rank2:     #c0c0c0;
+      --rank3:     #cd7f32;
+      --radius:    10px;
+      --shadow:    0 4px 24px rgba(0,0,0,0.5);
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────────── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+    /* ─── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0d0f1a 0%, #1a1f3a 50%, #0d0f1a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 24px 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(8px);
+    }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .clan-logo {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .diamond-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, var(--diamond), var(--diamond2));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 0 16px rgba(91, 229, 255, 0.4);
+    }
+    .clan-name {
+      font-size: 1.6rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--gold), var(--diamond));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .clan-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+    .header-meta {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+    #last-updated { color: var(--diamond); font-weight: 600; }
+
+    /* ─── Main ───────────────────────────────────────────────────────── */
+    main { padding: 28px 0 60px; }
+
+    /* ─── Battle Selector ────────────────────────────────────────────── */
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .battle-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    .battle-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .battle-tab {
+      padding: 7px 18px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .battle-tab:hover { border-color: var(--diamond2); color: var(--diamond); }
+    .battle-tab.active {
+      background: linear-gradient(135deg, var(--diamond2), #2a8da3);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 0 12px rgba(56, 178, 204, 0.35);
+    }
+
+    /* ─── Stats Cards ────────────────────────────────────────────────── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .stat-card.gold::before   { background: linear-gradient(90deg, var(--gold), var(--gold-dim)); }
+    .stat-card.blue::before   { background: linear-gradient(90deg, var(--diamond), var(--diamond2)); }
+    .stat-card.green::before  { background: linear-gradient(90deg, var(--green), #3aaa72); }
+    .stat-card.purple::before { background: linear-gradient(90deg, #9b6dff, #6b4fc3); }
+    .stat-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .stat-value {
+      font-size: 1.7rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.1;
+    }
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-weight: 500;
+    }
+
+    /* ─── Toolbar ────────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .search-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+      max-width: 340px;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 12px; top: 50%;
+      transform: translateY(-50%);
+      opacity: 0.4;
+    }
+    #search-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px 9px 38px;
+      color: var(--text);
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #search-input:focus { border-color: var(--diamond2); }
+    #search-input::placeholder { color: var(--text-muted); }
+    .toolbar-right { display: flex; align-items: center; gap: 10px; }
+    .count-badge {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .count-badge span { color: var(--diamond); font-weight: 700; }
+    #refresh-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.2s;
+    }
+    #refresh-btn:hover { border-color: var(--diamond2); color: var(--diamond); }
+    #refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Table ──────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: var(--surface2); }
+    th {
+      padding: 14px 16px;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: color 0.15s;
+    }
+    th:hover { color: var(--diamond); }
+    th.sorted { color: var(--diamond); }
+    th .sort-icon { display: inline-block; margin-left: 4px; opacity: 0.5; }
+    th.sorted .sort-icon { opacity: 1; }
+    td {
+      padding: 13px 16px;
+      font-size: 0.88rem;
+      border-top: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr { transition: background 0.15s; }
+    tbody tr:hover { background: var(--surface2); }
+
+    /* Rank cell */
+    .rank-cell {
+      font-weight: 800;
+      font-size: 1rem;
+      width: 50px;
+      text-align: center;
+    }
+    .rank-medal { font-size: 1.3rem; }
+    .rank-num { color: var(--text-muted); }
+
+    /* Name cell */
+    .name-cell { font-weight: 600; color: var(--text); }
+    .name-cell small { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
+
+    /* Numeric cell */
+    .num-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .num-cell.highlight { color: var(--diamond); }
+    .num-cell.gold-val { color: var(--gold); }
+
+    /* Bar cell */
+    .bar-wrap {
+      display: flex; align-items: center; gap: 10px;
+      min-width: 140px;
+    }
+    .bar-bg {
+      flex: 1;
+      height: 6px;
+      background: var(--bg);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--diamond2), var(--diamond));
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+    .bar-pct { font-size: 0.72rem; color: var(--text-muted); min-width: 36px; text-align: right; }
+
+    /* Change badge */
+    .change-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .change-up   { background: rgba(86,212,148,.15); color: var(--green); }
+    .change-down { background: rgba(255,107,107,.15); color: var(--red); }
+    .change-same { background: var(--surface2); color: var(--text-muted); }
+
+    /* ─── Loading / Error States ──────────────────────────────────────── */
+    .state-box {
+      text-align: center;
+      padding: 60px 20px;
+    }
+    .state-box .icon { font-size: 3rem; margin-bottom: 14px; }
+    .state-box h3 { font-size: 1.1rem; margin-bottom: 8px; }
+    .state-box p { color: var(--text-muted); font-size: 0.88rem; max-width: 440px; margin: 0 auto; }
+    .loader {
+      display: inline-block;
+      width: 42px; height: 42px;
+      border: 3px solid var(--border);
+      border-top-color: var(--diamond);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 14px;
+    }
+    .config-hint {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-top: 16px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      text-align: left;
+      max-width: 560px;
+      margin: 16px auto 0;
+    }
+    .config-hint code {
+      background: var(--bg);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: var(--diamond);
+    }
+    a { color: var(--diamond); }
+
+    /* ─── Footer ─────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 20px 0;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    footer a { text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ─── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .clan-name { font-size: 1.3rem; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .bar-wrap { min-width: 90px; }
+      th, td { padding: 10px 10px; }
+      .hide-mobile { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── CONFIG ──────────────────────────────────────────────────────────
+     Edit these values to point the dashboard at your own sheets.
+     SHEET_ID   — the long ID from the Google Sheet URL
+     TABS       — list of battle tabs (gid or sheet name); set to []
+                  to auto-detect the first visible sheet
+     APPSCRIPT  — optional: URL of a published Apps Script web app that
+                  returns JSON rows. If set it takes priority over the
+                  Google Sheets gviz API.
+─────────────────────────────────────────────────────────────────────── -->
+<script>
+const CONFIG = {
+  /* ---- Primary (front-facing) Google Sheet ---- */
+  SHEET_ID: "1JIhSVcbfgEFlz7L20qkQ1QiY95Y0ZZsl8DJmbuB7GJw",
+
+  /* ---- Named tabs to expose as "battles" ----
+     Each entry: { label: "Display Name", gid: 0 }
+     Leave empty to load the first sheet only.           */
+  TABS: [
+    /* Examples — replace with real gid values from the sheet URL:
+    { label: "Current Battle", gid: 0    },
+    { label: "Battle 12",      gid: 123456789 },
+    { label: "Battle 11",      gid: 987654321 },
+    */
+  ],
+
+  /* ---- Optional: Apps Script published web app URL ----
+     Leave empty ("") to use the Google Sheets gviz API instead.
+     Your Apps Script should return JSON like:
+     { columns: ["Rank","Name","Diamonds"], rows: [[1,"Alice",50000], ...] }
+  */
+  APPSCRIPT_URL: "",
+
+  /* ---- Column hints (case-insensitive partial match) ----
+     Columns whose names match these patterns get special formatting.  */
+  COL_HINTS: {
+    rank:     ["rank","#","place","pos"],
+    name:     ["name","user","player","member","ign"],
+    diamonds: ["diamond","gem","total","score","contrib","point"],
+    battle:   ["battle","event","week","season"],
+  },
+
+  /* ---- Clan display name shown in the header ---- */
+  CLAN_NAME: "NONG_",
+  CLAN_SUBTITLE: "Pet Simulator 99 · Clan Leaderboard",
+};
+</script>
+
+<!-- ─── MARKUP ─────────────────────────────────────────────────────── -->
+
+<header>
+  <div class="container header-inner">
+    <div class="clan-logo">
+      <div class="diamond-icon">💎</div>
+      <div>
+        <div class="clan-name" id="clan-name"></div>
+        <div class="clan-sub" id="clan-sub"></div>
+      </div>
+    </div>
+    <div class="header-meta">
+      Updated: <span id="last-updated">—</span><br>
+      <a id="sheet-link" href="#" target="_blank" rel="noopener" style="font-size:0.75rem;color:var(--text-muted);">View Source Sheet ↗</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="container">
+
+    <!-- Battle selector -->
+    <div id="battle-bar-wrap" style="display:none">
+      <div class="section-label">Clan Battle History</div>
+      <div class="battle-bar">
+        <div class="battle-tabs" id="battle-tabs"></div>
+      </div>
+    </div>
+
+    <!-- Stats cards -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card blue">
+        <div class="stat-icon">👥</div>
+        <div class="stat-value" id="stat-members">—</div>
+        <div class="stat-label">Active Members</div>
+      </div>
+      <div class="stat-card gold">
+        <div class="stat-icon">💎</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-label">Total Diamonds</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">🏆</div>
+        <div class="stat-value" id="stat-top">—</div>
+        <div class="stat-label">Top Contributor</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" id="stat-avg">—</div>
+        <div class="stat-label">Average Diamonds</div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrap">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input id="search-input" type="text" placeholder="Search member…" autocomplete="off" />
+      </div>
+      <div class="toolbar-right">
+        <div class="count-badge">Showing <span id="visible-count">0</span> members</div>
+        <button id="refresh-btn" title="Refresh data">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table id="lb-table">
+        <thead id="lb-head"><tr></tr></thead>
+        <tbody id="lb-body"></tbody>
+      </table>
+      <div id="lb-state" class="state-box">
+        <div class="loader"></div>
+        <h3>Loading leaderboard…</h3>
+        <p>Fetching data from Google Sheets.</p>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="container">
+    <p>
+      Data source: <a id="footer-sheet-link" href="#" target="_blank" rel="noopener">Google Sheets</a> ·
+      Built for <strong>NONG_</strong> clan ·
+      <a href="https://github.com/OpalApocalypse/NONG-_Leaderboard" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<!-- ─── JAVASCRIPT ─────────────────────────────────────────────────── -->
+<script>
+/* =====================================================================
+   State
+   ===================================================================== */
+let allRows    = [];   // raw parsed rows [{col: value, ...}]
+let columns    = [];   // column descriptors [{key, label, type, role}]
+let sortCol    = null; // key of currently sorted column
+let sortAsc    = false;
+let activeTab  = 0;    // index into CONFIG.TABS
+let maxPrimary = 1;    // max value in the primary numeric column (for bars)
+
+/* =====================================================================
+   Boot
+   ===================================================================== */
+document.addEventListener("DOMContentLoaded", () => {
+  // Populate static text from config
+  document.getElementById("clan-name").textContent = CONFIG.CLAN_NAME;
+  document.getElementById("clan-sub").textContent  = CONFIG.CLAN_SUBTITLE;
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/edit`;
+  document.getElementById("sheet-link").href       = sheetUrl;
+  document.getElementById("footer-sheet-link").href = sheetUrl;
+
+  buildBattleTabs();
+  loadData();
+
+  document.getElementById("search-input").addEventListener("input", renderTable);
+  document.getElementById("refresh-btn").addEventListener("click", () => {
+    loadData();
+  });
+});
+
+/* =====================================================================
+   Battle tabs
+   ===================================================================== */
+function buildBattleTabs() {
+  if (!CONFIG.TABS || CONFIG.TABS.length === 0) return;
+  const wrap = document.getElementById("battle-bar-wrap");
+  const tabs = document.getElementById("battle-tabs");
+  wrap.style.display = "block";
+  CONFIG.TABS.forEach((tab, i) => {
+    const btn = document.createElement("button");
+    btn.className = "battle-tab" + (i === activeTab ? " active" : "");
+    btn.textContent = tab.label;
+    btn.addEventListener("click", () => {
+      activeTab = i;
+      document.querySelectorAll(".battle-tab").forEach((b, j) =>
+        b.classList.toggle("active", j === i));
+      loadData();
+    });
+    tabs.appendChild(btn);
+  });
+}
+
+/* =====================================================================
+   Data loading
+   ===================================================================== */
+async function loadData() {
+  showState("loading");
+  setRefreshSpinner(true);
+
+  try {
+    if (CONFIG.APPSCRIPT_URL) {
+      await loadFromAppScript();
+    } else {
+      await loadFromGviz();
+    }
+  } catch (err) {
+    console.error(err);
+    showState("error", err.message);
+  } finally {
+    setRefreshSpinner(false);
+  }
+}
+
+/* ---- AppScript JSON endpoint ---- */
+async function loadFromAppScript() {
+  const sep = CONFIG.APPSCRIPT_URL.includes("?") ? "&" : "?";
+  const url = CONFIG.APPSCRIPT_URL +
+    (CONFIG.TABS.length ? `${sep}battle=${encodeURIComponent(CONFIG.TABS[activeTab].label)}` : "");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`AppScript returned HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.rows || !data.columns)
+    throw new Error("AppScript response must have { columns, rows } keys.");
+  processData(data.columns.map(c => ({ label: c, key: slugify(c) })),
+              data.rows.map(r => Object.fromEntries(data.columns.map((c, i) => [slugify(c), r[i]]))));
+}
+
+/* ---- Google Sheets gviz API ---- */
+async function loadFromGviz() {
+  const gid = (CONFIG.TABS.length > 0) ? CONFIG.TABS[activeTab].gid : 0;
+  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${gid}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Google Sheets returned HTTP ${res.status}. Ensure the sheet is publicly shared (View access).`);
+  const text = await res.text();
+  const json = parseGvizResponse(text);
+  const cols = json.table.cols.map((c, i) => ({
+    label: c.label || c.id || `Col ${i}`,
+    key:   slugify(c.label || c.id || `col_${i}`),
+    type:  c.type,
+  }));
+  const rows = json.table.rows.map(r =>
+    Object.fromEntries(cols.map((c, i) => [
+      c.key,
+      r.c && r.c[i] ? (r.c[i].v !== null && r.c[i].v !== undefined ? r.c[i].v : "") : ""
+    ]))
+  ).filter(row => cols.some(c => row[c.key] !== "" && row[c.key] !== null));
+  processData(cols, rows);
+}
+
+function parseGvizResponse(text) {
+  // Strip the JS wrapper: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
+  const match = text.match(/google\.visualization\.Query\.setResponse\((\{[\s\S]*\})\)/);
+  if (!match) throw new Error("Could not parse Google Sheets response. Is the sheet public?");
+  return JSON.parse(match[1]);
+}
+
+/* =====================================================================
+   Data processing
+   ===================================================================== */
+function processData(cols, rows) {
+  columns = cols;
+  allRows = rows;
+
+  // Detect column roles
+  columns.forEach(c => {
+    c.role = detectRole(c.label);
+  });
+
+  // Find primary "diamonds" column for bar chart scaling
+  const primCol = columns.find(c => c.role === "diamonds") || columns.find(c => c.type === "number" || typeof allRows[0]?.[c.key] === "number");
+  if (primCol) {
+    const vals = allRows.map(r => toNum(r[primCol.key])).filter(v => isFinite(v));
+    maxPrimary = Math.max(...vals, 1);
+    primCol.isPrimary = true;
+  }
+
+  // Sort by primary numeric column descending by default
+  if (primCol) {
+    sortCol = primCol.key;
+    sortAsc = false;
+  }
+
+  updateStats(primCol);
+  buildTableHeader();
+  renderTable();
+  updateTimestamp();
+  hideState();
+}
+
+/* =====================================================================
+   Role detection
+   ===================================================================== */
+function detectRole(label) {
+  const l = label.toLowerCase();
+  for (const [role, hints] of Object.entries(CONFIG.COL_HINTS)) {
+    if (hints.some(h => l.includes(h))) return role;
+  }
+  return "generic";
+}
+
+/* =====================================================================
+   Stats cards
+   ===================================================================== */
+function updateStats(primCol) {
+  const members = allRows.length;
+  document.getElementById("stat-members").textContent = members;
+
+  if (!primCol) {
+    document.getElementById("stat-total").textContent = "—";
+    document.getElementById("stat-top").textContent   = "—";
+    document.getElementById("stat-avg").textContent   = "—";
+    return;
+  }
+
+  const vals  = allRows.map(r => toNum(r[primCol.key])).filter(v => isFinite(v));
+  const total = vals.reduce((a, b) => a + b, 0);
+  const avg   = members ? Math.round(total / members) : 0;
+
+  // Find top contributor name
+  let topName = "—";
+  const nameCol = columns.find(c => c.role === "name");
+  if (nameCol && allRows.length > 0) {
+    const topRow = allRows.reduce((best, r) => toNum(r[primCol.key]) > toNum(best[primCol.key]) ? r : best, allRows[0]);
+    topName = topRow ? String(topRow[nameCol.key] || "—") : "—";
+  }
+
+  document.getElementById("stat-total").textContent = fmtNum(total);
+  document.getElementById("stat-top").textContent   = topName;
+  document.getElementById("stat-avg").textContent   = fmtNum(avg);
+}
+
+/* =====================================================================
+   Table header
+   ===================================================================== */
+function buildTableHeader() {
+  const tr = document.querySelector("#lb-head tr");
+  tr.innerHTML = "";
+
+  // Always inject a rank column first if no rank column exists in data
+  const hasRankCol = columns.some(c => c.role === "rank");
+  if (!hasRankCol) {
+    const th = document.createElement("th");
+    th.textContent = "#";
+    th.style.width = "52px";
+    th.style.textAlign = "center";
+    tr.appendChild(th);
+  }
+
+  columns.forEach(col => {
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    if (col.role === "rank") { th.style.width = "52px"; th.style.textAlign = "center"; }
+    th.dataset.key = col.key;
+    if (col.key === sortCol) { th.classList.add("sorted"); }
+    const icon = document.createElement("span");
+    icon.className = "sort-icon";
+    icon.textContent = col.key === sortCol ? (sortAsc ? "▲" : "▼") : "⇅";
+    th.appendChild(icon);
+    th.addEventListener("click", () => onSort(col.key));
+    tr.appendChild(th);
+  });
+}
+
+function onSort(key) {
+  if (sortCol === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortCol = key;
+    sortAsc = false;
+  }
+  // Update header
+  document.querySelectorAll("#lb-head th").forEach(th => {
+    if (th.dataset.key === key) {
+      th.classList.add("sorted");
+      th.querySelector(".sort-icon").textContent = sortAsc ? "▲" : "▼";
+    } else if (th.dataset.key) {
+      th.classList.remove("sorted");
+      th.querySelector(".sort-icon").textContent = "⇅";
+    }
+  });
+  renderTable();
+}
+
+/* =====================================================================
+   Table body
+   ===================================================================== */
+function renderTable() {
+  const query  = document.getElementById("search-input").value.trim().toLowerCase();
+  const nameCol = columns.find(c => c.role === "name");
+  const primCol = columns.find(c => c.isPrimary);
+  const hasRankCol = columns.some(c => c.role === "rank");
+
+  // Filter
+  let rows = query
+    ? allRows.filter(r => columns.some(c => String(r[c.key] ?? "").toLowerCase().includes(query)))
+    : allRows.slice();
+
+  // Sort
+  if (sortCol) {
+    rows.sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      const an = toNum(av), bn = toNum(bv);
+      if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
+      return sortAsc
+        ? String(av ?? "").localeCompare(String(bv ?? ""))
+        : String(bv ?? "").localeCompare(String(av ?? ""));
+    });
+  }
+
+  const tbody = document.getElementById("lb-body");
+  tbody.innerHTML = "";
+
+  rows.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    const displayRank = i + 1;
+
+    // Injected rank cell
+    if (!hasRankCol) {
+      const td = document.createElement("td");
+      td.className = "rank-cell";
+      if (displayRank === 1) td.innerHTML = '<span class="rank-medal">🥇</span>';
+      else if (displayRank === 2) td.innerHTML = '<span class="rank-medal">🥈</span>';
+      else if (displayRank === 3) td.innerHTML = '<span class="rank-medal">🥉</span>';
+      else td.innerHTML = `<span class="rank-num">${displayRank}</span>`;
+      tr.appendChild(td);
+    }
+
+    columns.forEach(col => {
+      const td  = document.createElement("td");
+      const val = row[col.key];
+
+      if (col.role === "rank") {
+        td.className = "rank-cell";
+        const r = parseInt(val, 10);
+        if (r === 1) td.innerHTML = '<span class="rank-medal">🥇</span>';
+        else if (r === 2) td.innerHTML = '<span class="rank-medal">🥈</span>';
+        else if (r === 3) td.innerHTML = '<span class="rank-medal">🥉</span>';
+        else td.innerHTML = `<span class="rank-num">${r || val}</span>`;
+
+      } else if (col.role === "name") {
+        td.className = "name-cell";
+        td.textContent = val ?? "—";
+
+      } else if (col.isPrimary) {
+        const num = toNum(val);
+        const pct = maxPrimary > 0 ? Math.round((num / maxPrimary) * 100) : 0;
+        td.innerHTML = `
+          <div class="bar-wrap">
+            <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
+            <span class="bar-pct">${pct}%</span>
+          </div>`;
+        td.insertAdjacentHTML("afterbegin", `<span class="num-cell highlight">${fmtNum(num)}</span><br>`);
+
+      } else if (typeof val === "number" || (typeof val === "string" && val !== "" && !isNaN(Number(val)))) {
+        td.className = "num-cell";
+        td.textContent = fmtNum(toNum(val));
+
+      } else {
+        td.textContent = val ?? "—";
+      }
+
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById("visible-count").textContent = rows.length;
+
+  if (rows.length === 0 && allRows.length > 0) {
+    tbody.innerHTML = `<tr><td colspan="${columns.length + (hasRankCol ? 0 : 1)}" style="text-align:center;padding:32px;color:var(--text-muted);">No members match your search.</td></tr>`;
+  }
+}
+
+/* =====================================================================
+   State UI helpers
+   ===================================================================== */
+function showState(type, msg) {
+  const el = document.getElementById("lb-state");
+  document.getElementById("lb-table").style.display = "none";
+  el.style.display = "block";
+  if (type === "loading") {
+    el.innerHTML = `<div class="loader"></div><h3>Loading leaderboard…</h3><p>Fetching data from Google Sheets.</p>`;
+  } else if (type === "error") {
+    el.innerHTML = `
+      <div class="icon">⚠️</div>
+      <h3>Could not load data</h3>
+      <p>${escHtml(msg || "An unknown error occurred.")}</p>
+      <div class="config-hint">
+        <strong>Troubleshooting tips:</strong><br>
+        • Make sure the sheet is <strong>shared publicly</strong> (Anyone with link → Viewer).<br>
+        • If using a custom Apps Script, set <code>APPSCRIPT_URL</code> in the CONFIG block.<br>
+        • Open the browser console for more details.
+      </div>`;
+  }
+}
+function hideState() {
+  document.getElementById("lb-state").style.display = "none";
+  document.getElementById("lb-table").style.display = "table";
+}
+function setRefreshSpinner(on) {
+  document.getElementById("refresh-btn").classList.toggle("spinning", on);
+}
+function updateTimestamp() {
+  document.getElementById("last-updated").textContent =
+    new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/* =====================================================================
+   Utilities
+   ===================================================================== */
+function slugify(s) { return String(s).toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, ""); }
+function toNum(v)   { const n = parseFloat(String(v).replace(/,/g, "")); return isNaN(n) ? NaN : n; }
+function fmtNum(n)  {
+  if (isNaN(n) || n === null || n === undefined) return "—";
+  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (Math.abs(n) >= 1_000)     return (n / 1_000).toFixed(1) + "K";
+  return String(Math.round(n));
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>
