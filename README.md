@@ -1,7 +1,8 @@
 # NONG_Leaderboard
 
-Lots of experimenting with the Clan Leaderboards using the Big Games API.
-Github Page: https://opalapocalypse.github.io/NONG_Leaderboard/
+Lots of experimenting with the Clan Leaderboards using the Big Games API. This page updates every 15 minutes.
+
+Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
 ## Top 10 Members (by Total Points)
 <!-- START_LEADERBOARD -->
