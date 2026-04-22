@@ -8,19 +8,19 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Bol1is | 58,451,357 | 867,750 |
-| 2 | Yume | 49,978,926 | 650,900 |
-| 3 | XRocky | 47,219,369 | 843,100 |
-| 4 | hugevkie | 42,854,743 | 639,725 |
-| 5 | Riley | 39,695,156 | 856,050 |
-| 6 | jupiter0477 | 38,946,749 | 672,125 |
-| 7 | Mr_Suter | 37,800,081 | 441,175 |
-| 8 | rolixx | 37,464,771 | 451,275 |
-| 9 | WhereIsPerry0 | 36,145,609 | 694,425 |
-| 10 | TealPlatypus747 | 35,754,677 | 688,325 |
+| 1 | Bol1is | 59,032,757 | 926,325 |
+| 2 | Yume | 50,362,951 | 671,950 |
+| 3 | XRocky | 47,734,244 | 856,200 |
+| 4 | hugevkie | 43,224,693 | 641,225 |
+| 5 | Riley | 40,245,256 | 904,950 |
+| 6 | jupiter0477 | 39,340,024 | 699,700 |
+| 7 | Mr_Suter | 38,066,906 | 451,400 |
+| 8 | rolixx | 37,731,821 | 468,550 |
+| 9 | WhereIsPerry0 | 36,524,784 | 671,550 |
+| 10 | TealPlatypus747 | 36,148,027 | 691,575 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-22 20:34:19.338 UTC
+2026-04-22 21:05:57.379 UTC
 <!-- END_UPDATED -->
