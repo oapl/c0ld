@@ -22,7 +22,7 @@ jobs:
           node-version: 20
 
       - name: Update README
-        run: node scripts/update-readme.js
+        run: node update-readme.js
 
       - name: Commit and push if changed
         run: |
