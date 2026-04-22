@@ -1,6 +1,7 @@
 # NONG_Leaderboard
 
-Live leaderboard data pulled from Google Sheets and refreshed automatically.
+Lots of experimenting with the Clan Leaderboards using the Big Games API.
+Github Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
 ## Top 10 Members (by Total Points)
 <!-- START_LEADERBOARD -->
