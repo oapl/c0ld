@@ -1,13 +1,12 @@
 // ingest.js
 // Fetches clan leaderboard from the Big Games API, stores a snapshot in
 // Supabase, computes the 60-minute point gain for each member, updates
-// README.md, and posts a Discord bot message with Components V2.
+// README.md, and posts a Discord embed webhook message.
 //
 // Required env vars (add as GitHub Actions secrets):
 //   SUPABASE_URL          – e.g. https://xxxx.supabase.co
 //   SUPABASE_SERVICE_KEY  – service-role key (has full DB access)
-//   DISCORD_BOT_TOKEN     – Bot token from Discord Developer Portal (no `Bot ` prefix)
-//   DISCORD_CHANNEL_ID    – Channel snowflake ID to post into
+//   DISCORD_WEBHOOK_URL   – Discord incoming-webhook URL
 //
 // Optional env vars (have sensible defaults):
 //   CLAN_NAME   – default "NONG"
@@ -19,8 +18,7 @@ const fs = require("fs/promises");
 const CLAN_NAME       = process.env.CLAN_NAME            || "NONG";
 const SUPABASE_URL    = (process.env.SUPABASE_URL        || "").replace(/\/$/, "");
 const SUPABASE_KEY    = process.env.SUPABASE_SERVICE_KEY || "";
-const DISCORD_BOT_TOKEN  = process.env.DISCORD_BOT_TOKEN  || "";
-const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || "";
+const DISCORD_WEBHOOK     = process.env.DISCORD_WEBHOOK_URL   || "";
 const DISCORD_MESSAGE_IDS = process.env.DISCORD_MESSAGE_IDS   || "";
 const TOP_N               = parseInt(process.env.TOP_N || "10", 10);
 
@@ -45,11 +43,11 @@ const EMBED_COLOR = 0xf5a623;
 const SPACER_IMAGE_URL_BASE =
   "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
 
-// No cache-bust query string: some Discord media-proxy paths reject query strings
-// on image.url and can trigger a 50006 "empty message" validator failure.
-// If image-cache invalidation is needed in future, use a URL fragment (#v=<unix>)
-// instead — fragments are not sent to the server.
-const EMBED_SPACER_IMAGE_URL = SPACER_IMAGE_URL_BASE;
+// Append ?v=<unix-seconds> so Discord re-fetches the image on each run instead
+// of serving a cached version. Discord caches embed images aggressively by URL;
+// without this, replacing the PNG never widens existing embeds.
+// Computed once at script start so all 3 pages in a single run share the same URL.
+const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
@@ -373,53 +371,38 @@ async function updateReadme(rows, updatedAt) {
   console.log("README updated.");
 }
 
-// ── Discord (bot REST API) ──────────────────────────────────────────────────
-//
-// Posts/edits up to 3 messages in a fixed channel using the bot REST endpoint
-// with Components V2 (`flags: 1 << 15`) so we can render wide COLD-style
-// Container components (no 600 px embed width cap).
-//
-// IMPORTANT: V2 ONLY works on the bot endpoint
-// (`POST /channels/{id}/messages` with `Authorization: Bot <token>`).
-// V2 is silently rejected by webhook execute (`POST /webhooks/{id}/{token}`),
-// which returns `50006 Cannot send an empty message`. Three previous attempts
-// (PRs #15, #25, plus one earlier) tried V2 over the webhook and all failed —
-// do not retry that path.
-//
-// Required env vars:
-//   DISCORD_BOT_TOKEN  – Bot token from https://discord.com/developers (no `Bot ` prefix)
-//   DISCORD_CHANNEL_ID – Channel snowflake to post into
-//   DISCORD_MESSAGE_IDS – comma-separated message IDs to PATCH (one per page);
-//                        empty = first run, will POST and log new IDs to copy in
+// ── Discord webhook ───────────────────────────────────────────────────────────
 async function postDiscord(rows, updatedAt) {
-  if (!DISCORD_BOT_TOKEN || !DISCORD_CHANNEL_ID) {
-    console.warn("DISCORD_BOT_TOKEN or DISCORD_CHANNEL_ID not set — skipping Discord post.");
+  if (!DISCORD_WEBHOOK) return;
+
+  const match = DISCORD_WEBHOOK.match(/webhooks\/(\d+)\/(.+)/);
+  if (!match) {
+    console.warn("Discord webhook URL is malformed — skipping.");
     return;
   }
+  const [, webhookId, webhookToken] = match;
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Page card budgets (3 cards per row, COLD-style 3-wide grid).
-  // V2 has no 25-field cap so we can fit more per page than the legacy embed.
-  // Keeping 3 pages × ~25 cards for visual parity with the legacy layout.
-  const PAGE_CARD_LIMITS = [25, 25, 25];
+  // Discord embed hard cap: 25 fields per embed.
+  // Header moves into embed.description on page 1 only (free, doesn't count against
+  // the 25-field cap). A spacer field is prepended on page 1 to restore the blank
+  // line gap between the header and the first card.
+  //
+  // Per-page card budgets to fit Discord's 25-field embed cap.
+  //   Page 1: 1 spacer field + up to 24 cards = 25 fields
+  //   Page 2:                   up to 25 cards = 25 fields
+  //   Page 3:                   up to 25 cards = 25 fields  (footer is native, not a field)
+  // Total capacity: 24 + 25 + 25 = 74 members across 3 pages.
+  // If the clan grows past 74 members, bump the array (e.g. [24, 25, 25, 25, 25]
+  // for 5 pages) — overflow is silently truncated until then.
+  const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
   const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
     * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
-
-  // Footer explicit date: MM/DD/YYYY at H:MM AM/PM UTC
-  const pad2 = n => String(n).padStart(2, "0");
-  const utcMonth   = pad2(now.getUTCMonth() + 1);
-  const utcDay     = pad2(now.getUTCDate());
-  const utcYear    = now.getUTCFullYear();
-  const utcHours   = now.getUTCHours();
-  const utcMinutes = pad2(now.getUTCMinutes());
-  const ampm       = utcHours >= 12 ? "PM" : "AM";
-  const hours12    = utcHours % 12 || 12;
-  const footerDateStr = `${utcMonth}/${utcDay}/${utcYear} at ${hours12}:${utcMinutes} ${ampm} UTC`;
 
   const totalCapacity = PAGE_CARD_LIMITS.reduce((a, b) => a + b, 0);
   if (rows.length > totalCapacity) {
@@ -429,139 +412,112 @@ async function postDiscord(rows, updatedAt) {
     );
   }
 
-  const IS_COMPONENTS_V2 = 1 << 15;
-  const CONTAINER_TYPE   = 17;
-  const TEXT_DISPLAY     = 10;
-  const SEPARATOR        = 14;
-  // MediaGallery (type 12) is the V2 equivalent of legacy embed.image for
-  // forcing a minimum Container width.  A 1×1200 transparent PNG floors all
-  // three Containers at the same width so pages render evenly.
-  const MEDIA_GALLERY    = 12;
-  const NBSP = "\u00A0";
-  const SPACER_URL = "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
-
-  // Gold accent color (decimal); same value as legacy EMBED_COLOR (0xf5a623).
-  const ACCENT_COLOR = EMBED_COLOR;
-
   let cursor = 0;
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const limit = PAGE_CARD_LIMITS[p];
     const page  = rows.slice(cursor, cursor + limit);
     cursor += limit;
     const messageId = messageIds[p];
+
+    // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
     const isFirstPage = p === 0;
     const isLastPage  = p === TOTAL_PAGES - 1;
 
-    // Build TextDisplay components: one per row of 3 cards.
-    // Each row pivots 3 members into a single TextDisplay using the same
-    // 3-column markdown trick the previous V2 attempt used (PR #25):
-    //
-    //   **1. Name** │ **2. Name** │ **3. Name**
-    //   ⭐ Pts: **5.5K**  1h: **89**  │  ⭐ Pts: **5.4K**  1h: **89**  │  ⭐ Pts: **5.3K**  1h: **89**
-    //
-    // Use the existing RANK_STAR_EMOJI constant.
-    const rowChunks = [];
-    for (let i = 0; i < page.length; i += 3) {
-      const trio = page.slice(i, i + 3);
-      const headerLine = trio
-        .map(r => `**${r.rank}.${NBSP}${r.username}**`)
-        .join(`${NBSP}${NBSP}│${NBSP}${NBSP}`);
-      const dataLine = trio
-        .map(r => {
-          const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
-          return `${RANK_STAR_EMOJI}${NBSP}Pts:${NBSP}**${fmtAbbrev(r.total_points)}**${NBSP}${NBSP}1h:${NBSP}**${gain}**`;
-        })
-        .join(`${NBSP}${NBSP}│${NBSP}${NBSP}`);
-      rowChunks.push(`${headerLine}\n${dataLine}`);
-    }
-    const cardsContent = rowChunks.join("\n\n");
+    const cardFields = page.map(r => ({
+      name: `${r.rank}. ${r.username}`,
+      value:
+        `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
+        `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
+        `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
+      // NOTE: Last Gain line intentionally omitted for now. To re-enable, insert
+      // before the trailing \u200b line:
+      //   `> Last Gain: ${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "-") + fmtAbbrev(Math.abs(r.last_gain)) + " pts"}\n` +
+      // The data is already computed and available on r.last_gain.
+      inline: true
+    }));
 
-    const containerChildren = [];
-
-    // MediaGallery width-floor: forces all Containers to the same minimum
-    // width (V2 equivalent of legacy embed.image trick).
-    const widthSpacer = {
-      type: MEDIA_GALLERY,
-      items: [{ media: { url: SPACER_URL } }]
-    };
-    containerChildren.push(widthSpacer);
-
-    if (isFirstPage) {
-      containerChildren.push({
-        type: TEXT_DISPLAY,
-        content: "# Starry Battle Rankings"
-      });
-      containerChildren.push({
-        type: TEXT_DISPLAY,
-        content: `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
-      });
-      containerChildren.push({ type: SEPARATOR });
-    }
-
-    if (cardsContent) {
-      containerChildren.push({
-        type: TEXT_DISPLAY,
-        content: cardsContent
-      });
-    }
-
-    if (isLastPage) {
-      containerChildren.push({ type: SEPARATOR });
-      containerChildren.push({
-        type: TEXT_DISPLAY,
-        content: `-# Created by Cinnamowopal • Updated: ${footerDateStr}`
-      });
-    }
-
-    const payload = {
-      flags: IS_COMPONENTS_V2,
-      components: [
-        {
-          type: CONTAINER_TYPE,
-          accent_color: ACCENT_COLOR,
-          components: containerChildren
-        }
-      ]
+    // Spacer field: prepended on page 1 only to add a visible blank line between
+    // the header (in embed.description) and the first card.
+    const spacerField = {
+      name: "\u200b",
+      value: "\u200b",
+      inline: false
     };
 
-    const baseUrl = `https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages`;
-    const headers = {
-      "Authorization": `Bot ${DISCORD_BOT_TOKEN}`,
-      "Content-Type":  "application/json",
-      "User-Agent":    "NONG-Leaderboard-Bot (https://github.com/OpalApocalypse/NONG_Leaderboard, 1.0)"
+    const fields = [
+      ...(isFirstPage ? [spacerField] : []),
+      ...cardFields
+    ];
+
+    // Title: only on page 1.
+    const title = isFirstPage ? "Starry Battle Rankings" : undefined;
+
+    // Header description: only on page 1 — doesn't count against the 25-field cap.
+    const description = isFirstPage
+      ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
+      : undefined;
+
+    // Precompute explicit UTC date/time string for the last-page footer so Discord
+    // renders it as a fixed date (e.g. "04/29/2026 at 1:59 PM UTC") rather than
+    // the auto-localized "Today at …" that embed.timestamp produces.
+    const embedFooter = (() => {
+      if (!isLastPage) return {};
+      const d = new Date(lastUpdateUnix * 1000);
+      const mm   = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd   = String(d.getUTCDate()).padStart(2, "0");
+      const yyyy = d.getUTCFullYear();
+      const hh12Raw = d.getUTCHours();
+      const ampm  = hh12Raw >= 12 ? "PM" : "AM";
+      const hh12  = ((hh12Raw + 11) % 12) + 1;
+      const mins  = String(d.getUTCMinutes()).padStart(2, "0");
+      const explicitDateTime = `${mm}/${dd}/${yyyy} at ${hh12}:${mins} ${ampm} UTC`;
+      return { footer: { text: `Created by Cinnamowopal • Updated: ${explicitDateTime}` } };
+    })();
+
+    const embed = {
+      color: EMBED_COLOR,
+      image: { url: EMBED_SPACER_IMAGE_URL },
+      fields,
+      ...(title       ? { title }       : {}),
+      ...(description ? { description } : {}),
+      ...embedFooter
     };
+
+    const payload = { embeds: [embed] };
 
     let res;
+
     if (messageId) {
-      res = await fetch(`${baseUrl}/${messageId}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify(payload)
-      });
+      // Edit the existing message in-place
+      res = await fetch(
+        `https://discord.com/api/webhooks/${webhookId}/${webhookToken}/messages/${messageId}`,
+        {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload)
+        }
+      );
       if (res.ok) {
         console.log(`Discord page ${p + 1} updated (message ${messageId}).`);
       } else {
         const msg = await res.text();
-        const payloadPreview = JSON.stringify(payload, null, 2).slice(0, 3000);
         console.warn(`Discord page ${p + 1} PATCH failed (${res.status}): ${msg}`);
-        console.warn(`Payload sent:\n${payloadPreview}`);
       }
     } else {
-      res = await fetch(baseUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload)
+      // Post a new message and log the returned ID so it can be saved as a secret
+      res = await fetch(`${DISCORD_WEBHOOK}?wait=true`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload)
       });
       if (res.ok) {
         const data = await res.json();
         console.log(`Discord page ${p + 1} posted. Message ID: ${data.id}`);
       } else {
         const msg = await res.text();
-        const payloadPreview = JSON.stringify(payload, null, 2).slice(0, 3000);
         console.warn(`Discord page ${p + 1} POST failed (${res.status}): ${msg}`);
-        console.warn(`Payload sent:\n${payloadPreview}`);
       }
     }
   }
