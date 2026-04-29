@@ -26,44 +26,26 @@ const BIG_GAMES_API   = `https://biggamesapi.io/api/clan/${encodeURIComponent(CL
 const TABLE           = "leaderboard_snapshots";
 const ARCHIVE_TABLE   = "StarryBattleArchive";
 
-// Custom Discord emoji used in card "Points" line. Webhooks must use the
-// full <:name:id> syntax — plain :shortcode: will not resolve. The numeric
-// ID is what Discord uses to resolve the emoji; the name portion is just
-// a label and can be renamed freely on the server without breaking this.
+// Custom Discord emoji used in card "Points" line.
 const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 
 // Embed accent color (gold).
 const EMBED_COLOR = 0xf5a623;
 
 // Raw GitHub URL of a 600×1 transparent PNG committed to this repo.
-// Attaching this as embed.image forces Discord to render the embed at its
-// maximum width (~600px), which widens the 3-column inline-field slots
-// so cards have visibly more horizontal breathing room. Without it, the
-// embed shrinks to fit text content and columns feel cramped.
 const SPACER_IMAGE_URL_BASE =
   "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
 
-// Append ?v=<unix-seconds> so Discord re-fetches the image on each run instead
-// of serving a cached version. Discord caches embed images aggressively by URL;
-// without this, replacing the PNG never widens existing embeds.
-// Computed once at script start so all 3 pages in a single run share the same URL.
+// Append ?v=<unix-seconds> for Discord cache busting.
 const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
-// Discord embed update cadence.
-// Change this constant (and the workflow cron) together when the cadence changes.
+// Discord embed update cadence
 const UPDATE_INTERVAL_MIN = 5;
+const UPDATE_INTERVAL_MS  = UPDATE_INTERVAL_MIN * 60 * 1000;
 
 // 60-min gain window configuration.
-// GAIN_TARGET_MIN: target snapshot age in minutes (we want the snapshot from ~60 min ago).
-// GAIN_WINDOW_MIN: ± tolerance in minutes; first try snapshots in [TARGET-WINDOW, TARGET+WINDOW].
-// If none found in that tight window, fall back to the most recent snapshot older than
-// (GAIN_TARGET_MIN - GAIN_WINDOW_MIN) minutes (preserves existing behaviour).
 const GAIN_TARGET_MIN = 60;
 const GAIN_WINDOW_MIN = 5;
-// Retain time-series rows in StarryBattleArchive for this many hours.
-// 336 h = 14 days — the maximum length of any clan battle, so any battle
-// started at the beginning of the window will still have full history.
-// If future events exceed 14 days, increase this constant accordingly.
 const KEEP_HOURS      = 336;
 
 // README markers
@@ -74,7 +56,6 @@ const UPD_START   = "<!-- START_UPDATED -->";
 const UPD_END     = "<!-- END_UPDATED -->";
 
 // Resolves an array of Roblox UserIDs to a Map<id, username> in batches of 100.
-// Falls back to "user_<UserID>" for any ID that can't be resolved.
 async function resolveRobloxUsernames(userIds) {
   const ROBLOX_USERS_API = "https://users.roblox.com/v1/users";
   const BATCH_SIZE = 100;
@@ -99,7 +80,6 @@ async function resolveRobloxUsernames(userIds) {
     } catch (err) {
       console.warn(`Roblox Users API request failed for batch starting at index ${i}: ${err.message} — falling back to user_<ID>`);
     }
-    // Apply fallback for any IDs not resolved in this batch
     for (const id of batch) {
       if (!result.has(id)) {
         result.set(id, `user_${id}`);
@@ -131,13 +111,8 @@ async function fetchClanMembers() {
     return { members: [], starryBattle: null };
   }
 
-  // Build a Set of current member UserIDs for filtering contributions
   const memberIdSet = new Set(members.map(m => m.UserID));
-
-  // Capture the raw StarryBattle object for archiving checks
   const starryBattle = json.data?.Battles?.StarryBattle ?? null;
-
-  // Build UserID → Points map from StarryBattle contributions, restricted to current members
   const pointData = starryBattle?.PointContributions ?? [];
   const points = new Map(
     pointData
@@ -145,11 +120,9 @@ async function fetchClanMembers() {
       .map(d => [d.UserID, d.Points ?? 0])
   );
 
-  // Resolve Roblox usernames for all member UserIDs
   const userIds = members.map(m => m.UserID);
   const usernameMap = await resolveRobloxUsernames(userIds);
 
-  // Sort descending by points and assign ranks
   const ranked = members
     .map(m => ({
       user_id:      m.UserID,
@@ -177,7 +150,6 @@ function sbHeaders(extra = {}) {
   };
 }
 
-// Appends a batch of time-series rows to StarryBattleArchive.
 async function sbInsertArchive(rows) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`, {
     method:  "POST",
@@ -190,8 +162,6 @@ async function sbInsertArchive(rows) {
   }
 }
 
-// Upserts the current-state batch into leaderboard_snapshots (one row per
-// member, replaced every run — the table never grows past clan size).
 async function sbUpsertCurrent(rows) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
   url.searchParams.set("on_conflict", "username");
@@ -206,8 +176,6 @@ async function sbUpsertCurrent(rows) {
   }
 }
 
-// Returns all rows with fetched_at < beforeIso, newest-first (up to 500 rows).
-// The caller picks the most-recent distinct batch from this result set.
 async function sbGetOldSnapshots(beforeIso) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
@@ -233,13 +201,10 @@ async function sbDeleteOld(olderThanIso) {
   });
   if (!res.ok) {
     const msg = await res.text();
-    // Non-fatal: log a warning and continue
     console.warn(`Supabase cleanup warning (${res.status}): ${msg}`);
   }
 }
 
-// Returns the rows of the single most-recent snapshot batch with
-// fetched_at strictly less than the current run's fetched_at.
 async function sbGetPreviousSnapshot(beforeIso) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
@@ -255,13 +220,10 @@ async function sbGetPreviousSnapshot(beforeIso) {
   }
   const rows = await res.json();
   if (!rows.length) return [];
-  // Filter to only the most-recent distinct fetched_at in the result set
   const latestTs = rows[0].fetched_at;
   return rows.filter(r => r.fetched_at === latestTs);
 }
 
-// Returns rows with fetched_at strictly between afterIso and beforeIso, newest-first (up to 500).
-// Used for the tight ~60-min window query.
 async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.append("fetched_at", `gt.${afterIso}`);
@@ -284,13 +246,9 @@ function computeGains(current, oldRows) {
   if (!oldRows.length) {
     return current.map(m => ({ ...m, gain_60m: null }));
   }
-
-  // The rows are sorted newest-first; take the most-recent batch (same fetched_at)
   const latestOldTs = oldRows[0].fetched_at;
   const oldBatch    = oldRows.filter(r => r.fetched_at === latestOldTs);
-  // PostgREST returns BIGINT columns as strings in JSON; coerce to number.
   const oldByName   = new Map(oldBatch.map(r => [r.username, Number(r.total_points)]));
-
   return current.map(m => ({
     ...m,
     gain_60m: oldByName.has(m.username)
@@ -300,13 +258,10 @@ function computeGains(current, oldRows) {
 }
 
 // ── Last-gain (previous snapshot delta) ──────────────────────────────────────
-// Diffs current points against the immediately previous snapshot batch.
-// Augments each member with a `last_gain` field (number or null for unknown).
 function computeLastGain(current, prevRows) {
   if (!prevRows.length) {
     return current.map(m => ({ ...m, last_gain: null }));
   }
-  // PostgREST returns BIGINT columns as strings in JSON; coerce to number.
   const prevByName = new Map(prevRows.map(r => [r.username, Number(r.total_points)]));
   return current.map(m => ({
     ...m,
@@ -320,9 +275,6 @@ function fmtNum(n) {
   return n != null ? Number(n).toLocaleString("en-US") : "N/A";
 }
 
-// Abbreviates large numbers with K / M / B / T suffixes (up to 2 decimal places,
-// trailing zeros trimmed). Returns "N/A" for null/undefined.
-// Examples: 1250 → "1.25K", 1_500_000 → "1.5M", 2_300_000_000 → "2.3B"
 function fmtAbbrev(n) {
   if (n == null) return "N/A";
   const num = Number(n);
@@ -342,7 +294,6 @@ function fmtAbbrev(n) {
 }
 
 function escapePipe(s) {
-  // Escape backslashes first, then pipes, so the resulting markdown is valid.
   return String(s ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim();
 }
 
@@ -385,24 +336,12 @@ async function postDiscord(rows, updatedAt) {
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
   // Discord embed hard cap: 25 fields per embed.
-  // Header moves into embed.description on page 1 only (free, doesn't count against
-  // the 25-field cap). A spacer field is prepended on page 1 to restore the blank
-  // line gap between the header and the first card.
-  //
-  // Per-page card budgets to fit Discord's 25-field embed cap.
-  //   Page 1: 1 spacer field + up to 24 cards = 25 fields
-  //   Page 2:                   up to 25 cards = 25 fields
-  //   Page 3:                   up to 25 cards = 25 fields  (footer is native, not a field)
-  // Total capacity: 24 + 25 + 25 = 74 members across 3 pages.
-  // If the clan grows past 74 members, bump the array (e.g. [24, 25, 25, 25, 25]
-  // for 5 pages) — overflow is silently truncated until then.
   const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
-  const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
-    * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
+  const nextUpdateUnix = Math.floor((now.getTime() + UPDATE_INTERVAL_MS) / 1000);
 
   const totalCapacity = PAGE_CARD_LIMITS.reduce((a, b) => a + b, 0);
   if (rows.length > totalCapacity) {
@@ -419,7 +358,6 @@ async function postDiscord(rows, updatedAt) {
     cursor += limit;
     const messageId = messageIds[p];
 
-    // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
     const isFirstPage = p === 0;
@@ -430,16 +368,10 @@ async function postDiscord(rows, updatedAt) {
       value:
         `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
         `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
-        `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
-      // NOTE: Last Gain line intentionally omitted for now. To re-enable, insert
-      // before the trailing \u200b line:
-      //   `> Last Gain: ${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "-") + fmtAbbrev(Math.abs(r.last_gain)) + " pts"}\n` +
-      // The data is already computed and available on r.last_gain.
+        `\u200b`,
       inline: true
     }));
 
-    // Spacer field: prepended on page 1 only to add a visible blank line between
-    // the header (in embed.description) and the first card.
     const spacerField = {
       name: "\u200b",
       value: "\u200b",
@@ -451,17 +383,14 @@ async function postDiscord(rows, updatedAt) {
       ...cardFields
     ];
 
-    // Title: only on page 1.
     const title = isFirstPage ? "Starry Battle Rankings" : undefined;
 
-    // Header description: only on page 1 — doesn't count against the 25-field cap.
+    // -- THIS IS THE FIXED PART --
     const description = isFirstPage
       ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
       : undefined;
+    // ---------------------------
 
-    // Precompute explicit UTC date/time string for the last-page footer so Discord
-    // renders it as a fixed date (e.g. "04/29/2026 at 1:59 PM UTC") rather than
-    // the auto-localized "Today at …" that embed.timestamp produces.
     const embedFooter = (() => {
       if (!isLastPage) return {};
       const d = new Date(lastUpdateUnix * 1000);
@@ -490,7 +419,6 @@ async function postDiscord(rows, updatedAt) {
     let res;
 
     if (messageId) {
-      // Edit the existing message in-place
       res = await fetch(
         `https://discord.com/api/webhooks/${webhookId}/${webhookToken}/messages/${messageId}`,
         {
@@ -506,7 +434,6 @@ async function postDiscord(rows, updatedAt) {
         console.warn(`Discord page ${p + 1} PATCH failed (${res.status}): ${msg}`);
       }
     } else {
-      // Post a new message and log the returned ID so it can be saved as a secret
       res = await fetch(`${DISCORD_WEBHOOK}?wait=true`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -527,7 +454,6 @@ async function postDiscord(rows, updatedAt) {
 async function main() {
   const now      = new Date();
   const nowIso   = now.toISOString();
-  // Format as "YYYY-MM-DD HH:MM:SS UTC" using explicit UTC component accessors.
   const pad = n => String(n).padStart(2, "0");
   const updatedAt =
     `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ` +
@@ -540,14 +466,11 @@ async function main() {
   let withGains = members.map(m => ({ ...m, gain_60m: null, last_gain: null }));
 
   if (SUPABASE_URL && SUPABASE_KEY) {
-    // 1. Retrieve snapshot from ~60 min ago using a tight window [TARGET±WINDOW].
-    //    Fall back to the most recent snapshot older than (TARGET - WINDOW) minutes.
     const olderBoundIso = new Date(now - (GAIN_TARGET_MIN + GAIN_WINDOW_MIN) * 60 * 1000).toISOString();
     const newerBoundIso = new Date(now - (GAIN_TARGET_MIN - GAIN_WINDOW_MIN) * 60 * 1000).toISOString();
 
     let oldRows = await sbGetSnapshotsInWindow(olderBoundIso, newerBoundIso);
     if (oldRows.length === 0) {
-      // Fallback: any snapshot older than (TARGET - WINDOW) minutes
       oldRows = await sbGetOldSnapshots(newerBoundIso);
       if (oldRows.length > 0) {
         console.log("No snapshot in tight 60-min window; using nearest older snapshot for gain.");
@@ -557,12 +480,10 @@ async function main() {
     withGains = computeGains(members, oldRows);
     console.log(`Found ${oldRows.length} historical rows for gain calculation.`);
 
-    // 1b. Retrieve the immediately previous snapshot (~5 min ago) for Last Gain.
     const prevRows = await sbGetPreviousSnapshot(nowIso);
     withGains = computeLastGain(withGains, prevRows);
     console.log(`Found ${prevRows.length} previous-snapshot rows for last-gain calculation.`);
 
-    // 2. Append current snapshot to the time-series archive
     const toInsert = members.map(m => ({
       fetched_at:   nowIso,
       rank:         m.rank,
@@ -572,11 +493,9 @@ async function main() {
     await sbInsertArchive(toInsert);
     console.log(`Inserted ${toInsert.length} rows into StarryBattleArchive.`);
 
-    // 3. Upsert current state into leaderboard_snapshots (never grows past clan size)
     await sbUpsertCurrent(toInsert);
     console.log(`Upserted ${toInsert.length} rows into leaderboard_snapshots.`);
 
-    // 4. Prune StarryBattleArchive rows older than KEEP_HOURS
     const pruneIso = new Date(now - KEEP_HOURS * 60 * 60 * 1000).toISOString();
     await sbDeleteOld(pruneIso);
     console.log("Old archive rows pruned.");
