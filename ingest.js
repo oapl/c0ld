@@ -371,7 +371,25 @@ async function updateReadme(rows, updatedAt) {
   console.log("README updated.");
 }
 
-// ── Discord webhook ───────────────────────────────────────────────────────────
+// ── Discord webhook ──────────────────────────────────────────────────────────
+//
+// IMPORTANT: This function MUST use the legacy embed payload shape
+// (`{ embeds: [embed] }`) — never Components V2.
+//
+// Components V2 (`flags: 1 << 15`) is NOT supported on Discord's incoming-webhook
+// execute endpoint. Webhooks silently ignore the V2 flag and then validate the
+// payload as legacy; with no `content` or `embeds` they reject with
+// `50006 Cannot send an empty message`.
+//
+// V2 only works for application/bot messages (`POST /channels/{id}/messages`
+// with a bot token). Migrating NONG Bot to a real Discord application would
+// allow V2 (and wider Container rendering, à la COLD bot), but that's out of
+// scope for the webhook-based architecture this script was designed for.
+//
+// History of failed V2 attempts: PR #15 (reverted #16), PR #25 (reverted by
+// THIS commit). Do not retry V2 with the webhook architecture; if you want
+// V2 rendering, convert this script to a real bot first.
+//
 async function postDiscord(rows, updatedAt) {
   if (!DISCORD_WEBHOOK) return;
 
@@ -384,17 +402,14 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Discord Components V2 layout — no 25-field embed cap.
-  // Cards are grouped 3 per row inside a single TextDisplay per page.
-  //
-  // Per-page card budgets (generous under V2 component limits):
-  //   Page 1: up to 25 cards
-  //   Page 2: up to 25 cards
-  //   Page 3: up to 25 cards
-  // Total capacity: 75 members across 3 pages.
-  // If the clan grows past 75 members, add a fourth entry (e.g. [25, 25, 25, 25])
+  // Per-page card budgets (legacy embed 25-field cap):
+  //   Page 1: 24 cards + 1 invisible spacer field = 25 fields total
+  //   Page 2: 25 cards
+  //   Page 3: 25 cards
+  // Total capacity: 74 members across 3 pages.
+  // If the clan grows past 74 members, add a fourth entry (e.g. [24, 25, 25, 25])
   // — overflow is silently truncated until then.
-  const PAGE_CARD_LIMITS = [25, 25, 25];
+  const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
@@ -421,10 +436,6 @@ async function postDiscord(rows, updatedAt) {
     );
   }
 
-  // IS_COMPONENTS_V2 flag: 1 << 15 = 32768.
-  // Required on every payload (POST and PATCH) when using V2 components.
-  const IS_COMPONENTS_V2 = 1 << 15;
-
   let cursor = 0;
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const limit = PAGE_CARD_LIMITS[p];
@@ -438,62 +449,37 @@ async function postDiscord(rows, updatedAt) {
     const isFirstPage = p === 0;
     const isLastPage  = p === TOTAL_PAGES - 1;
 
-    // Build the card grid as a single TextDisplay (type 10).
-    // Cards are arranged in groups of 3 per row, with each group rendered as
-    // 2 text lines separated by U+2502 BOX DRAWINGS LIGHT VERTICAL (│):
-    //   Line 1: **rank. username** │ **rank. username** │ **rank. username**
-    //   Line 2: ⭐ Pts: **X**  1h: **Y** │ … │ …
-    // Groups are separated by a blank line for visual breathing room.
-    // The wider V2 Container (no ~600 px embed ceiling) gives each column
-    // enough horizontal space that long names like "Doobydoobydoo_bah" don't wrap.
-    const rowTexts = [];
-    for (let i = 0; i < page.length; i += 3) {
-      const trio = page.slice(i, i + 3);
-      const nameParts  = trio.map(r => `**${r.rank}. ${r.username}**`);
-      const statsParts = trio.map(r => {
-        const pts  = fmtAbbrev(r.total_points);
-        const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
-        return `${RANK_STAR_EMOJI} Pts: **${pts}**  1h: **${gain}**`;
-      });
-      rowTexts.push(nameParts.join("  │  ") + "\n" + statsParts.join("  │  "));
-    }
-    const cardContent = rowTexts.join("\n\n");
+    // Build inline card fields — one per member.
+    // value ends with a real double-newline for vertical breathing room between cards.
+    const cardFields = page.map(r => {
+      const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
+      return {
+        name:   `${r.rank}. ${r.username}`,
+        value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n> 1h Gain: **${gain}**\n\n`,
+        inline: true
+      };
+    });
 
-    // Assemble container children (TextDisplay = type 10, Separator = type 14).
-    const containerComponents = [];
+    // Page 1 gets a leading invisible spacer field so its 24 cards + spacer = 25 fields total.
+    const spacerField = { name: "\u200b", value: "\u200b", inline: false };
+    const fields = isFirstPage ? [spacerField, ...cardFields] : cardFields;
+
+    const embed = {
+      color:  EMBED_COLOR,
+      image:  { url: EMBED_SPACER_IMAGE_URL },
+      fields
+    };
 
     if (isFirstPage) {
-      containerComponents.push(
-        { type: 10, content: "# Starry Battle Rankings" },
-        { type: 10, content: `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>` },
-        { type: 14 } // Separator
-      );
+      embed.title       = "Starry Battle Rankings";
+      embed.description = `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`;
     }
-
-    if (!cardContent) {
-      console.warn(`Discord page ${p + 1}: cardContent is empty (page has ${page.length} member(s)); using zero-width-space fallback.`);
-    }
-    containerComponents.push({ type: 10, content: cardContent || "\u200b" });
 
     if (isLastPage) {
-      containerComponents.push(
-        { type: 14 }, // Separator
-        { type: 10, content: `-# Created by Cinnamowopal • Updated: ${footerDateStr}` }
-      );
+      embed.footer = { text: `Created by Cinnamowopal • Updated: ${footerDateStr}` };
     }
 
-    // V2 payload: no `embeds` field; top-level component is a Container (type 17)
-    // with accent_color for the colored left sidebar.
-    const payload = {
-      flags: IS_COMPONENTS_V2,
-      components: [
-        {
-          type: 17, // Container
-          accent_color: EMBED_COLOR,
-          components: containerComponents
-        }
-      ]
-    };
+    const payload = { embeds: [embed] };
 
     let res;
 
