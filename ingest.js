@@ -384,25 +384,34 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Discord embed hard cap: 25 fields per embed.
-  // Header moves into embed.description on page 1 only (free, doesn't count against
-  // the 25-field cap). A spacer field is prepended on page 1 to restore the blank
-  // line gap between the header and the first card.
+  // Discord Components V2 layout — no 25-field embed cap.
+  // Cards are grouped 3 per row inside a single TextDisplay per page.
   //
-  // Per-page card budgets to fit Discord's 25-field embed cap.
-  //   Page 1: 1 spacer field + up to 24 cards = 25 fields
-  //   Page 2:                   up to 25 cards = 25 fields
-  //   Page 3:                   up to 25 cards = 25 fields  (footer is native, not a field)
-  // Total capacity: 24 + 25 + 25 = 74 members across 3 pages.
-  // If the clan grows past 74 members, bump the array (e.g. [24, 25, 25, 25, 25]
-  // for 5 pages) — overflow is silently truncated until then.
-  const PAGE_CARD_LIMITS = [24, 25, 25];
+  // Per-page card budgets (generous under V2 component limits):
+  //   Page 1: up to 25 cards
+  //   Page 2: up to 25 cards
+  //   Page 3: up to 25 cards
+  // Total capacity: 75 members across 3 pages.
+  // If the clan grows past 75 members, add a fourth entry (e.g. [25, 25, 25, 25])
+  // — overflow is silently truncated until then.
+  const PAGE_CARD_LIMITS = [25, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
   const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
     * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
+
+  // Footer explicit date: MM/DD/YYYY at H:MM AM/PM UTC
+  const pad2 = n => String(n).padStart(2, "0");
+  const utcMonth   = pad2(now.getUTCMonth() + 1);
+  const utcDay     = pad2(now.getUTCDate());
+  const utcYear    = now.getUTCFullYear();
+  const utcHours   = now.getUTCHours();
+  const utcMinutes = pad2(now.getUTCMinutes());
+  const ampm       = utcHours >= 12 ? "PM" : "AM";
+  const hours12    = utcHours % 12 || 12;
+  const footerDateStr = `${utcMonth}/${utcDay}/${utcYear} at ${hours12}:${utcMinutes} ${ampm} UTC`;
 
   const totalCapacity = PAGE_CARD_LIMITS.reduce((a, b) => a + b, 0);
   if (rows.length > totalCapacity) {
@@ -411,6 +420,10 @@ async function postDiscord(rows, updatedAt) {
       `Bump PAGE_CARD_LIMITS in ingest.js to avoid truncation.`
     );
   }
+
+  // IS_COMPONENTS_V2 flag: 1 << 15 = 32768.
+  // Required on every payload (POST and PATCH) when using V2 components.
+  const IS_COMPONENTS_V2 = 1 << 15;
 
   let cursor = 0;
   for (let p = 0; p < TOTAL_PAGES; p++) {
@@ -425,67 +438,59 @@ async function postDiscord(rows, updatedAt) {
     const isFirstPage = p === 0;
     const isLastPage  = p === TOTAL_PAGES - 1;
 
-    const cardFields = page.map(r => ({
-      name: `${r.rank}. ${r.username}`,
-      value:
-        `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
-        `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
-        `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
-      // NOTE: Last Gain line intentionally omitted for now. To re-enable, insert
-      // before the trailing \u200b line:
-      //   `> Last Gain: ${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "-") + fmtAbbrev(Math.abs(r.last_gain)) + " pts"}\n` +
-      // The data is already computed and available on r.last_gain.
-      inline: true
-    }));
+    // Build the card grid as a single TextDisplay (type 10).
+    // Cards are arranged in groups of 3 per row, with each group rendered as
+    // 2 text lines separated by U+2502 BOX DRAWINGS LIGHT VERTICAL (│):
+    //   Line 1: **rank. username** │ **rank. username** │ **rank. username**
+    //   Line 2: ⭐ Pts: **X**  1h: **Y** │ … │ …
+    // Groups are separated by a blank line for visual breathing room.
+    // The wider V2 Container (no ~600 px embed ceiling) gives each column
+    // enough horizontal space that long names like "Doobydoobydoo_bah" don't wrap.
+    const rowTexts = [];
+    for (let i = 0; i < page.length; i += 3) {
+      const trio = page.slice(i, i + 3);
+      const nameParts  = trio.map(r => `**${r.rank}. ${r.username}**`);
+      const statsParts = trio.map(r => {
+        const pts  = fmtAbbrev(r.total_points);
+        const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
+        return `${RANK_STAR_EMOJI} Pts: **${pts}**  1h: **${gain}**`;
+      });
+      rowTexts.push(nameParts.join("  │  ") + "\n" + statsParts.join("  │  "));
+    }
+    const cardContent = rowTexts.join("\n\n");
 
-    // Spacer field: prepended on page 1 only to add a visible blank line between
-    // the header (in embed.description) and the first card.
-    const spacerField = {
-      name: "\u200b",
-      value: "\u200b",
-      inline: false
+    // Assemble container children (TextDisplay = type 10, Separator = type 14).
+    const containerComponents = [];
+
+    if (isFirstPage) {
+      containerComponents.push(
+        { type: 10, content: "# Starry Battle Rankings" },
+        { type: 10, content: `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>` },
+        { type: 14 } // Separator
+      );
+    }
+
+    containerComponents.push({ type: 10, content: cardContent });
+
+    if (isLastPage) {
+      containerComponents.push(
+        { type: 14 }, // Separator
+        { type: 10, content: `-# Created by Cinnamowopal • Updated: ${footerDateStr}` }
+      );
+    }
+
+    // V2 payload: no `embeds` field; top-level component is a Container (type 17)
+    // with accent_color for the colored left sidebar.
+    const payload = {
+      flags: IS_COMPONENTS_V2,
+      components: [
+        {
+          type: 17, // Container
+          accent_color: EMBED_COLOR,
+          components: containerComponents
+        }
+      ]
     };
-
-    const fields = [
-      ...(isFirstPage ? [spacerField] : []),
-      ...cardFields
-    ];
-
-    // Title: only on page 1.
-    const title = isFirstPage ? "Starry Battle Rankings" : undefined;
-
-    // Header description: only on page 1 — doesn't count against the 25-field cap.
-    const description = isFirstPage
-      ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
-      : undefined;
-
-    // Precompute explicit UTC date/time string for the last-page footer so Discord
-    // renders it as a fixed date (e.g. "04/29/2026 at 1:59 PM UTC") rather than
-    // the auto-localized "Today at …" that embed.timestamp produces.
-    const embedFooter = (() => {
-      if (!isLastPage) return {};
-      const d = new Date(lastUpdateUnix * 1000);
-      const mm   = String(d.getUTCMonth() + 1).padStart(2, "0");
-      const dd   = String(d.getUTCDate()).padStart(2, "0");
-      const yyyy = d.getUTCFullYear();
-      const hh12Raw = d.getUTCHours();
-      const ampm  = hh12Raw >= 12 ? "PM" : "AM";
-      const hh12  = ((hh12Raw + 11) % 12) + 1;
-      const mins  = String(d.getUTCMinutes()).padStart(2, "0");
-      const explicitDateTime = `${mm}/${dd}/${yyyy} at ${hh12}:${mins} ${ampm} UTC`;
-      return { footer: { text: `Created by Cinnamowopal • Updated: ${explicitDateTime}` } };
-    })();
-
-    const embed = {
-      color: EMBED_COLOR,
-      image: { url: EMBED_SPACER_IMAGE_URL },
-      fields,
-      ...(title       ? { title }       : {}),
-      ...(description ? { description } : {}),
-      ...embedFooter
-    };
-
-    const payload = { embeds: [embed] };
 
     let res;
 
