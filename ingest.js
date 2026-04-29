@@ -1,7 +1,7 @@
 // ingest.js
 // Fetches clan leaderboard from the Big Games API, stores a snapshot in
 // Supabase, computes the 60-minute point gain for each member, updates
-// README.md, and posts a Discord Components V2 webhook message.
+// README.md, and posts a Discord embed webhook message.
 //
 // Required env vars (add as GitHub Actions secrets):
 //   SUPABASE_URL          – e.g. https://xxxx.supabase.co
@@ -32,8 +32,8 @@ const ARCHIVE_TABLE   = "StarryBattleArchive";
 // a label and can be renamed freely on the server without breaking this.
 const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 
-// Accent color used for Discord Components V2 containers (gold).
-const DISCORD_ACCENT_COLOR = 0xf5a623;
+// Embed accent color (gold).
+const EMBED_COLOR = 0xf5a623;
 
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
@@ -370,21 +370,23 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Components V2 layout: 24 cards per page arranged as 8 rows of 3.
-  // Component budget per page (well under Discord's 40-component cap):
-  //   1 header Container + 1 large Separator + 8 row Containers + 8 small Separators
-  //   + 1 footer Container = ~27 top-level components (Sections/TextDisplays are nested).
+  // 24 cards + 1 header = 25 fields, exactly at the Discord embed field cap.
   const PAGE_SIZE   = 24;
   const TOTAL_PAGES = 3;
-
-  // Components V2 flag — opt-in to the new component-based message format.
-  // When set, Discord ignores `embeds` and `content`; only `components` is rendered.
-  const IS_COMPONENTS_V2 = 32768; // 1 << 15
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
   const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
     * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
+
+  // Header field rendered on every page for context.
+  const headerField = {
+    name: "\u200b",
+    value:
+      `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
+      `└ Next Update : <t:${nextUpdateUnix}:R>`,
+    inline: false
+  };
 
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const page = rows.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
@@ -393,90 +395,28 @@ async function postDiscord(rows, updatedAt) {
     // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
-    // ── Header Container ──────────────────────────────────────────────────────
-    const headerContainer = {
-      type: 17, // Container
-      accent_color: DISCORD_ACCENT_COLOR, // gold
-      components: [
-        {
-          type: 10, // TextDisplay
-          content:
-            `## 🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})\n\n` +
-            `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
-            `└ Next Update : <t:${nextUpdateUnix}:R>`
-        }
-      ]
+    const memberCardFields = page.map(r => ({
+      name: `${r.rank}. ${r.username}`,
+      value:
+        `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
+        `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
+        `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
+      // NOTE: Last Gain line intentionally omitted for now. To re-enable, insert
+      // before the trailing \u200b line:
+      //   `> Last Gain: ${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "-") + fmtAbbrev(Math.abs(r.last_gain)) + " pts"}\n` +
+      // The data is already computed and available on r.last_gain.
+      inline: true
+    }));
+
+    const embed = {
+      title:     `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
+      color:     EMBED_COLOR,
+      footer:    { text: `Updated ${updatedAt}` },
+      timestamp: now.toISOString(),
+      fields:    [headerField, ...memberCardFields]
     };
 
-    // Large separator after header (no divider line — just spacing)
-    const largeSeparator = { type: 14, spacing: 2, divider: false };
-
-    // Small separator between row containers
-    const smallSeparator = { type: 14, spacing: 1, divider: false };
-
-    // ── Row Containers (8 rows of 3 cards each) ───────────────────────────────
-    const COLS = 3;
-    const rowCount = Math.ceil(PAGE_SIZE / COLS); // always 8 for PAGE_SIZE=24
-    const rowComponents = [];
-
-    for (let row = 0; row < rowCount; row++) {
-      const cardTextDisplays = [];
-
-      for (let col = 0; col < COLS; col++) {
-        const r = page[row * COLS + col];
-        let content;
-        if (r) {
-          content =
-            `**${r.rank}. ${r.username}**\n` +
-            `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
-            `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**`;
-          // NOTE: Last Gain line intentionally omitted for now. To re-enable,
-          // add a new `> Last Gain: **…**` line here (no trailing \u200b needed in V2):
-          //   content += `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**`;
-          // The data is already computed and available on r.last_gain.
-        } else {
-          // Pad partial rows so columns stay aligned
-          content = "\u200b";
-        }
-        cardTextDisplays.push({ type: 10, content }); // TextDisplay
-      }
-
-      const rowContainer = {
-        type: 17, // Container
-        accent_color: DISCORD_ACCENT_COLOR,
-        components: [
-          {
-            type: 9, // Section
-            components: cardTextDisplays
-          }
-        ]
-      };
-
-      if (rowComponents.length > 0) {
-        rowComponents.push(smallSeparator);
-      }
-      rowComponents.push(rowContainer);
-    }
-
-    // ── Footer Container ──────────────────────────────────────────────────────
-    const footerContainer = {
-      type: 17, // Container
-      components: [
-        {
-          type: 10, // TextDisplay
-          content: `-# Updated ${updatedAt}`
-        }
-      ]
-    };
-
-    const components = [
-      headerContainer,
-      largeSeparator,
-      ...rowComponents,
-      footerContainer
-    ];
-
-    const payload = { flags: IS_COMPONENTS_V2, components };
+    const payload = { embeds: [embed] };
 
     let res;
 
