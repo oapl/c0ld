@@ -26,6 +26,10 @@ const BIG_GAMES_API   = `https://biggamesapi.io/api/clan/${encodeURIComponent(CL
 const TABLE           = "leaderboard_snapshots";
 const ARCHIVE_TABLE   = "StarryBattleArchive";
 
+// Discord embed update cadence.
+// Change this constant (and the workflow cron) together when the cadence changes.
+const UPDATE_INTERVAL_MIN = 5;
+
 // 60-min gain window configuration.
 // GAIN_TARGET_MIN: target snapshot age in minutes (we want the snapshot from ~60 min ago).
 // GAIN_WINDOW_MIN: ± tolerance in minutes; first try snapshots in [TARGET-WINDOW, TARGET+WINDOW].
@@ -332,8 +336,15 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  const PAGE_SIZE   = 25;
+  // PAGE_SIZE must be 24 so that 24 member cards + 1 header field = 25 fields exactly
+  // (Discord's embed field cap). Do NOT increase PAGE_SIZE without reducing fields elsewhere.
+  const PAGE_SIZE   = 24;
   const TOTAL_PAGES = 3;
+
+  const now = new Date();
+  const lastUpdateUnix = Math.floor(now.getTime() / 1000);
+  const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
+    * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
 
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const page = rows.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
@@ -342,19 +353,25 @@ async function postDiscord(rows, updatedAt) {
     // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
-    const memberCol = page.map(r => `**${r.rank}.** ${r.username}`).join("\n");
+    // Header field shown on every page for context
+    const headerField = {
+      name:   "\u200b",
+      value:  `🕒 Last Update : <t:${lastUpdateUnix}:R>\n└ Next Update : <t:${nextUpdateUnix}:R>`,
+      inline: false
+    };
+
+    // One inline field per member — Discord auto-arranges inline fields in rows of 3
     // TODO: `:gold_star:` is a custom server emote — replace with `<:gold_star:EMOTE_ID>` for it to render in Discord.
-    const ptsCol    = page.map(r => `:gold_star: ${fmtAbbrev(r.total_points)}`).join("\n");
-    const gainCol   = page.map(r => fmtAbbrev(r.gain_60m)).join("\n");
+    const memberFields = page.map(r => ({
+      name:   `${r.rank}. ${r.username}`,
+      value:  `:gold_star: Points: **${fmtAbbrev(r.total_points)}**\n🕒 1h Gain: **${fmtAbbrev(r.gain_60m)}**`,
+      inline: true
+    }));
 
     const embed = {
       title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
       color:  0xf5a623, // gold
-      fields: [
-        { name: "Member",        value: memberCol || "—", inline: true },
-        { name: "Total Points",  value: ptsCol    || "—", inline: true },
-        { name: "60m Gain",      value: gainCol   || "—", inline: true }
-      ],
+      fields: [headerField, ...memberFields],
       footer:    { text: `Updated ${updatedAt}` },
       timestamp: new Date().toISOString()
     };
