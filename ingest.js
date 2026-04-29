@@ -396,10 +396,11 @@ async function postDiscord(rows, updatedAt) {
       return {
         name:   `${r.rank}. ${r.username}`,
         value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
-                `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**`,
+                `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
+                `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
         // NOTE: Last Gain line intentionally omitted for now. To re-enable,
-        // change the line above to end with a `+` and add this as the next line:
-        //   `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**`,
+        // add it before the \u200b line (keep \u200b at the very end):
+        //   `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**\n` +
         // The data is already computed and available on r.last_gain.
         inline: true
       };
