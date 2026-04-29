@@ -1,12 +1,13 @@
 // ingest.js
 // Fetches clan leaderboard from the Big Games API, stores a snapshot in
 // Supabase, computes the 60-minute point gain for each member, updates
-// README.md, and posts a Discord embed webhook message.
+// README.md, and posts a Discord bot message with Components V2.
 //
 // Required env vars (add as GitHub Actions secrets):
 //   SUPABASE_URL          – e.g. https://xxxx.supabase.co
 //   SUPABASE_SERVICE_KEY  – service-role key (has full DB access)
-//   DISCORD_WEBHOOK_URL   – Discord incoming-webhook URL
+//   DISCORD_BOT_TOKEN     – Bot token from Discord Developer Portal (no `Bot ` prefix)
+//   DISCORD_CHANNEL_ID    – Channel snowflake ID to post into
 //
 // Optional env vars (have sensible defaults):
 //   CLAN_NAME   – default "NONG"
@@ -18,7 +19,8 @@ const fs = require("fs/promises");
 const CLAN_NAME       = process.env.CLAN_NAME            || "NONG";
 const SUPABASE_URL    = (process.env.SUPABASE_URL        || "").replace(/\/$/, "");
 const SUPABASE_KEY    = process.env.SUPABASE_SERVICE_KEY || "";
-const DISCORD_WEBHOOK     = process.env.DISCORD_WEBHOOK_URL   || "";
+const DISCORD_BOT_TOKEN  = process.env.DISCORD_BOT_TOKEN  || "";
+const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || "";
 const DISCORD_MESSAGE_IDS = process.env.DISCORD_MESSAGE_IDS   || "";
 const TOP_N               = parseInt(process.env.TOP_N || "10", 10);
 
@@ -371,45 +373,36 @@ async function updateReadme(rows, updatedAt) {
   console.log("README updated.");
 }
 
-// ── Discord webhook ──────────────────────────────────────────────────────────
+// ── Discord (bot REST API) ──────────────────────────────────────────────────
 //
-// IMPORTANT: This function MUST use the legacy embed payload shape
-// (`{ embeds: [embed] }`) — never Components V2.
+// Posts/edits up to 3 messages in a fixed channel using the bot REST endpoint
+// with Components V2 (`flags: 1 << 15`) so we can render wide COLD-style
+// Container components (no 600 px embed width cap).
 //
-// Components V2 (`flags: 1 << 15`) is NOT supported on Discord's incoming-webhook
-// execute endpoint. Webhooks silently ignore the V2 flag and then validate the
-// payload as legacy; with no `content` or `embeds` they reject with
-// `50006 Cannot send an empty message`.
+// IMPORTANT: V2 ONLY works on the bot endpoint
+// (`POST /channels/{id}/messages` with `Authorization: Bot <token>`).
+// V2 is silently rejected by webhook execute (`POST /webhooks/{id}/{token}`),
+// which returns `50006 Cannot send an empty message`. Three previous attempts
+// (PRs #15, #25, plus one earlier) tried V2 over the webhook and all failed —
+// do not retry that path.
 //
-// V2 only works for application/bot messages (`POST /channels/{id}/messages`
-// with a bot token). Migrating NONG Bot to a real Discord application would
-// allow V2 (and wider Container rendering, à la COLD bot), but that's out of
-// scope for the webhook-based architecture this script was designed for.
-//
-// History of failed V2 attempts: PR #15 (reverted #16), PR #25 (reverted by
-// THIS commit). Do not retry V2 with the webhook architecture; if you want
-// V2 rendering, convert this script to a real bot first.
-//
+// Required env vars:
+//   DISCORD_BOT_TOKEN  – Bot token from https://discord.com/developers (no `Bot ` prefix)
+//   DISCORD_CHANNEL_ID – Channel snowflake to post into
+//   DISCORD_MESSAGE_IDS – comma-separated message IDs to PATCH (one per page);
+//                        empty = first run, will POST and log new IDs to copy in
 async function postDiscord(rows, updatedAt) {
-  if (!DISCORD_WEBHOOK) return;
-
-  const match = DISCORD_WEBHOOK.match(/webhooks\/(\d+)\/(.+)/);
-  if (!match) {
-    console.warn("Discord webhook URL is malformed — skipping.");
+  if (!DISCORD_BOT_TOKEN || !DISCORD_CHANNEL_ID) {
+    console.warn("DISCORD_BOT_TOKEN or DISCORD_CHANNEL_ID not set — skipping Discord post.");
     return;
   }
-  const [, webhookId, webhookToken] = match;
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Per-page card budgets (legacy embed 25-field cap):
-  //   Page 1: 24 cards + 1 invisible spacer field = 25 fields total
-  //   Page 2: 25 cards
-  //   Page 3: 25 cards
-  // Total capacity: 74 members across 3 pages.
-  // If the clan grows past 74 members, add a fourth entry (e.g. [24, 25, 25, 25])
-  // — overflow is silently truncated until then.
-  const PAGE_CARD_LIMITS = [24, 25, 25];
+  // Page card budgets (3 cards per row, COLD-style 3-wide grid).
+  // V2 has no 25-field cap so we can fit more per page than the legacy embed.
+  // Keeping 3 pages × ~25 cards for visual parity with the legacy layout.
+  const PAGE_CARD_LIMITS = [25, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
@@ -436,63 +429,103 @@ async function postDiscord(rows, updatedAt) {
     );
   }
 
+  const IS_COMPONENTS_V2 = 1 << 15;
+  const CONTAINER_TYPE   = 17;
+  const TEXT_DISPLAY     = 10;
+  const SEPARATOR        = 14;
+
+  // Gold accent color (decimal); same value as legacy EMBED_COLOR (0xf5a623).
+  const ACCENT_COLOR = EMBED_COLOR;
+
   let cursor = 0;
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const limit = PAGE_CARD_LIMITS[p];
     const page  = rows.slice(cursor, cursor + limit);
     cursor += limit;
     const messageId = messageIds[p];
-
-    // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
     const isFirstPage = p === 0;
     const isLastPage  = p === TOTAL_PAGES - 1;
 
-    // Build inline card fields — one per member.
-    // value ends with a real double-newline for vertical breathing room between cards.
-    const cardFields = page.map(r => {
-      const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
-      return {
-        name:   `${r.rank}. ${r.username}`,
-        value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n> 1h Gain: **${gain}**\n\n`,
-        inline: true
-      };
-    });
+    // Build TextDisplay components: one per row of 3 cards.
+    // Each row pivots 3 members into a single TextDisplay using the same
+    // 3-column markdown trick the previous V2 attempt used (PR #25):
+    //
+    //   **1. Name** │ **2. Name** │ **3. Name**
+    //   ⭐ Pts: **5.5K**  1h: **89**  │  ⭐ Pts: **5.4K**  1h: **89**  │  ⭐ Pts: **5.3K**  1h: **89**
+    //
+    // Use the existing RANK_STAR_EMOJI constant.
+    const rowChunks = [];
+    for (let i = 0; i < page.length; i += 3) {
+      const trio = page.slice(i, i + 3);
+      const headerLine = trio
+        .map(r => `**${r.rank}. ${r.username}**`)
+        .join("  │  ");
+      const dataLine = trio
+        .map(r => {
+          const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
+          return `${RANK_STAR_EMOJI} Pts: **${fmtAbbrev(r.total_points)}**  1h: **${gain}**`;
+        })
+        .join("  │  ");
+      rowChunks.push(`${headerLine}\n${dataLine}`);
+    }
+    const cardsContent = rowChunks.join("\n\n");
 
-    // Page 1 gets a leading invisible spacer field so its 24 cards + spacer = 25 fields total.
-    const spacerField = { name: "\u200b", value: "\u200b", inline: false };
-    const fields = isFirstPage ? [spacerField, ...cardFields] : cardFields;
-
-    const embed = {
-      color:  EMBED_COLOR,
-      image:  { url: EMBED_SPACER_IMAGE_URL },
-      fields
-    };
+    const containerChildren = [];
 
     if (isFirstPage) {
-      embed.title       = "Starry Battle Rankings";
-      embed.description = `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`;
+      containerChildren.push({
+        type: TEXT_DISPLAY,
+        content: "# Starry Battle Rankings"
+      });
+      containerChildren.push({
+        type: TEXT_DISPLAY,
+        content: `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
+      });
+      containerChildren.push({ type: SEPARATOR });
+    }
+
+    if (cardsContent) {
+      containerChildren.push({
+        type: TEXT_DISPLAY,
+        content: cardsContent
+      });
     }
 
     if (isLastPage) {
-      embed.footer = { text: `Created by Cinnamowopal • Updated: ${footerDateStr}` };
+      containerChildren.push({ type: SEPARATOR });
+      containerChildren.push({
+        type: TEXT_DISPLAY,
+        content: `-# Created by Cinnamowopal • Updated: ${footerDateStr}`
+      });
     }
 
-    const payload = { embeds: [embed] };
+    const payload = {
+      flags: IS_COMPONENTS_V2,
+      components: [
+        {
+          type: CONTAINER_TYPE,
+          accent_color: ACCENT_COLOR,
+          components: containerChildren
+        }
+      ]
+    };
+
+    const baseUrl = `https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages`;
+    const headers = {
+      "Authorization": `Bot ${DISCORD_BOT_TOKEN}`,
+      "Content-Type":  "application/json",
+      "User-Agent":    "NONG-Leaderboard-Bot (https://github.com/OpalApocalypse/NONG_Leaderboard, 1.0)"
+    };
 
     let res;
-
     if (messageId) {
-      // Edit the existing message in-place
-      res = await fetch(
-        `https://discord.com/api/webhooks/${webhookId}/${webhookToken}/messages/${messageId}`,
-        {
-          method:  "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify(payload)
-        }
-      );
+      res = await fetch(`${baseUrl}/${messageId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(payload)
+      });
       if (res.ok) {
         console.log(`Discord page ${p + 1} updated (message ${messageId}).`);
       } else {
@@ -502,11 +535,10 @@ async function postDiscord(rows, updatedAt) {
         console.warn(`Payload sent:\n${payloadPreview}`);
       }
     } else {
-      // Post a new message and log the returned ID so it can be saved as a secret
-      res = await fetch(`${DISCORD_WEBHOOK}?wait=true`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload)
+      res = await fetch(baseUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         const data = await res.json();
