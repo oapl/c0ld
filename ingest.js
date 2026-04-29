@@ -58,9 +58,17 @@ async function fetchClanMembers() {
   }
 
   const members = json.data?.Members ?? [];
+  const filtered = [...members].filter(m => m.UserName);
+
+  if (filtered.length === 0) {
+    // Log the raw response so we can diagnose why no members were returned
+    // (e.g. wrong clan name, changed API structure, clan has no members).
+    console.warn("WARNING: 0 members found. Raw API response:");
+    console.warn(JSON.stringify(json, null, 2));
+  }
+
   // Sort descending by contribution points and assign ranks
-  return [...members]
-    .filter(m => m.UserName)
+  return filtered
     .sort((a, b) => getMemberPoints(b) - getMemberPoints(a))
     .map((m, i) => ({
       rank:         i + 1,
