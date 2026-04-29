@@ -12,17 +12,17 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 |---:|---|---:|---:|
 | 1 | johnr622 | 7.58K | N/A |
 | 2 | Yume_Sakurax3 | 7.56K | N/A |
-| 3 | joshuacd2006 | 7.26K | N/A |
-| 4 | jupiter0477 | 7.12K | N/A |
+| 3 | joshuacd2006 | 7.27K | N/A |
+| 4 | jupiter0477 | 7.13K | N/A |
 | 5 | Josep_xD2 | 7.07K | N/A |
-| 6 | Mr_Suter | 6.85K | N/A |
-| 7 | Johnr622_alt2 | 6.37K | N/A |
-| 8 | Johnr622_alt3 | 6.37K | N/A |
+| 6 | Mr_Suter | 6.86K | N/A |
+| 7 | Johnr622_alt2 | 6.38K | N/A |
+| 8 | Johnr622_alt3 | 6.38K | N/A |
 | 9 | Johnr622_alt4 | 6.13K | N/A |
-| 10 | Johnr622_alt5 | 6.12K | N/A |
+| 10 | Johnr622_alt5 | 6.13K | N/A |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-29 18:33:28 UTC
+2026-04-29 18:36:44 UTC
 <!-- END_UPDATED -->
