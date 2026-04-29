@@ -370,9 +370,11 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // 24 cards + 1 header = 25 fields, exactly at the Discord embed field cap.
-  const PAGE_SIZE   = 24;
-  const TOTAL_PAGES = 3;
+  // Embed has a hard 25-field cap. Per-page layout:
+  //   1 header + 1 spacer + up to PAGE_SIZE cards + 1 footer = 25 max.
+  // → PAGE_SIZE = 22, TOTAL_PAGES = 4 covers up to 88 members.
+  const PAGE_SIZE   = 22;
+  const TOTAL_PAGES = 4;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
@@ -385,6 +387,13 @@ async function postDiscord(rows, updatedAt) {
     value:
       `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
       `└ Next Update : <t:${nextUpdateUnix}:R>`,
+    inline: false
+  };
+
+  // Spacer between header and first card for visual breathing room.
+  const spacerField = {
+    name: "\u200b",
+    value: "\u200b",
     inline: false
   };
 
@@ -408,12 +417,22 @@ async function postDiscord(rows, updatedAt) {
       inline: true
     }));
 
+    // Footer field: embed.footer doesn't render <t:UNIX:STYLE> markdown, so
+    // we use a plain field instead. "-# " renders as Discord small-text.
+    const footerField = {
+      name: "\u200b",
+      value:
+        `Updated: Today at <t:${lastUpdateUnix}:t>\n` +
+        `-# Created by Cinnamowopal`,
+      inline: false
+    };
+
     const embed = {
-      title:     `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
-      color:     EMBED_COLOR,
-      footer:    { text: `Updated ${updatedAt}` },
-      timestamp: now.toISOString(),
-      fields:    [headerField, ...memberCardFields]
+      title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
+      color:  EMBED_COLOR,
+      fields: [headerField, spacerField, ...memberCardFields, footerField]
+      // No `footer`, no `timestamp` — both are now rendered via footerField above
+      // because embed.footer doesn't render <t:UNIX:STYLE> markdown.
     };
 
     const payload = { embeds: [embed] };
