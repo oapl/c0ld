@@ -43,8 +43,11 @@ const UPDATE_INTERVAL_MIN = 5;
 // (GAIN_TARGET_MIN - GAIN_WINDOW_MIN) minutes (preserves existing behaviour).
 const GAIN_TARGET_MIN = 60;
 const GAIN_WINDOW_MIN = 5;
-// Delete snapshots older than this many hours to keep the table small.
-const KEEP_HOURS      = 48;
+// Retain time-series rows in StarryBattleArchive for this many hours.
+// 336 h = 14 days — the maximum length of any clan battle, so any battle
+// started at the beginning of the window will still have full history.
+// If future events exceed 14 days, increase this constant accordingly.
+const KEEP_HOURS      = 336;
 
 // README markers
 const README_PATH = "README.md";
@@ -157,22 +160,39 @@ function sbHeaders(extra = {}) {
   };
 }
 
-async function sbInsert(rows) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
+// Appends a batch of time-series rows to StarryBattleArchive.
+async function sbInsertArchive(rows) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`, {
     method:  "POST",
     headers: sbHeaders({ Prefer: "return=minimal" }),
     body:    JSON.stringify(rows)
   });
   if (!res.ok) {
     const msg = await res.text();
-    throw new Error(`Supabase insert failed (${res.status}): ${msg}`);
+    throw new Error(`Supabase archive insert failed (${res.status}): ${msg}`);
+  }
+}
+
+// Upserts the current-state batch into leaderboard_snapshots (one row per
+// member, replaced every run — the table never grows past clan size).
+async function sbUpsertCurrent(rows) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  url.searchParams.set("on_conflict", "username");
+  const res = await fetch(url.toString(), {
+    method:  "POST",
+    headers: sbHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body:    JSON.stringify(rows)
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Supabase upsert failed (${res.status}): ${msg}`);
   }
 }
 
 // Returns all rows with fetched_at < beforeIso, newest-first (up to 500 rows).
 // The caller picks the most-recent distinct batch from this result set.
 async function sbGetOldSnapshots(beforeIso) {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order",      "fetched_at.desc");
   url.searchParams.set("limit",      "500");
@@ -188,7 +208,7 @@ async function sbGetOldSnapshots(beforeIso) {
 }
 
 async function sbDeleteOld(olderThanIso) {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.set("fetched_at", `lt.${olderThanIso}`);
   const res = await fetch(url.toString(), {
     method:  "DELETE",
@@ -204,7 +224,7 @@ async function sbDeleteOld(olderThanIso) {
 // Returns the rows of the single most-recent snapshot batch with
 // fetched_at strictly less than the current run's fetched_at.
 async function sbGetPreviousSnapshot(beforeIso) {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order",      "fetched_at.desc");
   url.searchParams.set("limit",      "200");
@@ -226,7 +246,7 @@ async function sbGetPreviousSnapshot(beforeIso) {
 // Returns rows with fetched_at strictly between afterIso and beforeIso, newest-first (up to 500).
 // Used for the tight ~60-min window query.
 async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
   url.searchParams.append("fetched_at", `gt.${afterIso}`);
   url.searchParams.append("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order", "fetched_at.desc");
@@ -240,39 +260,6 @@ async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
     throw new Error(`Supabase window query failed (${res.status}): ${msg}`);
   }
   return res.json();
-}
-
-// ── StarryBattle archive helpers ──────────────────────────────────────────────
-
-// Returns the battle_id of the most recently archived StarryBattle, or null if none.
-async function sbGetLatestArchivedBattleId() {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
-  url.searchParams.set("select", "battle_id");
-  url.searchParams.set("order",  "archived_at.desc");
-  url.searchParams.set("limit",  "1");
-
-  const res = await fetch(url.toString(), {
-    headers: sbHeaders({ Prefer: "return=representation" })
-  });
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(`Supabase archive query failed (${res.status}): ${msg}`);
-  }
-  const rows = await res.json();
-  return rows[0]?.battle_id ?? null;
-}
-
-// Inserts rows into StarryBattleArchive.
-async function sbInsertArchive(rows) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`, {
-    method:  "POST",
-    headers: sbHeaders({ Prefer: "return=minimal" }),
-    body:    JSON.stringify(rows)
-  });
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(`Supabase archive insert failed (${res.status}): ${msg}`);
-  }
 }
 
 // ── 60-min gain ───────────────────────────────────────────────────────────────
@@ -406,14 +393,14 @@ async function postDiscord(rows, updatedAt) {
 
     // One inline field per member — Discord auto-arranges inline fields in rows of 3
     const memberFields = page.map(r => {
-      const lastGainStr = r.last_gain == null
-        ? "N/A"
-        : `${r.last_gain >= 0 ? "+" : "-"}${fmtAbbrev(Math.abs(r.last_gain))} pts`;
       return {
         name:   `${r.rank}. ${r.username}`,
         value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
-                `🕒 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
-                `└ Last Gain: ${lastGainStr}`,
+                `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**`,
+        // NOTE: Last Gain line intentionally omitted for now. To re-enable,
+        // change the line above to end with a `+` and add this as the next line:
+        //   `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**`,
+        // The data is already computed and available on r.last_gain.
         inline: true
       };
     });
@@ -473,7 +460,7 @@ async function main() {
     `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
 
   console.log(`Fetching clan data for "${CLAN_NAME}"…`);
-  const { members, starryBattle } = await fetchClanMembers();
+  const { members } = await fetchClanMembers();
   console.log(`Fetched ${members.length} members.`);
 
   let withGains = members.map(m => ({ ...m, gain_60m: null, last_gain: null }));
@@ -501,23 +488,24 @@ async function main() {
     withGains = computeLastGain(withGains, prevRows);
     console.log(`Found ${prevRows.length} previous-snapshot rows for last-gain calculation.`);
 
-    // 2. Insert current snapshot
+    // 2. Append current snapshot to the time-series archive
     const toInsert = members.map(m => ({
       fetched_at:   nowIso,
       rank:         m.rank,
       username:     m.username,
       total_points: m.total_points
     }));
-    await sbInsert(toInsert);
-    console.log(`Inserted ${toInsert.length} rows into Supabase.`);
+    await sbInsertArchive(toInsert);
+    console.log(`Inserted ${toInsert.length} rows into StarryBattleArchive.`);
 
-    // 3. Prune old data
+    // 3. Upsert current state into leaderboard_snapshots (never grows past clan size)
+    await sbUpsertCurrent(toInsert);
+    console.log(`Upserted ${toInsert.length} rows into leaderboard_snapshots.`);
+
+    // 4. Prune StarryBattleArchive rows older than KEEP_HOURS
     const pruneIso = new Date(now - KEEP_HOURS * 60 * 60 * 1000).toISOString();
     await sbDeleteOld(pruneIso);
-    console.log("Old snapshots pruned.");
-
-    // 4. StarryBattle archive: snapshot final standings once per completed battle.
-    await maybeArchiveStarryBattle(members, starryBattle, now, nowIso);
+    console.log("Old archive rows pruned.");
   } else {
     console.warn("SUPABASE_URL / SUPABASE_SERVICE_KEY not set — skipping DB operations. 60m gain will show as N/A.");
   }
@@ -526,88 +514,6 @@ async function main() {
   await postDiscord(withGains, updatedAt);
 
   console.log("Done.");
-}
-
-// Archives final StarryBattle standings to StarryBattleArchive exactly once per
-// completed battle. No-ops with a warning if the API does not expose end-time fields.
-async function maybeArchiveStarryBattle(members, starryBattle, now, nowIso) {
-  if (!starryBattle) {
-    console.warn("StarryBattle data not present in API response — skipping archive step.");
-    return;
-  }
-
-  // Defensively detect end-time field (API may use EndTime, FinishTime, etc.)
-  const rawEndTime =
-    starryBattle.EndTime   ??
-    starryBattle.FinishTime ??
-    starryBattle.end_time  ??
-    null;
-
-  if (rawEndTime == null) {
-    console.warn("StarryBattle end-time field not found in API response — skipping archive step.");
-    return;
-  }
-
-  const endTime = new Date(rawEndTime);
-  if (isNaN(endTime.getTime())) {
-    console.warn(`StarryBattle end-time "${rawEndTime}" could not be parsed — skipping archive step.`);
-    return;
-  }
-
-  // Only archive if the battle has ended.
-  if (now < endTime) {
-    console.log("StarryBattle is still active — no archiving needed.");
-    return;
-  }
-
-  // Derive a stable battle_id (prefer an API-provided ID, fall back to start-time epoch).
-  const rawStartTime =
-    starryBattle.StartTime ??
-    starryBattle.start_time ??
-    null;
-  const startTime = rawStartTime ? new Date(rawStartTime) : null;
-  const startEpoch = startTime && !isNaN(startTime.getTime()) ? startTime.getTime() : null;
-
-  const battleId = String(
-    starryBattle.Id ??
-    starryBattle.BattleId ??
-    starryBattle.battle_id ??
-    startEpoch ??
-    endTime.getTime()
-  );
-
-  // Check whether this battle has already been archived.
-  let latestArchivedId;
-  try {
-    latestArchivedId = await sbGetLatestArchivedBattleId();
-  } catch (err) {
-    console.warn(`Could not query StarryBattleArchive — skipping archive step: ${err.message}`);
-    return;
-  }
-
-  if (latestArchivedId === battleId) {
-    console.log(`StarryBattle ${battleId} already archived — skipping.`);
-    return;
-  }
-
-  // Insert final standings.
-  const archiveRows = members.map(m => ({
-    battle_id:         battleId,
-    archived_at:       nowIso,
-    battle_started_at: startTime && !isNaN(startTime.getTime()) ? startTime.toISOString() : null,
-    battle_ended_at:   endTime.toISOString(),
-    rank:              m.rank,
-    user_id:           m.user_id ?? null,
-    username:          m.username,
-    total_points:      m.total_points
-  }));
-
-  try {
-    await sbInsertArchive(archiveRows);
-    console.log(`Archived ${archiveRows.length} rows to StarryBattleArchive for battle ${battleId}.`);
-  } catch (err) {
-    console.warn(`Failed to archive StarryBattle standings: ${err.message}`);
-  }
 }
 
 main().catch(err => {
