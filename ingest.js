@@ -1,7 +1,7 @@
 // ingest.js
 // Fetches clan leaderboard from the Big Games API, stores a snapshot in
 // Supabase, computes the 60-minute point gain for each member, updates
-// README.md, and posts a Discord webhook embed.
+// README.md, and posts a Discord Components V2 webhook message.
 //
 // Required env vars (add as GitHub Actions secrets):
 //   SUPABASE_URL          – e.g. https://xxxx.supabase.co
@@ -31,6 +31,9 @@ const ARCHIVE_TABLE   = "StarryBattleArchive";
 // ID is what Discord uses to resolve the emoji; the name portion is just
 // a label and can be renamed freely on the server without breaking this.
 const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
+
+// Accent color used for Discord Components V2 containers (gold).
+const DISCORD_ACCENT_COLOR = 0xf5a623;
 
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
@@ -367,10 +370,16 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // PAGE_SIZE must be 24 so that 24 member cards + 1 header field = 25 fields exactly
-  // (Discord's embed field cap). Do NOT increase PAGE_SIZE without reducing fields elsewhere.
+  // Components V2 layout: 24 cards per page arranged as 8 rows of 3.
+  // Component budget per page (well under Discord's 40-component cap):
+  //   1 header Container + 1 large Separator + 8 row Containers + 8 small Separators
+  //   + 1 footer Container = ~27 top-level components (Sections/TextDisplays are nested).
   const PAGE_SIZE   = 24;
   const TOTAL_PAGES = 3;
+
+  // Components V2 flag — opt-in to the new component-based message format.
+  // When set, Discord ignores `embeds` and `content`; only `components` is rendered.
+  const IS_COMPONENTS_V2 = 32768; // 1 << 15
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
@@ -384,35 +393,90 @@ async function postDiscord(rows, updatedAt) {
     // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
-    // Header field shown on every page for context
-    const headerField = {
-      name:   "\u200b",
-      value:  `🕒 Last Update : <t:${lastUpdateUnix}:R>\n└ Next Update : <t:${nextUpdateUnix}:R>`,
-      inline: false
+    // ── Header Container ──────────────────────────────────────────────────────
+    const headerContainer = {
+      type: 17, // Container
+      accent_color: DISCORD_ACCENT_COLOR, // gold
+      components: [
+        {
+          type: 10, // TextDisplay
+          content:
+            `## 🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})\n\n` +
+            `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
+            `└ Next Update : <t:${nextUpdateUnix}:R>`
+        }
+      ]
     };
 
-    // One inline field per member — Discord auto-arranges inline fields in rows of 3
-    const memberFields = page.map(r => {
-      return {
-        name:   `${r.rank}. ${r.username}`,
-        value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
-                `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
-                `\u200b`, // trailing zero-width-space line: forces vertical gap between card rows
-        // NOTE: Last Gain line intentionally omitted for now. To re-enable,
-        // add it before the \u200b line (keep \u200b at the very end):
-        //   `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**\n` +
-        // The data is already computed and available on r.last_gain.
-        inline: true
+    // Large separator after header (no divider line — just spacing)
+    const largeSeparator = { type: 14, spacing: 2, divider: false };
+
+    // Small separator between row containers
+    const smallSeparator = { type: 14, spacing: 1, divider: false };
+
+    // ── Row Containers (8 rows of 3 cards each) ───────────────────────────────
+    const COLS = 3;
+    const rowCount = Math.ceil(PAGE_SIZE / COLS); // always 8 for PAGE_SIZE=24
+    const rowComponents = [];
+
+    for (let row = 0; row < rowCount; row++) {
+      const cardTextDisplays = [];
+
+      for (let col = 0; col < COLS; col++) {
+        const r = page[row * COLS + col];
+        let content;
+        if (r) {
+          content =
+            `**${r.rank}. ${r.username}**\n` +
+            `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
+            `> 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**`;
+          // NOTE: Last Gain line intentionally omitted for now. To re-enable,
+          // add a new `> Last Gain: **…**` line here (no trailing \u200b needed in V2):
+          //   content += `\n> Last Gain: **${r.last_gain == null ? "N/A" : (r.last_gain >= 0 ? "+" : "") + fmtAbbrev(r.last_gain) + " pts"}**`;
+          // The data is already computed and available on r.last_gain.
+        } else {
+          // Pad partial rows so columns stay aligned
+          content = "\u200b";
+        }
+        cardTextDisplays.push({ type: 10, content }); // TextDisplay
+      }
+
+      const rowContainer = {
+        type: 17, // Container
+        accent_color: DISCORD_ACCENT_COLOR,
+        components: [
+          {
+            type: 9, // Section
+            components: cardTextDisplays
+          }
+        ]
       };
-    });
 
-    const embed = {
-      title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
-      color:  0xf5a623, // gold
-      fields: [headerField, ...memberFields],
-      footer:    { text: `Updated ${updatedAt}` },
-      timestamp: new Date().toISOString()
+      if (rowComponents.length > 0) {
+        rowComponents.push(smallSeparator);
+      }
+      rowComponents.push(rowContainer);
+    }
+
+    // ── Footer Container ──────────────────────────────────────────────────────
+    const footerContainer = {
+      type: 17, // Container
+      components: [
+        {
+          type: 10, // TextDisplay
+          content: `-# Updated ${updatedAt}`
+        }
+      ]
     };
+
+    const components = [
+      headerContainer,
+      largeSeparator,
+      ...rowComponents,
+      footerContainer
+    ];
+
+    const payload = { flags: IS_COMPONENTS_V2, components };
 
     let res;
 
@@ -423,7 +487,7 @@ async function postDiscord(rows, updatedAt) {
         {
           method:  "PATCH",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ embeds: [embed] })
+          body:    JSON.stringify(payload)
         }
       );
       if (res.ok) {
@@ -437,7 +501,7 @@ async function postDiscord(rows, updatedAt) {
       res = await fetch(`${DISCORD_WEBHOOK}?wait=true`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ embeds: [embed] })
+        body:    JSON.stringify(payload)
       });
       if (res.ok) {
         const data = await res.json();

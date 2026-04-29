@@ -106,7 +106,7 @@ GitHub Actions (every 5 min)
        ├─ Upsert current state into leaderboard_snapshots
        ├─ Prune StarryBattleArchive rows older than 14 days
        ├─ Update README.md leaderboard table
-       └─ POST Discord webhook embed
+       └─ POST Discord Components V2 webhook message
 ```
 
 ### StarryBattleArchive
@@ -117,15 +117,49 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 `leaderboard_snapshots` is kept as the **current-state** table. It contains exactly one row per active member (upserted every run) and never grows past clan size. Any external service that wants "what does the leaderboard look like right now" should query this table.
 
-### Discord embed: card grid layout
+### Discord Components V2: card grid layout
 
-The Discord embed uses a **3-column card grid** format. Each member appears as
-its own inline field showing their rank, username, abbreviated points, and
-hourly gain. A header field at the top of each page shows the last and next
-update times using Discord's native relative timestamps (`<t:UNIX:R>`).
+> **Action required after merging this PR (existing deployments only — skip if this is a fresh install):**
+> 1. In Discord, delete the 3 existing leaderboard messages posted by the bot.
+> 2. In GitHub repository secrets, clear `DISCORD_MESSAGE_IDS` (or delete it).
+> 3. Trigger the workflow once. The bot will POST 3 new Components V2 messages and log their IDs.
+> 4. Copy those IDs back into `DISCORD_MESSAGE_IDS` (comma-separated, in order).
+>
+> This is necessary because a Components V2 message cannot be PATCHed into a plain-embed message and vice versa — Discord rejects mismatched edits.
 
-Each embed page holds 24 member cards + 1 header = 25 fields total (Discord's
-embed field cap). The `PAGE_SIZE` constant in `ingest.js` must not exceed 24.
+The Discord messages use **Components V2** (opted in via `flags: 32768`). Each
+page is structured as a `components` array — no `embeds` field is used.
+
+Per-page layout:
+
+```
+Container (header, gold accent)
+  └─ TextDisplay — "## 🏆 NONG Clan Leaderboard (Page X/3)\n\n🕒 Last Update…\n└ Next Update…"
+
+Separator (large, no divider line)
+
+// Repeated 8 times (one per row of 3 cards):
+Container (row, gold accent)
+  └─ Section
+       ├─ TextDisplay (card 1)
+       ├─ TextDisplay (card 2)
+       └─ TextDisplay (card 3)
+Separator (small, no divider line)
+
+Container (footer)
+  └─ TextDisplay — "-# Updated YYYY-MM-DD HH:MM:SS UTC"
+```
+
+Each card TextDisplay contains:
+
+```
+**{rank}. {username}**
+<:RankStar:…> Points: **{abbreviatedPoints}**
+> 1h Gain: **{gainOrNA}**
+```
+
+Partial last rows are padded with zero-width-space TextDisplays to keep
+columns aligned. Total components per page ≈ 27, well under Discord's 40-component cap.
 
 The `Next Update` timestamp is computed by rounding the current time up to the
 next `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and
