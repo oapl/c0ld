@@ -35,6 +35,14 @@ const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 // Embed accent color (gold).
 const EMBED_COLOR = 0xf5a623;
 
+// Raw GitHub URL of a 1×1 transparent PNG committed to this repo.
+// Attaching this as embed.image forces Discord to render the embed at its
+// maximum width (~600px), which widens the 3-column inline-field slots
+// so cards have visibly more horizontal breathing room. Without it, the
+// embed shrinks to fit text content and columns feel cramped.
+const EMBED_SPACER_IMAGE_URL =
+  "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
+
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
 const UPDATE_INTERVAL_MIN = 5;
@@ -428,11 +436,12 @@ async function postDiscord(rows, updatedAt) {
     };
 
     const embed = {
-      title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
       color:  EMBED_COLOR,
+      image:  { url: EMBED_SPACER_IMAGE_URL },
       fields: [headerField, spacerField, ...memberCardFields, footerField]
-      // No `footer`, no `timestamp` — both are now rendered via footerField above
-      // because embed.footer doesn't render <t:UNIX:STYLE> markdown.
+      // No `title`, no `footer`, no `timestamp` — footer content is rendered via
+      // footerField because embed.footer doesn't support <t:UNIX:STYLE> markdown.
+      // image is a 1×1 transparent PNG that forces Discord's maximum embed width.
     };
 
     const payload = { embeds: [embed] };

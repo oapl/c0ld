@@ -132,8 +132,8 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 Each Discord message is a standard embed (no `flags`, no `components`). Four messages
 are posted — one per page of up to 22 members. Each embed contains:
 
-- **Title** — `🏆 NONG Clan Leaderboard (Page X/4)`
 - **Color** — gold (`#f5a623`)
+- **Image** — `assets/embed-spacer.png` (1×1 transparent PNG; forces Discord max-width rendering — **do not delete**)
 - **Fields** — 1 header + 1 spacer + up to 22 inline card fields + 1 footer = 25 total (the Discord embed cap)
 
 The **header field** (non-inline, invisible name) shows Discord-native relative timestamps:
