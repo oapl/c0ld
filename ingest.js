@@ -58,9 +58,11 @@ async function resolveRobloxUsernames(userIds) {
         for (const user of (json.data ?? [])) {
           result.set(user.id, user.name);
         }
+      } else {
+        console.warn(`Roblox Users API error (${res.status}) for batch starting at index ${i} — falling back to user_<ID>`);
       }
-    } catch (_) {
-      // Fall through – missing IDs will get the fallback below
+    } catch (err) {
+      console.warn(`Roblox Users API request failed for batch starting at index ${i}: ${err.message} — falling back to user_<ID>`);
     }
     // Apply fallback for any IDs not resolved in this batch
     for (const id of batch) {
