@@ -26,6 +26,12 @@ const BIG_GAMES_API   = `https://biggamesapi.io/api/clan/${encodeURIComponent(CL
 const TABLE           = "leaderboard_snapshots";
 const ARCHIVE_TABLE   = "StarryBattleArchive";
 
+// Custom Discord emoji used in card "Points" line. Webhooks must use the
+// full <:name:id> syntax — plain :shortcode: will not resolve. The numeric
+// ID is what Discord uses to resolve the emoji; the name portion is just
+// a label and can be renamed freely on the server without breaking this.
+const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
+
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
 const UPDATE_INTERVAL_MIN = 5;
@@ -195,6 +201,28 @@ async function sbDeleteOld(olderThanIso) {
   }
 }
 
+// Returns the rows of the single most-recent snapshot batch with
+// fetched_at strictly less than the current run's fetched_at.
+async function sbGetPreviousSnapshot(beforeIso) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  url.searchParams.set("fetched_at", `lt.${beforeIso}`);
+  url.searchParams.set("order",      "fetched_at.desc");
+  url.searchParams.set("limit",      "200");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Supabase previous-snapshot query failed (${res.status}): ${msg}`);
+  }
+  const rows = await res.json();
+  if (!rows.length) return [];
+  // Filter to only the most-recent distinct fetched_at in the result set
+  const latestTs = rows[0].fetched_at;
+  return rows.filter(r => r.fetched_at === latestTs);
+}
+
 // Returns rows with fetched_at strictly between afterIso and beforeIso, newest-first (up to 500).
 // Used for the tight ~60-min window query.
 async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
@@ -267,7 +295,23 @@ function computeGains(current, oldRows) {
   }));
 }
 
-// ── Formatting helpers ────────────────────────────────────────────────────────
+// ── Last-gain (previous snapshot delta) ──────────────────────────────────────
+// Diffs current points against the immediately previous snapshot batch.
+// Augments each member with a `last_gain` field (number or null for unknown).
+function computeLastGain(current, prevRows) {
+  if (!prevRows.length) {
+    return current.map(m => ({ ...m, last_gain: null }));
+  }
+  // PostgREST returns BIGINT columns as strings in JSON; coerce to number.
+  const prevByName = new Map(prevRows.map(r => [r.username, Number(r.total_points)]));
+  return current.map(m => ({
+    ...m,
+    last_gain: prevByName.has(m.username)
+      ? m.total_points - prevByName.get(m.username)
+      : null
+  }));
+}
+
 function fmtNum(n) {
   return n != null ? Number(n).toLocaleString("en-US") : "N/A";
 }
@@ -361,12 +405,18 @@ async function postDiscord(rows, updatedAt) {
     };
 
     // One inline field per member — Discord auto-arranges inline fields in rows of 3
-    // TODO: `:gold_star:` is a custom server emote — replace with `<:gold_star:EMOTE_ID>` for it to render in Discord.
-    const memberFields = page.map(r => ({
-      name:   `${r.rank}. ${r.username}`,
-      value:  `:gold_star: Points: **${fmtAbbrev(r.total_points)}**\n🕒 1h Gain: **${fmtAbbrev(r.gain_60m)}**`,
-      inline: true
-    }));
+    const memberFields = page.map(r => {
+      const lastGainStr = r.last_gain == null
+        ? "N/A"
+        : `${r.last_gain >= 0 ? "+" : "-"}${fmtAbbrev(Math.abs(r.last_gain))} pts`;
+      return {
+        name:   `${r.rank}. ${r.username}`,
+        value:  `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
+                `🕒 1h Gain: **${r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m)}**\n` +
+                `└ Last Gain: ${lastGainStr}`,
+        inline: true
+      };
+    });
 
     const embed = {
       title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
@@ -426,7 +476,7 @@ async function main() {
   const { members, starryBattle } = await fetchClanMembers();
   console.log(`Fetched ${members.length} members.`);
 
-  let withGains = members.map(m => ({ ...m, gain_60m: null }));
+  let withGains = members.map(m => ({ ...m, gain_60m: null, last_gain: null }));
 
   if (SUPABASE_URL && SUPABASE_KEY) {
     // 1. Retrieve snapshot from ~60 min ago using a tight window [TARGET±WINDOW].
@@ -445,6 +495,11 @@ async function main() {
 
     withGains = computeGains(members, oldRows);
     console.log(`Found ${oldRows.length} historical rows for gain calculation.`);
+
+    // 1b. Retrieve the immediately previous snapshot (~5 min ago) for Last Gain.
+    const prevRows = await sbGetPreviousSnapshot(nowIso);
+    withGains = computeLastGain(withGains, prevRows);
+    console.log(`Found ${prevRows.length} previous-snapshot rows for last-gain calculation.`);
 
     // 2. Insert current snapshot
     const toInsert = members.map(m => ({
