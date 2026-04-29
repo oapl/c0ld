@@ -119,31 +119,34 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 ### Discord embed layout
 
-> **After merging, just trigger the workflow once.** It will POST 4 fresh embed messages
+> **After merging, just trigger the workflow once.** It will POST 3 fresh embed messages
 > and log their IDs (look for `Discord page N posted. Message ID: …` in the run log).
 > Copy those IDs into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on
 > the workflow edits those messages in place.
 >
-> **One-time note if you already have 3 message IDs configured:** the page count has
-> changed from 3 to 4. The script will continue editing pages 1–3 in place and will
-> POST a brand-new page-4 message, logging its ID. Append that 4th ID to
-> `DISCORD_MESSAGE_IDS` — no need to delete or repost the first three messages.
+> **One-time cleanup if you already have 4 message IDs configured:** the page count has
+> shrunk from 4 to 3. After merging:
+> 1. **Delete the 4th message** in the Discord channel manually (the old page-4 embed).
+> 2. **Remove the 4th ID** from the `DISCORD_MESSAGE_IDS` secret — keep the first 3, comma-separated.
+>
+> The first 3 messages will be edited in place by the next run with the new layout.
+> If columns still look narrow after the merge, clear `DISCORD_MESSAGE_IDS` entirely and
+> let the script POST 3 fresh messages.
 
-Each Discord message is a standard embed (no `flags`, no `components`). Four messages
-are posted — one per page of up to 22 members. Each embed contains:
+Each Discord message is a standard embed (no `flags`, no `components`). Three messages
+are posted — one per page of up to 25 members. Each embed contains:
 
 - **Color** — gold (`#f5a623`)
+- **Description** — header with Discord-native relative timestamps (not a field; doesn't count against the 25-field cap)
 - **Image** — `assets/embed-spacer.png` (1×1 transparent PNG; forces Discord max-width rendering — **do not delete**)
-- **Fields** — 1 header + 1 spacer + up to 22 inline card fields + 1 footer = 25 total (the Discord embed cap)
+- **Fields** — up to 25 inline card fields per page, plus a footer field on the last page only
 
-The **header field** (non-inline, invisible name) shows Discord-native relative timestamps:
+The **header** is rendered via `embed.description` and shows:
 
 ```
 🕒 Last Update : <t:unix:R>
 └ Next Update : <t:unix:R>
 ```
-
-A **spacer field** (invisible name and value, non-inline) follows the header for visual breathing room.
 
 Each **card field** (inline) shows:
 
@@ -154,7 +157,7 @@ Each **card field** (inline) shows:
             ← trailing zero-width-space line for vertical breathing room
 ```
 
-The **footer field** (non-inline, invisible name) renders at the bottom of each embed:
+The **footer field** (non-inline, invisible name) renders at the bottom of the **last page only**:
 
 ```
 Updated: Today at {viewer-local short time}
