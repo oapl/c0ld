@@ -378,32 +378,36 @@ async function postDiscord(rows, updatedAt) {
 
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  // Embed has a hard 25-field cap. Per-page layout:
-  //   1 header + 1 spacer + up to PAGE_SIZE cards + 1 footer = 25 max.
-  // → PAGE_SIZE = 22, TOTAL_PAGES = 4 covers up to 88 members.
-  const PAGE_SIZE   = 22;
-  const TOTAL_PAGES = 4;
+  // Discord embed hard cap: 25 fields per embed.
+  // Header is moved into embed.description (free, doesn't count against the 25 cap).
+  // Per-page field budget:
+  //   Pages 1..(TOTAL_PAGES-1): 25 card fields = 25 ✓
+  //   Last page:                25 card fields max + 1 footer field = 26 → see logic below
+  // Practical breakdown for a 70-member clan with PAGE_SIZE=25, TOTAL_PAGES=3:
+  //   Page 1: 25 cards   (no footer)
+  //   Page 2: 25 cards   (no footer)
+  //   Page 3: 20 cards + 1 footer field = 21 ✓
+  // If a future clan grows past 25*3=75 members, pages will silently truncate;
+  // bump TOTAL_PAGES then.
+  const PAGE_SIZE   = 25;
+  const TOTAL_PAGES = 3;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
   const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
     * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
 
-  // Header field rendered on every page for context.
-  const headerField = {
-    name: "\u200b",
-    value:
-      `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
-      `└ Next Update : <t:${nextUpdateUnix}:R>`,
-    inline: false
-  };
+  // Header rendered via embed.description on every page — doesn't count against the 25-field cap.
+  const description =
+    `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
+    `└ Next Update : <t:${nextUpdateUnix}:R>`;
 
-  // Spacer between header and first card for visual breathing room.
-  const spacerField = {
-    name: "\u200b",
-    value: "\u200b",
-    inline: false
-  };
+  if (rows.length > PAGE_SIZE * TOTAL_PAGES) {
+    console.warn(
+      `Warning: ${rows.length} members exceed page capacity (${PAGE_SIZE * TOTAL_PAGES}). ` +
+      `Bump TOTAL_PAGES in ingest.js to avoid truncation.`
+    );
+  }
 
   for (let p = 0; p < TOTAL_PAGES; p++) {
     const page = rows.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
@@ -412,7 +416,7 @@ async function postDiscord(rows, updatedAt) {
     // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
 
-    const memberCardFields = page.map(r => ({
+    const cardFields = page.map(r => ({
       name: `${r.rank}. ${r.username}`,
       value:
         `${RANK_STAR_EMOJI} Points: **${fmtAbbrev(r.total_points)}**\n` +
@@ -427,18 +431,23 @@ async function postDiscord(rows, updatedAt) {
 
     // Footer field: embed.footer doesn't render <t:UNIX:STYLE> markdown, so
     // we use a plain field instead. "-# " renders as Discord small-text.
-    const footerField = {
+    // Only appended on the last page.
+    const isLastPage = p === TOTAL_PAGES - 1;
+    const footerField = isLastPage ? {
       name: "\u200b",
       value:
         `Updated: Today at <t:${lastUpdateUnix}:t>\n` +
         `-# Created by Cinnamowopal`,
       inline: false
-    };
+    } : null;
+
+    const fields = [...cardFields, footerField].filter(Boolean);
 
     const embed = {
-      color:  EMBED_COLOR,
-      image:  { url: EMBED_SPACER_IMAGE_URL },
-      fields: [headerField, spacerField, ...memberCardFields, footerField]
+      color:       EMBED_COLOR,
+      description,
+      image:       { url: EMBED_SPACER_IMAGE_URL },
+      fields
       // No `title`, no `footer`, no `timestamp` — footer content is rendered via
       // footerField because embed.footer doesn't support <t:UNIX:STYLE> markdown.
       // image is a 1×1 transparent PNG that forces Discord's maximum embed width.
