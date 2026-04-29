@@ -14,7 +14,7 @@ This guide covers every step needed to migrate from Google Sheets to
 
 ---
 
-## 2. Create the database table
+## 2. Create the database tables
 
 1. In your Supabase project, open **SQL Editor**.
 2. Paste the contents of [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql) and click **Run**.
@@ -28,6 +28,10 @@ This creates the `leaderboard_snapshots` table with columns:
 | `rank` | integer | Member rank at that moment |
 | `username` | text | Roblox username |
 | `total_points` | bigint | Contribution points |
+
+3. Paste the contents of [`supabase/migrations/002_starry_battle_archive.sql`](supabase/migrations/002_starry_battle_archive.sql) and click **Run**.
+
+This creates the `StarryBattleArchive` table used to store final standings of completed StarryBattle events (see [How it works end-to-end](#how-it-works-end-to-end)).
 
 ---
 
@@ -69,29 +73,48 @@ In this repository go to **Settings → Secrets and variables → Actions → Ne
 
 ## 6. Trigger the workflow
 
-The workflow runs automatically every 15 minutes. To run it immediately:
+The workflow runs automatically every 5 minutes. To run it immediately:
 
 1. Go to **Actions → Update leaderboard**.
 2. Click **Run workflow → Run workflow**.
 
 The first run will insert a snapshot but show `N/A` for the 60-minute gain
-(no historical data yet). After two consecutive runs (~15 minutes apart) gain
-values will appear.
+(no historical data yet). After ~60 minutes of runs gain values will appear.
 
 ---
 
 ## How it works end-to-end
 
 ```
-GitHub Actions (every 15 min)
+GitHub Actions (every 5 min)
   └─ ingest.js
        ├─ Fetch clan data from biggamesapi.io/api/clan/NONG
        ├─ Read snapshot from ~60 min ago from Supabase  →  compute 60m gains
        ├─ Insert new snapshot into Supabase
        ├─ Prune snapshots older than 48 h
+       ├─ Archive completed StarryBattle standings (if applicable)
        ├─ Update README.md leaderboard table
        └─ POST Discord webhook embed
 ```
+
+### StarryBattle archive
+
+When a StarryBattle event ends, `ingest.js` automatically snapshots the final
+standings (rank, username, total points) into the **`StarryBattleArchive`**
+Supabase table. This happens exactly once per completed battle, identified by
+a stable `battle_id` derived from the API response.
+
+This table is separate from `leaderboard_snapshots` (which is a rolling
+time-series used only for the 60-minute gain calculation and is pruned after
+48 hours). `StarryBattleArchive` is never pruned and can be queried to
+review historical battle results long after the battle has ended.
+
+### Discord embed: custom emote
+
+The `Total Points` column in the Discord embed is prefixed with the
+`:gold_star:` shortcode. **This must be replaced with the full custom-emote
+tag** (`<:gold_star:EMOTE_ID>`) for it to render correctly in your Discord
+server. Update the TODO comment in `ingest.js` once you have the emote ID.
 
 ---
 

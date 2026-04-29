@@ -24,11 +24,15 @@ const TOP_N               = parseInt(process.env.TOP_N || "10", 10);
 
 const BIG_GAMES_API   = `https://biggamesapi.io/api/clan/${encodeURIComponent(CLAN_NAME)}`;
 const TABLE           = "leaderboard_snapshots";
+const ARCHIVE_TABLE   = "StarryBattleArchive";
 
-// Fetch a batch older than this many minutes to compute the 60-min gain.
-// With a 15-min schedule the snapshot closest to 60 min ago will be the one
-// taken ~60 min back, sitting just past the 45-min cutoff.
-const GAIN_CUTOFF_MIN = 45;
+// 60-min gain window configuration.
+// GAIN_TARGET_MIN: target snapshot age in minutes (we want the snapshot from ~60 min ago).
+// GAIN_WINDOW_MIN: ± tolerance in minutes; first try snapshots in [TARGET-WINDOW, TARGET+WINDOW].
+// If none found in that tight window, fall back to the most recent snapshot older than
+// (GAIN_TARGET_MIN - GAIN_WINDOW_MIN) minutes (preserves existing behaviour).
+const GAIN_TARGET_MIN = 60;
+const GAIN_WINDOW_MIN = 5;
 // Delete snapshots older than this many hours to keep the table small.
 const KEEP_HOURS      = 48;
 
@@ -94,14 +98,17 @@ async function fetchClanMembers() {
   if (members.length === 0) {
     console.warn("WARNING: 0 members found. Raw API response:");
     console.warn(JSON.stringify(json, null, 2));
-    return [];
+    return { members: [], starryBattle: null };
   }
 
   // Build a Set of current member UserIDs for filtering contributions
   const memberIdSet = new Set(members.map(m => m.UserID));
 
+  // Capture the raw StarryBattle object for archiving checks
+  const starryBattle = json.data?.Battles?.StarryBattle ?? null;
+
   // Build UserID → Points map from StarryBattle contributions, restricted to current members
-  const pointData = json.data?.Battles?.StarryBattle?.PointContributions ?? [];
+  const pointData = starryBattle?.PointContributions ?? [];
   const points = new Map(
     pointData
       .filter(d => memberIdSet.has(d.UserID))
@@ -113,17 +120,21 @@ async function fetchClanMembers() {
   const usernameMap = await resolveRobloxUsernames(userIds);
 
   // Sort descending by points and assign ranks
-  return members
+  const ranked = members
     .map(m => ({
+      user_id:      m.UserID,
       username:     usernameMap.get(m.UserID) ?? `user_${m.UserID}`,
       total_points: points.get(m.UserID) ?? 0
     }))
     .sort((a, b) => b.total_points - a.total_points)
     .map((m, i) => ({
       rank:         i + 1,
+      user_id:      m.user_id,
       username:     m.username,
       total_points: m.total_points
     }));
+
+  return { members: ranked, starryBattle };
 }
 
 // ── Supabase REST helpers ─────────────────────────────────────────────────────
@@ -180,6 +191,58 @@ async function sbDeleteOld(olderThanIso) {
   }
 }
 
+// Returns rows with fetched_at strictly between afterIso and beforeIso, newest-first (up to 500).
+// Used for the tight ~60-min window query.
+async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+  url.searchParams.append("fetched_at", `gt.${afterIso}`);
+  url.searchParams.append("fetched_at", `lt.${beforeIso}`);
+  url.searchParams.set("order", "fetched_at.desc");
+  url.searchParams.set("limit", "500");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Supabase window query failed (${res.status}): ${msg}`);
+  }
+  return res.json();
+}
+
+// ── StarryBattle archive helpers ──────────────────────────────────────────────
+
+// Returns the battle_id of the most recently archived StarryBattle, or null if none.
+async function sbGetLatestArchivedBattleId() {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`);
+  url.searchParams.set("select", "battle_id");
+  url.searchParams.set("order",  "archived_at.desc");
+  url.searchParams.set("limit",  "1");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Supabase archive query failed (${res.status}): ${msg}`);
+  }
+  const rows = await res.json();
+  return rows[0]?.battle_id ?? null;
+}
+
+// Inserts rows into StarryBattleArchive.
+async function sbInsertArchive(rows) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${ARCHIVE_TABLE}`, {
+    method:  "POST",
+    headers: sbHeaders({ Prefer: "return=minimal" }),
+    body:    JSON.stringify(rows)
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Supabase archive insert failed (${res.status}): ${msg}`);
+  }
+}
+
 // ── 60-min gain ───────────────────────────────────────────────────────────────
 function computeGains(current, oldRows) {
   if (!oldRows.length) {
@@ -205,6 +268,27 @@ function fmtNum(n) {
   return n != null ? Number(n).toLocaleString("en-US") : "N/A";
 }
 
+// Abbreviates large numbers with K / M / B / T suffixes (up to 2 decimal places,
+// trailing zeros trimmed). Returns "N/A" for null/undefined.
+// Examples: 1250 → "1.25K", 1_500_000 → "1.5M", 2_300_000_000 → "2.3B"
+function fmtAbbrev(n) {
+  if (n == null) return "N/A";
+  const num = Number(n);
+  const tiers = [
+    { threshold: 1e12, suffix: "T" },
+    { threshold: 1e9,  suffix: "B" },
+    { threshold: 1e6,  suffix: "M" },
+    { threshold: 1e3,  suffix: "K" }
+  ];
+  for (const { threshold, suffix } of tiers) {
+    if (Math.abs(num) >= threshold) {
+      const val = (num / threshold).toFixed(2).replace(/\.?0+$/, "");
+      return `${val}${suffix}`;
+    }
+  }
+  return String(num);
+}
+
 function escapePipe(s) {
   // Escape backslashes first, then pipes, so the resulting markdown is valid.
   return String(s ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim();
@@ -216,7 +300,7 @@ async function updateReadme(rows, updatedAt) {
     "| Rank | Member | Total Points | 60m Gain |",
     "|---:|---|---:|---:|",
     ...rows.slice(0, TOP_N).map(r =>
-      `| ${escapePipe(r.rank)} | ${escapePipe(r.username)} | ${fmtNum(r.total_points)} | ${fmtNum(r.gain_60m)} |`
+      `| ${escapePipe(r.rank)} | ${escapePipe(r.username)} | ${fmtAbbrev(r.total_points)} | ${fmtAbbrev(r.gain_60m)} |`
     )
   ];
 
@@ -259,8 +343,9 @@ async function postDiscord(rows, updatedAt) {
     if (page.length === 0 && !messageId) continue;
 
     const memberCol = page.map(r => `**${r.rank}.** ${r.username}`).join("\n");
-    const ptsCol    = page.map(r => fmtNum(r.total_points)).join("\n");
-    const gainCol   = page.map(r => fmtNum(r.gain_60m)).join("\n");
+    // TODO: `:gold_star:` is a custom server emote — replace with `<:gold_star:EMOTE_ID>` for it to render in Discord.
+    const ptsCol    = page.map(r => `:gold_star: ${fmtAbbrev(r.total_points)}`).join("\n");
+    const gainCol   = page.map(r => fmtAbbrev(r.gain_60m)).join("\n");
 
     const embed = {
       title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
@@ -321,16 +406,27 @@ async function main() {
     `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
 
   console.log(`Fetching clan data for "${CLAN_NAME}"…`);
-  const members = await fetchClanMembers();
+  const { members, starryBattle } = await fetchClanMembers();
   console.log(`Fetched ${members.length} members.`);
 
   let withGains = members.map(m => ({ ...m, gain_60m: null }));
 
   if (SUPABASE_URL && SUPABASE_KEY) {
-    // 1. Retrieve snapshot from ~60 min ago (anything older than 45 min)
-    const cutoffIso = new Date(now - GAIN_CUTOFF_MIN * 60 * 1000).toISOString();
-    const oldRows   = await sbGetOldSnapshots(cutoffIso);
-    withGains       = computeGains(members, oldRows);
+    // 1. Retrieve snapshot from ~60 min ago using a tight window [TARGET±WINDOW].
+    //    Fall back to the most recent snapshot older than (TARGET - WINDOW) minutes.
+    const olderBoundIso = new Date(now - (GAIN_TARGET_MIN + GAIN_WINDOW_MIN) * 60 * 1000).toISOString();
+    const newerBoundIso = new Date(now - (GAIN_TARGET_MIN - GAIN_WINDOW_MIN) * 60 * 1000).toISOString();
+
+    let oldRows = await sbGetSnapshotsInWindow(olderBoundIso, newerBoundIso);
+    if (oldRows.length === 0) {
+      // Fallback: any snapshot older than (TARGET - WINDOW) minutes
+      oldRows = await sbGetOldSnapshots(newerBoundIso);
+      if (oldRows.length > 0) {
+        console.log("No snapshot in tight 60-min window; using nearest older snapshot for gain.");
+      }
+    }
+
+    withGains = computeGains(members, oldRows);
     console.log(`Found ${oldRows.length} historical rows for gain calculation.`);
 
     // 2. Insert current snapshot
@@ -347,6 +443,9 @@ async function main() {
     const pruneIso = new Date(now - KEEP_HOURS * 60 * 60 * 1000).toISOString();
     await sbDeleteOld(pruneIso);
     console.log("Old snapshots pruned.");
+
+    // 4. StarryBattle archive: snapshot final standings once per completed battle.
+    await maybeArchiveStarryBattle(members, starryBattle, now, nowIso);
   } else {
     console.warn("SUPABASE_URL / SUPABASE_SERVICE_KEY not set — skipping DB operations. 60m gain will show as N/A.");
   }
@@ -355,6 +454,88 @@ async function main() {
   await postDiscord(withGains, updatedAt);
 
   console.log("Done.");
+}
+
+// Archives final StarryBattle standings to StarryBattleArchive exactly once per
+// completed battle. No-ops with a warning if the API does not expose end-time fields.
+async function maybeArchiveStarryBattle(members, starryBattle, now, nowIso) {
+  if (!starryBattle) {
+    console.warn("StarryBattle data not present in API response — skipping archive step.");
+    return;
+  }
+
+  // Defensively detect end-time field (API may use EndTime, FinishTime, etc.)
+  const rawEndTime =
+    starryBattle.EndTime   ??
+    starryBattle.FinishTime ??
+    starryBattle.end_time  ??
+    null;
+
+  if (rawEndTime == null) {
+    console.warn("StarryBattle end-time field not found in API response — skipping archive step.");
+    return;
+  }
+
+  const endTime = new Date(rawEndTime);
+  if (isNaN(endTime.getTime())) {
+    console.warn(`StarryBattle end-time "${rawEndTime}" could not be parsed — skipping archive step.`);
+    return;
+  }
+
+  // Only archive if the battle has ended.
+  if (now < endTime) {
+    console.log("StarryBattle is still active — no archiving needed.");
+    return;
+  }
+
+  // Derive a stable battle_id (prefer an API-provided ID, fall back to start-time epoch).
+  const rawStartTime =
+    starryBattle.StartTime ??
+    starryBattle.start_time ??
+    null;
+  const startTime = rawStartTime ? new Date(rawStartTime) : null;
+  const startEpoch = startTime && !isNaN(startTime.getTime()) ? startTime.getTime() : null;
+
+  const battleId = String(
+    starryBattle.Id ??
+    starryBattle.BattleId ??
+    starryBattle.battle_id ??
+    startEpoch ??
+    endTime.getTime()
+  );
+
+  // Check whether this battle has already been archived.
+  let latestArchivedId;
+  try {
+    latestArchivedId = await sbGetLatestArchivedBattleId();
+  } catch (err) {
+    console.warn(`Could not query StarryBattleArchive — skipping archive step: ${err.message}`);
+    return;
+  }
+
+  if (latestArchivedId === battleId) {
+    console.log(`StarryBattle ${battleId} already archived — skipping.`);
+    return;
+  }
+
+  // Insert final standings.
+  const archiveRows = members.map(m => ({
+    battle_id:         battleId,
+    archived_at:       nowIso,
+    battle_started_at: startTime && !isNaN(startTime.getTime()) ? startTime.toISOString() : null,
+    battle_ended_at:   endTime.toISOString(),
+    rank:              m.rank,
+    user_id:           m.user_id ?? null,
+    username:          m.username,
+    total_points:      m.total_points
+  }));
+
+  try {
+    await sbInsertArchive(archiveRows);
+    console.log(`Archived ${archiveRows.length} rows to StarryBattleArchive for battle ${battleId}.`);
+  } catch (err) {
+    console.warn(`Failed to archive StarryBattle standings: ${err.message}`);
+  }
 }
 
 main().catch(err => {
