@@ -119,19 +119,22 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 ### Discord embed layout
 
-> **After merging, just trigger the workflow once.** It will POST 3 fresh embed messages
+> **After merging, just trigger the workflow once.** It will POST 4 fresh embed messages
 > and log their IDs (look for `Discord page N posted. Message ID: …` in the run log).
 > Copy those IDs into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on
 > the workflow edits those messages in place.
+>
+> **One-time note if you already have 3 message IDs configured:** the page count has
+> changed from 3 to 4. The script will continue editing pages 1–3 in place and will
+> POST a brand-new page-4 message, logging its ID. Append that 4th ID to
+> `DISCORD_MESSAGE_IDS` — no need to delete or repost the first three messages.
 
-Each Discord message is a standard embed (no `flags`, no `components`). Three messages
-are posted — one per page of 24 members. Each embed contains:
+Each Discord message is a standard embed (no `flags`, no `components`). Four messages
+are posted — one per page of up to 22 members. Each embed contains:
 
-- **Title** — `🏆 NONG Clan Leaderboard (Page X/3)`
+- **Title** — `🏆 NONG Clan Leaderboard (Page X/4)`
 - **Color** — gold (`#f5a623`)
-- **Footer** — `Updated YYYY-MM-DD HH:MM:SS UTC`
-- **Timestamp** — ISO timestamp of the run
-- **Fields** — 1 header field + up to 24 inline card fields (25 total, the Discord embed cap)
+- **Fields** — 1 header + 1 spacer + up to 22 inline card fields + 1 footer = 25 total (the Discord embed cap)
 
 The **header field** (non-inline, invisible name) shows Discord-native relative timestamps:
 
@@ -139,6 +142,8 @@ The **header field** (non-inline, invisible name) shows Discord-native relative 
 🕒 Last Update : <t:unix:R>
 └ Next Update : <t:unix:R>
 ```
+
+A **spacer field** (invisible name and value, non-inline) follows the header for visual breathing room.
 
 Each **card field** (inline) shows:
 
@@ -148,6 +153,15 @@ Each **card field** (inline) shows:
 > 1h Gain: **{gainOrNA}**
             ← trailing zero-width-space line for vertical breathing room
 ```
+
+The **footer field** (non-inline, invisible name) renders at the bottom of each embed:
+
+```
+Updated: Today at {viewer-local short time}
+Created by Cinnamowopal   ← small-text via Discord's -# markdown
+```
+
+The time uses `<t:UNIX:t>` so Discord converts it to each viewer's local timezone automatically. The "Today at" prefix is fixed text.
 
 The `Next Update` timestamp is computed by rounding the current time up to the next
 `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the
