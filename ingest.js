@@ -433,6 +433,12 @@ async function postDiscord(rows, updatedAt) {
   const CONTAINER_TYPE   = 17;
   const TEXT_DISPLAY     = 10;
   const SEPARATOR        = 14;
+  // MediaGallery (type 12) is the V2 equivalent of legacy embed.image for
+  // forcing a minimum Container width.  A 1×1200 transparent PNG floors all
+  // three Containers at the same width so pages render evenly.
+  const MEDIA_GALLERY    = 12;
+  const NBSP = "\u00A0";
+  const SPACER_URL = "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
 
   // Gold accent color (decimal); same value as legacy EMBED_COLOR (0xf5a623).
   const ACCENT_COLOR = EMBED_COLOR;
@@ -460,19 +466,27 @@ async function postDiscord(rows, updatedAt) {
     for (let i = 0; i < page.length; i += 3) {
       const trio = page.slice(i, i + 3);
       const headerLine = trio
-        .map(r => `**${r.rank}. ${r.username}**`)
-        .join("  │  ");
+        .map(r => `**${r.rank}.${NBSP}${r.username}**`)
+        .join(`${NBSP}${NBSP}│${NBSP}${NBSP}`);
       const dataLine = trio
         .map(r => {
           const gain = r.gain_60m == null ? "N/A" : fmtAbbrev(r.gain_60m);
-          return `${RANK_STAR_EMOJI} Pts: **${fmtAbbrev(r.total_points)}**  1h: **${gain}**`;
+          return `${RANK_STAR_EMOJI}${NBSP}Pts:${NBSP}**${fmtAbbrev(r.total_points)}**${NBSP}${NBSP}1h:${NBSP}**${gain}**`;
         })
-        .join("  │  ");
+        .join(`${NBSP}${NBSP}│${NBSP}${NBSP}`);
       rowChunks.push(`${headerLine}\n${dataLine}`);
     }
     const cardsContent = rowChunks.join("\n\n");
 
     const containerChildren = [];
+
+    // MediaGallery width-floor: forces all Containers to the same minimum
+    // width (V2 equivalent of legacy embed.image trick).
+    const widthSpacer = {
+      type: MEDIA_GALLERY,
+      items: [{ media: { url: SPACER_URL } }]
+    };
+    containerChildren.push(widthSpacer);
 
     if (isFirstPage) {
       containerChildren.push({
