@@ -339,9 +339,17 @@ async function postDiscord(rows, updatedAt) {
   const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
-  const now = new Date();
-  const lastUpdateUnix = Math.floor(now.getTime() / 1000);
-  const nextUpdateUnix = Math.floor((now.getTime() + UPDATE_INTERVAL_MS) / 1000);
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const SCRIPT_INTERVAL_SECONDS = UPDATE_INTERVAL_MS / 1000;
+  const nextUpdateUnix = nowUnix + SCRIPT_INTERVAL_SECONDS;
+  const delta = nextUpdateUnix - nowUnix;
+
+  let nextUpdateStr;
+  if (delta > 0) {
+    nextUpdateStr = `<t:${nextUpdateUnix}:R>`;
+  } else {
+    nextUpdateStr = "Refreshing…";
+  }
 
   const totalCapacity = PAGE_CARD_LIMITS.reduce((a, b) => a + b, 0);
   if (rows.length > totalCapacity) {
@@ -385,15 +393,15 @@ async function postDiscord(rows, updatedAt) {
 
     const title = isFirstPage ? "Starry Battle Rankings" : undefined;
 
-    // -- THIS IS THE FIXED PART --
+    // -- THIS IS THE UPDATED PART --
     const description = isFirstPage
-      ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
+      ? `Last Update: <t:${nowUnix}:R>  🕒  Next Update: ${nextUpdateStr}`
       : undefined;
-    // ---------------------------
+    // -----------------------------
 
     const embedFooter = (() => {
       if (!isLastPage) return {};
-      const d = new Date(lastUpdateUnix * 1000);
+      const d = new Date(nowUnix * 1000);
       const mm   = String(d.getUTCMonth() + 1).padStart(2, "0");
       const dd   = String(d.getUTCDate()).padStart(2, "0");
       const yyyy = d.getUTCFullYear();
