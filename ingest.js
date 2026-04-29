@@ -18,8 +18,9 @@ const fs = require("fs/promises");
 const CLAN_NAME       = process.env.CLAN_NAME            || "NONG";
 const SUPABASE_URL    = (process.env.SUPABASE_URL        || "").replace(/\/$/, "");
 const SUPABASE_KEY    = process.env.SUPABASE_SERVICE_KEY || "";
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK_URL  || "";
-const TOP_N           = parseInt(process.env.TOP_N || "10", 10);
+const DISCORD_WEBHOOK     = process.env.DISCORD_WEBHOOK_URL   || "";
+const DISCORD_MESSAGE_IDS = process.env.DISCORD_MESSAGE_IDS   || "";
+const TOP_N               = parseInt(process.env.TOP_N || "10", 10);
 
 const BIG_GAMES_API   = `https://biggamesapi.io/api/clan/${encodeURIComponent(CLAN_NAME)}`;
 const TABLE           = "leaderboard_snapshots";
@@ -99,23 +100,23 @@ async function fetchClanMembers() {
   // Build a Set of current member UserIDs for filtering contributions
   const memberIdSet = new Set(members.map(m => m.UserID));
 
-  // Build UserID → Diamonds map, restricted to current members only
-  const diamondData = json.data?.DiamondContributions?.AllTime?.Data ?? [];
-  const diamonds = new Map(
-    diamondData
+  // Build UserID → Points map from StarryBattle contributions, restricted to current members
+  const pointData = json.data?.Battles?.StarryBattle?.PointContributions ?? [];
+  const points = new Map(
+    pointData
       .filter(d => memberIdSet.has(d.UserID))
-      .map(d => [d.UserID, d.Diamonds ?? 0])
+      .map(d => [d.UserID, d.Points ?? 0])
   );
 
   // Resolve Roblox usernames for all member UserIDs
   const userIds = members.map(m => m.UserID);
   const usernameMap = await resolveRobloxUsernames(userIds);
 
-  // Sort descending by diamonds and assign ranks
+  // Sort descending by points and assign ranks
   return members
     .map(m => ({
       username:     usernameMap.get(m.UserID) ?? `user_${m.UserID}`,
-      total_points: diamonds.get(m.UserID) ?? 0
+      total_points: points.get(m.UserID) ?? 0
     }))
     .sort((a, b) => b.total_points - a.total_points)
     .map((m, i) => ({
@@ -238,35 +239,74 @@ async function updateReadme(rows, updatedAt) {
 async function postDiscord(rows, updatedAt) {
   if (!DISCORD_WEBHOOK) return;
 
-  const top = rows.slice(0, TOP_N);
+  const match = DISCORD_WEBHOOK.match(/webhooks\/(\d+)\/(.+)/);
+  if (!match) {
+    console.warn("Discord webhook URL is malformed — skipping.");
+    return;
+  }
+  const [, webhookId, webhookToken] = match;
 
-  // Build three inline columns that line up in the embed
-  const memberCol = top.map(r => `**${r.rank}.** ${r.username}`).join("\n");
-  const ptsCol    = top.map(r => fmtNum(r.total_points)).join("\n");
-  const gainCol   = top.map(r => fmtNum(r.gain_60m)).join("\n");
+  const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
-  const embed = {
-    title:  `🏆 ${CLAN_NAME} Clan Leaderboard`,
-    color:  0xf5a623, // gold
-    fields: [
-      { name: "Member",        value: memberCol, inline: true },
-      { name: "Total Points",  value: ptsCol,    inline: true },
-      { name: "60m Gain",      value: gainCol,   inline: true }
-    ],
-    footer:    { text: `Updated ${updatedAt}` },
-    timestamp: new Date().toISOString()
-  };
+  const PAGE_SIZE   = 25;
+  const TOTAL_PAGES = 3;
 
-  const res = await fetch(DISCORD_WEBHOOK, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ embeds: [embed] })
-  });
-  if (!res.ok) {
-    const msg = await res.text();
-    console.warn(`Discord webhook failed (${res.status}): ${msg}`);
-  } else {
-    console.log("Discord webhook posted.");
+  for (let p = 0; p < TOTAL_PAGES; p++) {
+    const page = rows.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
+    const messageId = messageIds[p];
+
+    // Skip empty pages that have no existing message to update
+    if (page.length === 0 && !messageId) continue;
+
+    const memberCol = page.map(r => `**${r.rank}.** ${r.username}`).join("\n");
+    const ptsCol    = page.map(r => fmtNum(r.total_points)).join("\n");
+    const gainCol   = page.map(r => fmtNum(r.gain_60m)).join("\n");
+
+    const embed = {
+      title:  `🏆 ${CLAN_NAME} Clan Leaderboard (Page ${p + 1}/${TOTAL_PAGES})`,
+      color:  0xf5a623, // gold
+      fields: [
+        { name: "Member",        value: memberCol || "—", inline: true },
+        { name: "Total Points",  value: ptsCol    || "—", inline: true },
+        { name: "60m Gain",      value: gainCol   || "—", inline: true }
+      ],
+      footer:    { text: `Updated ${updatedAt}` },
+      timestamp: new Date().toISOString()
+    };
+
+    let res;
+
+    if (messageId) {
+      // Edit the existing message in-place
+      res = await fetch(
+        `https://discord.com/api/webhooks/${webhookId}/${webhookToken}/messages/${messageId}`,
+        {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ embeds: [embed] })
+        }
+      );
+      if (res.ok) {
+        console.log(`Discord page ${p + 1} updated (message ${messageId}).`);
+      } else {
+        const msg = await res.text();
+        console.warn(`Discord page ${p + 1} PATCH failed (${res.status}): ${msg}`);
+      }
+    } else {
+      // Post a new message and log the returned ID so it can be saved as a secret
+      res = await fetch(`${DISCORD_WEBHOOK}?wait=true`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ embeds: [embed] })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log(`Discord page ${p + 1} posted. Message ID: ${data.id}`);
+      } else {
+        const msg = await res.text();
+        console.warn(`Discord page ${p + 1} POST failed (${res.status}): ${msg}`);
+      }
+    }
   }
 }
 
