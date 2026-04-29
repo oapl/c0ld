@@ -30,7 +30,8 @@ jobs:
           TOP_N:                ${{ vars.TOP_N }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DISCORD_WEBHOOK_URL:  ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BOT_TOKEN:    ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID:   ${{ secrets.DISCORD_CHANNEL_ID }}
           DISCORD_MESSAGE_IDS:  ${{ secrets.DISCORD_MESSAGE_IDS }}
         run: node ingest.js
 

@@ -57,12 +57,28 @@ In your Supabase project go to **Project Settings → API**.
 
 ---
 
-## 4. Create a Discord webhook
+## 4. Set up Discord (bot)
 
-1. Open Discord, go to the channel where you want leaderboard posts.
-2. **Edit Channel → Integrations → Webhooks → New Webhook**.
-3. Give it a name (e.g. `NONG Leaderboard`) and optionally set an avatar.
-4. Click **Copy Webhook URL** — save it for the next step.
+NONG Bot uses the Discord **bot REST endpoint** (not webhooks) so it can render
+COLD-style Components V2 Container layouts. To set it up:
+
+1. Register an application at https://discord.com/developers/applications.
+2. In the **Bot** tab, click **Reset Token** and copy the token.
+3. In the **OAuth2 → URL Generator** tab, select scope `bot` and permissions
+   `Send Messages` + `Embed Links`. Open the generated URL and invite the bot
+   to your server.
+4. Enable Developer Mode in Discord (User Settings → Advanced → Developer Mode),
+   right-click your target channel, and **Copy Channel ID**.
+5. Add these two repo secrets:
+   - `DISCORD_BOT_TOKEN` — the bot token from step 2 (no `Bot ` prefix)
+   - `DISCORD_CHANNEL_ID` — the channel ID from step 4
+6. Trigger the workflow once. The bot will POST 3 messages and log their IDs.
+   Copy the IDs into a third secret `DISCORD_MESSAGE_IDS` (comma-separated, in order).
+   Subsequent runs will PATCH those messages in place.
+
+**Why not webhooks?** Webhook execute endpoints don't support Components V2
+(`flags: 32768`); they return `50006 Cannot send an empty message`. See the
+comment block at the top of `postDiscord()` in `ingest.js`.
 
 ---
 
@@ -74,7 +90,8 @@ In this repository go to **Settings → Secrets and variables → Actions → Ne
 |---|---|
 | `SUPABASE_URL` | Your Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Your Supabase service-role key |
-| `DISCORD_WEBHOOK_URL` | Your Discord webhook URL |
+| `DISCORD_BOT_TOKEN` | Your Discord bot token (no `Bot ` prefix) |
+| `DISCORD_CHANNEL_ID` | Your Discord channel snowflake ID |
 
 > **Optional:** You can also add `CLAN_NAME` (default: `NONG`) and `TOP_N`
 > (default: `10`) as secrets or plain repository variables if you want to
@@ -106,7 +123,7 @@ GitHub Actions (every 5 min)
        ├─ Upsert current state into leaderboard_snapshots
        ├─ Prune StarryBattleArchive rows older than 14 days
        ├─ Update README.md leaderboard table
-       └─ POST Discord embed webhook message
+       └─ POST Discord bot message (Components V2)
 ```
 
 ### StarryBattleArchive
@@ -117,47 +134,21 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 `leaderboard_snapshots` is kept as the **current-state** table. It contains exactly one row per active member (upserted every run) and never grows past clan size. Any external service that wants "what does the leaderboard look like right now" should query this table.
 
-### Discord embed layout
+### Discord Components V2 layout
 
-> **Why not Components V2?** Webhook execute endpoints don't support the V2 flag (`flags: 1 << 15`) — Discord silently ignores it and then rejects the payload with `50006 Cannot send an empty message` because there are no `content` or `embeds` fields. V2 only works for real bot/application messages. See the comment block at the top of `postDiscord()` in `ingest.js`.
+Three messages are posted — one per page — using the **bot REST endpoint** with `flags: 1 << 15` (Components V2). Each message contains a single Container component (type 17) with gold accent color (`#f5a623`).
 
-> **After merging, you must:**
-> 1. **Delete any existing Discord messages** from the channel that the webhook posts to (V2 messages that 400'd won't be there, but check).
-> 2. **Clear `DISCORD_MESSAGE_IDS`** — set the secret to empty (or delete it).
-> 3. **Trigger the workflow once** — it will POST 3 fresh legacy-embed messages and log their IDs (`Discord page N posted. Message ID: …`).
-> 4. **Copy those 3 IDs** into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on the workflow edits those messages in place.
+The Container holds:
 
-Each Discord message is a standard embed (no `flags`, no `components`). Three messages
-are posted — one per page. Each embed contains:
+- **Page 1 only:** TextDisplay `# Starry Battle Rankings` heading, then a TextDisplay with relative timestamps (`Last Update: <t:unix:R>  🕒  Next Update: <t:unix:R>`), then a Separator.
+- **All pages:** One TextDisplay per row of 3 members. Each row uses a 3-column markdown layout:
 
-- **Color** — gold (`#f5a623`)
-- **Title** — `Starry Battle Rankings` on page 1 only
-- **Description** — header with Discord-native relative timestamps on page 1 only (not a field; doesn't count against the 25-field cap)
-- **Image** — `assets/embed-spacer.png` (1200×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**)
-- **Fields** — up to 24 card fields on page 1 (plus 1 invisible spacer field = 25 total), up to 25 on pages 2 and 3
-- **Footer** — `embed.footer.text` with an explicit `MM/DD/YYYY at H:MM AM/PM UTC` date string on the last page only (not `embed.timestamp`, which auto-localizes to "Today at …")
+  ```
+  **1. Name**  │  **2. Name**  │  **3. Name**
+  ⭐ Pts: **5.5K**  1h: **89**  │  ⭐ Pts: **5.4K**  1h: **89**  │  ⭐ Pts: **5.3K**  1h: **89**
+  ```
 
-The **header** is rendered via `embed.title` and `embed.description` on page 1 only:
-
-```
-Starry Battle Rankings
-Last Update: <t:unix:R>  🕒  Next Update: <t:unix:R>
-```
-
-Each **card field** (inline) shows:
-
-```
-{rank}. {username}
-<:RankStar:…> Points: **{abbreviatedPoints}**
-> 1h Gain: **{gainOrNA}**
-            ← trailing real blank line (\n\n) for vertical breathing room
-```
-
-The **footer** renders at the bottom of the **last page only** as small grey text:
-
-```
-Created by Cinnamowopal • Updated: MM/DD/YYYY at H:MM AM/PM UTC
-```
+- **Last page only:** A Separator, then a small TextDisplay footer (`-# Created by Cinnamowopal • Updated: MM/DD/YYYY at H:MM AM/PM UTC`).
 
 The `Next Update` timestamp is computed by rounding the current time up to the next
 `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the
