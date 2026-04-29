@@ -10,19 +10,19 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 7.67K | 87 |
-| 2 | Yume_Sakurax3 | 7.65K | 87 |
-| 3 | joshuacd2006 | 7.36K | 87 |
-| 4 | jupiter0477 | 7.21K | 82 |
-| 5 | Josep_xD2 | 7.16K | 87 |
-| 6 | Mr_Suter | 6.94K | 87 |
-| 7 | Johnr622_alt2 | 6.46K | 80 |
-| 8 | Johnr622_alt3 | 6.46K | 80 |
-| 9 | Johnr622_alt4 | 6.21K | 80 |
-| 10 | Johnr622_alt5 | 6.21K | 80 |
+| 1 | johnr622 | 7.68K | 86 |
+| 2 | Yume_Sakurax3 | 7.66K | 86 |
+| 3 | joshuacd2006 | 7.37K | 86 |
+| 4 | jupiter0477 | 7.22K | 81 |
+| 5 | Josep_xD2 | 7.17K | 86 |
+| 6 | Mr_Suter | 6.96K | 86 |
+| 7 | Johnr622_alt2 | 6.47K | 79 |
+| 8 | Johnr622_alt3 | 6.47K | 79 |
+| 9 | Johnr622_alt4 | 6.22K | 79 |
+| 10 | Johnr622_alt5 | 6.22K | 79 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-29 19:33:05 UTC
+2026-04-29 19:39:20 UTC
 <!-- END_UPDATED -->
