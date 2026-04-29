@@ -31,7 +31,18 @@ This creates the `leaderboard_snapshots` table with columns:
 
 3. Paste the contents of [`supabase/migrations/002_starry_battle_archive.sql`](supabase/migrations/002_starry_battle_archive.sql) and click **Run**.
 
-This creates the `StarryBattleArchive` table used to store final standings of completed StarryBattle events (see [How it works end-to-end](#how-it-works-end-to-end)).
+This creates the `StarryBattleArchive` table used as an append-only time-series of all leaderboard snapshots. All hourly-gain and rate calculations read from this table (see [How it works end-to-end](#how-it-works-end-to-end)).
+
+4. Paste the contents of [`supabase/migrations/003_repurpose_tables.sql`](supabase/migrations/003_repurpose_tables.sql) and click **Run**.
+
+> ⚠️ **One-time migration required.** Run `003_repurpose_tables.sql` in the Supabase SQL Editor **before the next ingest run** after deploying these changes. If you skip this step, the ingest will fail because the `username` unique constraint on `leaderboard_snapshots` won't exist yet.
+
+### Tables
+
+| Table | Role | Write pattern |
+|---|---|---|
+| `leaderboard_snapshots` | **Current state only.** Always reflects the most recent run. Safe for any external service to query for "what does the leaderboard look like right now". | UPSERT on `username` — never grows beyond clan size. |
+| `StarryBattleArchive` | **Append-only time-series.** All historical snapshots, retained for 14 days. Used internally for hourly-gain and other rate calculations. | INSERT a fresh batch every run; rows older than 14 days are pruned. |
 
 ---
 
@@ -89,25 +100,22 @@ The first run will insert a snapshot but show `N/A` for the 60-minute gain
 GitHub Actions (every 5 min)
   └─ ingest.js
        ├─ Fetch clan data from biggamesapi.io/api/clan/NONG
-       ├─ Read snapshot from ~60 min ago from Supabase  →  compute 60m gains
-       ├─ Insert new snapshot into Supabase
-       ├─ Prune snapshots older than 48 h
-       ├─ Archive completed StarryBattle standings (if applicable)
+       ├─ Read snapshot from ~60 min ago from StarryBattleArchive  →  compute 60m gains
+       ├─ Read previous snapshot from StarryBattleArchive          →  compute last-gain delta
+       ├─ Append new snapshot batch to StarryBattleArchive
+       ├─ Upsert current state into leaderboard_snapshots
+       ├─ Prune StarryBattleArchive rows older than 14 days
        ├─ Update README.md leaderboard table
        └─ POST Discord webhook embed
 ```
 
-### StarryBattle archive
+### StarryBattleArchive
 
-When a StarryBattle event ends, `ingest.js` automatically snapshots the final
-standings (rank, username, total points) into the **`StarryBattleArchive`**
-Supabase table. This happens exactly once per completed battle, identified by
-a stable `battle_id` derived from the API response.
+`StarryBattleArchive` is the **append-only time-series** table. Every ingest run inserts a fresh batch of rows (one row per member) with a `fetched_at` timestamp. All gain and rate calculations (1h gain, last-gain delta, and any future rates) read from this table.
 
-This table is separate from `leaderboard_snapshots` (which is a rolling
-time-series used only for the 60-minute gain calculation and is pruned after
-48 hours). `StarryBattleArchive` is never pruned and can be queried to
-review historical battle results long after the battle has ended.
+Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days is the maximum length of any clan battle, so any battle started at the beginning of the window will still have full history available.
+
+`leaderboard_snapshots` is kept as the **current-state** table. It contains exactly one row per active member (upserted every run) and never grows past clan size. Any external service that wants "what does the leaderboard look like right now" should query this table.
 
 ### Discord embed: card grid layout
 
