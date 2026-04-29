@@ -137,15 +137,17 @@ Each Discord message is a standard embed (no `flags`, no `components`). Three me
 are posted — one per page. Each embed contains:
 
 - **Color** — gold (`#f5a623`)
+- **Title** — `Starry Battle Rankings` on page 1 only
 - **Description** — header with Discord-native relative timestamps on page 1 only (not a field; doesn't count against the 25-field cap)
-- **Image** — `assets/embed-spacer.png` (600×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**)
-- **Fields** — up to 24 card fields on pages 1 and 3, up to 25 on page 2; plus a spacer field on page 1 and a footer field on page 3
+- **Image** — `assets/embed-spacer.png` (600×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**); URL includes `?v=<unix-seconds>` cache-busting param so Discord re-fetches on each run
+- **Fields** — up to 24 card fields on page 1 (plus 1 spacer field), up to 25 on pages 2 and 3
+- **Footer + Timestamp** — `embed.footer` (`Created by Cinnamowopal`) and `embed.timestamp` on the last page only, rendered by Discord as small grey text
 
-The **header** is rendered via `embed.description` on page 1 only and shows:
+The **header** is rendered via `embed.title` and `embed.description` on page 1 only:
 
 ```
-🕒 Last Update : <t:unix:R>
-└ Next Update : <t:unix:R>
+Starry Battle Rankings
+Last Update: <t:unix:R>  🕒  Next Update: <t:unix:R>
 ```
 
 Each **card field** (inline) shows:
@@ -157,13 +159,13 @@ Each **card field** (inline) shows:
             ← trailing zero-width-space line for vertical breathing room
 ```
 
-The **footer field** (non-inline, invisible name) renders at the bottom of the **last page only**:
+The **native footer** renders at the bottom of the **last page only** as small grey text (Discord's built-in style):
 
 ```
--# Created by Cinnamowopal • Updated: {viewer-local short date} at {viewer-local short time}
+Created by Cinnamowopal • Today at {viewer-local time}
 ```
 
-The date uses `<t:UNIX:d>` and the time uses `<t:UNIX:t>` so Discord converts both to each viewer's local timezone automatically.
+Discord renders `embed.footer.text` and `embed.timestamp` together in small grey text, with the timestamp auto-localized to each viewer's timezone.
 
 The `Next Update` timestamp is computed by rounding the current time up to the next
 `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the
