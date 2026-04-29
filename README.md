@@ -1,7 +1,5 @@
 # NONG_Leaderboard
 
-Clan leaderboard powered by the [Big Games API](https://biggamesapi.io), updated every 5 minutes. Pulls from a Supabase DB now instead of a Google Sheet. :)
-
 Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
 ## Top 10 Members (by Total Points)
