@@ -106,7 +106,7 @@ GitHub Actions (every 5 min)
        ├─ Upsert current state into leaderboard_snapshots
        ├─ Prune StarryBattleArchive rows older than 14 days
        ├─ Update README.md leaderboard table
-       └─ POST Discord Components V2 webhook message
+       └─ POST Discord embed webhook message
 ```
 
 ### StarryBattleArchive
@@ -117,53 +117,41 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 `leaderboard_snapshots` is kept as the **current-state** table. It contains exactly one row per active member (upserted every run) and never grows past clan size. Any external service that wants "what does the leaderboard look like right now" should query this table.
 
-### Discord Components V2: card grid layout
+### Discord embed layout
 
-> **Action required after merging this PR (existing deployments only — skip if this is a fresh install):**
-> 1. In Discord, delete the 3 existing leaderboard messages posted by the bot.
-> 2. In GitHub repository secrets, clear `DISCORD_MESSAGE_IDS` (or delete it).
-> 3. Trigger the workflow once. The bot will POST 3 new Components V2 messages and log their IDs.
-> 4. Copy those IDs back into `DISCORD_MESSAGE_IDS` (comma-separated, in order).
->
-> This is necessary because a Components V2 message cannot be PATCHed into a plain-embed message and vice versa — Discord rejects mismatched edits.
+> **After merging, just trigger the workflow once.** It will POST 3 fresh embed messages
+> and log their IDs (look for `Discord page N posted. Message ID: …` in the run log).
+> Copy those IDs into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on
+> the workflow edits those messages in place.
 
-The Discord messages use **Components V2** (opted in via `flags: 32768`). Each
-page is structured as a `components` array — no `embeds` field is used.
+Each Discord message is a standard embed (no `flags`, no `components`). Three messages
+are posted — one per page of 24 members. Each embed contains:
 
-Per-page layout:
+- **Title** — `🏆 NONG Clan Leaderboard (Page X/3)`
+- **Color** — gold (`#f5a623`)
+- **Footer** — `Updated YYYY-MM-DD HH:MM:SS UTC`
+- **Timestamp** — ISO timestamp of the run
+- **Fields** — 1 header field + up to 24 inline card fields (25 total, the Discord embed cap)
 
-```
-Container (header, gold accent)
-  └─ TextDisplay — "## 🏆 NONG Clan Leaderboard (Page X/3)\n\n🕒 Last Update…\n└ Next Update…"
-
-Separator (large, no divider line)
-
-// Repeated 8 times (one per row of 3 cards):
-Container (row, gold accent)
-  └─ Section
-       ├─ TextDisplay (card 1)
-       ├─ TextDisplay (card 2)
-       └─ TextDisplay (card 3)
-Separator (small, no divider line)
-
-Container (footer)
-  └─ TextDisplay — "-# Updated YYYY-MM-DD HH:MM:SS UTC"
-```
-
-Each card TextDisplay contains:
+The **header field** (non-inline, invisible name) shows Discord-native relative timestamps:
 
 ```
-**{rank}. {username}**
+🕒 Last Update : <t:unix:R>
+└ Next Update : <t:unix:R>
+```
+
+Each **card field** (inline) shows:
+
+```
+{rank}. {username}
 <:RankStar:…> Points: **{abbreviatedPoints}**
 > 1h Gain: **{gainOrNA}**
+            ← trailing zero-width-space line for vertical breathing room
 ```
 
-Partial last rows are padded with zero-width-space TextDisplays to keep
-columns aligned. Total components per page ≈ 27, well under Discord's 40-component cap.
-
-The `Next Update` timestamp is computed by rounding the current time up to the
-next `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and
-the `UPDATE_INTERVAL_MIN` constant in `ingest.js` if you change the cadence.
+The `Next Update` timestamp is computed by rounding the current time up to the next
+`UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the
+`UPDATE_INTERVAL_MIN` constant in `ingest.js` if you change the cadence.
 
 #### Custom emoji
 
