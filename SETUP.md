@@ -123,12 +123,12 @@ The `Next Update` timestamp is computed by rounding the current time up to the
 next `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and
 the `UPDATE_INTERVAL_MIN` constant in `ingest.js` if you change the cadence.
 
-#### Custom emote
+#### Custom emoji
 
-The Points line is prefixed with the `:gold_star:` shortcode. **Replace it
-with the full custom-emote tag** (`<:gold_star:EMOTE_ID>`) for it to render
-correctly in your Discord server. Update the TODO comment in `ingest.js` once
-you have the emote ID.
+The Points line uses the `RANK_STAR_EMOJI` constant defined near the top of
+`ingest.js`. It is set to `<:RankStar:1499100837006413937>` — Discord resolves
+the emoji by **ID**, so the name portion can be freely renamed on the server
+without breaking anything. To swap in a different emoji, update the constant.
 
 ---
 
