@@ -38,10 +38,41 @@ const LB_END      = "<!-- END_LEADERBOARD -->";
 const UPD_START   = "<!-- START_UPDATED -->";
 const UPD_END     = "<!-- END_UPDATED -->";
 
-// Returns the contribution/points value for a member, handling both field names
-// the Big Games API has used across different game versions.
-function getMemberPoints(m) {
-  return m.ContributionPoints ?? m.Points ?? 0;
+// Resolves an array of Roblox UserIDs to a Map<id, username> in batches of 100.
+// Falls back to "user_<UserID>" for any ID that can't be resolved.
+async function resolveRobloxUsernames(userIds) {
+  const ROBLOX_USERS_API = "https://users.roblox.com/v1/users";
+  const BATCH_SIZE = 100;
+  const result = new Map();
+
+  for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+    const batch = userIds.slice(i, i + BATCH_SIZE);
+    try {
+      const res = await fetch(ROBLOX_USERS_API, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ userIds: batch, excludeBannedUsers: false })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        for (const user of (json.data ?? [])) {
+          result.set(user.id, user.name);
+        }
+      } else {
+        console.warn(`Roblox Users API error (${res.status}) for batch starting at index ${i} — falling back to user_<ID>`);
+      }
+    } catch (err) {
+      console.warn(`Roblox Users API request failed for batch starting at index ${i}: ${err.message} — falling back to user_<ID>`);
+    }
+    // Apply fallback for any IDs not resolved in this batch
+    for (const id of batch) {
+      if (!result.has(id)) {
+        result.set(id, `user_${id}`);
+      }
+    }
+  }
+
+  return result;
 }
 
 // ── Big Games API ─────────────────────────────────────────────────────────────
@@ -58,22 +89,39 @@ async function fetchClanMembers() {
   }
 
   const members = json.data?.Members ?? [];
-  const filtered = [...members].filter(m => m.UserName);
 
-  if (filtered.length === 0) {
-    // Log the raw response so we can diagnose why no members were returned
-    // (e.g. wrong clan name, changed API structure, clan has no members).
+  if (members.length === 0) {
     console.warn("WARNING: 0 members found. Raw API response:");
     console.warn(JSON.stringify(json, null, 2));
+    return [];
   }
 
-  // Sort descending by contribution points and assign ranks
-  return filtered
-    .sort((a, b) => getMemberPoints(b) - getMemberPoints(a))
+  // Build a Set of current member UserIDs for filtering contributions
+  const memberIdSet = new Set(members.map(m => m.UserID));
+
+  // Build UserID → Diamonds map, restricted to current members only
+  const diamondData = json.data?.DiamondContributions?.AllTime?.Data ?? [];
+  const diamonds = new Map(
+    diamondData
+      .filter(d => memberIdSet.has(d.UserID))
+      .map(d => [d.UserID, d.Diamonds ?? 0])
+  );
+
+  // Resolve Roblox usernames for all member UserIDs
+  const userIds = members.map(m => m.UserID);
+  const usernameMap = await resolveRobloxUsernames(userIds);
+
+  // Sort descending by diamonds and assign ranks
+  return members
+    .map(m => ({
+      username:     usernameMap.get(m.UserID) ?? `user_${m.UserID}`,
+      total_points: diamonds.get(m.UserID) ?? 0
+    }))
+    .sort((a, b) => b.total_points - a.total_points)
     .map((m, i) => ({
       rank:         i + 1,
-      username:     m.UserName,
-      total_points: getMemberPoints(m)
+      username:     m.username,
+      total_points: m.total_points
     }));
 }
 
