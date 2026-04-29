@@ -134,14 +134,14 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 > let the script POST 3 fresh messages.
 
 Each Discord message is a standard embed (no `flags`, no `components`). Three messages
-are posted — one per page of up to 25 members. Each embed contains:
+are posted — one per page. Each embed contains:
 
 - **Color** — gold (`#f5a623`)
-- **Description** — header with Discord-native relative timestamps (not a field; doesn't count against the 25-field cap)
-- **Image** — `assets/embed-spacer.png` (1×1 transparent PNG; forces Discord max-width rendering — **do not delete**)
-- **Fields** — up to 25 inline card fields per page, plus a footer field on the last page only
+- **Description** — header with Discord-native relative timestamps on page 1 only (not a field; doesn't count against the 25-field cap)
+- **Image** — `assets/embed-spacer.png` (600×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**)
+- **Fields** — up to 24 card fields on pages 1 and 3, up to 25 on page 2; plus a spacer field on page 1 and a footer field on page 3
 
-The **header** is rendered via `embed.description` and shows:
+The **header** is rendered via `embed.description` on page 1 only and shows:
 
 ```
 🕒 Last Update : <t:unix:R>
@@ -160,11 +160,10 @@ Each **card field** (inline) shows:
 The **footer field** (non-inline, invisible name) renders at the bottom of the **last page only**:
 
 ```
-Updated: Today at {viewer-local short time}
-Created by Cinnamowopal   ← small-text via Discord's -# markdown
+-# Created by Cinnamowopal • Updated: {viewer-local short date} at {viewer-local short time}
 ```
 
-The time uses `<t:UNIX:t>` so Discord converts it to each viewer's local timezone automatically. The "Today at" prefix is fixed text.
+The date uses `<t:UNIX:d>` and the time uses `<t:UNIX:t>` so Discord converts both to each viewer's local timezone automatically.
 
 The `Next Update` timestamp is computed by rounding the current time up to the next
 `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the

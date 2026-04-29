@@ -379,42 +379,45 @@ async function postDiscord(rows, updatedAt) {
   const messageIds = DISCORD_MESSAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
 
   // Discord embed hard cap: 25 fields per embed.
-  // Header is moved into embed.description (free, doesn't count against the 25 cap).
-  // Per-page field budget:
-  //   Pages 1..(TOTAL_PAGES-1): 25 card fields = 25 ✓
-  //   Last page:                25 card fields max + 1 footer field = 26 → see logic below
-  // Practical breakdown for a 70-member clan with PAGE_SIZE=25, TOTAL_PAGES=3:
-  //   Page 1: 25 cards   (no footer)
-  //   Page 2: 25 cards   (no footer)
-  //   Page 3: 20 cards + 1 footer field = 21 ✓
-  // If a future clan grows past 25*3=75 members, pages will silently truncate;
-  // bump TOTAL_PAGES then.
-  const PAGE_SIZE   = 25;
-  const TOTAL_PAGES = 3;
+  // Header moves into embed.description on page 1 only (free, doesn't count against
+  // the 25-field cap). A spacer field is prepended on page 1 to restore the blank
+  // line gap between the header and the first card.
+  //
+  // Per-page card budgets to fit Discord's 25-field embed cap:
+  //   Page 1: 1 spacer field + up to 24 cards            = 25 fields max
+  //   Page 2: up to 25 cards                              = 25 fields max
+  //   Page 3: up to 24 cards + 1 footer field             = 25 fields max
+  // Total capacity: 24 + 25 + 24 = 73 members across 3 pages.
+  // If the clan grows past 73 members, bump the array (e.g. [24, 25, 25, 25, 24]
+  // for 5 pages) — overflow is silently truncated until then.
+  const PAGE_CARD_LIMITS = [24, 25, 24];
+  const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
   const lastUpdateUnix = Math.floor(now.getTime() / 1000);
   const nextUpdateUnix = Math.ceil(now.getTime() / (UPDATE_INTERVAL_MIN * 60 * 1000))
     * (UPDATE_INTERVAL_MIN * 60 * 1000) / 1000;
 
-  // Header rendered via embed.description on every page — doesn't count against the 25-field cap.
-  const description =
-    `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
-    `└ Next Update : <t:${nextUpdateUnix}:R>`;
-
-  if (rows.length > PAGE_SIZE * TOTAL_PAGES) {
+  const totalCapacity = PAGE_CARD_LIMITS.reduce((a, b) => a + b, 0);
+  if (rows.length > totalCapacity) {
     console.warn(
-      `Warning: ${rows.length} members exceed page capacity (${PAGE_SIZE * TOTAL_PAGES}). ` +
-      `Bump TOTAL_PAGES in ingest.js to avoid truncation.`
+      `Warning: ${rows.length} members exceed page capacity (${totalCapacity}). ` +
+      `Bump PAGE_CARD_LIMITS in ingest.js to avoid truncation.`
     );
   }
 
+  let cursor = 0;
   for (let p = 0; p < TOTAL_PAGES; p++) {
-    const page = rows.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
+    const limit = PAGE_CARD_LIMITS[p];
+    const page  = rows.slice(cursor, cursor + limit);
+    cursor += limit;
     const messageId = messageIds[p];
 
     // Skip empty pages that have no existing message to update
     if (page.length === 0 && !messageId) continue;
+
+    const isFirstPage = p === 0;
+    const isLastPage  = p === TOTAL_PAGES - 1;
 
     const cardFields = page.map(r => ({
       name: `${r.rank}. ${r.username}`,
@@ -429,28 +432,43 @@ async function postDiscord(rows, updatedAt) {
       inline: true
     }));
 
+    // Spacer field: prepended on page 1 only to add a visible blank line between
+    // the header (in embed.description) and the first card.
+    const spacerField = {
+      name: "\u200b",
+      value: "\u200b",
+      inline: false
+    };
+
     // Footer field: embed.footer doesn't render <t:UNIX:STYLE> markdown, so
     // we use a plain field instead. "-# " renders as Discord small-text.
     // Only appended on the last page.
-    const isLastPage = p === TOTAL_PAGES - 1;
     const footerField = isLastPage ? {
       name: "\u200b",
-      value:
-        `Updated: Today at <t:${lastUpdateUnix}:t>\n` +
-        `-# Created by Cinnamowopal`,
+      value: `-# Created by Cinnamowopal \u2022 Updated: <t:${lastUpdateUnix}:d> at <t:${lastUpdateUnix}:t>`,
       inline: false
     } : null;
 
-    const fields = [...cardFields, footerField].filter(Boolean);
+    const fields = [
+      ...(isFirstPage ? [spacerField] : []),
+      ...cardFields,
+      ...(footerField ? [footerField] : [])
+    ];
+
+    // Header description: only on page 1 — doesn't count against the 25-field cap.
+    const description = isFirstPage
+      ? `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
+        `└ Next Update : <t:${nextUpdateUnix}:R>`
+      : undefined;
 
     const embed = {
-      color:       EMBED_COLOR,
-      description,
-      image:       { url: EMBED_SPACER_IMAGE_URL },
-      fields
+      color: EMBED_COLOR,
+      image: { url: EMBED_SPACER_IMAGE_URL },
+      fields,
+      ...(description ? { description } : {})
       // No `title`, no `footer`, no `timestamp` — footer content is rendered via
       // footerField because embed.footer doesn't support <t:UNIX:STYLE> markdown.
-      // image is a 1×1 transparent PNG that forces Discord's maximum embed width.
+      // image is a 600×1 transparent PNG that forces Discord's maximum embed width.
     };
 
     const payload = { embeds: [embed] };
