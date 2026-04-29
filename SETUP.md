@@ -119,19 +119,13 @@ Rows are automatically pruned after **14 days** (`KEEP_HOURS = 336`) — 14 days
 
 ### Discord embed layout
 
-> **After merging, just trigger the workflow once.** It will POST 3 fresh embed messages
-> and log their IDs (look for `Discord page N posted. Message ID: …` in the run log).
-> Copy those IDs into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on
-> the workflow edits those messages in place.
->
-> **One-time cleanup if you already have 4 message IDs configured:** the page count has
-> shrunk from 4 to 3. After merging:
-> 1. **Delete the 4th message** in the Discord channel manually (the old page-4 embed).
-> 2. **Remove the 4th ID** from the `DISCORD_MESSAGE_IDS` secret — keep the first 3, comma-separated.
->
-> The first 3 messages will be edited in place by the next run with the new layout.
-> If columns still look narrow after the merge, clear `DISCORD_MESSAGE_IDS` entirely and
-> let the script POST 3 fresh messages.
+> **Why not Components V2?** Webhook execute endpoints don't support the V2 flag (`flags: 1 << 15`) — Discord silently ignores it and then rejects the payload with `50006 Cannot send an empty message` because there are no `content` or `embeds` fields. V2 only works for real bot/application messages. See the comment block at the top of `postDiscord()` in `ingest.js`.
+
+> **After merging, you must:**
+> 1. **Delete any existing Discord messages** from the channel that the webhook posts to (V2 messages that 400'd won't be there, but check).
+> 2. **Clear `DISCORD_MESSAGE_IDS`** — set the secret to empty (or delete it).
+> 3. **Trigger the workflow once** — it will POST 3 fresh legacy-embed messages and log their IDs (`Discord page N posted. Message ID: …`).
+> 4. **Copy those 3 IDs** into `DISCORD_MESSAGE_IDS` (comma-separated, in order). From then on the workflow edits those messages in place.
 
 Each Discord message is a standard embed (no `flags`, no `components`). Three messages
 are posted — one per page. Each embed contains:
@@ -139,9 +133,9 @@ are posted — one per page. Each embed contains:
 - **Color** — gold (`#f5a623`)
 - **Title** — `Starry Battle Rankings` on page 1 only
 - **Description** — header with Discord-native relative timestamps on page 1 only (not a field; doesn't count against the 25-field cap)
-- **Image** — `assets/embed-spacer.png` (600×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**); URL includes `?v=<unix-seconds>` cache-busting param so Discord re-fetches on each run
-- **Fields** — up to 24 card fields on page 1 (plus 1 spacer field), up to 25 on pages 2 and 3
-- **Footer + Timestamp** — `embed.footer` (`Created by Cinnamowopal`) and `embed.timestamp` on the last page only, rendered by Discord as small grey text
+- **Image** — `assets/embed-spacer.png` (1200×1 transparent PNG; **width is load-bearing** — forces Discord max-width rendering — **do not delete or shrink**)
+- **Fields** — up to 24 card fields on page 1 (plus 1 invisible spacer field = 25 total), up to 25 on pages 2 and 3
+- **Footer** — `embed.footer.text` with an explicit `MM/DD/YYYY at H:MM AM/PM UTC` date string on the last page only (not `embed.timestamp`, which auto-localizes to "Today at …")
 
 The **header** is rendered via `embed.title` and `embed.description` on page 1 only:
 
@@ -156,16 +150,14 @@ Each **card field** (inline) shows:
 {rank}. {username}
 <:RankStar:…> Points: **{abbreviatedPoints}**
 > 1h Gain: **{gainOrNA}**
-            ← trailing zero-width-space line for vertical breathing room
+            ← trailing real blank line (\n\n) for vertical breathing room
 ```
 
-The **native footer** renders at the bottom of the **last page only** as small grey text (Discord's built-in style):
+The **footer** renders at the bottom of the **last page only** as small grey text:
 
 ```
-Created by Cinnamowopal • Today at {viewer-local time}
+Created by Cinnamowopal • Updated: MM/DD/YYYY at H:MM AM/PM UTC
 ```
-
-Discord renders `embed.footer.text` and `embed.timestamp` together in small grey text, with the timestamp auto-localized to each viewer's timezone.
 
 The `Next Update` timestamp is computed by rounding the current time up to the next
 `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and the
