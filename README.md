@@ -18,11 +18,11 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 | 6 | Mr_Suter | 6.87K | N/A |
 | 7 | Johnr622_alt2 | 6.39K | N/A |
 | 8 | Johnr622_alt3 | 6.39K | N/A |
-| 9 | Johnr622_alt4 | 6.14K | N/A |
+| 9 | Johnr622_alt4 | 6.15K | N/A |
 | 10 | Johnr622_alt5 | 6.14K | N/A |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-29 18:43:52 UTC
+2026-04-29 18:45:14 UTC
 <!-- END_UPDATED -->
