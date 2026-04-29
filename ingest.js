@@ -35,13 +35,19 @@ const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 // Embed accent color (gold).
 const EMBED_COLOR = 0xf5a623;
 
-// Raw GitHub URL of a 1×1 transparent PNG committed to this repo.
+// Raw GitHub URL of a 600×1 transparent PNG committed to this repo.
 // Attaching this as embed.image forces Discord to render the embed at its
 // maximum width (~600px), which widens the 3-column inline-field slots
 // so cards have visibly more horizontal breathing room. Without it, the
 // embed shrinks to fit text content and columns feel cramped.
-const EMBED_SPACER_IMAGE_URL =
+const SPACER_IMAGE_URL_BASE =
   "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
+
+// Append ?v=<unix-seconds> so Discord re-fetches the image on each run instead
+// of serving a cached version. Discord caches embed images aggressively by URL;
+// without this, replacing the PNG never widens existing embeds.
+// Computed once at script start so all 3 pages in a single run share the same URL.
+const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
@@ -383,14 +389,14 @@ async function postDiscord(rows, updatedAt) {
   // the 25-field cap). A spacer field is prepended on page 1 to restore the blank
   // line gap between the header and the first card.
   //
-  // Per-page card budgets to fit Discord's 25-field embed cap:
-  //   Page 1: 1 spacer field + up to 24 cards            = 25 fields max
-  //   Page 2: up to 25 cards                              = 25 fields max
-  //   Page 3: up to 24 cards + 1 footer field             = 25 fields max
-  // Total capacity: 24 + 25 + 24 = 73 members across 3 pages.
-  // If the clan grows past 73 members, bump the array (e.g. [24, 25, 25, 25, 24]
+  // Per-page card budgets to fit Discord's 25-field embed cap.
+  //   Page 1: 1 spacer field + up to 24 cards = 25 fields
+  //   Page 2:                   up to 25 cards = 25 fields
+  //   Page 3:                   up to 25 cards = 25 fields  (footer is native, not a field)
+  // Total capacity: 24 + 25 + 25 = 74 members across 3 pages.
+  // If the clan grows past 74 members, bump the array (e.g. [24, 25, 25, 25, 25]
   // for 5 pages) — overflow is silently truncated until then.
-  const PAGE_CARD_LIMITS = [24, 25, 24];
+  const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
   const now = new Date();
@@ -440,35 +446,29 @@ async function postDiscord(rows, updatedAt) {
       inline: false
     };
 
-    // Footer field: embed.footer doesn't render <t:UNIX:STYLE> markdown, so
-    // we use a plain field instead. "-# " renders as Discord small-text.
-    // Only appended on the last page.
-    const footerField = isLastPage ? {
-      name: "\u200b",
-      value: `-# Created by Cinnamowopal \u2022 Updated: <t:${lastUpdateUnix}:d> at <t:${lastUpdateUnix}:t>`,
-      inline: false
-    } : null;
-
     const fields = [
       ...(isFirstPage ? [spacerField] : []),
-      ...cardFields,
-      ...(footerField ? [footerField] : [])
+      ...cardFields
     ];
+
+    // Title: only on page 1.
+    const title = isFirstPage ? "Starry Battle Rankings" : undefined;
 
     // Header description: only on page 1 — doesn't count against the 25-field cap.
     const description = isFirstPage
-      ? `🕒 Last Update : <t:${lastUpdateUnix}:R>\n` +
-        `└ Next Update : <t:${nextUpdateUnix}:R>`
+      ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
       : undefined;
 
     const embed = {
       color: EMBED_COLOR,
       image: { url: EMBED_SPACER_IMAGE_URL },
       fields,
-      ...(description ? { description } : {})
-      // No `title`, no `footer`, no `timestamp` — footer content is rendered via
-      // footerField because embed.footer doesn't support <t:UNIX:STYLE> markdown.
-      // image is a 600×1 transparent PNG that forces Discord's maximum embed width.
+      ...(title       ? { title }       : {}),
+      ...(description ? { description } : {}),
+      ...(isLastPage  ? {
+        footer: { text: "Created by Cinnamowopal" },
+        timestamp: new Date(lastUpdateUnix * 1000).toISOString()
+      } : {})
     };
 
     const payload = { embeds: [embed] };
