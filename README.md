@@ -1,6 +1,6 @@
 # NONG_Leaderboard
 
-Clan leaderboard powered by the [Big Games API](https://biggamesapi.io), updated every 15 minutes.
+Clan leaderboard powered by the [Big Games API](https://biggamesapi.io), updated every 5 minutes.
 
 Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 

@@ -2,7 +2,8 @@ name: Update leaderboard
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Runs every 5 minutes; may be reduced further in the future.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
