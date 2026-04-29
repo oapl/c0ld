@@ -43,11 +43,11 @@ const EMBED_COLOR = 0xf5a623;
 const SPACER_IMAGE_URL_BASE =
   "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
 
-// Append ?v=<unix-seconds> so Discord re-fetches the image on each run instead
-// of serving a cached version. Discord caches embed images aggressively by URL;
-// without this, replacing the PNG never widens existing embeds.
-// Computed once at script start so all 3 pages in a single run share the same URL.
-const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
+// No cache-bust query string: some Discord media-proxy paths reject query strings
+// on image.url and can trigger a 50006 "empty message" validator failure.
+// If image-cache invalidation is needed in future, use a URL fragment (#v=<unix>)
+// instead — fragments are not sent to the server.
+const EMBED_SPACER_IMAGE_URL = SPACER_IMAGE_URL_BASE;
 
 // Discord embed update cadence.
 // Change this constant (and the workflow cron) together when the cadence changes.
@@ -470,7 +470,10 @@ async function postDiscord(rows, updatedAt) {
       );
     }
 
-    containerComponents.push({ type: 10, content: cardContent });
+    if (!cardContent) {
+      console.warn(`Discord page ${p + 1}: cardContent is empty (page has ${page.length} member(s)); using zero-width-space fallback.`);
+    }
+    containerComponents.push({ type: 10, content: cardContent || "\u200b" });
 
     if (isLastPage) {
       containerComponents.push(
@@ -508,7 +511,9 @@ async function postDiscord(rows, updatedAt) {
         console.log(`Discord page ${p + 1} updated (message ${messageId}).`);
       } else {
         const msg = await res.text();
+        const payloadPreview = JSON.stringify(payload, null, 2).slice(0, 3000);
         console.warn(`Discord page ${p + 1} PATCH failed (${res.status}): ${msg}`);
+        console.warn(`Payload sent:\n${payloadPreview}`);
       }
     } else {
       // Post a new message and log the returned ID so it can be saved as a secret
@@ -522,7 +527,9 @@ async function postDiscord(rows, updatedAt) {
         console.log(`Discord page ${p + 1} posted. Message ID: ${data.id}`);
       } else {
         const msg = await res.text();
+        const payloadPreview = JSON.stringify(payload, null, 2).slice(0, 3000);
         console.warn(`Discord page ${p + 1} POST failed (${res.status}): ${msg}`);
+        console.warn(`Payload sent:\n${payloadPreview}`);
       }
     }
   }
