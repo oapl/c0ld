@@ -459,16 +459,30 @@ async function postDiscord(rows, updatedAt) {
       ? `Last Update: <t:${lastUpdateUnix}:R>  🕒  Next Update: <t:${nextUpdateUnix}:R>`
       : undefined;
 
+    // Precompute explicit UTC date/time string for the last-page footer so Discord
+    // renders it as a fixed date (e.g. "04/29/2026 at 1:59 PM UTC") rather than
+    // the auto-localized "Today at …" that embed.timestamp produces.
+    const embedFooter = (() => {
+      if (!isLastPage) return {};
+      const d = new Date(lastUpdateUnix * 1000);
+      const mm   = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd   = String(d.getUTCDate()).padStart(2, "0");
+      const yyyy = d.getUTCFullYear();
+      const hh12Raw = d.getUTCHours();
+      const ampm  = hh12Raw >= 12 ? "PM" : "AM";
+      const hh12  = ((hh12Raw + 11) % 12) + 1;
+      const mins  = String(d.getUTCMinutes()).padStart(2, "0");
+      const explicitDateTime = `${mm}/${dd}/${yyyy} at ${hh12}:${mins} ${ampm} UTC`;
+      return { footer: { text: `Created by Cinnamowopal • Updated: ${explicitDateTime}` } };
+    })();
+
     const embed = {
       color: EMBED_COLOR,
       image: { url: EMBED_SPACER_IMAGE_URL },
       fields,
       ...(title       ? { title }       : {}),
       ...(description ? { description } : {}),
-      ...(isLastPage  ? {
-        footer: { text: "Created by Cinnamowopal" },
-        timestamp: new Date(lastUpdateUnix * 1000).toISOString()
-      } : {})
+      ...embedFooter
     };
 
     const payload = { embeds: [embed] };
