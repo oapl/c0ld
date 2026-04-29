@@ -109,12 +109,26 @@ time-series used only for the 60-minute gain calculation and is pruned after
 48 hours). `StarryBattleArchive` is never pruned and can be queried to
 review historical battle results long after the battle has ended.
 
-### Discord embed: custom emote
+### Discord embed: card grid layout
 
-The `Total Points` column in the Discord embed is prefixed with the
-`:gold_star:` shortcode. **This must be replaced with the full custom-emote
-tag** (`<:gold_star:EMOTE_ID>`) for it to render correctly in your Discord
-server. Update the TODO comment in `ingest.js` once you have the emote ID.
+The Discord embed uses a **3-column card grid** format. Each member appears as
+its own inline field showing their rank, username, abbreviated points, and
+hourly gain. A header field at the top of each page shows the last and next
+update times using Discord's native relative timestamps (`<t:UNIX:R>`).
+
+Each embed page holds 24 member cards + 1 header = 25 fields total (Discord's
+embed field cap). The `PAGE_SIZE` constant in `ingest.js` must not exceed 24.
+
+The `Next Update` timestamp is computed by rounding the current time up to the
+next `UPDATE_INTERVAL_MIN`-minute boundary. Update both the workflow cron and
+the `UPDATE_INTERVAL_MIN` constant in `ingest.js` if you change the cadence.
+
+#### Custom emote
+
+The Points line is prefixed with the `:gold_star:` shortcode. **Replace it
+with the full custom-emote tag** (`<:gold_star:EMOTE_ID>`) for it to render
+correctly in your Discord server. Update the TODO comment in `ingest.js` once
+you have the emote ID.
 
 ---
 
