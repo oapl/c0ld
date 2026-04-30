@@ -465,11 +465,8 @@
   </main>
 
   <script>
-    /*
-      Update this to the real clan battle end time.
-      UTC example: "2026-05-03T18:00:00Z"
-    */
     const CURRENT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
+    const AUTO_REFRESH_MS = 60 * 1000;
 
     let currentData = null;
     let currentRows = [];
@@ -484,6 +481,9 @@
 
     let historySortKey = "last_snapshot";
     let historySortAsc = false;
+
+    let refreshTimer = null;
+    let isLoading = false;
 
     function escapeHtml(s) {
       return String(s ?? "")
@@ -932,7 +932,7 @@
 
     function wireEvents() {
       document.getElementById("search").addEventListener("input", renderLeaderboard);
-      document.getElementById("refresh").addEventListener("click", loadData);
+      document.getElementById("refresh").addEventListener("click", () => loadData({ manual: true }));
 
       document.getElementById("battle-select").addEventListener("change", () => {
         handleBattleChange();
@@ -981,13 +981,18 @@
       });
     }
 
-    async function loadData() {
+    async function loadData(options = {}) {
+      if (isLoading) return;
+
+      isLoading = true;
+
       const status = document.getElementById("status");
       status.className = "";
       status.textContent = "";
       status.style.display = "none";
 
       try {
+        const previousActiveBattle = activeBattle;
         const cacheBust = Date.now();
 
         const [currentRes, battlesRes, playersRes] = await Promise.all([
@@ -1016,6 +1021,8 @@
           throw new Error("Data/current.json loaded, but it does not contain a valid rows array.");
         }
 
+        activeBattle = previousActiveBattle || "current";
+
         if (activeBattle === "current") {
           currentRows = normalizeCurrentRows(currentData.rows || []);
         } else {
@@ -1032,13 +1039,26 @@
         status.className = "error";
         status.style.display = "block";
         status.textContent = err.message;
+      } finally {
+        isLoading = false;
       }
+    }
+
+    function startAutoRefresh() {
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+
+      refreshTimer = setInterval(() => {
+        loadData();
+      }, AUTO_REFRESH_MS);
     }
 
     document.addEventListener("DOMContentLoaded", () => {
       wireEvents();
       startCountdown();
       loadData();
+      startAutoRefresh();
     });
   </script>
 </body>
