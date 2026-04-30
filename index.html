@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NONG Leaderboard</title>
 
+  <meta property="og:title" content="NONG Leaderboard" />
+  <meta property="og:description" content="Pet Simulator 99 NONG clan leaderboard, member stats, clan history, and battle projections." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://opalapocalypse.github.io/NONG_Leaderboard/" />
+  <meta property="og:image" content="https://opalapocalypse.github.io/NONG_Leaderboard/assets/preview.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="NONG Leaderboard" />
+  <meta name="twitter:description" content="Pet Simulator 99 NONG clan leaderboard, member stats, clan history, and battle projections." />
+  <meta name="twitter:image" content="https://opalapocalypse.github.io/NONG_Leaderboard/assets/preview.png" />
+
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -454,10 +467,11 @@
   </main>
 
   <script>
-    const CURRENT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
+    const DEFAULT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
     const AUTO_REFRESH_MS = 60 * 1000;
 
     let currentData = null;
+    let clanData = null;
     let currentRows = [];
     let battles = [];
     let playerIndex = [];
@@ -755,14 +769,18 @@
       return list;
     }
 
+    function getBattleEndIso() {
+      return clanData?.battle_end_iso || currentData?.battle_end_iso || DEFAULT_BATTLE_END_ISO;
+    }
+
     function renderCards() {
-      const rank = currentData?.clan_rank || null;
-      const projectedRank = currentData?.projected_rank || null;
+      const rank = clanData?.clan_rank ?? currentData?.clan_rank ?? null;
+      const projectedRank = clanData?.projected_rank ?? currentData?.projected_rank ?? null;
 
       document.getElementById("nong-rank-value").textContent =
         rank ? `#${rank}` : "—";
 
-      const latest = getCurrentFetchedAt();
+      const latest = clanData?.snapshot_at || getCurrentFetchedAt();
       document.getElementById("db-update-value").textContent = latest ? fmtDateTime(latest) : "—";
 
       document.getElementById("projected-rank-value").textContent =
@@ -847,12 +865,14 @@
       const el = document.getElementById("countdown-value");
 
       function tick() {
-        if (!CURRENT_BATTLE_END_ISO) {
+        const endIso = getBattleEndIso();
+
+        if (!endIso) {
           el.textContent = "Set battle end time";
           return;
         }
 
-        const end = new Date(CURRENT_BATTLE_END_ISO).getTime();
+        const end = new Date(endIso).getTime();
 
         if (Number.isNaN(end)) {
           el.textContent = "Invalid end time";
@@ -1012,10 +1032,11 @@
         const previousActiveBattle = activeBattle;
         const cacheBust = Date.now();
 
-        const [currentRes, battlesRes, playersRes] = await Promise.all([
+        const [currentRes, battlesRes, playersRes, clansRes] = await Promise.all([
           fetch(`Data/current.json?v=${cacheBust}`),
           fetch(`Data/battles.json?v=${cacheBust}`),
-          fetch(`Data/players.json?v=${cacheBust}`)
+          fetch(`Data/players.json?v=${cacheBust}`),
+          fetch(`Data/clans-current.json?v=${cacheBust}`)
         ]);
 
         if (!currentRes.ok) {
@@ -1030,12 +1051,21 @@
           throw new Error(`Could not load Data/players.json (HTTP ${playersRes.status})`);
         }
 
+        if (!clansRes.ok) {
+          throw new Error(`Could not load Data/clans-current.json (HTTP ${clansRes.status}). Run the updated clan builder first.`);
+        }
+
         currentData = await currentRes.json();
         battles = await battlesRes.json();
         playerIndex = await playersRes.json();
+        clanData = await clansRes.json();
 
         if (!currentData || !Array.isArray(currentData.rows)) {
           throw new Error("Data/current.json loaded, but it does not contain a valid rows array.");
+        }
+
+        if (!clanData || !Array.isArray(clanData.rows)) {
+          throw new Error("Data/clans-current.json loaded, but it does not contain a valid rows array.");
         }
 
         activeBattle = previousActiveBattle || "current";
