@@ -124,6 +124,7 @@
 
     #status {
       display: none;
+      margin-bottom: 18px;
     }
 
     .cards {
@@ -551,6 +552,7 @@
           return obj[key];
         }
       }
+
       return null;
     }
 
@@ -616,6 +618,7 @@
           try {
             const res = await fetch(`${p.file}?v=${Date.now()}`);
             if (!res.ok) return;
+
             const profile = await res.json();
             profileCache.set(p.profile_key, profile);
           } catch {
@@ -629,7 +632,6 @@
 
     async function buildHistoricalRows(battleName) {
       const profiles = await getAllProfiles();
-
       const rows = [];
 
       for (const profile of profiles) {
@@ -866,42 +868,39 @@
       }
     }
 
-function populateBattleDropdown() {
-  const select = document.getElementById("battle-select");
-  select.innerHTML = "";
+    function populateBattleDropdown() {
+      const select = document.getElementById("battle-select");
+      select.innerHTML = "";
 
-  const currentBattleName = currentData?.battle || null;
-  const seen = new Set();
+      const currentBattleName = currentData?.battle || null;
+      const currentDisplayName = currentData?.display_name || "Current Clan Battle";
+      const seen = new Set();
 
-  const currentOpt = document.createElement("option");
-  currentOpt.value = "current";
-  currentOpt.textContent = currentData?.display_name || "Current Clan Battle";
-  select.appendChild(currentOpt);
+      const currentOpt = document.createElement("option");
+      currentOpt.value = "current";
+      currentOpt.textContent = currentDisplayName;
+      select.appendChild(currentOpt);
 
-  seen.add("current");
-  if (currentBattleName) {
-    seen.add(String(currentBattleName).toLowerCase());
-  }
+      seen.add("current");
+      if (currentBattleName) seen.add(String(currentBattleName).toLowerCase());
+      if (currentDisplayName) seen.add(String(currentDisplayName).toLowerCase());
 
-  for (const battle of battles) {
-    const battleKey = String(battle.battle || "").toLowerCase();
-    const displayKey = String(battle.display_name || battle.battle || "").toLowerCase();
+      for (const battle of battles) {
+        const battleKey = String(battle.battle || "").toLowerCase();
+        const displayKey = String(battle.display_name || battle.battle || "").toLowerCase();
 
-    if (seen.has(battleKey) || seen.has(displayKey)) {
-      continue;
-    }
+        if (seen.has(battleKey) || seen.has(displayKey)) {
+          continue;
+        }
 
-    const opt = document.createElement("option");
-    opt.value = battle.battle;
-    opt.textContent = battle.display_name || battle.battle;
-    select.appendChild(opt);
+        const opt = document.createElement("option");
+        opt.value = battle.battle;
+        opt.textContent = battle.display_name || battle.battle;
+        select.appendChild(opt);
 
-    seen.add(battleKey);
-    seen.add(displayKey);
-  }
-
-  select.value = activeBattle;
-}
+        seen.add(battleKey);
+        seen.add(displayKey);
+      }
 
       select.value = activeBattle;
     }
@@ -940,7 +939,7 @@ function populateBattleDropdown() {
       });
 
       document.getElementById("tab-btn-leaderboard").addEventListener("click", () => {
-        window.location.hash = "";
+        history.pushState("", document.title, window.location.pathname + window.location.search);
         setActiveTab("leaderboard");
       });
 
@@ -986,6 +985,7 @@ function populateBattleDropdown() {
       const status = document.getElementById("status");
       status.className = "";
       status.textContent = "";
+      status.style.display = "none";
 
       try {
         const cacheBust = Date.now();
@@ -1012,6 +1012,10 @@ function populateBattleDropdown() {
         battles = await battlesRes.json();
         playerIndex = await playersRes.json();
 
+        if (!currentData || !Array.isArray(currentData.rows)) {
+          throw new Error("Data/current.json loaded, but it does not contain a valid rows array.");
+        }
+
         if (activeBattle === "current") {
           currentRows = normalizeCurrentRows(currentData.rows || []);
         } else {
@@ -1026,6 +1030,7 @@ function populateBattleDropdown() {
       } catch (err) {
         console.error(err);
         status.className = "error";
+        status.style.display = "block";
         status.textContent = err.message;
       }
     }
