@@ -1,12 +1,13 @@
 // scripts/merge-manual-battles.js
 // Merges Data/manual-battles.json into Data/battles.json.
 //
-// Rule:
-//   Placement/rank is ALWAYS manual.
-//   Generated battle summaries may provide dates/counts/unique player data,
-//   but placement only comes from Data/manual-battles.json.
+// Source of truth rules:
+//   - placement is ALWAYS manual
+//   - update_number is ALWAYS manual
+//   - update_url is ALWAYS manual
+//   - generated data may fill only snapshot/count fields
 //
-// Input:
+// Inputs:
 //   Data/battles.json
 //   Data/manual-battles.json
 //
@@ -23,22 +24,23 @@ const MANUAL_FILE = path.join(DATA_DIR, "manual-battles.json");
 function normalizeBattleKey(value) {
   return String(value || "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
-function safeNumberOrNull(value) {
+function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
 
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeStringOrNull(value) {
+function stringOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   return String(value);
 }
 
-function safeDateOrNull(value) {
+function dateOrNull(value) {
   if (!value) return null;
 
   const d = new Date(value);
@@ -50,34 +52,65 @@ function safeDateOrNull(value) {
   return d.toISOString();
 }
 
-function cleanBattleRecord(record) {
+function cleanManualRecord(record) {
+  const battle = stringOrNull(record.battle || record.display_name);
+  const displayName = stringOrNull(record.display_name || record.battle);
+
   return {
-    battle: safeStringOrNull(record.battle || record.display_name),
-    display_name: safeStringOrNull(record.display_name || record.battle),
-    first_snapshot: safeDateOrNull(record.first_snapshot),
-    last_snapshot: safeDateOrNull(record.last_snapshot),
-    total_snapshots: safeNumberOrNull(record.total_snapshots),
-    total_rows: safeNumberOrNull(record.total_rows),
-    unique_players: safeNumberOrNull(record.unique_players),
-    placement: safeNumberOrNull(record.placement)
+    battle,
+    display_name: displayName,
+
+    first_snapshot: dateOrNull(record.first_snapshot),
+    last_snapshot: dateOrNull(record.last_snapshot),
+
+    total_snapshots: numberOrNull(record.total_snapshots),
+    total_rows: numberOrNull(record.total_rows),
+    unique_players: numberOrNull(record.unique_players),
+
+    // Manual-only fields.
+    placement: numberOrNull(record.placement),
+    update_number: numberOrNull(record.update_number),
+    update_url: stringOrNull(record.update_url)
   };
 }
 
-function mergeBattleRecord(generated, manual) {
+function cleanGeneratedRecord(record) {
+  const battle = stringOrNull(record.battle || record.display_name);
+  const displayName = stringOrNull(record.display_name || record.battle);
+
   return {
-    battle: generated.battle || manual.battle,
-    display_name: manual.display_name ?? generated.display_name,
+    battle,
+    display_name: displayName,
 
-    // Prefer generated dates/counts when they exist because they are based on real snapshots.
-    // Manual values fill gaps for older battles.
-    first_snapshot: generated.first_snapshot ?? manual.first_snapshot,
-    last_snapshot: generated.last_snapshot ?? manual.last_snapshot,
-    total_snapshots: generated.total_snapshots ?? manual.total_snapshots,
-    total_rows: generated.total_rows ?? manual.total_rows,
-    unique_players: generated.unique_players ?? manual.unique_players,
+    first_snapshot: dateOrNull(record.first_snapshot),
+    last_snapshot: dateOrNull(record.last_snapshot),
 
-    // Placement is ALWAYS manual.
-    placement: manual.placement ?? null
+    total_snapshots: numberOrNull(record.total_snapshots),
+    total_rows: numberOrNull(record.total_rows),
+    unique_players: numberOrNull(record.unique_players)
+
+    // Do NOT read placement/update fields from generated records.
+  };
+}
+
+function mergeRecord(manual, generated) {
+  return {
+    battle: manual?.battle || generated?.battle || null,
+    display_name: manual?.display_name || generated?.display_name || null,
+
+    // Prefer manual dates if present. Generated fills gaps only.
+    first_snapshot: manual?.first_snapshot ?? generated?.first_snapshot ?? null,
+    last_snapshot: manual?.last_snapshot ?? generated?.last_snapshot ?? null,
+
+    // Prefer manual counts if present. Generated fills gaps only.
+    total_snapshots: manual?.total_snapshots ?? generated?.total_snapshots ?? null,
+    total_rows: manual?.total_rows ?? generated?.total_rows ?? null,
+    unique_players: manual?.unique_players ?? generated?.unique_players ?? null,
+
+    // Always manual. Never generated.
+    placement: manual?.placement ?? null,
+    update_number: manual?.update_number ?? null,
+    update_url: manual?.update_url ?? null
   };
 }
 
@@ -92,7 +125,7 @@ function sortBattles(a, b) {
   );
 }
 
-async function readJsonArray(filePath, fallback = []) {
+async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
@@ -104,7 +137,7 @@ async function readJsonArray(filePath, fallback = []) {
     return parsed;
   } catch (err) {
     if (err.code === "ENOENT") {
-      return fallback;
+      return [];
     }
 
     throw err;
@@ -112,74 +145,59 @@ async function readJsonArray(filePath, fallback = []) {
 }
 
 async function main() {
-  const generatedRaw = await readJsonArray(GENERATED_FILE, []);
-  const manualRaw = await readJsonArray(MANUAL_FILE, []);
+  const generatedRaw = await readJsonArray(GENERATED_FILE);
+  const manualRaw = await readJsonArray(MANUAL_FILE);
 
-  const generated = generatedRaw
-    .map(cleanBattleRecord)
+  const generatedRecords = generatedRaw
+    .map(cleanGeneratedRecord)
     .filter(record => record.battle && record.display_name);
 
-  const manual = manualRaw
-    .map(cleanBattleRecord)
+  const manualRecords = manualRaw
+    .map(cleanManualRecord)
     .filter(record => record.battle && record.display_name);
 
-  const manualMap = new Map();
   const generatedMap = new Map();
+  const manualMap = new Map();
 
-  for (const record of manual) {
-    manualMap.set(normalizeBattleKey(record.battle), record);
-  }
-
-  for (const record of generated) {
+  for (const record of generatedRecords) {
     generatedMap.set(normalizeBattleKey(record.battle), record);
   }
 
+  for (const record of manualRecords) {
+    manualMap.set(normalizeBattleKey(record.battle), record);
+  }
+
   const allKeys = new Set([
-    ...manualMap.keys(),
-    ...generatedMap.keys()
+    ...generatedMap.keys(),
+    ...manualMap.keys()
   ]);
 
   const merged = [];
 
   for (const key of allKeys) {
-    const manualRecord = manualMap.get(key);
-    const generatedRecord = generatedMap.get(key);
+    const generated = generatedMap.get(key) || null;
+    const manual = manualMap.get(key) || null;
 
-    if (manualRecord && generatedRecord) {
-      merged.push(mergeBattleRecord(generatedRecord, manualRecord));
-      continue;
-    }
-
-    if (manualRecord && !generatedRecord) {
-      // Manual-only historical battle.
-      merged.push({
-        ...manualRecord,
-        placement: manualRecord.placement ?? null
-      });
-      continue;
-    }
-
-    if (!manualRecord && generatedRecord) {
-      // Generated battle with no manual placement yet.
-      merged.push({
-        ...generatedRecord,
-        placement: null
-      });
-    }
+    merged.push(mergeRecord(manual, generated));
   }
 
-  merged.sort(sortBattles);
+  const finalRecords = merged
+    .filter(record => record.battle && record.display_name)
+    .sort(sortBattles);
 
   await fs.writeFile(
     GENERATED_FILE,
-    JSON.stringify(merged, null, 2) + "\n",
+    JSON.stringify(finalRecords, null, 2) + "\n",
     "utf8"
   );
 
-  console.log(`Manual battles loaded: ${manual.length}`);
-  console.log(`Generated battles loaded: ${generated.length}`);
-  console.log(`Final battles written: ${merged.length}`);
-  console.log("Placement source: manual-battles.json only");
+  console.log(`Generated battles read: ${generatedRecords.length}`);
+  console.log(`Manual battles read: ${manualRecords.length}`);
+  console.log(`Final battles written: ${finalRecords.length}`);
+  console.log("Manual-only fields preserved:");
+  console.log("  - placement");
+  console.log("  - update_number");
+  console.log("  - update_url");
   console.log(`Updated ${GENERATED_FILE}`);
 }
 
