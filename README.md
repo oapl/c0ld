@@ -5,16 +5,12 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
 <img width="449" height="378" alt="image" src="https://github.com/user-attachments/assets/76bb0823-d0c0-4e65-a329-3d6aece55ed7" />
 
-First and foremost, I'm tired.
+First and foremost, I'm **_tired_**.
 
-I'm use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github because Github sucks at scheduling.
+I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
 
-It's kind of a shit show, but hey it's mine!
-
-Shows the data below just because and passes into a Discord webhook.
-
-EXAMPLE: This updates at the same tempo and just shows some of it.
-
+_EXAMPLE: This updates at the same tempo and just shows some of it.
+_
 ## Top 10 Members (by Total Points)
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
