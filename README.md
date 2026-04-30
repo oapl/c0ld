@@ -8,12 +8,12 @@ I'm use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 9.55K | 70 |
-| 2 | Yume_Sakurax3 | 9.55K | 81 |
-| 3 | joshuacd2006 | 9.25K | 79 |
-| 4 | Josep_xD2 | 8.99K | 79 |
-| 5 | jupiter0477 | 8.76K | 65 |
-| 6 | Mr_Suter | 8.72K | 77 |
+| 1 | johnr622 | 9.56K | 67 |
+| 2 | Yume_Sakurax3 | 9.56K | 81 |
+| 3 | joshuacd2006 | 9.26K | 78 |
+| 4 | Josep_xD2 | 9K | 79 |
+| 5 | jupiter0477 | 8.77K | 63 |
+| 6 | Mr_Suter | 8.72K | 72 |
 | 7 | Johnr622_alt2 | 8.07K | 0 |
 | 8 | Johnr622_alt3 | 8.07K | 0 |
 | 9 | Johnr622_alt4 | 7.83K | 0 |
@@ -22,5 +22,5 @@ I'm use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-30 16:15:54 UTC
+2026-04-30 16:21:02 UTC
 <!-- END_UPDATED -->
