@@ -6,19 +6,27 @@
 //   Data/players.json
 //   Data/battles.json
 //   Data/players/<user_id>.json
+//   assets/avatars/<user_id>.png
 //
 // Required env:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_KEY
+//
+// Optional env:
+//   CLAN_NAME = NONG
 
 const fs = require("fs/promises");
 const path = require("path");
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+const CLAN_NAME = process.env.CLAN_NAME || "NONG";
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
+
+const AVATAR_DIR = path.join(process.cwd(), "assets", "avatars");
+const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
 
@@ -54,6 +62,19 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function ensureDir(dir) {
+  await fs.mkdir(dir, { recursive: true });
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -75,6 +96,21 @@ function fmtSlug(value) {
 function rowIdentity(row) {
   if (row.user_id) return `id:${row.user_id}`;
   return `name:${String(row.username || "").toLowerCase()}`;
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} from ${url}: ${text}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON from ${url}: ${text.slice(0, 500)}`);
+  }
 }
 
 async function fetchAllRows(table) {
@@ -291,6 +327,53 @@ async function fetchAvatarHeadshots(userIds) {
   return result;
 }
 
+async function downloadAvatarToCache(userId, imageUrl) {
+  if (!userId || !imageUrl) return null;
+
+  await ensureDir(AVATAR_DIR);
+
+  const fileName = `${userId}.png`;
+  const filePath = path.join(AVATAR_DIR, fileName);
+  const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
+
+  if (await fileExists(filePath)) {
+    return publicPath;
+  }
+
+  try {
+    const res = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "NONG-Leaderboard-Avatar-Cache"
+      }
+    });
+
+    if (!res.ok) {
+      console.warn(`Avatar download failed for ${userId}: HTTP ${res.status}`);
+      return imageUrl;
+    }
+
+    const bytes = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(filePath, bytes);
+
+    console.log(`Cached avatar for ${userId}: ${publicPath}`);
+    return publicPath;
+  } catch (err) {
+    console.warn(`Avatar cache error for ${userId}: ${err.message}`);
+    return imageUrl;
+  }
+}
+
+async function cacheAvatarMap(avatarMap) {
+  const cached = new Map();
+
+  for (const [userId, imageUrl] of avatarMap.entries()) {
+    const localPath = await downloadAvatarToCache(userId, imageUrl);
+    cached.set(Number(userId), localPath || imageUrl);
+  }
+
+  return cached;
+}
+
 function buildBattleSummary(battleName, displayName, rows) {
   if (!rows.length) {
     return {
@@ -391,6 +474,171 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
   };
 }
 
+function findClanRankInAnyShape(value, clanName) {
+  const target = String(clanName).toLowerCase();
+
+  function getName(node) {
+    return (
+      node?.Name ??
+      node?.name ??
+      node?.ClanName ??
+      node?.clanName ??
+      node?.Clan ??
+      node?.clan ??
+      node?.Tag ??
+      node?.tag ??
+      node?.ClanTag ??
+      node?.clanTag ??
+      node?.DisplayName ??
+      node?.displayName
+    );
+  }
+
+  function getRank(node) {
+    return (
+      node?.Rank ??
+      node?.rank ??
+      node?.Place ??
+      node?.place ??
+      node?.Position ??
+      node?.position ??
+      node?.Index ??
+      node?.index
+    );
+  }
+
+  function getPoints(node) {
+    return (
+      node?.Points ??
+      node?.points ??
+      node?.Score ??
+      node?.score ??
+      node?.Total ??
+      node?.total ??
+      node?.Value ??
+      node?.value
+    );
+  }
+
+  function nameMatches(name) {
+    return String(name || "").toLowerCase() === target;
+  }
+
+  function isLeaderboardArray(arr) {
+    if (!Array.isArray(arr) || !arr.length) return false;
+
+    return arr.some(item => {
+      if (!item || typeof item !== "object") return false;
+      return getName(item) !== undefined && getPoints(item) !== undefined;
+    });
+  }
+
+  function walk(node) {
+    if (!node || typeof node !== "object") return null;
+
+    if (Array.isArray(node)) {
+      if (isLeaderboardArray(node)) {
+        const sorted = [...node].sort((a, b) => Number(getPoints(b) || 0) - Number(getPoints(a) || 0));
+
+        for (let i = 0; i < sorted.length; i++) {
+          const item = sorted[i];
+          const name = getName(item);
+
+          if (nameMatches(name)) {
+            const explicitRank = getRank(item);
+            const rank = Number(explicitRank || i + 1);
+
+            return {
+              rank,
+              source: "leaderboard_array",
+              matchedName: String(name),
+              points: Number(getPoints(item) || 0)
+            };
+          }
+        }
+      }
+
+      for (const item of node) {
+        const found = walk(item);
+        if (found) return found;
+      }
+
+      return null;
+    }
+
+    const name = getName(node);
+
+    if (nameMatches(name)) {
+      const explicitRank = getRank(node);
+
+      if (explicitRank !== undefined && explicitRank !== null && explicitRank !== "") {
+        return {
+          rank: Number(explicitRank),
+          source: "object_explicit_rank",
+          matchedName: String(name),
+          points: Number(getPoints(node) || 0)
+        };
+      }
+    }
+
+    for (const child of Object.values(node)) {
+      const found = walk(child);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  return walk(value);
+}
+
+async function fetchNongCurrentRank() {
+  const urls = [
+    "https://biggamesapi.io/api/activeClanBattle"
+  ];
+
+  for (const url of urls) {
+    try {
+      console.log(`Fetching current clan rank from ${url}...`);
+
+      const json = await fetchJson(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "NONG-Leaderboard-Rank"
+        }
+      });
+
+      const found = findClanRankInAnyShape(json, CLAN_NAME);
+
+      if (found && Number.isFinite(Number(found.rank))) {
+        console.log(
+          `${CLAN_NAME} current rank found: #${found.rank} via ${found.source}. ` +
+          `Matched name: ${found.matchedName}. Points: ${found.points}.`
+        );
+
+        return {
+          rank: Number(found.rank),
+          source: found.source,
+          matched_name: found.matchedName,
+          points: Number.isFinite(Number(found.points)) ? Number(found.points) : null
+        };
+      }
+
+      console.warn(`${CLAN_NAME} current rank not found in activeClanBattle response.`);
+      console.warn("Rank response top-level keys:", Object.keys(json || {}).join(", "));
+    } catch (err) {
+      console.warn(`Clan rank lookup error from ${url}: ${err.message}`);
+    }
+  }
+
+  return {
+    rank: null,
+    source: null,
+    matched_name: null,
+    points: null
+  };
+}
+
 async function main() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.");
@@ -399,6 +647,7 @@ async function main() {
   await fs.mkdir(OUT_DIR, { recursive: true });
   await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
   await fs.mkdir(PLAYERS_DIR, { recursive: true });
+  await ensureDir(AVATAR_DIR);
 
   const battleRows = new Map();
   const battlesSummary = [];
@@ -465,7 +714,8 @@ async function main() {
     .filter(Boolean);
 
   console.log(`Fetching avatars for ${ids.length} users...`);
-  const avatars = await fetchAvatarHeadshots(ids);
+  const remoteAvatars = await fetchAvatarHeadshots(ids);
+  const avatars = await cacheAvatarMap(remoteAvatars);
 
   const playerIndex = [];
   let written = 0;
@@ -562,6 +812,9 @@ async function main() {
     })
     .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 
+  console.log(`Fetching current rank for ${CLAN_NAME}...`);
+  const clanRank = await fetchNongCurrentRank();
+
   await fs.writeFile(
     path.join(OUT_DIR, "players.json"),
     JSON.stringify(playerIndex, null, 2),
@@ -580,7 +833,11 @@ async function main() {
       generated_at: new Date().toISOString(),
       battle: CURRENT_BATTLE.name,
       display_name: CURRENT_BATTLE.displayName,
-      clan_rank: null,
+      clan_name: CLAN_NAME,
+      clan_rank: clanRank.rank,
+      clan_rank_source: clanRank.source,
+      clan_rank_matched_name: clanRank.matched_name,
+      clan_rank_points: clanRank.points,
       projected_rank: null,
       rows: currentRows
     }, null, 2),
