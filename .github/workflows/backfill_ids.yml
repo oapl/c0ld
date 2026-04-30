@@ -21,4 +21,4 @@ jobs:
           node-version: 20
 
       - name: Run Roblox lookup test
-        run: node scripts/test-roblox-lookup.js
+        run: node scripts/generate-backfill-sql.js
