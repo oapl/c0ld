@@ -3,17 +3,17 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-04-30T22:26:05.171Z",
-    "total_snapshots": 345,
-    "total_rows": 25103,
+    "last_snapshot": "2026-04-30T22:30:55.959Z",
+    "total_snapshots": 346,
+    "total_rows": 25176,
     "unique_players": 73,
-    "placement": null,
-    "update_number": null,
-    "update_url": null
+    "placement": 0,
+    "update_number": 77,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
   },
   {
     "battle": "Spring2026",
-    "display_name": "Spring2026",
+    "display_name": "Spring 2026",
     "first_snapshot": "2026-04-21T12:14:36.000Z",
     "last_snapshot": "2026-04-25T13:09:36.000Z",
     "total_snapshots": 1140,
@@ -382,17 +382,5 @@
     "placement": 32,
     "update_number": null,
     "update_url": null
-  },
-  {
-    "battle": "Starry Battle",
-    "display_name": "Starry Battle",
-    "first_snapshot": null,
-    "last_snapshot": null,
-    "total_snapshots": null,
-    "total_rows": null,
-    "unique_players": null,
-    "placement": 0,
-    "update_number": 77,
-    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
   }
 ]
