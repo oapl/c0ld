@@ -318,15 +318,5 @@
     "total_rows": null,
     "unique_players": null,
     "placement": 32
-  },
-  {
-    "battle": "Spring 2026",
-    "display_name": "Spring 2026",
-    "first_snapshot": null,
-    "last_snapshot": null,
-    "total_snapshots": null,
-    "total_rows": null,
-    "unique_players": null,
-    "placement": 34
   }
 ]
