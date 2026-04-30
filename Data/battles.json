@@ -3,9 +3,9 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-04-30T19:25:56.162Z",
-    "total_snapshots": 307,
-    "total_rows": 22329,
+    "last_snapshot": "2026-04-30T19:30:56.750Z",
+    "total_snapshots": 308,
+    "total_rows": 22402,
     "unique_players": 73,
     "placement": null
   },
@@ -17,7 +17,7 @@
     "total_snapshots": 1140,
     "total_rows": 83827,
     "unique_players": 84,
-    "placement": 37
+    "placement": null
   },
   {
     "battle": "Forged Battle",
