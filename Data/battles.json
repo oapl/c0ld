@@ -7,15 +7,15 @@
     "total_snapshots": 1140,
     "total_rows": 83827,
     "unique_players": 84,
-    "placement": 34 
+    "placement": null
   },
   {
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-04-30T18:50:59.524Z",
-    "total_snapshots": 299,
-    "total_rows": 21745,
+    "last_snapshot": "2026-04-30T18:56:01.671Z",
+    "total_snapshots": 300,
+    "total_rows": 21818,
     "unique_players": 73,
     "placement": null
   }
