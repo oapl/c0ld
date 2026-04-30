@@ -670,13 +670,16 @@
         const battle = (profile.battles || []).find(b => b.battle === battleName);
         if (!battle) continue;
 
+        const endingPoints = Number(battle.ending_points || 0);
+
         rows.push({
-          rank: battle.last_rank,
+          rank: null,
+          stored_rank: battle.last_rank,
           username: profile.username,
           user_id: profile.user_id,
           profile_key: profile.profile_key,
           avatar_url: profile.avatar_url,
-          total_points: battle.ending_points,
+          total_points: endingPoints,
           gain_5m: null,
           gain_1h: null,
           gain_12h: null,
@@ -686,12 +689,16 @@
       }
 
       rows.sort((a, b) => {
-        const ar = Number(a.rank);
-        const br = Number(b.rank);
+        const ap = Number(a.total_points || 0);
+        const bp = Number(b.total_points || 0);
 
-        if (!Number.isNaN(ar) && !Number.isNaN(br)) return ar - br;
+        if (bp !== ap) return bp - ap;
 
-        return Number(b.total_points || 0) - Number(a.total_points || 0);
+        return String(a.username || "").localeCompare(String(b.username || ""));
+      });
+
+      rows.forEach((row, index) => {
+        row.rank = index + 1;
       });
 
       return rows;
