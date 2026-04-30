@@ -12,7 +12,7 @@ First and foremost, I'm **_tired_**.
 I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
 
 
-_EXAMPLE: This updates at the same tempo and just shows some of it._
+_EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Top 10 Members (by Total Points)
 <!-- START_LEADERBOARD -->
