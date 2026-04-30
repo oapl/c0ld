@@ -5,7 +5,9 @@
 //   - placement is ALWAYS manual
 //   - update_number is ALWAYS manual
 //   - update_url is ALWAYS manual
-//   - generated data may fill only snapshot/count fields
+//   - manual display_name wins when present
+//   - manual dates/counts win when present, otherwise generated fills gaps
+//   - duplicate battle rows are collapsed into one row
 //
 // Inputs:
 //   Data/battles.json
@@ -25,7 +27,7 @@ function normalizeBattleKey(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ");
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function numberOrNull(value) {
@@ -67,7 +69,6 @@ function cleanManualRecord(record) {
     total_rows: numberOrNull(record.total_rows),
     unique_players: numberOrNull(record.unique_players),
 
-    // Manual-only fields.
     placement: numberOrNull(record.placement),
     update_number: numberOrNull(record.update_number),
     update_url: stringOrNull(record.update_url)
@@ -88,8 +89,42 @@ function cleanGeneratedRecord(record) {
     total_snapshots: numberOrNull(record.total_snapshots),
     total_rows: numberOrNull(record.total_rows),
     unique_players: numberOrNull(record.unique_players)
+  };
+}
 
-    // Do NOT read placement/update fields from generated records.
+function preferBetterGenerated(existing, incoming) {
+  if (!existing) return incoming;
+
+  return {
+    battle: existing.battle || incoming.battle,
+    display_name: existing.display_name || incoming.display_name,
+
+    first_snapshot: existing.first_snapshot ?? incoming.first_snapshot,
+    last_snapshot: existing.last_snapshot ?? incoming.last_snapshot,
+
+    total_snapshots: existing.total_snapshots ?? incoming.total_snapshots,
+    total_rows: existing.total_rows ?? incoming.total_rows,
+    unique_players: existing.unique_players ?? incoming.unique_players
+  };
+}
+
+function preferBetterManual(existing, incoming) {
+  if (!existing) return incoming;
+
+  return {
+    battle: incoming.battle || existing.battle,
+    display_name: incoming.display_name || existing.display_name,
+
+    first_snapshot: incoming.first_snapshot ?? existing.first_snapshot,
+    last_snapshot: incoming.last_snapshot ?? existing.last_snapshot,
+
+    total_snapshots: incoming.total_snapshots ?? existing.total_snapshots,
+    total_rows: incoming.total_rows ?? existing.total_rows,
+    unique_players: incoming.unique_players ?? existing.unique_players,
+
+    placement: incoming.placement ?? existing.placement ?? null,
+    update_number: incoming.update_number ?? existing.update_number ?? null,
+    update_url: incoming.update_url ?? existing.update_url ?? null
   };
 }
 
@@ -98,16 +133,13 @@ function mergeRecord(manual, generated) {
     battle: manual?.battle || generated?.battle || null,
     display_name: manual?.display_name || generated?.display_name || null,
 
-    // Prefer manual dates if present. Generated fills gaps only.
     first_snapshot: manual?.first_snapshot ?? generated?.first_snapshot ?? null,
     last_snapshot: manual?.last_snapshot ?? generated?.last_snapshot ?? null,
 
-    // Prefer manual counts if present. Generated fills gaps only.
     total_snapshots: manual?.total_snapshots ?? generated?.total_snapshots ?? null,
     total_rows: manual?.total_rows ?? generated?.total_rows ?? null,
     unique_players: manual?.unique_players ?? generated?.unique_players ?? null,
 
-    // Always manual. Never generated.
     placement: manual?.placement ?? null,
     update_number: manual?.update_number ?? null,
     update_url: manual?.update_url ?? null
@@ -148,23 +180,23 @@ async function main() {
   const generatedRaw = await readJsonArray(GENERATED_FILE);
   const manualRaw = await readJsonArray(MANUAL_FILE);
 
-  const generatedRecords = generatedRaw
-    .map(cleanGeneratedRecord)
-    .filter(record => record.battle && record.display_name);
-
-  const manualRecords = manualRaw
-    .map(cleanManualRecord)
-    .filter(record => record.battle && record.display_name);
-
   const generatedMap = new Map();
   const manualMap = new Map();
 
-  for (const record of generatedRecords) {
-    generatedMap.set(normalizeBattleKey(record.battle), record);
+  for (const raw of generatedRaw) {
+    const record = cleanGeneratedRecord(raw);
+    if (!record.battle || !record.display_name) continue;
+
+    const key = normalizeBattleKey(record.battle);
+    generatedMap.set(key, preferBetterGenerated(generatedMap.get(key), record));
   }
 
-  for (const record of manualRecords) {
-    manualMap.set(normalizeBattleKey(record.battle), record);
+  for (const raw of manualRaw) {
+    const record = cleanManualRecord(raw);
+    if (!record.battle || !record.display_name) continue;
+
+    const key = normalizeBattleKey(record.battle);
+    manualMap.set(key, preferBetterManual(manualMap.get(key), record));
   }
 
   const allKeys = new Set([
@@ -172,18 +204,20 @@ async function main() {
     ...manualMap.keys()
   ]);
 
-  const merged = [];
+  const finalRecords = [];
 
   for (const key of allKeys) {
     const generated = generatedMap.get(key) || null;
     const manual = manualMap.get(key) || null;
 
-    merged.push(mergeRecord(manual, generated));
+    const merged = mergeRecord(manual, generated);
+
+    if (merged.battle && merged.display_name) {
+      finalRecords.push(merged);
+    }
   }
 
-  const finalRecords = merged
-    .filter(record => record.battle && record.display_name)
-    .sort(sortBattles);
+  finalRecords.sort(sortBattles);
 
   await fs.writeFile(
     GENERATED_FILE,
@@ -191,8 +225,10 @@ async function main() {
     "utf8"
   );
 
-  console.log(`Generated battles read: ${generatedRecords.length}`);
-  console.log(`Manual battles read: ${manualRecords.length}`);
+  console.log(`Generated raw battles read: ${generatedRaw.length}`);
+  console.log(`Manual raw battles read: ${manualRaw.length}`);
+  console.log(`Generated unique battles: ${generatedMap.size}`);
+  console.log(`Manual unique battles: ${manualMap.size}`);
   console.log(`Final battles written: ${finalRecords.length}`);
   console.log("Manual-only fields preserved:");
   console.log("  - placement");
