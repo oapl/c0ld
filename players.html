@@ -222,6 +222,53 @@
       padding: 24px;
     }
 
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 16px 16px;
+      flex-wrap: wrap;
+    }
+
+    .pager.hidden {
+      display: none;
+    }
+
+    .pager button {
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 7px 11px;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .pager button:hover:not(:disabled) {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .pager button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .pager button.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+      font-weight: bold;
+    }
+
+    .pager-info {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 0 6px;
+    }
+
     .error {
       border: 1px solid var(--danger);
       background: var(--danger-bg);
@@ -244,6 +291,10 @@
       }
 
       .menu-bar {
+        justify-content: flex-start;
+      }
+
+      .pager {
         justify-content: flex-start;
       }
     }
@@ -292,14 +343,27 @@
         <h2 class="section-title">Previous Members</h2>
         <div id="previous-count" class="section-count">—</div>
       </div>
+
       <div id="previous-players" class="grid"></div>
+
+      <div id="previous-pager" class="pager hidden">
+        <button id="prev-page" type="button">Previous</button>
+        <span id="page-buttons"></span>
+        <button id="next-page" type="button">Next</button>
+        <span id="pager-info" class="pager-info"></span>
+      </div>
     </section>
   </main>
 
   <script>
+    const PREVIOUS_PAGE_SIZE = 25;
+
     let allPlayers = [];
     let currentData = null;
     let currentKeys = new Set();
+
+    let previousPage = 1;
+    let lastPreviousTotalPages = 1;
 
     function fmtNum(n) {
       if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "N/A";
@@ -326,10 +390,6 @@
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
-    }
-
-    function getPlayerKey(p) {
-      return String(p.user_id || p.profile_key || p.username || "").toLowerCase();
     }
 
     function buildCurrentKeys() {
@@ -403,7 +463,7 @@
       }
     }
 
-    function render() {
+    function getFilteredPlayers() {
       const q = document.getElementById("search").value.trim().toLowerCase();
 
       let visible = allPlayers.slice();
@@ -432,11 +492,136 @@
           return String(a.username || "").localeCompare(String(b.username || ""));
         });
 
+      return { current, previous };
+    }
+
+    function buildPageButton(pageNumber) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = String(pageNumber);
+
+      if (pageNumber === previousPage) {
+        btn.className = "active";
+      }
+
+      btn.addEventListener("click", () => {
+        previousPage = pageNumber;
+        render();
+        scrollPreviousSectionIntoView();
+      });
+
+      return btn;
+    }
+
+    function renderPager(previousCount) {
+      const pager = document.getElementById("previous-pager");
+      const pageButtons = document.getElementById("page-buttons");
+      const prevBtn = document.getElementById("prev-page");
+      const nextBtn = document.getElementById("next-page");
+      const pagerInfo = document.getElementById("pager-info");
+
+      const totalPages = Math.max(1, Math.ceil(previousCount / PREVIOUS_PAGE_SIZE));
+      lastPreviousTotalPages = totalPages;
+
+      if (previousPage > totalPages) {
+        previousPage = totalPages;
+      }
+
+      if (previousCount <= PREVIOUS_PAGE_SIZE) {
+        pager.classList.add("hidden");
+        pageButtons.innerHTML = "";
+        pagerInfo.textContent = "";
+        return;
+      }
+
+      pager.classList.remove("hidden");
+
+      prevBtn.disabled = previousPage <= 1;
+      nextBtn.disabled = previousPage >= totalPages;
+
+      pageButtons.innerHTML = "";
+
+      const pagesToShow = new Set();
+
+      pagesToShow.add(1);
+      pagesToShow.add(totalPages);
+
+      for (let i = previousPage - 2; i <= previousPage + 2; i++) {
+        if (i >= 1 && i <= totalPages) {
+          pagesToShow.add(i);
+        }
+      }
+
+      const sortedPages = [...pagesToShow].sort((a, b) => a - b);
+
+      let last = 0;
+
+      for (const page of sortedPages) {
+        if (last && page - last > 1) {
+          const dots = document.createElement("span");
+          dots.className = "pager-info";
+          dots.textContent = "…";
+          pageButtons.appendChild(dots);
+        }
+
+        pageButtons.appendChild(buildPageButton(page));
+        last = page;
+      }
+
+      const start = (previousPage - 1) * PREVIOUS_PAGE_SIZE + 1;
+      const end = Math.min(previousPage * PREVIOUS_PAGE_SIZE, previousCount);
+
+      pagerInfo.textContent = `${start}-${end} of ${previousCount}`;
+    }
+
+    function scrollPreviousSectionIntoView() {
+      const section = document.getElementById("previous-players");
+      if (!section) return;
+
+      section.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }
+
+    function render() {
+      const { current, previous } = getFilteredPlayers();
+
+      const totalPreviousPages = Math.max(1, Math.ceil(previous.length / PREVIOUS_PAGE_SIZE));
+
+      if (previousPage > totalPreviousPages) {
+        previousPage = totalPreviousPages;
+      }
+
+      const previousStart = (previousPage - 1) * PREVIOUS_PAGE_SIZE;
+      const previousEnd = previousStart + PREVIOUS_PAGE_SIZE;
+      const previousPageItems = previous.slice(previousStart, previousEnd);
+
       document.getElementById("current-count").textContent = `${current.length} player(s)`;
-      document.getElementById("previous-count").textContent = `${previous.length} player(s)`;
+      document.getElementById("previous-count").textContent =
+        `${previous.length} player(s) · Page ${previousPage} of ${totalPreviousPages}`;
 
       renderGroup(document.getElementById("current-players"), current, "current");
-      renderGroup(document.getElementById("previous-players"), previous, "previous");
+      renderGroup(document.getElementById("previous-players"), previousPageItems, "previous");
+      renderPager(previous.length);
+    }
+
+    function wirePager() {
+      document.getElementById("prev-page").addEventListener("click", () => {
+        if (previousPage <= 1) return;
+
+        previousPage--;
+        render();
+        scrollPreviousSectionIntoView();
+      });
+
+      document.getElementById("next-page").addEventListener("click", () => {
+        if (previousPage >= lastPreviousTotalPages) return;
+
+        previousPage++;
+        render();
+        scrollPreviousSectionIntoView();
+      });
     }
 
     async function main() {
@@ -460,9 +645,13 @@
         currentData = await currentRes.json();
 
         buildCurrentKeys();
+        wirePager();
         render();
 
-        document.getElementById("search").addEventListener("input", render);
+        document.getElementById("search").addEventListener("input", () => {
+          previousPage = 1;
+          render();
+        });
       } catch (err) {
         console.error(err);
         document.querySelector("main").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
