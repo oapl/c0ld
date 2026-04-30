@@ -278,11 +278,6 @@
       font-weight: bold;
     }
 
-    .muted {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
     .num {
       text-align: right;
       font-variant-numeric: tabular-nums;
@@ -364,16 +359,12 @@
         <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
       </div>
 
-      <a
-        class="github-btn"
-        href="https://github.com/OpalApocalypse/NONG_Leaderboard"
-        target="_blank"
-        rel="noopener"
-      >GitHub</a>
+      <a class="github-btn" href="https://github.com/OpalApocalypse/NONG_Leaderboard" target="_blank" rel="noopener">GitHub</a>
     </div>
 
     <div class="menu-bar">
-      <button class="menu-btn active" id="tab-btn-leaderboard" type="button">Current Leaderboard</button>
+      <button class="menu-btn active" id="tab-btn-leaderboard" type="button">NONG Leaderboard</button>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="players.html">Player Profiles</a>
       <button class="menu-btn" id="tab-btn-history" type="button">Clan History</button>
     </div>
@@ -406,7 +397,7 @@
 
     <section id="view-leaderboard" class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">Leaderboard</h2>
+        <h2 class="panel-title">NONG Leaderboard</h2>
 
         <div class="toolbar">
           <select id="battle-select">
@@ -981,7 +972,7 @@
       });
     }
 
-    async function loadData(options = {}) {
+    async function loadData() {
       if (isLoading) return;
 
       isLoading = true;
