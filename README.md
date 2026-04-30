@@ -12,19 +12,19 @@ Shows the data below just because and passes into a Discord webhook.
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 9.81K | 81 |
-| 2 | johnr622 | 9.79K | 81 |
-| 3 | joshuacd2006 | 9.43K | 49 |
-| 4 | Josep_xD2 | 9.16K | 48 |
-| 5 | jupiter0477 | 9.01K | 76 |
-| 6 | Mr_Suter | 8.96K | 81 |
-| 7 | Johnr622_alt2 | 8.25K | 71 |
-| 8 | Johnr622_alt3 | 8.25K | 71 |
-| 9 | Johnr622_alt4 | 8K | 71 |
-| 10 | Johnr622_alt5 | 8K | 71 |
+| 1 | Yume_Sakurax3 | 9.81K | 75 |
+| 2 | johnr622 | 9.79K | 75 |
+| 3 | joshuacd2006 | 9.44K | 45 |
+| 4 | Josep_xD2 | 9.17K | 45 |
+| 5 | jupiter0477 | 9.01K | 70 |
+| 6 | Mr_Suter | 8.96K | 75 |
+| 7 | Johnr622_alt2 | 8.25K | 67 |
+| 8 | Johnr622_alt3 | 8.25K | 67 |
+| 9 | Johnr622_alt4 | 8.01K | 67 |
+| 10 | Johnr622_alt5 | 8K | 67 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-30 19:18:49 UTC
+2026-04-30 19:21:02 UTC
 <!-- END_UPDATED -->
