@@ -148,7 +148,8 @@ async function fetchAllRows(table) {
 async function fetchCurrentLeaderboard() {
   const url = new URL(`${SUPABASE_URL}/rest/v1/leaderboard_snapshots`);
   url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
-  url.searchParams.set("order", "rank.asc");
+  url.searchParams.set("order", "fetched_at.desc");
+  url.searchParams.set("limit", "5000");
 
   const res = await fetch(url.toString(), {
     headers: sbHeaders({ Prefer: "return=representation" })
@@ -159,7 +160,17 @@ async function fetchCurrentLeaderboard() {
     throw new Error(`Supabase fetch failed for leaderboard_snapshots (${res.status}): ${text}`);
   }
 
-  return res.json();
+  const rows = await res.json();
+
+  if (!rows.length) {
+    return [];
+  }
+
+  const latestTimestamp = rows[0].fetched_at;
+
+  return rows
+    .filter(row => row.fetched_at === latestTimestamp)
+    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 }
 
 function groupRowsByTimestamp(rows) {
@@ -244,9 +255,7 @@ function addGainFieldsToCurrent(currentRows, archiveRows) {
 
     oldPointMaps[win.key] = buildPointMap(oldBatch);
 
-    console.log(
-      `${win.key}: found ${oldBatch.length} rows near ${win.minutes} minutes ago`
-    );
+    console.log(`${win.key}: found ${oldBatch.length} rows near ${win.minutes} minutes ago`);
   }
 
   return currentRows.map(row => {
@@ -324,7 +333,6 @@ async function downloadAvatarToCache(userId, imageUrl) {
   const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
 
   if (await fileExists(filePath)) {
-    console.log(`Avatar already cached for ${userId}: ${publicPath}`);
     return publicPath;
   }
 
@@ -472,162 +480,172 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
   };
 }
 
-function findClanRankInAnyShape(value, clanName) {
-  const target = String(clanName).toLowerCase();
+function extractClanArrays(value) {
+  const arrays = [];
 
-  function getName(node) {
-    return (
-      node?.Name ??
-      node?.name ??
-      node?.ClanName ??
-      node?.clanName ??
-      node?.Clan ??
-      node?.clan ??
-      node?.Tag ??
-      node?.tag ??
-      node?.ClanTag ??
-      node?.clanTag ??
-      node?.DisplayName ??
-      node?.displayName
-    );
-  }
+  function looksLikeClanObject(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
 
-  function getRank(node) {
-    return (
-      node?.Rank ??
-      node?.rank ??
-      node?.Place ??
-      node?.place ??
-      node?.Position ??
-      node?.position ??
-      node?.Index ??
-      node?.index
-    );
-  }
+    const hasName =
+      obj.Name !== undefined ||
+      obj.name !== undefined ||
+      obj.ClanName !== undefined ||
+      obj.clanName !== undefined ||
+      obj.Tag !== undefined ||
+      obj.tag !== undefined;
 
-  function getPoints(node) {
-    return (
-      node?.Points ??
-      node?.points ??
-      node?.Score ??
-      node?.score ??
-      node?.Total ??
-      node?.total ??
-      node?.Value ??
-      node?.value
-    );
-  }
+    const hasPoints =
+      obj.Points !== undefined ||
+      obj.points !== undefined ||
+      obj.Score !== undefined ||
+      obj.score !== undefined ||
+      obj.Total !== undefined ||
+      obj.total !== undefined ||
+      obj.Value !== undefined ||
+      obj.value !== undefined;
 
-  function nameMatches(name) {
-    return String(name || "").toLowerCase() === target;
-  }
-
-  function isLeaderboardArray(arr) {
-    if (!Array.isArray(arr) || !arr.length) return false;
-
-    return arr.some(item => {
-      if (!item || typeof item !== "object") return false;
-      return getName(item) !== undefined && getPoints(item) !== undefined;
-    });
+    return hasName && hasPoints;
   }
 
   function walk(node) {
-    if (!node || typeof node !== "object") return null;
+    if (!node || typeof node !== "object") return;
 
     if (Array.isArray(node)) {
-      if (isLeaderboardArray(node)) {
-        const sorted = [...node].sort((a, b) => Number(getPoints(b) || 0) - Number(getPoints(a) || 0));
-
-        for (let i = 0; i < sorted.length; i++) {
-          const item = sorted[i];
-          const name = getName(item);
-
-          if (nameMatches(name)) {
-            const explicitRank = getRank(item);
-            const rank = Number(explicitRank || i + 1);
-
-            return {
-              rank,
-              source: "leaderboard_array",
-              matchedName: String(name),
-              points: Number(getPoints(item) || 0)
-            };
-          }
-        }
+      if (node.some(looksLikeClanObject)) {
+        arrays.push(node);
       }
 
       for (const item of node) {
-        const found = walk(item);
-        if (found) return found;
+        walk(item);
       }
 
-      return null;
-    }
-
-    const name = getName(node);
-
-    if (nameMatches(name)) {
-      const explicitRank = getRank(node);
-
-      if (explicitRank !== undefined && explicitRank !== null && explicitRank !== "") {
-        return {
-          rank: Number(explicitRank),
-          source: "object_explicit_rank",
-          matchedName: String(name),
-          points: Number(getPoints(node) || 0)
-        };
-      }
+      return;
     }
 
     for (const child of Object.values(node)) {
-      const found = walk(child);
-      if (found) return found;
+      walk(child);
     }
-
-    return null;
   }
 
-  return walk(value);
+  walk(value);
+  return arrays;
+}
+
+function getClanName(clan) {
+  return String(
+    clan?.Name ??
+    clan?.name ??
+    clan?.ClanName ??
+    clan?.clanName ??
+    clan?.Tag ??
+    clan?.tag ??
+    ""
+  ).trim();
+}
+
+function getClanPoints(clan) {
+  return Number(
+    clan?.Points ??
+    clan?.points ??
+    clan?.Score ??
+    clan?.score ??
+    clan?.Total ??
+    clan?.total ??
+    clan?.Value ??
+    clan?.value ??
+    0
+  );
+}
+
+function getClanExplicitRank(clan) {
+  const value =
+    clan?.Rank ??
+    clan?.rank ??
+    clan?.Place ??
+    clan?.place ??
+    clan?.Position ??
+    clan?.position ??
+    clan?.Index ??
+    clan?.index;
+
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 async function fetchNongCurrentRank() {
-  const urls = [
-    "https://biggamesapi.io/api/activeClanBattle"
+  const target = String(CLAN_NAME || "NONG").trim().toLowerCase();
+  const pageSize = 100;
+  const maxPages = 100;
+
+  const hosts = [
+    "https://biggamesapi.io/api/clans",
+    "https://ps99.biggamesapi.io/api/clans"
   ];
 
-  for (const url of urls) {
-    try {
-      console.log(`Fetching current clan rank from ${url}...`);
+  for (const baseUrl of hosts) {
+    console.log(`Fetching current clan rank for ${CLAN_NAME} from ${baseUrl}...`);
 
-      const json = await fetchJson(url, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "NONG-Leaderboard-Rank"
+    for (let page = 1; page <= maxPages; page++) {
+      const url = new URL(baseUrl);
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("pageSize", String(pageSize));
+      url.searchParams.set("sort", "Points");
+      url.searchParams.set("sortOrder", "desc");
+
+      try {
+        const json = await fetchJson(url.toString(), {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "NONG-Leaderboard-Rank"
+          }
+        });
+
+        const clanArrays = extractClanArrays(json);
+        const clans = clanArrays.length ? clanArrays[0] : [];
+
+        if (!clans.length) {
+          console.warn(`No clan array found on ${baseUrl} page ${page}.`);
+          break;
         }
-      });
 
-      const found = findClanRankInAnyShape(json, CLAN_NAME);
+        const sorted = [...clans].sort((a, b) => getClanPoints(b) - getClanPoints(a));
 
-      if (found && Number.isFinite(Number(found.rank))) {
-        console.log(
-          `${CLAN_NAME} current rank found: #${found.rank} via ${found.source}. ` +
-          `Matched name: ${found.matchedName}. Points: ${found.points}.`
-        );
+        for (let i = 0; i < sorted.length; i++) {
+          const clan = sorted[i];
+          const name = getClanName(clan);
 
-        return {
-          rank: Number(found.rank),
-          source: found.source,
-          matched_name: found.matchedName,
-          points: Number.isFinite(Number(found.points)) ? Number(found.points) : null
-        };
+          if (name.toLowerCase() === target) {
+            const explicitRank = getClanExplicitRank(clan);
+            const calculatedRank = (page - 1) * pageSize + i + 1;
+            const rank = explicitRank || calculatedRank;
+            const points = getClanPoints(clan);
+
+            console.log(`${CLAN_NAME} current rank found: #${rank} with ${points} points.`);
+
+            return {
+              rank,
+              source: baseUrl,
+              matched_name: name,
+              points
+            };
+          }
+        }
+
+        console.log(`Checked ${baseUrl} page ${page}; ${CLAN_NAME} not found yet.`);
+
+        if (sorted.length < pageSize) {
+          break;
+        }
+
+        await sleep(150);
+      } catch (err) {
+        console.warn(`Clan rank lookup error from ${baseUrl} page ${page}: ${err.message}`);
+        break;
       }
-
-      console.warn(`${CLAN_NAME} current rank not found in activeClanBattle response.`);
-      console.warn("Rank response top-level keys:", Object.keys(json || {}).join(", "));
-    } catch (err) {
-      console.warn(`Clan rank lookup error from ${url}: ${err.message}`);
     }
   }
+
+  console.warn(`${CLAN_NAME} was not found in the searched clan pages.`);
 
   return {
     rank: null,
