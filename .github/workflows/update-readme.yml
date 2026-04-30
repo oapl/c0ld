@@ -49,35 +49,45 @@ jobs:
 
       - name: Fetch, store and broadcast leaderboard
         env:
-          CLAN_NAME:                 ${{ vars.CLAN_NAME }}
-          TOP_N:                     ${{ vars.TOP_N }}
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY:      ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DISCORD_BOT_TOKEN:         ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID:        ${{ secrets.DISCORD_CHANNEL_ID }}
-          DISCORD_MESSAGE_IDS:       ${{ secrets.DISCORD_MESSAGE_IDS }}
-          DISCORD_WEBHOOK_URL:       ${{ secrets.DISCORD_WEBHOOK_URL }}
-          RUN_SOURCE:                ${{ github.event.inputs.source }}
+          CLAN_NAME:                    ${{ vars.CLAN_NAME }}
+          TOP_N:                        ${{ vars.TOP_N }}
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:         ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_BOT_TOKEN:            ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID:           ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_MESSAGE_IDS:          ${{ secrets.DISCORD_MESSAGE_IDS }}
+          DISCORD_WEBHOOK_URL:          ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_SOURCE:                   ${{ github.event.inputs.source }}
         run: node ingest.js
 
       - name: Ingest clan rank snapshots
         env:
-          CLAN_NAME:                 ${{ vars.CLAN_NAME }}
-          CURRENT_BATTLE_NAME:       ${{ vars.CURRENT_BATTLE_NAME }}
-          CLAN_RANK_TOP_N:           ${{ vars.CLAN_RANK_TOP_N }}
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY:      ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CLAN_NAME:                    ${{ vars.CLAN_NAME }}
+          CURRENT_BATTLE_NAME:          ${{ vars.CURRENT_BATTLE_NAME }}
+          CLAN_RANK_TOP_N:              ${{ vars.CLAN_RANK_TOP_N }}
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:         ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/ingest-clan-ranks.js
 
       - name: Build player profile data
         env:
-          CLAN_NAME:                 ${{ vars.CLAN_NAME }}
-          CURRENT_BATTLE_NAME:       ${{ vars.CURRENT_BATTLE_NAME }}
-          CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
-          CURRENT_BATTLE_END_ISO:    ${{ vars.CURRENT_BATTLE_END_ISO }}
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY:      ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CLAN_NAME:                    ${{ vars.CLAN_NAME }}
+          CURRENT_BATTLE_NAME:          ${{ vars.CURRENT_BATTLE_NAME }}
+          CURRENT_BATTLE_DISPLAY_NAME:  ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
+          CURRENT_BATTLE_END_ISO:       ${{ vars.CURRENT_BATTLE_END_ISO }}
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:         ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/build-player-profiles.js
+
+      - name: Build clan leaderboard data
+        env:
+          CLAN_NAME:                    ${{ vars.CLAN_NAME }}
+          CURRENT_BATTLE_NAME:          ${{ vars.CURRENT_BATTLE_NAME }}
+          CURRENT_BATTLE_DISPLAY_NAME:  ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
+          CURRENT_BATTLE_END_ISO:       ${{ vars.CURRENT_BATTLE_END_ISO }}
+          SUPABASE_URL:                 ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:         ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/build-clan-leaderboard.js
 
       - name: Show generated avatar files
         run: |
@@ -91,10 +101,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add README.md Data/ assets/avatars/
+          git add README.md Data/ assets/avatars/ index.html clans.html
 
           if git diff --cached --quiet; then
-            echo "No README, Data, or avatar changes to commit."
+            echo "No README, Data, avatar, or page changes to commit."
             exit 0
           fi
 
