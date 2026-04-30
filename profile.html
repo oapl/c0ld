@@ -3,8 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NONG Player Profile</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Player Profile</title>
 
   <style>
     *, *::before, *::after {
@@ -111,21 +110,27 @@
       transform: translateY(-1px);
     }
 
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
     main {
       max-width: 1200px;
       margin: 0 auto;
       padding: 22px 24px 24px;
     }
 
-    .profile {
+    .profile-header {
       display: flex;
-      gap: 18px;
       align-items: center;
-      margin-bottom: 24px;
-      padding: 18px;
+      gap: 18px;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: var(--panel);
+      padding: 18px;
+      margin-bottom: 24px;
     }
 
     .avatar {
@@ -137,18 +142,21 @@
       flex: 0 0 auto;
     }
 
-    h1 {
+    .profile-name {
       margin: 0 0 6px;
+      font-size: 34px;
+      line-height: 1.05;
     }
 
-    .muted {
+    .profile-meta {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1.45;
     }
 
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -158,6 +166,10 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       background: var(--panel);
+      min-height: 82px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     .label {
@@ -167,46 +179,102 @@
     }
 
     .value {
-      font-size: 22px;
+      font-size: 21px;
       font-weight: bold;
+      line-height: 1.25;
+      word-break: break-word;
     }
 
-    .battle {
-      margin-top: 24px;
-      padding: 16px;
+    .section-title {
+      margin: 24px 0 14px;
+      font-size: 24px;
+    }
+
+    .battle-card {
       border: 1px solid var(--border);
       border-radius: 10px;
       background: var(--panel);
+      margin-bottom: 18px;
+      overflow: hidden;
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-    }
-
-    th, td {
+    .battle-header {
+      padding: 16px;
       border-bottom: 1px solid var(--border);
-      padding: 8px;
-      text-align: left;
     }
 
-    th {
+    .battle-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    .battle-dates {
       color: var(--muted);
-      font-weight: normal;
+      font-size: 13px;
     }
 
-    canvas {
-      margin-top: 18px;
-      max-height: 360px;
+    .stats {
+      padding: 8px 16px 16px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: minmax(190px, 1fr) minmax(100px, 1fr);
+      gap: 16px;
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat-row:last-child {
+      border-bottom: 0;
+    }
+
+    .stat-label {
+      color: var(--muted);
+    }
+
+    .stat-value {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .series-wrap {
+      padding: 0 16px 16px;
+    }
+
+    .series-title {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 10px 0;
+    }
+
+    .sparkline {
+      width: 100%;
+      height: 120px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      display: block;
+    }
+
+    .empty, .error {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 18px;
+      color: var(--muted);
     }
 
     .error {
-      border: 1px solid var(--danger);
+      border-color: var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
-      border-radius: 10px;
-      padding: 16px;
+    }
+
+    @media (max-width: 1000px) {
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 700px) {
@@ -222,17 +290,34 @@
         font-size: 24px;
       }
 
-      .profile {
+      .menu-bar {
+        justify-content: flex-start;
+      }
+
+      .profile-header {
         align-items: flex-start;
       }
 
-      .avatar {
-        width: 72px;
-        height: 72px;
+      .profile-name {
+        font-size: 26px;
       }
 
-      .menu-bar {
-        justify-content: flex-start;
+      .avatar {
+        width: 76px;
+        height: 76px;
+      }
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .stat-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+
+      .stat-value {
+        text-align: left;
       }
     }
   </style>
@@ -255,28 +340,18 @@
     </div>
 
     <div class="menu-bar">
-      <a class="menu-btn" href="index.html">Current Leaderboard</a>
-      <a class="menu-btn" href="players.html">Player Profiles</a>
+      <a class="menu-btn" href="index.html">NONG Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn active" href="players.html">Player Profiles</a>
       <a class="menu-btn" href="index.html#history">Clan History</a>
     </div>
   </header>
 
-  <main>
-    <div id="status">Loading profile...</div>
-    <div id="content" style="display:none;"></div>
+  <main id="app">
+    <div class="empty">Loading player profile...</div>
   </main>
 
   <script>
-    function fmtNum(n) {
-      if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "N/A";
-      return Number(n).toLocaleString("en-US");
-    }
-
-    function fmtDate(s) {
-      if (!s) return "N/A";
-      return new Date(s).toLocaleString();
-    }
-
     function escapeHtml(s) {
       return String(s ?? "")
         .replace(/&/g, "&amp;")
@@ -285,148 +360,282 @@
         .replace(/"/g, "&quot;");
     }
 
+    function fmtNum(n) {
+      if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
+      return Number(n).toLocaleString("en-US");
+    }
+
+    function fmtDate(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+    }
+
+    function fmtDateTime(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "medium"
+      });
+    }
+
     function getProfileId() {
       const params = new URLSearchParams(window.location.search);
       return params.get("id");
     }
 
-    function card(label, value) {
-      return `
-        <div class="card">
-          <div class="label">${label}</div>
-          <div class="value">${value}</div>
-        </div>
-      `;
+    function getBattleSortTime(battle) {
+      const d = new Date(battle.last_seen || battle.battle_last_snapshot || battle.last_snapshot || 0);
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
     }
 
-    function renderChart(canvas, battle) {
-      const labels = battle.series.map(p => new Date(p.t).toLocaleString());
-      const points = battle.series.map(p => p.points);
+    function drawSparkline(canvas, series) {
+      if (!canvas || !Array.isArray(series) || series.length < 2) return;
 
-      new Chart(canvas, {
-        type: "line",
-        data: {
-          labels,
-          datasets: [
-            {
-              label: "Points",
-              data: points,
-              tension: 0.25
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: {
-              labels: {
-                color: "#e6edf3"
-              }
-            }
-          },
-          scales: {
-            x: {
-              ticks: {
-                color: "#8b949e",
-                maxTicksLimit: 8
-              },
-              grid: {
-                color: "#30363d"
-              }
-            },
-            y: {
-              ticks: {
-                color: "#8b949e"
-              },
-              grid: {
-                color: "#30363d"
-              }
-            }
-          }
-        }
+      const ctx = canvas.getContext("2d");
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      const points = series
+        .map(item => ({
+          t: new Date(item.t).getTime(),
+          y: Number(item.points)
+        }))
+        .filter(item => !Number.isNaN(item.t) && !Number.isNaN(item.y));
+
+      if (points.length < 2) return;
+
+      const minT = Math.min(...points.map(p => p.t));
+      const maxT = Math.max(...points.map(p => p.t));
+      const minY = Math.min(...points.map(p => p.y));
+      const maxY = Math.max(...points.map(p => p.y));
+
+      const pad = 14;
+      const width = rect.width - pad * 2;
+      const height = rect.height - pad * 2;
+
+      function x(t) {
+        if (maxT === minT) return pad;
+        return pad + ((t - minT) / (maxT - minT)) * width;
+      }
+
+      function y(v) {
+        if (maxY === minY) return rect.height / 2;
+        return pad + (1 - ((v - minY) / (maxY - minY))) * height;
+      }
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#58a6ff";
+      ctx.beginPath();
+
+      points.forEach((p, i) => {
+        const px = x(p.t);
+        const py = y(p.y);
+
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       });
+
+      ctx.stroke();
+
+      ctx.fillStyle = "#58a6ff";
+      const last = points[points.length - 1];
+      ctx.beginPath();
+      ctx.arc(x(last.t), y(last.y), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function render(profile) {
+      const app = document.getElementById("app");
+
+      const battles = (profile.battles || [])
+        .slice()
+        .sort((a, b) => getBattleSortTime(b) - getBattleSortTime(a));
+
+      app.innerHTML = `
+        <section class="profile-header">
+          <img class="avatar" src="${escapeHtml(profile.avatar_url || "assets/embed-spacer.png")}" alt="">
+          <div>
+            <h2 class="profile-name">${escapeHtml(profile.username || "Unknown")}</h2>
+            <div class="profile-meta">
+              User ID: ${escapeHtml(profile.user_id ?? "N/A")}<br>
+              ${
+                profile.profile_url
+                  ? `<a href="${escapeHtml(profile.profile_url)}" target="_blank" rel="noopener">Open Roblox Profile</a>`
+                  : ""
+              }
+            </div>
+          </div>
+        </section>
+
+        <section class="cards">
+          <div class="card">
+            <div class="label">Battles</div>
+            <div class="value">${fmtNum(profile.total_battles)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Rank</div>
+            <div class="value">${fmtNum(profile.latest_rank)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Points</div>
+            <div class="value">${fmtNum(profile.latest_points)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Seen</div>
+            <div class="value">${fmtDateTime(profile.latest_seen)}</div>
+          </div>
+        </section>
+
+        <h2 class="section-title">Battle History</h2>
+
+        <section id="battle-history"></section>
+      `;
+
+      const history = document.getElementById("battle-history");
+
+      if (!battles.length) {
+        history.innerHTML = `<div class="empty">No battle history found for this player.</div>`;
+        return;
+      }
+
+      for (const battle of battles) {
+        const el = document.createElement("article");
+        el.className = "battle-card";
+
+        const firstDate = fmtDate(battle.first_seen || battle.battle_first_snapshot);
+        const lastDate = fmtDate(battle.last_seen || battle.battle_last_snapshot);
+
+        el.innerHTML = `
+          <div class="battle-header">
+            <h3 class="battle-title">${escapeHtml(battle.display_name || battle.battle || "Unknown Battle")}</h3>
+            <div class="battle-dates">${firstDate} → ${lastDate}</div>
+          </div>
+
+          <div class="stats">
+            <div class="stat-row">
+              <div class="stat-label">Starting Rank</div>
+              <div class="stat-value">${fmtNum(battle.starting_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Last Known Rank</div>
+              <div class="stat-value">${fmtNum(battle.last_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Best Rank</div>
+              <div class="stat-value">${fmtNum(battle.best_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Worst Rank</div>
+              <div class="stat-value">${fmtNum(battle.worst_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Starting Points</div>
+              <div class="stat-value">${fmtNum(battle.starting_points)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Ending Points</div>
+              <div class="stat-value">${fmtNum(battle.ending_points)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Gained Points</div>
+              <div class="stat-value">${fmtNum(battle.gained_points)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Snapshots Seen</div>
+              <div class="stat-value">${fmtNum(battle.snapshot_count)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Present at Final Snapshot</div>
+              <div class="stat-value">${battle.present_at_final_snapshot ? "Yes" : "No"}</div>
+            </div>
+          </div>
+
+          ${
+            Array.isArray(battle.series) && battle.series.length > 1
+              ? `
+                <div class="series-wrap">
+                  <div class="series-title">Points Progression</div>
+                  <canvas class="sparkline"></canvas>
+                </div>
+              `
+              : ""
+          }
+        `;
+
+        history.appendChild(el);
+
+        const canvas = el.querySelector(".sparkline");
+        if (canvas) {
+          requestAnimationFrame(() => drawSparkline(canvas, battle.series));
+        }
+      }
     }
 
     async function main() {
+      const app = document.getElementById("app");
       const id = getProfileId();
 
       if (!id) {
-        document.getElementById("status").textContent = "Missing profile id.";
+        app.innerHTML = `<div class="error">Missing profile ID.</div>`;
         return;
       }
 
-      const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${Date.now()}`);
+      try {
+        const cacheBust = Date.now();
+        const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${cacheBust}`);
 
-      if (!res.ok) {
-        document.getElementById("status").textContent = "Profile not found.";
-        return;
+        if (!res.ok) {
+          throw new Error(`Could not load profile ${id}. HTTP ${res.status}`);
+        }
+
+        const profile = await res.json();
+
+        document.title = `${profile.username || "Player"} - NONG Profile`;
+        render(profile);
+      } catch (err) {
+        console.error(err);
+        app.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
       }
-
-      const p = await res.json();
-
-      document.title = `${p.username} - NONG Profile`;
-
-      const content = document.getElementById("content");
-
-      content.innerHTML = `
-        <div class="profile">
-          <img class="avatar" src="${p.avatar_url || "assets/embed-spacer.png"}" alt="">
-          <div>
-            <h1>${escapeHtml(p.username)}</h1>
-            <div class="muted">User ID: ${p.user_id ?? "N/A"}</div>
-            ${p.profile_url ? `<div><a href="${p.profile_url}" target="_blank" rel="noopener">Open Roblox Profile</a></div>` : ""}
-          </div>
-        </div>
-
-        <div class="cards">
-          ${card("Battles", p.total_battles)}
-          ${card("Latest Rank", p.latest_rank ?? "N/A")}
-          ${card("Latest Points", fmtNum(p.latest_points))}
-          ${card("Latest Seen", fmtDate(p.latest_seen))}
-        </div>
-
-        <h2>Battle History</h2>
-        <div id="battles"></div>
-      `;
-
-      const battlesDiv = content.querySelector("#battles");
-
-      for (const battle of p.battles) {
-        const div = document.createElement("div");
-        div.className = "battle";
-
-        div.innerHTML = `
-          <h3>${escapeHtml(battle.display_name)}</h3>
-          <div class="muted">${fmtDate(battle.first_seen)} → ${fmtDate(battle.last_seen)}</div>
-
-          <table>
-            <tr><th>Starting Rank</th><td>${battle.starting_rank ?? "N/A"}</td></tr>
-            <tr><th>Last Known Rank</th><td>${battle.last_rank ?? "N/A"}</td></tr>
-            <tr><th>Best Rank</th><td>${battle.best_rank ?? "N/A"}</td></tr>
-            <tr><th>Starting Points</th><td>${fmtNum(battle.starting_points)}</td></tr>
-            <tr><th>Ending Points</th><td>${fmtNum(battle.ending_points)}</td></tr>
-            <tr><th>Gained Points</th><td>${fmtNum(battle.gained_points)}</td></tr>
-            <tr><th>Snapshots Seen</th><td>${fmtNum(battle.snapshot_count)}</td></tr>
-            <tr><th>Present at Final Snapshot</th><td>${battle.present_at_final_snapshot ? "Yes" : "No"}</td></tr>
-          </table>
-
-          ${battle.note ? `<p class="muted">${escapeHtml(battle.note)}</p>` : ""}
-
-          <canvas></canvas>
-        `;
-
-        battlesDiv.appendChild(div);
-        renderChart(div.querySelector("canvas"), battle);
-      }
-
-      document.getElementById("status").style.display = "none";
-      content.style.display = "block";
     }
 
-    main().catch(err => {
-      console.error(err);
-      document.getElementById("status").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    window.addEventListener("resize", () => {
+      document.querySelectorAll(".battle-card").forEach((card, index) => {
+        const canvas = card.querySelector(".sparkline");
+        if (!canvas) return;
+
+        const id = getProfileId();
+        if (!id) return;
+      });
     });
+
+    main();
   </script>
 </body>
 </html>
