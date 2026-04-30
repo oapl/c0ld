@@ -358,5 +358,29 @@
     "placement": 10,
     "update_number": null,
     "update_url": null
-  }
+  },
+{
+  "battle": "Spring2026",
+  "display_name": "Spring2026",
+  "first_snapshot": null,
+  "last_snapshot": null,
+  "total_snapshots": null,
+  "total_rows": null,
+  "unique_players": null,
+  "placement": 34,
+  "update_number": null,
+  "update_url": null
+},
+{
+  "battle": "Starry Battle",
+  "display_name": "Starry Battle",
+  "first_snapshot": null,
+  "last_snapshot": null,
+  "total_snapshots": null,
+  "total_rows": null,
+  "unique_players": null,
+  "placement": 0,
+  "update_number": 77,
+  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
+}
 ]
