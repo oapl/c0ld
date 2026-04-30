@@ -470,12 +470,6 @@
     */
     const CURRENT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
 
-    /*
-      Until NONG clan rank is generated into JSON, set it manually here.
-      Example: const NONG_CURRENT_RANK = 14;
-    */
-    const NONG_CURRENT_RANK = null;
-
     let currentData = null;
     let currentRows = [];
     let battles = [];
@@ -742,13 +736,17 @@
     }
 
     function renderCards() {
+      const rank = currentData?.clan_rank || null;
+      const projectedRank = currentData?.projected_rank || null;
+
       document.getElementById("nong-rank-value").textContent =
-        NONG_CURRENT_RANK ? `#${NONG_CURRENT_RANK}` : "—";
+        rank ? `#${rank}` : "—";
 
       const latest = getCurrentFetchedAt();
       document.getElementById("db-update-value").textContent = latest ? fmtDate(latest) : "—";
 
-      document.getElementById("projected-rank-value").textContent = "—";
+      document.getElementById("projected-rank-value").textContent =
+        projectedRank ? `#${projectedRank}` : "—";
     }
 
     function renderLeaderboard() {
@@ -904,6 +902,14 @@
       renderLeaderboard();
     }
 
+    function applyHashRoute() {
+      if (window.location.hash === "#history") {
+        setActiveTab("history");
+      } else {
+        setActiveTab("leaderboard");
+      }
+    }
+
     function wireEvents() {
       document.getElementById("search").addEventListener("input", renderLeaderboard);
       document.getElementById("refresh").addEventListener("click", loadData);
@@ -913,12 +919,16 @@
       });
 
       document.getElementById("tab-btn-leaderboard").addEventListener("click", () => {
+        window.location.hash = "";
         setActiveTab("leaderboard");
       });
 
       document.getElementById("tab-btn-history").addEventListener("click", () => {
+        window.location.hash = "history";
         setActiveTab("history");
       });
+
+      window.addEventListener("hashchange", applyHashRoute);
 
       document.querySelectorAll("th[data-sort]").forEach(th => {
         th.addEventListener("click", () => {
@@ -991,6 +1001,7 @@
         renderCards();
         renderLeaderboard();
         renderHistory();
+        applyHashRoute();
       } catch (err) {
         console.error(err);
         status.className = "error";
@@ -1000,7 +1011,6 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       wireEvents();
-      setActiveTab("leaderboard");
       startCountdown();
       loadData();
     });
