@@ -466,7 +466,12 @@
     }
 
     function getBattleSortTime(battle) {
-      const d = new Date(battle.last_seen || battle.battle_last_snapshot || battle.last_snapshot || 0);
+      const d = new Date(
+        battle.battle_last_snapshot ||
+        battle.last_snapshot ||
+        battle.last_seen ||
+        0
+      );
       return Number.isNaN(d.getTime()) ? 0 : d.getTime();
     }
 
@@ -486,9 +491,24 @@
       }
 
       if (Number(battle.starting_points || 0) > 0) {
-        return battle.first_seen || battle.battle_first_snapshot || null;
+        return battle.first_seen || battle.battle_first_snapshot || battle.first_snapshot || null;
       }
 
+      return null;
+    }
+
+    function getEventStartDate(battle) {
+      return battle.battle_first_snapshot || battle.first_snapshot || battle.first_seen || null;
+    }
+
+    function getEventEndDate(battle) {
+      return battle.battle_last_snapshot || battle.last_snapshot || battle.last_seen || null;
+    }
+
+    function getEndRank(battle) {
+      if (battle.ending_rank !== undefined && battle.ending_rank !== null) return battle.ending_rank;
+      if (battle.end_rank !== undefined && battle.end_rank !== null) return battle.end_rank;
+      if (battle.last_known_rank !== undefined && battle.last_known_rank !== null) return battle.last_known_rank;
       return null;
     }
 
@@ -631,8 +651,7 @@
         points,
         x,
         y,
-        rect,
-        nearest: null
+        rect
       };
     }
 
@@ -673,7 +692,6 @@
 
         for (const p of currentChart.points) {
           const dist = Math.abs(currentChart.x(p.t) - mx);
-
           if (dist < nearestDist) {
             nearest = p;
             nearestDist = dist;
@@ -727,14 +745,10 @@
       canvas.addEventListener("mousemove", showTooltip);
       canvas.addEventListener("mouseleave", hideTooltip);
       canvas.addEventListener("touchstart", ev => {
-        if (ev.touches && ev.touches[0]) {
-          showTooltip(ev.touches[0]);
-        }
+        if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
       }, { passive: true });
       canvas.addEventListener("touchmove", ev => {
-        if (ev.touches && ev.touches[0]) {
-          showTooltip(ev.touches[0]);
-        }
+        if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
       }, { passive: true });
       canvas.addEventListener("touchend", hideTooltip);
     }
@@ -749,15 +763,16 @@
         return;
       }
 
-      const firstDate = fmtDate(battle.first_seen || battle.battle_first_snapshot);
-      const lastDate = fmtDate(battle.last_seen || battle.battle_last_snapshot);
+      const eventStart = fmtDate(getEventStartDate(battle));
+      const eventEnd = fmtDate(getEventEndDate(battle));
       const firstActiveDate = fmtDate(getFirstActiveDate(battle));
+      const endRank = getEndRank(battle);
 
       container.innerHTML = `
         <article class="battle-card">
           <div class="battle-header">
             <h3 class="battle-title">${escapeHtml(battle.display_name || battle.battle || "Unknown Battle")}</h3>
-            <div class="battle-dates">${firstDate} → ${lastDate}</div>
+            <div class="battle-dates">${eventStart} → ${eventEnd}</div>
           </div>
 
           <div class="stats">
@@ -772,13 +787,18 @@
             </div>
 
             <div class="stat-row">
+              <div class="stat-label">Worst Rank</div>
+              <div class="stat-value">${fmtNum(battle.worst_rank)}</div>
+            </div>
+
+            <div class="stat-row">
               <div class="stat-label">Best Rank</div>
               <div class="stat-value">${fmtNum(battle.best_rank)}</div>
             </div>
 
             <div class="stat-row">
-              <div class="stat-label">Worst Rank</div>
-              <div class="stat-value">${fmtNum(battle.worst_rank)}</div>
+              <div class="stat-label">End Rank</div>
+              <div class="stat-value">${fmtNum(endRank)}</div>
             </div>
 
             <div class="stat-row">
@@ -857,13 +877,11 @@
           <h2 class="section-title">Battle History</h2>
 
           <select id="battle-select">
-            ${
-              battles.map((battle, index) => `
-                <option value="${index}">
-                  ${escapeHtml(battle.display_name || battle.battle || `Battle ${index + 1}`)}
-                </option>
-              `).join("")
-            }
+            ${battles.map((battle, index) => `
+              <option value="${index}">
+                ${escapeHtml(battle.display_name || battle.battle || `Battle ${index + 1}`)}
+              </option>
+            `).join("")}
           </select>
         </div>
 
