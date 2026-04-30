@@ -861,31 +861,40 @@
       }
     }
 
-    function startCountdown() {
-      const el = document.getElementById("countdown-value");
+let countdownTimer = null;
 
-      function tick() {
-        const endIso = getBattleEndIso();
+function startCountdown() {
+  const el = document.getElementById("countdown-value");
 
-        if (!endIso) {
-          el.textContent = "Set battle end time";
-          return;
-        }
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
 
-        const end = new Date(endIso).getTime();
+  function tick() {
+    const endIso =
+      clanData?.battle_end_iso ||
+      currentData?.battle_end_iso ||
+      null;
 
-        if (Number.isNaN(end)) {
-          el.textContent = "Invalid end time";
-          return;
-        }
-
-        el.textContent = fmtCountdown(end - Date.now());
-      }
-
-      tick();
-      setInterval(tick, 1000);
+    if (!endIso) {
+      el.textContent = "—";
+      return;
     }
 
+    const end = new Date(endIso).getTime();
+
+    if (Number.isNaN(end)) {
+      el.textContent = "—";
+      return;
+    }
+
+    el.textContent = fmtCountdown(end - Date.now());
+  }
+
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
     function setActiveTab(which) {
       const btnLeaderboard = document.getElementById("tab-btn-leaderboard");
       const btnHistory = document.getElementById("tab-btn-history");
