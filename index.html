@@ -37,13 +37,13 @@
     }
 
     a:hover {
-      text-decoration: underline;
+      text-decoration: none;
     }
 
     header {
       background: var(--panel);
       border-bottom: 1px solid var(--border);
-      padding: 22px 24px 14px;
+      padding: 12px 22px 10px;
     }
 
     .header-inner {
@@ -57,60 +57,73 @@
     }
 
     .title-wrap h1 {
-      margin: 0 0 4px;
-      font-size: 30px;
+      margin: 0 0 3px;
+      font-size: 27px;
       line-height: 1.1;
     }
 
     .subtitle {
       color: var(--muted);
-      font-size: 14px;
+      font-size: 13px;
     }
 
     .github-btn {
       display: inline-block;
-      padding: 10px 16px;
+      padding: 8px 13px;
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: 6px;
       background: var(--panel-2);
       white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .github-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
     }
 
     .menu-bar {
       max-width: 1200px;
-      margin: 16px auto 0;
+      margin: 9px auto 0;
       display: flex;
       justify-content: center;
-      gap: 12px;
+      gap: 8px;
       flex-wrap: wrap;
     }
 
     .menu-btn {
       display: inline-block;
-      padding: 10px 16px;
+      padding: 7px 12px;
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: 5px;
       background: var(--panel-2);
       color: var(--text);
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
     }
 
     .menu-btn.active {
       border-color: var(--link);
       color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
     }
 
     main {
       max-width: 1200px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 22px 24px 24px;
     }
 
-    .status {
-      color: var(--muted);
-      margin-bottom: 18px;
+    #status {
+      display: none;
     }
 
     .cards {
@@ -123,17 +136,12 @@
     .card {
       padding: 16px;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 10px;
       background: var(--panel);
-      min-height: 96px;
+      min-height: 92px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-    }
-
-    .card.blank .label,
-    .card.blank .value {
-      visibility: hidden;
     }
 
     .label {
@@ -151,7 +159,7 @@
 
     .panel {
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 10px;
       background: var(--panel);
       overflow: hidden;
     }
@@ -182,26 +190,30 @@
       align-items: center;
     }
 
-    input, button {
+    input, button, select {
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 6px;
       background: var(--panel-2);
       color: var(--text);
-      padding: 10px 12px;
+      padding: 9px 11px;
       font-size: 14px;
       outline: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
     }
 
     input {
-      min-width: 250px;
+      min-width: 230px;
     }
 
     button {
       cursor: pointer;
     }
 
-    button:hover {
+    button:hover,
+    select:hover,
+    input:focus {
       border-color: var(--link);
+      background: var(--hover);
     }
 
     .table-wrap {
@@ -233,6 +245,10 @@
       color: var(--text);
     }
 
+    tbody tr {
+      transition: background 0.12s ease;
+    }
+
     tbody tr:hover {
       background: var(--hover);
     }
@@ -251,7 +267,7 @@
     .avatar {
       width: 38px;
       height: 38px;
-      border-radius: 9px;
+      border-radius: 7px;
       background: #21262d;
       object-fit: cover;
       flex: 0 0 auto;
@@ -286,8 +302,10 @@
       border: 1px solid var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
-      border-radius: 12px;
+      border-radius: 10px;
       padding: 16px;
+      display: block;
+      margin-bottom: 18px;
     }
 
     code {
@@ -306,7 +324,7 @@
 
     @media (max-width: 700px) {
       header {
-        padding: 18px 16px 12px;
+        padding: 14px 16px 10px;
       }
 
       main {
@@ -314,10 +332,10 @@
       }
 
       .title-wrap h1 {
-        font-size: 25px;
+        font-size: 24px;
       }
 
-      input {
+      input, select {
         width: 100%;
         min-width: 0;
       }
@@ -332,10 +350,6 @@
 
       .menu-bar {
         justify-content: flex-start;
-      }
-
-      .github-btn {
-        padding: 8px 12px;
       }
     }
   </style>
@@ -365,12 +379,12 @@
   </header>
 
   <main>
-    <div id="status" class="status">Loading leaderboard data...</div>
+    <div id="status"></div>
 
     <section class="cards">
-      <div class="card blank">
-        <div class="label">Reserved</div>
-        <div class="value">—</div>
+      <div class="card">
+        <div class="label">NONG Current Rank</div>
+        <div id="nong-rank-value" class="value">—</div>
       </div>
 
       <div class="card">
@@ -383,16 +397,21 @@
         <div id="db-update-value" class="value">—</div>
       </div>
 
-      <div class="card blank">
-        <div class="label">Reserved</div>
-        <div class="value">—</div>
+      <div class="card">
+        <div class="label">Projected Rank</div>
+        <div id="projected-rank-value" class="value">—</div>
       </div>
     </section>
 
     <section id="view-leaderboard" class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">Current Leaderboard</h2>
+        <h2 class="panel-title">Leaderboard</h2>
+
         <div class="toolbar">
+          <select id="battle-select">
+            <option value="current">Current Clan Battle</option>
+          </select>
+
           <input id="search" type="text" placeholder="Search members..." autocomplete="off" />
           <button id="refresh" type="button">Refresh</button>
         </div>
@@ -402,9 +421,9 @@
         <table>
           <thead>
             <tr>
-              <th data-sort="latest_rank">Rank</th>
+              <th data-sort="rank">Rank</th>
               <th data-sort="username">Player</th>
-              <th data-sort="latest_points" class="num">Total Points</th>
+              <th data-sort="total_points" class="num">Total Points</th>
               <th data-sort="gain_5m" class="num">5 Minutes</th>
               <th data-sort="gain_1h" class="num">1 Hour</th>
               <th data-sort="gain_12h" class="num">12 Hours</th>
@@ -422,7 +441,7 @@
       </div>
 
       <div class="history-note">
-        This tab is ready for previous NONG battle results. Right now it uses <code>Data/battles.json</code>.
+        This tab is ready for previous NONG battle results. It currently uses <code>Data/battles.json</code>.
         If placement data is not present yet, placement will show as —.
       </div>
 
@@ -446,17 +465,26 @@
 
   <script>
     /*
-      Update this when you know the real clan battle end time.
-      Use UTC format.
-      Example:
-      const CURRENT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
+      Update this to the real clan battle end time.
+      UTC example: "2026-05-03T18:00:00Z"
     */
     const CURRENT_BATTLE_END_ISO = "2026-05-03T18:00:00Z";
 
-    let players = [];
-    let battles = [];
+    /*
+      Until NONG clan rank is generated into JSON, set it manually here.
+      Example: const NONG_CURRENT_RANK = 14;
+    */
+    const NONG_CURRENT_RANK = null;
 
-    let sortKey = "latest_rank";
+    let currentData = null;
+    let currentRows = [];
+    let battles = [];
+    let playerIndex = [];
+    let profileCache = new Map();
+
+    let activeBattle = "current";
+
+    let sortKey = "rank";
     let sortAsc = true;
 
     let historySortKey = "last_snapshot";
@@ -499,6 +527,7 @@
       if (!s) return "—";
       const d = new Date(s);
       if (Number.isNaN(d.getTime())) return "—";
+
       return d.toLocaleString(undefined, {
         dateStyle: "short",
         timeStyle: "short"
@@ -522,77 +551,13 @@
       return Number.isNaN(t) ? null : t;
     }
 
-    function getLatestDbUpdate() {
-      const battleLatest = battles
-        .map(b => b.last_snapshot || b.latest_snapshot || b.lastSeen || null)
-        .map(parseDateValue)
-        .filter(v => v !== null);
-
-      const playerLatest = players
-        .map(p => p.latest_seen || p.last_seen || p.updated_at || null)
-        .map(parseDateValue)
-        .filter(v => v !== null);
-
-      const all = [...battleLatest, ...playerLatest];
-      if (!all.length) return null;
-
-      return new Date(Math.max(...all)).toISOString();
-    }
-
     function resolveValue(obj, keys) {
       for (const key of keys) {
-        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+        if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
           return obj[key];
         }
       }
       return null;
-    }
-
-    function getGain5m(p) {
-      return resolveValue(p, [
-        "gain_5m",
-        "gain5m",
-        "five_min_gain",
-        "minutes_5",
-        "minutes5",
-        "last_5m_gain",
-        "fiveMinuteGain"
-      ]);
-    }
-
-    function getGain1h(p) {
-      return resolveValue(p, [
-        "gain_1h",
-        "gain1h",
-        "gain_60m",
-        "gain60m",
-        "hour_1_gain",
-        "hours_1",
-        "minutes_60",
-        "oneHourGain"
-      ]);
-    }
-
-    function getGain12h(p) {
-      return resolveValue(p, [
-        "gain_12h",
-        "gain12h",
-        "hours_12_gain",
-        "hours_12",
-        "twelve_hour_gain",
-        "twelveHourGain"
-      ]);
-    }
-
-    function getGain24h(p) {
-      return resolveValue(p, [
-        "gain_24h",
-        "gain24h",
-        "hours_24_gain",
-        "hours_24",
-        "twentyfour_hour_gain",
-        "twentyFourHourGain"
-      ]);
     }
 
     function getPlacement(b) {
@@ -606,44 +571,119 @@
       ]);
     }
 
-    function getVisiblePlayers() {
+    function getCurrentFetchedAt() {
+      const rowTimes = currentRows
+        .map(r => r.fetched_at)
+        .map(parseDateValue)
+        .filter(v => v !== null);
+
+      if (!rowTimes.length) return currentData?.generated_at || null;
+
+      return new Date(Math.max(...rowTimes)).toISOString();
+    }
+
+    function getAvatar(row) {
+      if (row.avatar_url || row.avatar) return row.avatar_url || row.avatar;
+
+      const match = playerIndex.find(p =>
+        String(p.user_id || "") === String(row.user_id || "") ||
+        String(p.profile_key || "") === String(row.profile_key || "")
+      );
+
+      return match?.avatar_url || "assets/embed-spacer.png";
+    }
+
+    function getProfileKey(row) {
+      if (row.profile_key) return row.profile_key;
+      if (row.user_id) return row.user_id;
+      return row.username;
+    }
+
+    function normalizeCurrentRows(rows) {
+      return rows.map(row => {
+        const match = playerIndex.find(p =>
+          String(p.user_id || "") === String(row.user_id || "") ||
+          String(p.username || "").toLowerCase() === String(row.username || "").toLowerCase()
+        );
+
+        return {
+          ...row,
+          profile_key: match?.profile_key || row.user_id || row.username,
+          avatar_url: match?.avatar_url || row.avatar_url || null
+        };
+      });
+    }
+
+    async function getAllProfiles() {
+      const missing = playerIndex.filter(p => !profileCache.has(p.profile_key));
+
+      await Promise.all(
+        missing.map(async p => {
+          try {
+            const res = await fetch(`${p.file}?v=${Date.now()}`);
+            if (!res.ok) return;
+            const profile = await res.json();
+            profileCache.set(p.profile_key, profile);
+          } catch {
+            // Skip failed profile load.
+          }
+        })
+      );
+
+      return [...profileCache.values()];
+    }
+
+    async function buildHistoricalRows(battleName) {
+      const profiles = await getAllProfiles();
+
+      const rows = [];
+
+      for (const profile of profiles) {
+        const battle = (profile.battles || []).find(b => b.battle === battleName);
+        if (!battle) continue;
+
+        rows.push({
+          rank: battle.last_rank,
+          username: profile.username,
+          user_id: profile.user_id,
+          profile_key: profile.profile_key,
+          avatar_url: profile.avatar_url,
+          total_points: battle.ending_points,
+          gain_5m: null,
+          gain_1h: null,
+          gain_12h: null,
+          gain_24h: null,
+          fetched_at: battle.last_seen
+        });
+      }
+
+      rows.sort((a, b) => {
+        const ar = Number(a.rank);
+        const br = Number(b.rank);
+
+        if (!Number.isNaN(ar) && !Number.isNaN(br)) return ar - br;
+
+        return Number(b.total_points || 0) - Number(a.total_points || 0);
+      });
+
+      return rows;
+    }
+
+    function getVisibleRows() {
       const q = document.getElementById("search").value.trim().toLowerCase();
 
-      let list = players.slice();
+      let list = currentRows.slice();
 
       if (q) {
-        list = list.filter(p =>
-          String(p.username || "").toLowerCase().includes(q) ||
-          String(p.user_id || "").includes(q)
+        list = list.filter(r =>
+          String(r.username || "").toLowerCase().includes(q) ||
+          String(r.user_id || "").includes(q)
         );
       }
 
       list.sort((a, b) => {
-        let av;
-        let bv;
-
-        switch (sortKey) {
-          case "gain_5m":
-            av = getGain5m(a);
-            bv = getGain5m(b);
-            break;
-          case "gain_1h":
-            av = getGain1h(a);
-            bv = getGain1h(b);
-            break;
-          case "gain_12h":
-            av = getGain12h(a);
-            bv = getGain12h(b);
-            break;
-          case "gain_24h":
-            av = getGain24h(a);
-            bv = getGain24h(b);
-            break;
-          default:
-            av = a[sortKey];
-            bv = b[sortKey];
-            break;
-        }
+        const av = a[sortKey];
+        const bv = b[sortKey];
 
         const an = Number(av);
         const bn = Number(bv);
@@ -701,9 +741,19 @@
       return list;
     }
 
+    function renderCards() {
+      document.getElementById("nong-rank-value").textContent =
+        NONG_CURRENT_RANK ? `#${NONG_CURRENT_RANK}` : "—";
+
+      const latest = getCurrentFetchedAt();
+      document.getElementById("db-update-value").textContent = latest ? fmtDate(latest) : "—";
+
+      document.getElementById("projected-rank-value").textContent = "—";
+    }
+
     function renderLeaderboard() {
       const tbody = document.getElementById("leaderboard-body");
-      const visible = getVisiblePlayers();
+      const visible = getVisibleRows();
 
       tbody.innerHTML = "";
 
@@ -718,26 +768,25 @@
         return;
       }
 
-      for (const p of visible) {
+      for (const row of visible) {
         const tr = document.createElement("tr");
-        const avatar = p.avatar_url || "assets/embed-spacer.png";
-        const profileUrl = `profile.html?id=${encodeURIComponent(p.profile_key || p.user_id || p.username)}`;
+        const profileUrl = `profile.html?id=${encodeURIComponent(getProfileKey(row))}`;
 
         tr.innerHTML = `
-          <td class="rank">#${escapeHtml(p.latest_rank ?? "—")}</td>
+          <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
           <td>
             <a class="player-cell" href="${profileUrl}">
-              <img class="avatar" src="${avatar}" alt="">
+              <img class="avatar" src="${getAvatar(row)}" alt="">
               <div>
-                <div class="player-name">${escapeHtml(p.username ?? "Unknown")}</div>
+                <div class="player-name">${escapeHtml(row.username ?? "Unknown")}</div>
               </div>
             </a>
           </td>
-          <td class="num" title="${fmtNum(p.latest_points)}">${fmtShortNum(p.latest_points)}</td>
-          <td class="num" title="${fmtNum(getGain5m(p))}">${fmtShortNum(getGain5m(p))}</td>
-          <td class="num" title="${fmtNum(getGain1h(p))}">${fmtShortNum(getGain1h(p))}</td>
-          <td class="num" title="${fmtNum(getGain12h(p))}">${fmtShortNum(getGain12h(p))}</td>
-          <td class="num" title="${fmtNum(getGain24h(p))}">${fmtShortNum(getGain24h(p))}</td>
+          <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
+          <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
+          <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
+          <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
+          <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
         `;
 
         tbody.appendChild(tr);
@@ -775,11 +824,6 @@
 
         tbody.appendChild(tr);
       }
-    }
-
-    function renderDbUpdateCard() {
-      const latest = getLatestDbUpdate();
-      document.getElementById("db-update-value").textContent = latest ? fmtDate(latest) : "—";
     }
 
     function startCountdown() {
@@ -824,9 +868,49 @@
       }
     }
 
+    function populateBattleDropdown() {
+      const select = document.getElementById("battle-select");
+      select.innerHTML = "";
+
+      const currentOpt = document.createElement("option");
+      currentOpt.value = "current";
+      currentOpt.textContent = currentData?.display_name || "Current Clan Battle";
+      select.appendChild(currentOpt);
+
+      for (const battle of battles) {
+        const opt = document.createElement("option");
+        opt.value = battle.battle;
+        opt.textContent = battle.display_name || battle.battle;
+        select.appendChild(opt);
+      }
+
+      select.value = activeBattle;
+    }
+
+    async function handleBattleChange() {
+      const value = document.getElementById("battle-select").value;
+      activeBattle = value;
+
+      if (value === "current") {
+        currentRows = normalizeCurrentRows(currentData.rows || []);
+      } else {
+        currentRows = await buildHistoricalRows(value);
+      }
+
+      sortKey = "rank";
+      sortAsc = true;
+
+      renderCards();
+      renderLeaderboard();
+    }
+
     function wireEvents() {
       document.getElementById("search").addEventListener("input", renderLeaderboard);
       document.getElementById("refresh").addEventListener("click", loadData);
+
+      document.getElementById("battle-select").addEventListener("change", () => {
+        handleBattleChange();
+      });
 
       document.getElementById("tab-btn-leaderboard").addEventListener("click", () => {
         setActiveTab("leaderboard");
@@ -844,7 +928,7 @@
             sortAsc = !sortAsc;
           } else {
             sortKey = key;
-            sortAsc = key === "latest_rank";
+            sortAsc = key === "rank";
           }
 
           renderLeaderboard();
@@ -869,35 +953,48 @@
 
     async function loadData() {
       const status = document.getElementById("status");
-      status.textContent = "Loading leaderboard data...";
+      status.className = "";
+      status.textContent = "";
 
       try {
         const cacheBust = Date.now();
 
-        const [playersRes, battlesRes] = await Promise.all([
-          fetch(`Data/players.json?v=${cacheBust}`),
-          fetch(`Data/battles.json?v=${cacheBust}`)
+        const [currentRes, battlesRes, playersRes] = await Promise.all([
+          fetch(`Data/current.json?v=${cacheBust}`),
+          fetch(`Data/battles.json?v=${cacheBust}`),
+          fetch(`Data/players.json?v=${cacheBust}`)
         ]);
 
-        if (!playersRes.ok) {
-          throw new Error(`Could not load Data/players.json (HTTP ${playersRes.status})`);
+        if (!currentRes.ok) {
+          throw new Error(`Could not load Data/current.json (HTTP ${currentRes.status}). Run the updated profile builder first.`);
         }
 
         if (!battlesRes.ok) {
           throw new Error(`Could not load Data/battles.json (HTTP ${battlesRes.status})`);
         }
 
-        players = await playersRes.json();
-        battles = await battlesRes.json();
+        if (!playersRes.ok) {
+          throw new Error(`Could not load Data/players.json (HTTP ${playersRes.status})`);
+        }
 
+        currentData = await currentRes.json();
+        battles = await battlesRes.json();
+        playerIndex = await playersRes.json();
+
+        if (activeBattle === "current") {
+          currentRows = normalizeCurrentRows(currentData.rows || []);
+        } else {
+          currentRows = await buildHistoricalRows(activeBattle);
+        }
+
+        populateBattleDropdown();
+        renderCards();
         renderLeaderboard();
         renderHistory();
-        renderDbUpdateCard();
-
-        status.textContent = `Loaded ${players.length} players from generated Supabase archive data.`;
       } catch (err) {
         console.error(err);
-        status.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        status.className = "error";
+        status.textContent = err.message;
       }
     }
 
