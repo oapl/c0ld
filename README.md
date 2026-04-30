@@ -4,6 +4,10 @@ Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
 I'm use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github because Github sucks at scheduling.
 
+It's kind of a shit show, but hey it's mine!
+
+Shows the data below just because and passes into a Discord webhook.
+
 ## Top 10 Members (by Total Points)
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
