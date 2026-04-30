@@ -866,21 +866,42 @@
       }
     }
 
-    function populateBattleDropdown() {
-      const select = document.getElementById("battle-select");
-      select.innerHTML = "";
+function populateBattleDropdown() {
+  const select = document.getElementById("battle-select");
+  select.innerHTML = "";
 
-      const currentOpt = document.createElement("option");
-      currentOpt.value = "current";
-      currentOpt.textContent = currentData?.display_name || "Current Clan Battle";
-      select.appendChild(currentOpt);
+  const currentBattleName = currentData?.battle || null;
+  const seen = new Set();
 
-      for (const battle of battles) {
-        const opt = document.createElement("option");
-        opt.value = battle.battle;
-        opt.textContent = battle.display_name || battle.battle;
-        select.appendChild(opt);
-      }
+  const currentOpt = document.createElement("option");
+  currentOpt.value = "current";
+  currentOpt.textContent = currentData?.display_name || "Current Clan Battle";
+  select.appendChild(currentOpt);
+
+  seen.add("current");
+  if (currentBattleName) {
+    seen.add(String(currentBattleName).toLowerCase());
+  }
+
+  for (const battle of battles) {
+    const battleKey = String(battle.battle || "").toLowerCase();
+    const displayKey = String(battle.display_name || battle.battle || "").toLowerCase();
+
+    if (seen.has(battleKey) || seen.has(displayKey)) {
+      continue;
+    }
+
+    const opt = document.createElement("option");
+    opt.value = battle.battle;
+    opt.textContent = battle.display_name || battle.battle;
+    select.appendChild(opt);
+
+    seen.add(battleKey);
+    seen.add(displayKey);
+  }
+
+  select.value = activeBattle;
+}
 
       select.value = activeBattle;
     }
