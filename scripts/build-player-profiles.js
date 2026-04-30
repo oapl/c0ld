@@ -230,26 +230,10 @@ function addGainFieldsToCurrent(currentRows, archiveRows) {
   }
 
   const gainWindows = [
-    {
-      key: "gain_5m",
-      minutes: 5,
-      toleranceMin: 4
-    },
-    {
-      key: "gain_1h",
-      minutes: 60,
-      toleranceMin: 10
-    },
-    {
-      key: "gain_12h",
-      minutes: 720,
-      toleranceMin: 25
-    },
-    {
-      key: "gain_24h",
-      minutes: 1440,
-      toleranceMin: 45
-    }
+    { key: "gain_5m", minutes: 5, toleranceMin: 4 },
+    { key: "gain_1h", minutes: 60, toleranceMin: 10 },
+    { key: "gain_12h", minutes: 720, toleranceMin: 25 },
+    { key: "gain_24h", minutes: 1440, toleranceMin: 45 }
   ];
 
   const oldPointMaps = {};
@@ -286,6 +270,8 @@ async function fetchAvatarHeadshots(userIds) {
   const result = new Map();
   const ids = [...new Set(userIds.filter(Boolean).map(Number))];
 
+  console.log(`Requesting Roblox avatar thumbnail URLs for ${ids.length} users...`);
+
   for (let i = 0; i < ids.length; i += 100) {
     const batch = ids.slice(i, i + 100);
 
@@ -306,7 +292,7 @@ async function fetchAvatarHeadshots(userIds) {
       const text = await res.text();
 
       if (!res.ok) {
-        console.warn(`Avatar batch failed (${res.status}): ${text}`);
+        console.warn(`Avatar thumbnail URL batch failed (${res.status}): ${text}`);
         continue;
       }
 
@@ -318,12 +304,13 @@ async function fetchAvatarHeadshots(userIds) {
         }
       }
     } catch (err) {
-      console.warn(`Avatar batch error: ${err.message}`);
+      console.warn(`Avatar thumbnail URL batch error: ${err.message}`);
     }
 
     await sleep(300);
   }
 
+  console.log(`Received ${result.size} Roblox avatar thumbnail URLs.`);
   return result;
 }
 
@@ -337,6 +324,7 @@ async function downloadAvatarToCache(userId, imageUrl) {
   const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
 
   if (await fileExists(filePath)) {
+    console.log(`Avatar already cached for ${userId}: ${publicPath}`);
     return publicPath;
   }
 
@@ -353,6 +341,12 @@ async function downloadAvatarToCache(userId, imageUrl) {
     }
 
     const bytes = Buffer.from(await res.arrayBuffer());
+
+    if (!bytes.length) {
+      console.warn(`Avatar download for ${userId} returned empty file.`);
+      return imageUrl;
+    }
+
     await fs.writeFile(filePath, bytes);
 
     console.log(`Cached avatar for ${userId}: ${publicPath}`);
@@ -364,13 +358,17 @@ async function downloadAvatarToCache(userId, imageUrl) {
 }
 
 async function cacheAvatarMap(avatarMap) {
+  await ensureDir(AVATAR_DIR);
+
   const cached = new Map();
 
   for (const [userId, imageUrl] of avatarMap.entries()) {
     const localPath = await downloadAvatarToCache(userId, imageUrl);
     cached.set(Number(userId), localPath || imageUrl);
+    await sleep(100);
   }
 
+  console.log(`Avatar cache complete. Cached/linked ${cached.size} avatars.`);
   return cached;
 }
 
@@ -644,10 +642,10 @@ async function main() {
     throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.");
   }
 
-  await fs.mkdir(OUT_DIR, { recursive: true });
-  await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
-  await fs.mkdir(PLAYERS_DIR, { recursive: true });
+  await ensureDir(OUT_DIR);
   await ensureDir(AVATAR_DIR);
+  await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
+  await ensureDir(PLAYERS_DIR);
 
   const battleRows = new Map();
   const battlesSummary = [];
@@ -848,6 +846,7 @@ async function main() {
   console.log("Wrote Data/players.json.");
   console.log("Wrote Data/battles.json.");
   console.log("Wrote Data/current.json.");
+  console.log(`Avatar files are stored in: ${AVATAR_DIR}`);
 }
 
 main().catch(err => {
