@@ -224,7 +224,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 980px;
+      min-width: 850px;
     }
 
     th, td {
@@ -433,8 +433,7 @@
       </div>
 
       <div class="history-note">
-        This tab is ready for previous NONG battle results. It currently uses <code>Data/battles.json</code>.
-        If placement data is not present yet, placement will show as —.
+        Placement is manually maintained for completed battles. Generated history fills in dates and unique-player counts where available.
       </div>
 
       <div class="table-wrap">
@@ -445,7 +444,6 @@
               <th data-history-sort="placement">Placement</th>
               <th data-history-sort="first_snapshot">Start</th>
               <th data-history-sort="last_snapshot">End</th>
-              <th data-history-sort="total_snapshots" class="num">Snapshots</th>
               <th data-history-sort="unique_players" class="num">Unique Players</th>
             </tr>
           </thead>
@@ -514,6 +512,18 @@
       const d = new Date(s);
       if (Number.isNaN(d.getTime())) return "—";
 
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+    }
+
+    function fmtDateTime(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return "—";
+
       return d.toLocaleString(undefined, {
         dateStyle: "short",
         timeStyle: "short"
@@ -556,6 +566,23 @@
         "final_rank",
         "place"
       ]);
+    }
+
+    function fmtPlacement(b) {
+      const placement = getPlacement(b);
+
+      if (placement !== null && placement !== undefined && placement !== "") {
+        return `#${placement}`;
+      }
+
+      const endMs = parseDateValue(b.last_snapshot);
+      const nowMs = Date.now();
+
+      if (endMs && endMs > nowMs - 48 * 60 * 60 * 1000) {
+        return "TBD";
+      }
+
+      return "—";
     }
 
     function getCurrentFetchedAt() {
@@ -736,7 +763,7 @@
         rank ? `#${rank}` : "—";
 
       const latest = getCurrentFetchedAt();
-      document.getElementById("db-update-value").textContent = latest ? fmtDate(latest) : "—";
+      document.getElementById("db-update-value").textContent = latest ? fmtDateTime(latest) : "—";
 
       document.getElementById("projected-rank-value").textContent =
         projectedRank ? `#${projectedRank}` : "—";
@@ -793,7 +820,7 @@
       if (!visible.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6" style="text-align:center;padding:32px;color:#8b949e;">
+            <td colspan="5" style="text-align:center;padding:32px;color:#8b949e;">
               No history records found.
             </td>
           </tr>
@@ -806,10 +833,9 @@
 
         tr.innerHTML = `
           <td>${escapeHtml(b.display_name || b.battle || "Unknown")}</td>
-          <td>${escapeHtml(getPlacement(b) ?? "—")}</td>
+          <td>${escapeHtml(fmtPlacement(b))}</td>
           <td>${fmtDate(b.first_snapshot)}</td>
           <td>${fmtDate(b.last_snapshot)}</td>
-          <td class="num">${fmtNum(b.total_snapshots)}</td>
           <td class="num">${fmtNum(b.unique_players)}</td>
         `;
 
@@ -923,7 +949,7 @@
 
     function wireEvents() {
       document.getElementById("search").addEventListener("input", renderLeaderboard);
-      document.getElementById("refresh").addEventListener("click", () => loadData({ manual: true }));
+      document.getElementById("refresh").addEventListener("click", () => loadData());
 
       document.getElementById("battle-select").addEventListener("change", () => {
         handleBattleChange();
