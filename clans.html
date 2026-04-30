@@ -23,6 +23,7 @@
       --nong-bg: rgba(255, 153, 51, 0.18);
       --nong-border: rgba(255, 153, 51, 0.65);
       --nong-text: #ffb15c;
+      --danger: #f85149;
     }
 
     html, body {
@@ -35,10 +36,6 @@
 
     a {
       color: var(--link);
-      text-decoration: none;
-    }
-
-    a:hover {
       text-decoration: none;
     }
 
@@ -295,17 +292,13 @@
       font-weight: 700;
     }
 
-    .muted {
-      color: var(--muted);
-    }
-
-    .empty-state,
-    .error-state {
+    .empty-state {
       padding: 20px 18px;
       color: var(--muted);
     }
 
     .error-state {
+      padding: 20px 18px;
       color: #ffb4ad;
     }
 
@@ -339,6 +332,7 @@
     }
   </style>
 </head>
+
 <body>
   <header>
     <div class="header-inner">
@@ -391,7 +385,9 @@
         <h2 class="section-title">Clans Leaderboard</h2>
 
         <div class="controls">
-          <select id="battle-select"></select>
+          <select id="battle-select">
+            <option value="current">Current Clan Battle</option>
+          </select>
           <input id="search-input" type="text" placeholder="Search clans..." />
           <button id="refresh-btn" type="button">Refresh</button>
         </div>
@@ -421,9 +417,9 @@
 
   <script>
     const TARGET_CLAN = "NONG";
+    const AUTO_REFRESH_MS = 60 * 1000;
 
     let currentData = null;
-    let selectedBattle = "";
     let countdownTimer = null;
     let autoRefreshTimer = null;
 
@@ -451,35 +447,34 @@
       return normalizeClanKey(name) === TARGET_CLAN;
     }
 
-    function fmtNumber(value) {
-      if (value === null || value === undefined || value === "") return "—";
-      const n = Number(value);
-      if (Number.isNaN(n)) return htmlEscape(value);
-      return n.toLocaleString("en-US");
-    }
-
     function fmtShortNumber(value) {
       if (value === null || value === undefined || value === "") return "—";
+
       const n = Number(value);
       if (Number.isNaN(n)) return htmlEscape(value);
 
       const abs = Math.abs(n);
+
       if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
       if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
       if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
       if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
+
       return n.toLocaleString("en-US");
     }
 
     function fmtRank(value) {
       if (value === null || value === undefined || value === "") return "—";
+
       const n = Number(value);
       if (Number.isNaN(n)) return htmlEscape(value);
+
       return "#" + n.toLocaleString("en-US");
     }
 
     function fmtDateTime(value) {
       if (!value) return "—";
+
       const d = new Date(value);
       if (Number.isNaN(d.getTime())) return "—";
 
@@ -492,126 +487,16 @@
       });
     }
 
-    function pickFirst(...values) {
-      for (const value of values) {
-        if (value !== undefined && value !== null && value !== "") {
-          return value;
-        }
-      }
-      return null;
-    }
+    function fmtCountdown(ms) {
+      if (ms <= 0) return "Ended";
 
-    function getBattleOptions(data) {
-      if (!data) return [];
+      const totalSeconds = Math.floor(ms / 1000);
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
 
-      const options = [];
-
-      if (Array.isArray(data.battles)) {
-        for (const battle of data.battles) {
-          const id = pickFirst(battle.battle, battle.id, battle.slug, battle.name);
-          const label = pickFirst(battle.display_name, battle.name, battle.battle, battle.id);
-
-          if (id) {
-            options.push({
-              value: String(id),
-              label: String(label || id)
-            });
-          }
-        }
-      }
-
-      if (!options.length && data.current_battle) {
-        options.push({
-          value: String(data.current_battle),
-          label: String(data.current_battle_display || data.current_battle)
-        });
-      }
-
-      if (!options.length && data.currentBattle) {
-        options.push({
-          value: String(data.currentBattle),
-          label: String(data.currentBattleDisplay || data.currentBattle)
-        });
-      }
-
-      return dedupeBattleOptions(options);
-    }
-
-    function dedupeBattleOptions(items) {
-      const seen = new Set();
-      const out = [];
-
-      for (const item of items) {
-        const key = String(item.value).trim().toUpperCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(item);
-      }
-
-      return out;
-    }
-
-    function getRawClanRows(data, battleName) {
-      if (!data) return [];
-
-      if (data.clans_by_battle && Array.isArray(data.clans_by_battle[battleName])) {
-        return data.clans_by_battle[battleName];
-      }
-
-      if (data.clan_leaderboards && Array.isArray(data.clan_leaderboards[battleName])) {
-        return data.clan_leaderboards[battleName];
-      }
-
-      if (data.battles_by_name && data.battles_by_name[battleName] && Array.isArray(data.battles_by_name[battleName].clans)) {
-        return data.battles_by_name[battleName].clans;
-      }
-
-      if (Array.isArray(data.clans)) return data.clans;
-      if (Array.isArray(data.clan_rows)) return data.clan_rows;
-      if (Array.isArray(data.top_clans)) return data.top_clans;
-      if (Array.isArray(data.clan_leaderboard)) return data.clan_leaderboard;
-
-      return [];
-    }
-
-    function normalizeClanRow(row) {
-      const totalPoints = pickFirst(row.total_points, row.points, row.current_points);
-      const projectedRank = pickFirst(row.projected_rank, row.projection_rank, row.rank_projection);
-
-      return {
-        rank: pickFirst(row.rank, row.current_rank),
-        clan: cleanClanName(pickFirst(row.clan, row.name, row.clan_name, row.tag)),
-        total_points: totalPoints,
-        gain_5m: pickFirst(row.gain_5m, row.points_5m, row.delta_5m, row.five_min_gain),
-        gain_1h: pickFirst(row.gain_1h, row.points_1h, row.delta_1h, row.hour_gain),
-        gain_12h: pickFirst(row.gain_12h, row.points_12h, row.delta_12h, row.twelve_hour_gain),
-        gain_24h: pickFirst(row.gain_24h, row.points_24h, row.delta_24h, row.day_gain),
-        projected_rank: projectedRank
-      };
-    }
-
-    function getNormalizedRows(data, battleName) {
-      return getRawClanRows(data, battleName).map(normalizeClanRow);
-    }
-
-    function getNongRow(data, battleName) {
-      return getNormalizedRows(data, battleName).find(row => isTargetClan(row.clan)) || null;
-    }
-
-    function getBattleEnd(data, battleName) {
-      if (!data) return null;
-
-      const battle = Array.isArray(data.battles)
-        ? data.battles.find(b => String(pickFirst(b.battle, b.id, b.slug, b.name)) === String(battleName))
-        : null;
-
-      return pickFirst(
-        battle && (battle.ends_at || battle.end_at || battle.end_time || battle.battle_end),
-        data.current_battle_ends_at,
-        data.currentBattleEndsAt,
-        data.battle_end,
-        data.battleEnd
-      );
+      return `${days}d ${hours}h ${minutes}m ${seconds}s`;
     }
 
     function startCountdown(endValue) {
@@ -633,89 +518,56 @@
         return;
       }
 
-      function renderCountdown() {
-        const now = Date.now();
-        let diff = Math.floor((end.getTime() - now) / 1000);
-
-        if (diff <= 0) {
-          el.textContent = "Ended";
-          return;
-        }
-
-        const days = Math.floor(diff / 86400);
-        diff -= days * 86400;
-        const hours = Math.floor(diff / 3600);
-        diff -= hours * 3600;
-        const minutes = Math.floor(diff / 60);
-        const seconds = diff - minutes * 60;
-
-        el.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+      function tick() {
+        el.textContent = fmtCountdown(end.getTime() - Date.now());
       }
 
-      renderCountdown();
-      countdownTimer = setInterval(renderCountdown, 1000);
+      tick();
+      countdownTimer = setInterval(tick, 1000);
     }
 
-    function renderBattleOptions(data) {
-      const select = document.getElementById("battle-select");
-      const options = getBattleOptions(data);
+    function getRows() {
+      if (!currentData || !Array.isArray(currentData.rows)) return [];
 
-      if (!options.length) {
-        select.innerHTML = `<option value="">Current Clan Battle</option>`;
-        selectedBattle = "";
-        return;
-      }
-
-      if (!selectedBattle || !options.some(o => o.value === selectedBattle)) {
-        selectedBattle = options[0].value;
-      }
-
-      select.innerHTML = options.map(option => `
-        <option value="${htmlEscape(option.value)}" ${option.value === selectedBattle ? "selected" : ""}>
-          ${htmlEscape(option.label)}
-        </option>
-      `).join("");
+      return currentData.rows.map(row => ({
+        rank: row.rank,
+        clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
+        points: row.points ?? row.total_points,
+        gain_5m: row.gain_5m,
+        gain_1h: row.gain_1h,
+        gain_12h: row.gain_12h,
+        gain_24h: row.gain_24h,
+        projected_rank: row.projected_rank
+      }));
     }
 
-    function renderCards(data) {
-      const nongRow = getNongRow(data, selectedBattle);
-
-      const nongCurrentRank = pickFirst(
-        nongRow && nongRow.rank,
-        data.nong_current_rank,
-        data.nongRank,
-        data.current_nong_rank
-      );
-
-      const nongProjectedRank = pickFirst(
-        nongRow && nongRow.projected_rank,
-        data.nong_projected_rank,
-        data.nongProjectedRank,
-        data.projected_rank
-      );
-
-      const lastUpdate = pickFirst(
-        data.last_db_update,
-        data.last_updated,
-        data.generated_at,
-        data.updated_at
-      );
-
-      document.getElementById("nong-current-rank").textContent = fmtRank(nongCurrentRank);
-      document.getElementById("nong-projected-rank").textContent = fmtRank(nongProjectedRank);
-      document.getElementById("last-db-update").textContent = fmtDateTime(lastUpdate);
-
-      startCountdown(getBattleEnd(data, selectedBattle));
+    function getNongRow() {
+      return getRows().find(row => isTargetClan(row.clan_name)) || null;
     }
 
-    function renderTable(data) {
+    function renderCards() {
+      const nong = getNongRow();
+
+      document.getElementById("nong-current-rank").textContent =
+        fmtRank(nong?.rank ?? currentData?.clan_rank);
+
+      document.getElementById("nong-projected-rank").textContent =
+        fmtRank(nong?.projected_rank ?? currentData?.projected_rank);
+
+      document.getElementById("last-db-update").textContent =
+        fmtDateTime(currentData?.snapshot_at || currentData?.generated_at);
+
+      startCountdown(currentData?.battle_end_iso);
+    }
+
+    function renderTable() {
       const tbody = document.getElementById("clans-tbody");
       const searchText = document.getElementById("search-input").value.trim().toLowerCase();
 
-      let rows = getNormalizedRows(data, selectedBattle);
+      let rows = getRows();
 
       if (searchText) {
-        rows = rows.filter(row => String(row.clan || "").toLowerCase().includes(searchText));
+        rows = rows.filter(row => String(row.clan_name || "").toLowerCase().includes(searchText));
       }
 
       if (!rows.length) {
@@ -724,12 +576,13 @@
       }
 
       tbody.innerHTML = rows.map(row => {
-        const highlight = isTargetClan(row.clan);
+        const isNong = isTargetClan(row.clan_name);
+
         return `
-          <tr class="${highlight ? "nong-row" : ""}">
+          <tr class="${isNong ? "nong-row" : ""}">
             <td class="rank">${fmtRank(row.rank)}</td>
-            <td class="clan">${htmlEscape(row.clan)}</td>
-            <td class="numeric">${fmtShortNumber(row.total_points)}</td>
+            <td class="clan">${htmlEscape(row.clan_name)}</td>
+            <td class="numeric">${fmtShortNumber(row.points)}</td>
             <td class="numeric">${fmtShortNumber(row.gain_5m)}</td>
             <td class="numeric">${fmtShortNumber(row.gain_1h)}</td>
             <td class="numeric">${fmtShortNumber(row.gain_12h)}</td>
@@ -740,47 +593,47 @@
       }).join("");
     }
 
-    function renderAll(data) {
-      currentData = data;
-      renderBattleOptions(data);
-      renderCards(data);
-      renderTable(data);
+    function renderAll() {
+      renderCards();
+      renderTable();
     }
 
     async function loadData() {
       const tbody = document.getElementById("clans-tbody");
 
       try {
-        const response = await fetch(`Data/current.json?v=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch(`Data/clans-current.json?v=${Date.now()}`, {
+          cache: "no-store"
+        });
+
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const data = await response.json();
-        renderAll(data);
+        currentData = await response.json();
+
+        if (!currentData || !Array.isArray(currentData.rows)) {
+          throw new Error("Data/clans-current.json does not contain a rows array.");
+        }
+
+        renderAll();
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="8" class="error-state">Failed to load leaderboard data.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="error-state">Failed to load Data/clans-current.json.</td></tr>`;
       }
     }
 
     function wireEvents() {
-      document.getElementById("battle-select").addEventListener("change", event => {
-        selectedBattle = event.target.value;
-        if (currentData) {
-          renderCards(currentData);
-          renderTable(currentData);
-        }
-      });
-
       document.getElementById("search-input").addEventListener("input", () => {
-        if (currentData) {
-          renderTable(currentData);
-        }
+        renderTable();
       });
 
       document.getElementById("refresh-btn").addEventListener("click", () => {
         loadData();
+      });
+
+      document.getElementById("battle-select").addEventListener("change", () => {
+        renderAll();
       });
     }
 
@@ -794,7 +647,7 @@
 
       autoRefreshTimer = setInterval(() => {
         loadData();
-      }, 60000);
+      }, AUTO_REFRESH_MS);
     }
 
     init();
