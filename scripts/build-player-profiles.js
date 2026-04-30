@@ -14,13 +14,20 @@
 //
 // Optional env:
 //   CLAN_NAME = NONG
+//   CURRENT_BATTLE_NAME = StarryBattle
+//   CURRENT_BATTLE_DISPLAY_NAME = Starry Battle
+//   CURRENT_BATTLE_END_ISO = 2026-05-03T18:00:00Z
 
 const fs = require("fs/promises");
 const path = require("path");
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
+const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
+const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Starry Battle";
+const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "2026-05-03T18:00:00Z";
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
@@ -44,8 +51,8 @@ const BATTLES = [
 ];
 
 const CURRENT_BATTLE = {
-  name: "StarryBattle",
-  displayName: "Starry Battle",
+  name: CURRENT_BATTLE_NAME,
+  displayName: CURRENT_BATTLE_DISPLAY_NAME,
   archiveTable: "StarryBattleArchive"
 };
 
@@ -480,178 +487,201 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
   };
 }
 
-function extractClanArrays(value) {
-  const arrays = [];
+async function fetchClanRankSnapshots() {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/clan_rank_snapshots`);
+  url.searchParams.set("select", "fetched_at,battle,rank,clan_name,points");
+  url.searchParams.set("battle", `eq.${CURRENT_BATTLE.name}`);
+  url.searchParams.set("order", "fetched_at.desc");
+  url.searchParams.set("limit", "50000");
 
-  function looksLikeClanObject(obj) {
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders()
+  });
 
-    const hasName =
-      obj.Name !== undefined ||
-      obj.name !== undefined ||
-      obj.ClanName !== undefined ||
-      obj.clanName !== undefined ||
-      obj.Tag !== undefined ||
-      obj.tag !== undefined;
-
-    const hasPoints =
-      obj.Points !== undefined ||
-      obj.points !== undefined ||
-      obj.Score !== undefined ||
-      obj.score !== undefined ||
-      obj.Total !== undefined ||
-      obj.total !== undefined ||
-      obj.Value !== undefined ||
-      obj.value !== undefined;
-
-    return hasName && hasPoints;
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn(`Could not fetch clan_rank_snapshots (${res.status}): ${text}`);
+    return [];
   }
 
-  function walk(node) {
-    if (!node || typeof node !== "object") return;
+  const rows = await res.json();
 
-    if (Array.isArray(node)) {
-      if (node.some(looksLikeClanObject)) {
-        arrays.push(node);
-      }
+  console.log(`Fetched ${rows.length} clan rank snapshot rows.`);
+  return rows;
+}
 
-      for (const item of node) {
-        walk(item);
-      }
+function getLatestClanSnapshotRows(rows) {
+  if (!rows.length) return [];
 
-      return;
-    }
+  const latestTime = rows
+    .map(row => new Date(row.fetched_at).getTime())
+    .filter(t => !Number.isNaN(t))
+    .sort((a, b) => b - a)[0];
 
-    for (const child of Object.values(node)) {
-      walk(child);
+  if (!latestTime) return [];
+
+  return rows.filter(row => new Date(row.fetched_at).getTime() === latestTime);
+}
+
+function getNearestClanSnapshotRows(rows, targetMs, toleranceMin) {
+  const byTimestamp = groupRowsByTimestamp(rows);
+
+  let best = null;
+
+  for (const [ts, batch] of byTimestamp.entries()) {
+    const rowTime = new Date(ts).getTime();
+    if (Number.isNaN(rowTime)) continue;
+
+    const diff = Math.abs(rowTime - targetMs);
+
+    if (!best || diff < best.diff) {
+      best = {
+        ts,
+        batch,
+        diff
+      };
     }
   }
 
-  walk(value);
-  return arrays;
+  if (!best) return [];
+
+  const toleranceMs = toleranceMin * 60 * 1000;
+
+  if (best.diff > toleranceMs) {
+    return [];
+  }
+
+  return best.batch;
 }
 
-function getClanName(clan) {
-  return String(
-    clan?.Name ??
-    clan?.name ??
-    clan?.ClanName ??
-    clan?.clanName ??
-    clan?.Tag ??
-    clan?.tag ??
-    ""
-  ).trim();
+function clanKey(name) {
+  return String(name || "").trim().toLowerCase();
 }
 
-function getClanPoints(clan) {
-  return Number(
-    clan?.Points ??
-    clan?.points ??
-    clan?.Score ??
-    clan?.score ??
-    clan?.Total ??
-    clan?.total ??
-    clan?.Value ??
-    clan?.value ??
-    0
+function buildClanPointMap(rows) {
+  return new Map(
+    rows.map(row => [
+      clanKey(row.clan_name),
+      Number(row.points || 0)
+    ])
   );
 }
 
-function getClanExplicitRank(clan) {
-  const value =
-    clan?.Rank ??
-    clan?.rank ??
-    clan?.Place ??
-    clan?.place ??
-    clan?.Position ??
-    clan?.position ??
-    clan?.Index ??
-    clan?.index;
-
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-async function fetchNongCurrentRank() {
-  const target = String(CLAN_NAME || "NONG").trim().toLowerCase();
-  const pageSize = 100;
-  const maxPages = 100;
-
-  const hosts = [
-    "https://biggamesapi.io/api/clans",
-    "https://ps99.biggamesapi.io/api/clans"
+function chooseProjectionRate(clanName, currentPoints, currentTimeMs, snapshotRows) {
+  const windows = [
+    {
+      basis: "12h",
+      hours: 12,
+      toleranceMin: 45
+    },
+    {
+      basis: "1h",
+      hours: 1,
+      toleranceMin: 15
+    },
+    {
+      basis: "24h",
+      hours: 24,
+      toleranceMin: 90
+    }
   ];
 
-  for (const baseUrl of hosts) {
-    console.log(`Fetching current clan rank for ${CLAN_NAME} from ${baseUrl}...`);
+  for (const win of windows) {
+    const targetMs = currentTimeMs - win.hours * 60 * 60 * 1000;
+    const oldRows = getNearestClanSnapshotRows(snapshotRows, targetMs, win.toleranceMin);
+    const oldMap = buildClanPointMap(oldRows);
+    const oldPoints = oldMap.get(clanKey(clanName));
 
-    for (let page = 1; page <= maxPages; page++) {
-      const url = new URL(baseUrl);
-      url.searchParams.set("page", String(page));
-      url.searchParams.set("pageSize", String(pageSize));
-      url.searchParams.set("sort", "Points");
-      url.searchParams.set("sortOrder", "desc");
-
-      try {
-        const json = await fetchJson(url.toString(), {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "NONG-Leaderboard-Rank"
-          }
-        });
-
-        const clanArrays = extractClanArrays(json);
-        const clans = clanArrays.length ? clanArrays[0] : [];
-
-        if (!clans.length) {
-          console.warn(`No clan array found on ${baseUrl} page ${page}.`);
-          break;
-        }
-
-        const sorted = [...clans].sort((a, b) => getClanPoints(b) - getClanPoints(a));
-
-        for (let i = 0; i < sorted.length; i++) {
-          const clan = sorted[i];
-          const name = getClanName(clan);
-
-          if (name.toLowerCase() === target) {
-            const explicitRank = getClanExplicitRank(clan);
-            const calculatedRank = (page - 1) * pageSize + i + 1;
-            const rank = explicitRank || calculatedRank;
-            const points = getClanPoints(clan);
-
-            console.log(`${CLAN_NAME} current rank found: #${rank} with ${points} points.`);
-
-            return {
-              rank,
-              source: baseUrl,
-              matched_name: name,
-              points
-            };
-          }
-        }
-
-        console.log(`Checked ${baseUrl} page ${page}; ${CLAN_NAME} not found yet.`);
-
-        if (sorted.length < pageSize) {
-          break;
-        }
-
-        await sleep(150);
-      } catch (err) {
-        console.warn(`Clan rank lookup error from ${baseUrl} page ${page}: ${err.message}`);
-        break;
-      }
+    if (oldPoints === undefined) {
+      continue;
     }
+
+    const gain = Number(currentPoints || 0) - Number(oldPoints || 0);
+    const ratePerHour = gain / win.hours;
+
+    return {
+      basis: win.basis,
+      old_points: oldPoints,
+      gain,
+      rate_per_hour: ratePerHour
+    };
   }
 
-  console.warn(`${CLAN_NAME} was not found in the searched clan pages.`);
+  return {
+    basis: "none",
+    old_points: null,
+    gain: 0,
+    rate_per_hour: 0
+  };
+}
+
+function calculateClanProjection(snapshotRows) {
+  const latestRows = getLatestClanSnapshotRows(snapshotRows);
+
+  if (!latestRows.length) {
+    return {
+      clan_rank: null,
+      clan_points: null,
+      clan_rank_source: null,
+      clan_rank_matched_name: null,
+      projected_rank: null,
+      projected_points: null,
+      projection_basis: null,
+      hours_remaining: null,
+      clan_rank_snapshot_at: null
+    };
+  }
+
+  const latestTimeMs = Math.max(
+    ...latestRows
+      .map(row => new Date(row.fetched_at).getTime())
+      .filter(t => !Number.isNaN(t))
+  );
+
+  const battleEndMs = new Date(CURRENT_BATTLE_END_ISO).getTime();
+  const hoursRemaining =
+    Number.isNaN(battleEndMs) || Number.isNaN(latestTimeMs)
+      ? 0
+      : Math.max(0, (battleEndMs - latestTimeMs) / (60 * 60 * 1000));
+
+  const projected = latestRows.map(row => {
+    const rate = chooseProjectionRate(
+      row.clan_name,
+      Number(row.points || 0),
+      latestTimeMs,
+      snapshotRows
+    );
+
+    return {
+      clan_name: row.clan_name,
+      current_rank: Number(row.rank || 0) || null,
+      current_points: Number(row.points || 0),
+      rate_per_hour: rate.rate_per_hour,
+      projection_basis: rate.basis,
+      projected_points: Number(row.points || 0) + rate.rate_per_hour * hoursRemaining
+    };
+  });
+
+  projected.sort((a, b) => {
+    if (b.projected_points !== a.projected_points) return b.projected_points - a.projected_points;
+    return a.clan_name.localeCompare(b.clan_name);
+  });
+
+  const target = clanKey(CLAN_NAME);
+  const currentNong = latestRows.find(row => clanKey(row.clan_name) === target);
+  const projectedIndex = projected.findIndex(row => clanKey(row.clan_name) === target);
+  const projectedNong = projectedIndex >= 0 ? projected[projectedIndex] : null;
 
   return {
-    rank: null,
-    source: null,
-    matched_name: null,
-    points: null
+    clan_rank: currentNong ? Number(currentNong.rank || 0) || null : null,
+    clan_points: currentNong ? Number(currentNong.points || 0) : null,
+    clan_rank_source: "clan_rank_snapshots",
+    clan_rank_matched_name: currentNong?.clan_name || null,
+    projected_rank: projectedIndex >= 0 ? projectedIndex + 1 : null,
+    projected_points: projectedNong ? Math.round(projectedNong.projected_points) : null,
+    projection_basis: projectedNong?.projection_basis || null,
+    hours_remaining: Number(hoursRemaining.toFixed(3)),
+    clan_rank_snapshot_at: latestRows[0]?.fetched_at || null
   };
 }
 
@@ -828,8 +858,12 @@ async function main() {
     })
     .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 
-  console.log(`Fetching current rank for ${CLAN_NAME}...`);
-  const clanRank = await fetchNongCurrentRank();
+  const clanSnapshotRows = await fetchClanRankSnapshots();
+  const clanProjection = calculateClanProjection(clanSnapshotRows);
+
+  console.log(`${CLAN_NAME} current rank from snapshots: ${clanProjection.clan_rank}`);
+  console.log(`${CLAN_NAME} projected rank: ${clanProjection.projected_rank}`);
+  console.log(`${CLAN_NAME} projection basis: ${clanProjection.projection_basis}`);
 
   await fs.writeFile(
     path.join(OUT_DIR, "players.json"),
@@ -850,11 +884,19 @@ async function main() {
       battle: CURRENT_BATTLE.name,
       display_name: CURRENT_BATTLE.displayName,
       clan_name: CLAN_NAME,
-      clan_rank: clanRank.rank,
-      clan_rank_source: clanRank.source,
-      clan_rank_matched_name: clanRank.matched_name,
-      clan_rank_points: clanRank.points,
-      projected_rank: null,
+      battle_end_iso: CURRENT_BATTLE_END_ISO,
+
+      clan_rank: clanProjection.clan_rank,
+      clan_points: clanProjection.clan_points,
+      clan_rank_source: clanProjection.clan_rank_source,
+      clan_rank_matched_name: clanProjection.clan_rank_matched_name,
+      clan_rank_snapshot_at: clanProjection.clan_rank_snapshot_at,
+
+      projected_rank: clanProjection.projected_rank,
+      projected_points: clanProjection.projected_points,
+      projection_basis: clanProjection.projection_basis,
+      hours_remaining: clanProjection.hours_remaining,
+
       rows: currentRows
     }, null, 2),
     "utf8"
