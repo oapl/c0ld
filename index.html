@@ -446,7 +446,7 @@
       </div>
 
       <div class="history-note">
-        Placement is manually maintained for completed battles. Generated history fills in dates and unique-player counts where available.
+        This page needs more work. I'm planning to go back into our spreadsheets and extract as MUCH as possible though. I'm le tired tho..
       </div>
 
       <div class="table-wrap">
@@ -454,10 +454,10 @@
           <thead>
             <tr>
               <th data-history-sort="display_name">Battle</th>
+              <th data-history-sort="update_number">Update #</th>
               <th data-history-sort="placement">Placement</th>
               <th data-history-sort="first_snapshot">Start</th>
               <th data-history-sort="last_snapshot">End</th>
-              <th data-history-sort="unique_players" class="num">Unique Players</th>
             </tr>
           </thead>
           <tbody id="history-body"></tbody>
@@ -597,6 +597,23 @@
       }
 
       return "—";
+    }
+
+    function fmtUpdateLink(battle) {
+      const updateNumber = battle.update_number;
+      const updateUrl = battle.update_url;
+
+      if (updateNumber === null || updateNumber === undefined || updateNumber === "") {
+        return "—";
+      }
+
+      const label = `Update #${escapeHtml(updateNumber)}`;
+
+      if (updateUrl) {
+        return `<a href="${escapeHtml(updateUrl)}" target="_blank" rel="noopener">${label}</a>`;
+      }
+
+      return label;
     }
 
     function getCurrentFetchedAt() {
@@ -747,6 +764,9 @@
         if (historySortKey === "placement") {
           av = getPlacement(a);
           bv = getPlacement(b);
+        } else if (historySortKey === "update_number") {
+          av = a.update_number;
+          bv = b.update_number;
         } else {
           av = a[historySortKey];
           bv = b[historySortKey];
@@ -860,10 +880,10 @@
 
         tr.innerHTML = `
           <td>${escapeHtml(b.display_name || b.battle || "Unknown")}</td>
+          <td>${fmtUpdateLink(b)}</td>
           <td>${escapeHtml(fmtPlacement(b))}</td>
           <td>${fmtDate(b.first_snapshot)}</td>
           <td>${fmtDate(b.last_snapshot)}</td>
-          <td class="num">${fmtNum(b.unique_players)}</td>
         `;
 
         tbody.appendChild(tr);
