@@ -1,5 +1,5 @@
 [
-    {
+  {
     "battle": "New Years Clan Battle",
     "display_name": "New Years Clan Battle",
     "first_snapshot": null,
@@ -7,9 +7,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 32
+    "placement": 32,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Pet Collecting Battle",
     "display_name": "Pet Collecting Battle",
     "first_snapshot": null,
@@ -17,9 +19,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Achievements Battle",
     "display_name": "Achievements Battle",
     "first_snapshot": null,
@@ -27,9 +31,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 19
+    "placement": 19,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Raid Clan Battle",
     "display_name": "Raid Clan Battle",
     "first_snapshot": null,
@@ -37,9 +43,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 13
+    "placement": 13,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Quest Clan Battle",
     "display_name": "Quest Clan Battle",
     "first_snapshot": null,
@@ -47,9 +55,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 6
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Pixel Clan Battle",
     "display_name": "Pixel Clan Battle",
     "first_snapshot": null,
@@ -57,9 +67,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 6
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Fragmented Clan Battle",
     "display_name": "Fragmented Clan Battle",
     "first_snapshot": null,
@@ -67,9 +79,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 8
+    "placement": 8,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Wicked Clan Battle",
     "display_name": "Wicked Clan Battle",
     "first_snapshot": null,
@@ -77,9 +91,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 8
+    "placement": 8,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Good vs. Evil Battle",
     "display_name": "Good vs. Evil Battle",
     "first_snapshot": null,
@@ -87,9 +103,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Clown Clan Battle",
     "display_name": "Clown Clan Battle",
     "first_snapshot": null,
@@ -97,9 +115,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 5
+    "placement": 5,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Ice Cream Clan Battle",
     "display_name": "Ice Cream Clan Battle",
     "first_snapshot": null,
@@ -107,9 +127,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Rave Crab Clan Battle",
     "display_name": "Rave Crab Clan Battle",
     "first_snapshot": null,
@@ -117,9 +139,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 6
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Reversed Clan Battle",
     "display_name": "Reversed Clan Battle",
     "first_snapshot": null,
@@ -127,9 +151,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 10
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Ghost Clan Battle",
     "display_name": "Ghost Clan Battle",
     "first_snapshot": null,
@@ -137,9 +163,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Blimp Dragon Clan Battle",
     "display_name": "Blimp Dragon Clan Battle",
     "first_snapshot": null,
@@ -147,9 +175,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 5
+    "placement": 5,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Blurred Battle",
     "display_name": "Blurred Battle",
     "first_snapshot": null,
@@ -157,9 +187,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 7
+    "placement": 7,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Wyvern Battle",
     "display_name": "Wyvern Battle",
     "first_snapshot": null,
@@ -167,9 +199,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 4
+    "placement": 4,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Mushroom Battle",
     "display_name": "Mushroom Battle",
     "first_snapshot": null,
@@ -177,9 +211,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 10
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Holographic Battle",
     "display_name": "Holographic Battle",
     "first_snapshot": null,
@@ -187,9 +223,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Egyptian Battle",
     "display_name": "Egyptian Battle",
     "first_snapshot": null,
@@ -197,9 +235,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 7
+    "placement": 7,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Tie Dye Battle",
     "display_name": "Tie Dye Battle",
     "first_snapshot": null,
@@ -207,9 +247,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 9
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Athena Battle",
     "display_name": "Athena Battle",
     "first_snapshot": null,
@@ -217,9 +259,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 3
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Pixel Chick Battle",
     "display_name": "Pixel Chick Battle",
     "first_snapshot": null,
@@ -227,9 +271,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 2
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Poison Turtle Battle",
     "display_name": "Poison Turtle Battle",
     "first_snapshot": null,
@@ -237,9 +283,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 2
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Balloon Corgi Battle",
     "display_name": "Balloon Corgi Battle",
     "first_snapshot": null,
@@ -247,9 +295,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 3
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Junkyard Hound Battle",
     "display_name": "Junkyard Hound Battle",
     "first_snapshot": null,
@@ -257,9 +307,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 3
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Nightmare Cyclops Battle",
     "display_name": "Nightmare Cyclops Battle",
     "first_snapshot": null,
@@ -267,9 +319,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 2
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Scuba Dog Battle",
     "display_name": "Scuba Dog Battle",
     "first_snapshot": null,
@@ -277,9 +331,11 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 3
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
   },
-    {
+  {
     "battle": "Sun Angelus Battle",
     "display_name": "Sun Angelus Battle",
     "first_snapshot": null,
@@ -287,7 +343,9 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 3
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
   },
   {
     "battle": "Forged Battle",
@@ -297,6 +355,8 @@
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
-    "placement": 10
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
   }
 ]
