@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NONG Player Profile</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+
+    header {
+      padding: 24px;
+      border-bottom: 1px solid #30363d;
+      background: #161b22;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    a {
+      color: #58a6ff;
+      text-decoration: none;
+    }
+
+    .profile {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .avatar {
+      width: 96px;
+      height: 96px;
+      border-radius: 16px;
+      background: #21262d;
+      object-fit: cover;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+    }
+
+    .muted {
+      color: #8b949e;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      padding: 16px;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      background: #161b22;
+    }
+
+    .label {
+      color: #8b949e;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .battle {
+      margin-top: 24px;
+      padding: 16px;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      background: #161b22;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #30363d;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      color: #8b949e;
+      font-weight: normal;
+    }
+
+    canvas {
+      margin-top: 18px;
+      max-height: 360px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="players.html">← Back to players</a>
+  </header>
+
+  <main>
+    <div id="status">Loading profile...</div>
+    <div id="content" style="display:none;"></div>
+  </main>
+
+  <script>
+    function fmtNum(n) {
+      if (n === null || n === undefined) return "N/A";
+      return Number(n).toLocaleString("en-US");
+    }
+
+    function fmtDate(s) {
+      if (!s) return "N/A";
+      return new Date(s).toLocaleString();
+    }
+
+    function getProfileId() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("id");
+    }
+
+    function card(label, value) {
+      return `
+        <div class="card">
+          <div class="label">${label}</div>
+          <div class="value">${value}</div>
+        </div>
+      `;
+    }
+
+    function renderChart(canvas, battle) {
+      const labels = battle.series.map(p => new Date(p.t).toLocaleString());
+      const points = battle.series.map(p => p.points);
+
+      new Chart(canvas, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Points",
+              data: points,
+              tension: 0.25
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              labels: {
+                color: "#e6edf3"
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: {
+                color: "#8b949e",
+                maxTicksLimit: 8
+              },
+              grid: {
+                color: "#30363d"
+              }
+            },
+            y: {
+              ticks: {
+                color: "#8b949e"
+              },
+              grid: {
+                color: "#30363d"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    async function main() {
+      const id = getProfileId();
+
+      if (!id) {
+        document.getElementById("status").textContent = "Missing profile id.";
+        return;
+      }
+
+      const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${Date.now()}`);
+
+      if (!res.ok) {
+        document.getElementById("status").textContent = "Profile not found.";
+        return;
+      }
+
+      const p = await res.json();
+
+      document.title = `${p.username} - NONG Profile`;
+
+      const content = document.getElementById("content");
+
+      content.innerHTML = `
+        <div class="profile">
+          <img class="avatar" src="${p.avatar_url || "assets/embed-spacer.png"}" alt="">
+          <div>
+            <h1>${p.username}</h1>
+            <div class="muted">User ID: ${p.user_id ?? "N/A"}</div>
+            ${p.profile_url ? `<div><a href="${p.profile_url}" target="_blank" rel="noopener">Open Roblox Profile</a></div>` : ""}
+          </div>
+        </div>
+
+        <div class="cards">
+          ${card("Battles", p.total_battles)}
+          ${card("Latest Rank", p.latest_rank ?? "N/A")}
+          ${card("Latest Points", fmtNum(p.latest_points))}
+          ${card("Latest Seen", fmtDate(p.latest_seen))}
+        </div>
+
+        <h2>Battle History</h2>
+        <div id="battles"></div>
+      `;
+
+      const battlesDiv = content.querySelector("#battles");
+
+      for (const battle of p.battles) {
+        const div = document.createElement("div");
+        div.className = "battle";
+
+        div.innerHTML = `
+          <h3>${battle.display_name}</h3>
+          <div class="muted">${fmtDate(battle.first_seen)} → ${fmtDate(battle.last_seen)}</div>
+
+          <table>
+            <tr><th>Starting Rank</th><td>${battle.starting_rank ?? "N/A"}</td></tr>
+            <tr><th>Last Known Rank</th><td>${battle.last_rank ?? "N/A"}</td></tr>
+            <tr><th>Best Rank</th><td>${battle.best_rank ?? "N/A"}</td></tr>
+            <tr><th>Starting Points</th><td>${fmtNum(battle.starting_points)}</td></tr>
+            <tr><th>Ending Points</th><td>${fmtNum(battle.ending_points)}</td></tr>
+            <tr><th>Gained Points</th><td>${fmtNum(battle.gained_points)}</td></tr>
+            <tr><th>Snapshots Seen</th><td>${fmtNum(battle.snapshot_count)}</td></tr>
+            <tr><th>Present at Final Snapshot</th><td>${battle.present_at_final_snapshot ? "Yes" : "No"}</td></tr>
+          </table>
+
+          ${battle.note ? `<p class="muted">${battle.note}</p>` : ""}
+
+          <canvas></canvas>
+        `;
+
+        battlesDiv.appendChild(div);
+        renderChart(div.querySelector("canvas"), battle);
+      }
+
+      document.getElementById("status").style.display = "none";
+      content.style.display = "block";
+    }
+
+    main().catch(err => {
+      console.error(err);
+      document.getElementById("status").textContent = "Failed to load profile.";
+    });
+  </script>
+</body>
+</html>
