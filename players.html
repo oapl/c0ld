@@ -187,6 +187,7 @@
       border-radius: 10px;
       background: var(--panel-2);
       transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+      min-height: 86px;
     }
 
     .card:hover {
@@ -305,6 +306,20 @@
       return Number(n).toLocaleString("en-US");
     }
 
+    function fmtDate(value) {
+      if (!value) return "N/A";
+
+      const d = new Date(value);
+
+      if (Number.isNaN(d.getTime())) return "N/A";
+
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+    }
+
     function escapeHtml(s) {
       return String(s ?? "")
         .replace(/&/g, "&amp;")
@@ -333,7 +348,7 @@
              currentKeys.has(String(p.username || "").toLowerCase());
     }
 
-    function makeCard(p) {
+    function makeCard(p, groupType) {
       const link = document.createElement("a");
       link.href = `profile.html?id=${encodeURIComponent(p.profile_key)}`;
 
@@ -353,10 +368,17 @@
 
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.innerHTML =
-        `Latest Rank: ${p.latest_rank ?? "N/A"}<br>` +
-        `Latest Points: ${fmtNum(p.latest_points)}<br>` +
-        `Battles: ${p.total_battles ?? "N/A"}`;
+
+      if (groupType === "previous") {
+        meta.innerHTML =
+          `Last Active: ${fmtDate(p.latest_seen)}<br>` +
+          `Battles: ${p.total_battles ?? "N/A"}`;
+      } else {
+        meta.innerHTML =
+          `Latest Rank: ${p.latest_rank ?? "N/A"}<br>` +
+          `Latest Points: ${fmtNum(p.latest_points)}<br>` +
+          `Battles: ${p.total_battles ?? "N/A"}`;
+      }
 
       info.appendChild(name);
       info.appendChild(meta);
@@ -368,7 +390,7 @@
       return link;
     }
 
-    function renderGroup(el, players) {
+    function renderGroup(el, players, groupType) {
       el.innerHTML = "";
 
       if (!players.length) {
@@ -377,7 +399,7 @@
       }
 
       for (const p of players) {
-        el.appendChild(makeCard(p));
+        el.appendChild(makeCard(p, groupType));
       }
     }
 
@@ -399,13 +421,22 @@
 
       const previous = visible
         .filter(p => !isCurrentPlayer(p))
-        .sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
+        .sort((a, b) => {
+          const ad = new Date(a.latest_seen || 0).getTime();
+          const bd = new Date(b.latest_seen || 0).getTime();
+
+          if (!Number.isNaN(ad) && !Number.isNaN(bd) && ad !== bd) {
+            return bd - ad;
+          }
+
+          return String(a.username || "").localeCompare(String(b.username || ""));
+        });
 
       document.getElementById("current-count").textContent = `${current.length} player(s)`;
       document.getElementById("previous-count").textContent = `${previous.length} player(s)`;
 
-      renderGroup(document.getElementById("current-players"), current);
-      renderGroup(document.getElementById("previous-players"), previous);
+      renderGroup(document.getElementById("current-players"), current, "current");
+      renderGroup(document.getElementById("previous-players"), previous, "previous");
     }
 
     async function main() {
