@@ -12,19 +12,19 @@ Shows the data below just because and passes into a Discord webhook.
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 9.8K | 78 |
-| 2 | johnr622 | 9.78K | 78 |
+| 1 | Yume_Sakurax3 | 9.8K | 75 |
+| 2 | johnr622 | 9.78K | 75 |
 | 3 | joshuacd2006 | 9.43K | 46 |
 | 4 | Josep_xD2 | 9.16K | 46 |
-| 5 | jupiter0477 | 9K | 73 |
-| 6 | Mr_Suter | 8.95K | 78 |
-| 7 | Johnr622_alt2 | 8.24K | 68 |
-| 8 | Johnr622_alt3 | 8.24K | 68 |
-| 9 | Johnr622_alt4 | 7.99K | 68 |
-| 10 | Johnr622_alt5 | 7.99K | 68 |
+| 5 | jupiter0477 | 9K | 70 |
+| 6 | Mr_Suter | 8.96K | 75 |
+| 7 | Johnr622_alt2 | 8.24K | 67 |
+| 8 | Johnr622_alt3 | 8.24K | 67 |
+| 9 | Johnr622_alt4 | 8K | 67 |
+| 10 | Johnr622_alt5 | 7.99K | 67 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-30 19:11:03 UTC
+2026-04-30 19:16:02 UTC
 <!-- END_UPDATED -->
