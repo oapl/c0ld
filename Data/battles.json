@@ -3,9 +3,9 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-04-30T19:36:05.186Z",
-    "total_snapshots": 309,
-    "total_rows": 22475,
+    "last_snapshot": "2026-04-30T19:41:02.230Z",
+    "total_snapshots": 310,
+    "total_rows": 22548,
     "unique_players": 73,
     "placement": null
   },
@@ -318,5 +318,15 @@
     "total_rows": null,
     "unique_players": null,
     "placement": 32
+  },
+  {
+    "battle": "Spring 2026",
+    "display_name": "Spring 2026",
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 34
   }
 ]
