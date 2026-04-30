@@ -1,14 +1,15 @@
 // scripts/build-player-profiles.js
-// Builds static JSON player profile data for GitHub Pages.
+// Builds static JSON data for GitHub Pages from Supabase.
+//
+// Outputs:
+//   Data/current.json
+//   Data/players.json
+//   Data/battles.json
+//   Data/players/<user_id>.json
 //
 // Required env:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_KEY
-//
-// Outputs:
-//   Data/players.json
-//   Data/battles.json
-//   Data/players/<user_id>.json
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -18,6 +19,8 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
+
+const PAGE_SIZE = 1000;
 
 const BATTLES = [
   {
@@ -32,7 +35,11 @@ const BATTLES = [
   }
 ];
 
-const PAGE_SIZE = 1000;
+const CURRENT_BATTLE = {
+  name: "StarryBattle",
+  displayName: "Starry Battle",
+  archiveTable: "StarryBattleArchive"
+};
 
 function sbHeaders(extra = {}) {
   return {
@@ -48,7 +55,7 @@ function sleep(ms) {
 }
 
 function toNumber(value) {
-  if (value === null || value === undefined) return null;
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -63,6 +70,11 @@ function fmtSlug(value) {
   return String(value)
     .replace(/[^0-9a-zA-Z_-]/g, "_")
     .slice(0, 80);
+}
+
+function rowIdentity(row) {
+  if (row.user_id) return `id:${row.user_id}`;
+  return `name:${String(row.username || "").toLowerCase()}`;
 }
 
 async function fetchAllRows(table) {
@@ -97,6 +109,143 @@ async function fetchAllRows(table) {
   return all;
 }
 
+async function fetchCurrentLeaderboard() {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/leaderboard_snapshots`);
+  url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
+  url.searchParams.set("order", "rank.asc");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase fetch failed for leaderboard_snapshots (${res.status}): ${text}`);
+  }
+
+  return res.json();
+}
+
+function groupRowsByTimestamp(rows) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const ts = row.fetched_at;
+    if (!map.has(ts)) map.set(ts, []);
+    map.get(ts).push(row);
+  }
+
+  return map;
+}
+
+function getNearestSnapshotBatch(rows, targetMs, toleranceMin) {
+  const byTimestamp = groupRowsByTimestamp(rows);
+
+  let best = null;
+
+  for (const [ts, batch] of byTimestamp.entries()) {
+    const rowTime = new Date(ts).getTime();
+    if (Number.isNaN(rowTime)) continue;
+
+    const diff = Math.abs(rowTime - targetMs);
+
+    if (!best || diff < best.diff) {
+      best = {
+        ts,
+        batch,
+        diff
+      };
+    }
+  }
+
+  if (!best) return [];
+
+  const toleranceMs = toleranceMin * 60 * 1000;
+
+  if (best.diff > toleranceMs) {
+    return [];
+  }
+
+  return best.batch;
+}
+
+function buildPointMap(rows) {
+  return new Map(
+    rows.map(row => [
+      rowIdentity(row),
+      Number(row.total_points || 0)
+    ])
+  );
+}
+
+function addGainFieldsToCurrent(currentRows, archiveRows) {
+  if (!currentRows.length) return [];
+
+  const currentTime = new Date(currentRows[0].fetched_at).getTime();
+
+  if (Number.isNaN(currentTime)) {
+    return currentRows.map(row => ({
+      ...row,
+      gain_5m: null,
+      gain_1h: null,
+      gain_12h: null,
+      gain_24h: null
+    }));
+  }
+
+  const gainWindows = [
+    {
+      key: "gain_5m",
+      minutes: 5,
+      toleranceMin: 4
+    },
+    {
+      key: "gain_1h",
+      minutes: 60,
+      toleranceMin: 10
+    },
+    {
+      key: "gain_12h",
+      minutes: 720,
+      toleranceMin: 25
+    },
+    {
+      key: "gain_24h",
+      minutes: 1440,
+      toleranceMin: 45
+    }
+  ];
+
+  const oldPointMaps = {};
+
+  for (const win of gainWindows) {
+    const targetMs = currentTime - win.minutes * 60 * 1000;
+    const oldBatch = getNearestSnapshotBatch(archiveRows, targetMs, win.toleranceMin);
+
+    oldPointMaps[win.key] = buildPointMap(oldBatch);
+
+    console.log(
+      `${win.key}: found ${oldBatch.length} rows near ${win.minutes} minutes ago`
+    );
+  }
+
+  return currentRows.map(row => {
+    const key = rowIdentity(row);
+    const out = { ...row };
+
+    for (const win of gainWindows) {
+      const oldPoints = oldPointMaps[win.key].get(key);
+
+      out[win.key] =
+        oldPoints === undefined
+          ? null
+          : Number(row.total_points || 0) - oldPoints;
+    }
+
+    return out;
+  });
+}
+
 async function fetchAvatarHeadshots(userIds) {
   const result = new Map();
   const ids = [...new Set(userIds.filter(Boolean).map(Number))];
@@ -113,7 +262,7 @@ async function fetchAvatarHeadshots(userIds) {
     try {
       const res = await fetch(url.toString(), {
         headers: {
-          "Accept": "application/json",
+          Accept: "application/json",
           "User-Agent": "NONG-Leaderboard-Profiles"
         }
       });
@@ -150,12 +299,16 @@ function buildBattleSummary(battleName, displayName, rows) {
       first_snapshot: null,
       last_snapshot: null,
       total_snapshots: 0,
-      unique_players: 0
+      total_rows: 0,
+      unique_players: 0,
+      placement: null
     };
   }
 
   const snapshotTimes = new Set(rows.map(r => r.fetched_at));
-  const playerKeys = new Set(rows.map(r => r.user_id ? `id:${r.user_id}` : `name:${r.username}`));
+  const playerKeys = new Set(
+    rows.map(r => r.user_id ? `id:${r.user_id}` : `name:${String(r.username).toLowerCase()}`)
+  );
 
   return {
     battle: battleName,
@@ -164,12 +317,19 @@ function buildBattleSummary(battleName, displayName, rows) {
     last_snapshot: safeIso(rows[rows.length - 1].fetched_at),
     total_snapshots: snapshotTimes.size,
     total_rows: rows.length,
-    unique_players: playerKeys.size
+    unique_players: playerKeys.size,
+    placement: null
   };
 }
 
 function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRows) {
-  const sorted = [...playerRows].sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+  const sorted = [...playerRows].sort((a, b) => {
+    const at = new Date(a.fetched_at).getTime();
+    const bt = new Date(b.fetched_at).getTime();
+
+    if (at !== bt) return at - bt;
+    return Number(a.rank || 0) - Number(b.rank || 0);
+  });
 
   const battleStart = allBattleRows.length ? safeIso(allBattleRows[0].fetched_at) : null;
   const battleEnd = allBattleRows.length ? safeIso(allBattleRows[allBattleRows.length - 1].fetched_at) : null;
@@ -236,6 +396,8 @@ async function main() {
     throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.");
   }
 
+  await fs.mkdir(OUT_DIR, { recursive: true });
+  await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
   await fs.mkdir(PLAYERS_DIR, { recursive: true });
 
   const battleRows = new Map();
@@ -248,6 +410,7 @@ async function main() {
     rows.sort((a, b) => {
       const at = new Date(a.fetched_at).getTime();
       const bt = new Date(b.fetched_at).getTime();
+
       if (at !== bt) return at - bt;
       return Number(a.rank || 0) - Number(b.rank || 0);
     });
@@ -259,6 +422,12 @@ async function main() {
 
     battlesSummary.push(buildBattleSummary(battle.name, battle.displayName, rows));
   }
+
+  console.log("Loading current leaderboard...");
+  const currentRowsRaw = await fetchCurrentLeaderboard();
+
+  const currentArchiveRows = battleRows.get(CURRENT_BATTLE.name)?.rows || [];
+  const currentRowsWithGains = addGainFieldsToCurrent(currentRowsRaw, currentArchiveRows);
 
   const playerMap = new Map();
 
@@ -341,6 +510,7 @@ async function main() {
     };
 
     const filename = `${profile.profile_key}.json`;
+
     await fs.writeFile(
       path.join(PLAYERS_DIR, filename),
       JSON.stringify(profile, null, 2),
@@ -365,9 +535,32 @@ async function main() {
   playerIndex.sort((a, b) => {
     const ap = a.latest_points ?? -1;
     const bp = b.latest_points ?? -1;
+
     if (bp !== ap) return bp - ap;
     return String(a.username).localeCompare(String(b.username));
   });
+
+  const playerIndexById = new Map();
+  const playerIndexByName = new Map();
+
+  for (const p of playerIndex) {
+    if (p.user_id) playerIndexById.set(String(p.user_id), p);
+    if (p.username) playerIndexByName.set(String(p.username).toLowerCase(), p);
+  }
+
+  const currentRows = currentRowsWithGains
+    .map(row => {
+      const match =
+        (row.user_id ? playerIndexById.get(String(row.user_id)) : null) ||
+        playerIndexByName.get(String(row.username || "").toLowerCase());
+
+      return {
+        ...row,
+        profile_key: match?.profile_key || (row.user_id ? String(row.user_id) : fmtSlug(row.username)),
+        avatar_url: match?.avatar_url || null
+      };
+    })
+    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 
   await fs.writeFile(
     path.join(OUT_DIR, "players.json"),
@@ -381,9 +574,23 @@ async function main() {
     "utf8"
   );
 
+  await fs.writeFile(
+    path.join(OUT_DIR, "current.json"),
+    JSON.stringify({
+      generated_at: new Date().toISOString(),
+      battle: CURRENT_BATTLE.name,
+      display_name: CURRENT_BATTLE.displayName,
+      clan_rank: null,
+      projected_rank: null,
+      rows: currentRows
+    }, null, 2),
+    "utf8"
+  );
+
   console.log(`Wrote ${written} player profiles.`);
-  console.log(`Wrote Data/players.json.`);
-  console.log(`Wrote Data/battles.json.`);
+  console.log("Wrote Data/players.json.");
+  console.log("Wrote Data/battles.json.");
+  console.log("Wrote Data/current.json.");
 }
 
 main().catch(err => {
