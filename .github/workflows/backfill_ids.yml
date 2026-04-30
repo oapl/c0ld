@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Run backfill-userids.js
+      - name: Run backfill-ids.js
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
