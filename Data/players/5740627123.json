@@ -5,12 +5,12 @@
   "usernames_seen": [
     "ArcticGalaxy199"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-CBC80F562E47176D99E38246EDF224C7-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/5740627123.png",
   "profile_url": "https://www.roblox.com/users/5740627123/profile",
   "total_battles": 2,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
-  "latest_rank": 37,
-  "latest_points": 6606,
+  "latest_seen": "2026-04-30T16:55:56.269Z",
+  "latest_rank": 36,
+  "latest_points": 6614,
   "battles": [
     {
       "battle": "Spring2026",
@@ -5737,18 +5737,18 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 38,
-      "last_rank": 37,
+      "last_rank": 36,
       "best_rank": 36,
       "worst_rank": 39,
       "starting_points": 4726,
-      "ending_points": 6606,
-      "max_points": 6606,
-      "gained_points": 1880,
-      "snapshot_count": 269,
+      "ending_points": 6614,
+      "max_points": 6614,
+      "gained_points": 1888,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -7096,6 +7096,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 37,
           "points": 6606
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 36,
+          "points": 6614
         }
       ]
     }

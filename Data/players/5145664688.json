@@ -5,12 +5,12 @@
   "usernames_seen": [
     "mybananafarm1"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-25D042A1D4DACD10D05A425C148FE57A-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/5145664688.png",
   "profile_url": "https://www.roblox.com/users/5145664688/profile",
   "total_battles": 2,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 62,
-  "latest_points": 1697,
+  "latest_points": 1703,
   "battles": [
     {
       "battle": "Spring2026",
@@ -5722,18 +5722,18 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 69,
       "last_rank": 62,
       "best_rank": 62,
       "worst_rank": 70,
       "starting_points": 0,
-      "ending_points": 1697,
-      "max_points": 1697,
-      "gained_points": 1697,
-      "snapshot_count": 269,
+      "ending_points": 1703,
+      "max_points": 1703,
+      "gained_points": 1703,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -7081,6 +7081,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 62,
           "points": 1697
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 62,
+          "points": 1703
         }
       ]
     }

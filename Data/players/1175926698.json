@@ -5,12 +5,12 @@
   "usernames_seen": [
     "Mr_Suter"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8817F8DA5DC52C2223EE2830A14DD466-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/1175926698.png",
   "profile_url": "https://www.roblox.com/users/1175926698/profile",
   "total_battles": 2,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 6,
-  "latest_points": 8751,
+  "latest_points": 8758,
   "battles": [
     {
       "battle": "Spring2026",
@@ -5737,18 +5737,18 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 6,
       "last_rank": 6,
       "best_rank": 6,
       "worst_rank": 6,
       "starting_points": 6817,
-      "ending_points": 8751,
-      "max_points": 8751,
-      "gained_points": 1934,
-      "snapshot_count": 269,
+      "ending_points": 8758,
+      "max_points": 8758,
+      "gained_points": 1941,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -7096,6 +7096,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 6,
           "points": 8751
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 6,
+          "points": 8758
         }
       ]
     }

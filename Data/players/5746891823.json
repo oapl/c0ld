@@ -5,12 +5,12 @@
   "usernames_seen": [
     "AgentP_8928"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-96920C8F7E768CE93E6ABF6A8630B6BA-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/5746891823.png",
   "profile_url": "https://www.roblox.com/users/5746891823/profile",
   "total_battles": 2,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 35,
-  "latest_points": 6617,
+  "latest_points": 6625,
   "battles": [
     {
       "battle": "Spring2026",
@@ -5737,18 +5737,18 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 39,
       "last_rank": 35,
       "best_rank": 35,
       "worst_rank": 39,
       "starting_points": 4724,
-      "ending_points": 6617,
-      "max_points": 6617,
-      "gained_points": 1893,
-      "snapshot_count": 269,
+      "ending_points": 6625,
+      "max_points": 6625,
+      "gained_points": 1901,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -7096,6 +7096,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 35,
           "points": 6617
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 35,
+          "points": 6625
         }
       ]
     }

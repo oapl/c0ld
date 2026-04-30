@@ -5,12 +5,12 @@
   "usernames_seen": [
     "LawnMp3"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-DACB15754F1B8CBF6A595E631B6CA6E5-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/2341656429.png",
   "profile_url": "https://www.roblox.com/users/2341656429/profile",
   "total_battles": 2,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 22,
-  "latest_points": 7019,
+  "latest_points": 7023,
   "battles": [
     {
       "battle": "Spring2026",
@@ -5737,18 +5737,18 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 22,
       "last_rank": 22,
       "best_rank": 17,
       "worst_rank": 23,
       "starting_points": 5097,
-      "ending_points": 7019,
-      "max_points": 7019,
-      "gained_points": 1922,
-      "snapshot_count": 269,
+      "ending_points": 7023,
+      "max_points": 7023,
+      "gained_points": 1926,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -7096,6 +7096,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 22,
           "points": 7019
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 22,
+          "points": 7023
         }
       ]
     }

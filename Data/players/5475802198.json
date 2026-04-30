@@ -5,29 +5,29 @@
   "usernames_seen": [
     "ManapuaMan8O8"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-A0571BEACAC713B1F21B181232EFAB70-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/5475802198.png",
   "profile_url": "https://www.roblox.com/users/5475802198/profile",
   "total_battles": 1,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 49,
-  "latest_points": 5116,
+  "latest_points": 5121,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 50,
       "last_rank": 49,
       "best_rank": 49,
       "worst_rank": 50,
       "starting_points": 3167,
-      "ending_points": 5116,
-      "max_points": 5116,
-      "gained_points": 1949,
-      "snapshot_count": 269,
+      "ending_points": 5121,
+      "max_points": 5121,
+      "gained_points": 1954,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -1375,6 +1375,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 49,
           "points": 5116
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 49,
+          "points": 5121
         }
       ]
     }

@@ -5,29 +5,29 @@
   "usernames_seen": [
     "NatsdudeYT"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-EFBBF1420460F27F455F871E765148FA-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/3220548476.png",
   "profile_url": "https://www.roblox.com/users/3220548476/profile",
   "total_battles": 1,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 55,
-  "latest_points": 4012,
+  "latest_points": 4017,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 58,
       "last_rank": 55,
       "best_rank": 55,
       "worst_rank": 58,
       "starting_points": 2035,
-      "ending_points": 4012,
-      "max_points": 4012,
-      "gained_points": 1977,
-      "snapshot_count": 269,
+      "ending_points": 4017,
+      "max_points": 4017,
+      "gained_points": 1982,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -1375,6 +1375,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 55,
           "points": 4012
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 55,
+          "points": 4017
         }
       ]
     }

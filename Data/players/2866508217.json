@@ -5,29 +5,29 @@
   "usernames_seen": [
     "Baddie_true1223"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-49ED1AB713FC227EFDFE1529D3F3290C-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/2866508217.png",
   "profile_url": "https://www.roblox.com/users/2866508217/profile",
   "total_battles": 1,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 63,
-  "latest_points": 1616,
+  "latest_points": 1622,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T19:33:05.203Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 71,
       "last_rank": 63,
       "best_rank": 62,
       "worst_rank": 71,
       "starting_points": 0,
-      "ending_points": 1616,
-      "max_points": 1616,
-      "gained_points": 1616,
-      "snapshot_count": 256,
+      "ending_points": 1622,
+      "max_points": 1622,
+      "gained_points": 1622,
+      "snapshot_count": 257,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -1310,6 +1310,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 63,
           "points": 1616
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 63,
+          "points": 1622
         }
       ]
     }

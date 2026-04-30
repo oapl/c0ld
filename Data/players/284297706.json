@@ -5,29 +5,29 @@
   "usernames_seen": [
     "owendemey"
   ],
-  "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-F96A9689A5B4E346DB49096765612C56-Png/150/150/AvatarHeadshot/Png/noFilter",
+  "avatar_url": "assets/avatars/284297706.png",
   "profile_url": "https://www.roblox.com/users/284297706/profile",
   "total_battles": 1,
-  "latest_seen": "2026-04-30T16:51:00.712Z",
+  "latest_seen": "2026-04-30T16:55:56.269Z",
   "latest_rank": 60,
-  "latest_points": 1914,
+  "latest_points": 1916,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-04-30T16:51:00.712Z",
+      "battle_last_snapshot": "2026-04-30T16:55:56.269Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-04-30T16:51:00.712Z",
+      "last_seen": "2026-04-30T16:55:56.269Z",
       "starting_rank": 60,
       "last_rank": 60,
       "best_rank": 60,
       "worst_rank": 61,
       "starting_points": 1261,
-      "ending_points": 1914,
-      "max_points": 1914,
-      "gained_points": 653,
-      "snapshot_count": 269,
+      "ending_points": 1916,
+      "max_points": 1916,
+      "gained_points": 655,
+      "snapshot_count": 270,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -1375,6 +1375,11 @@
           "t": "2026-04-30T16:51:00.712Z",
           "rank": 60,
           "points": 1914
+        },
+        {
+          "t": "2026-04-30T16:55:56.269Z",
+          "rank": 60,
+          "points": 1916
         }
       ]
     }
