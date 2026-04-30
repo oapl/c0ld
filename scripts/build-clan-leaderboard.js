@@ -4,8 +4,9 @@
 // Input table:
 //   public.clan_rank_snapshots
 //
-// Output:
+// Outputs:
 //   Data/clans-current.json
+//   Data/current.json gets patched with the same clan/projection values
 //
 // Required env:
 //   SUPABASE_URL
@@ -29,6 +30,8 @@ const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "
 const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "2026-05-03T18:00:00Z";
 
 const OUT_DIR = path.join(process.cwd(), "Data");
+const CLANS_CURRENT_FILE = path.join(OUT_DIR, "clans-current.json");
+const CURRENT_FILE = path.join(OUT_DIR, "current.json");
 
 const PAGE_SIZE = 1000;
 
@@ -236,7 +239,10 @@ function calculateRows(snapshotRows) {
   });
 
   const projectedSorted = [...projectedRows].sort((a, b) => {
-    if (b.projected_points !== a.projected_points) return b.projected_points - a.projected_points;
+    if (b.projected_points !== a.projected_points) {
+      return b.projected_points - a.projected_points;
+    }
+
     return String(a.clan_name).localeCompare(String(b.clan_name));
   });
 
@@ -262,6 +268,50 @@ function calculateRows(snapshotRows) {
     generatedFromSnapshot: safeIso(latestRows[0]?.fetched_at),
     hoursRemaining: Number(hoursRemaining.toFixed(3))
   };
+}
+
+async function patchCurrentJson(clanOutput) {
+  let current = {};
+
+  try {
+    const raw = await fs.readFile(CURRENT_FILE, "utf8");
+    current = JSON.parse(raw);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      throw err;
+    }
+
+    current = {};
+  }
+
+  const patched = {
+    ...current,
+
+    clan_name: clanOutput.clan_name,
+    battle: clanOutput.battle,
+    display_name: clanOutput.display_name,
+    battle_end_iso: clanOutput.battle_end_iso,
+
+    clan_rank: clanOutput.clan_rank,
+    clan_points: clanOutput.clan_points,
+    clan_rank_source: "clans-current.json",
+    clan_rank_matched_name: clanOutput.clan_name,
+    clan_rank_snapshot_at: clanOutput.snapshot_at,
+
+    projected_rank: clanOutput.projected_rank,
+    projected_points: clanOutput.projected_points,
+    projection_basis: clanOutput.projection_basis,
+    hours_remaining: clanOutput.hours_remaining
+  };
+
+  await fs.writeFile(
+    CURRENT_FILE,
+    JSON.stringify(patched, null, 2) + "\n",
+    "utf8"
+  );
+
+  console.log("Patched Data/current.json with clan projection source of truth.");
+  console.log(`Data/current.json projected rank: ${patched.projected_rank}`);
 }
 
 async function main() {
@@ -293,15 +343,18 @@ async function main() {
   };
 
   await fs.writeFile(
-    path.join(OUT_DIR, "clans-current.json"),
-    JSON.stringify(output, null, 2),
+    CLANS_CURRENT_FILE,
+    JSON.stringify(output, null, 2) + "\n",
     "utf8"
   );
+
+  await patchCurrentJson(output);
 
   console.log("Wrote Data/clans-current.json.");
   console.log(`Clan rows written: ${calculated.rows.length}`);
   console.log(`${CLAN_NAME} current rank: ${output.clan_rank}`);
   console.log(`${CLAN_NAME} projected rank: ${output.projected_rank}`);
+  console.log(`${CLAN_NAME} projection basis: ${output.projection_basis}`);
 }
 
 main().catch(err => {
