@@ -27,7 +27,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
 const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Starry Battle";
-const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "2026-05-03T18:00:00Z";
+const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "2026-05-02T15:00:00Z";
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
