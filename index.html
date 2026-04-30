@@ -467,7 +467,6 @@
   </main>
 
   <script>
-    const DEFAULT_BATTLE_END_ISO = null;
     const AUTO_REFRESH_MS = 60 * 1000;
 
     let currentData = null;
@@ -486,6 +485,7 @@
     let historySortAsc = false;
 
     let refreshTimer = null;
+    let countdownTimer = null;
     let isLoading = false;
 
     function escapeHtml(s) {
@@ -770,7 +770,7 @@
     }
 
     function getBattleEndIso() {
-      return clanData?.battle_end_iso || currentData?.battle_end_iso || DEFAULT_BATTLE_END_ISO;
+      return clanData?.battle_end_iso || currentData?.battle_end_iso || null;
     }
 
     function renderCards() {
@@ -781,7 +781,9 @@
         rank ? `#${rank}` : "—";
 
       const latest = clanData?.snapshot_at || getCurrentFetchedAt();
-      document.getElementById("db-update-value").textContent = latest ? fmtDateTime(latest) : "—";
+
+      document.getElementById("db-update-value").textContent =
+        latest ? fmtDateTime(latest) : "—";
 
       document.getElementById("projected-rank-value").textContent =
         projectedRank ? `#${projectedRank}` : "—";
@@ -861,40 +863,36 @@
       }
     }
 
-let countdownTimer = null;
+    function startCountdown() {
+      const el = document.getElementById("countdown-value");
 
-function startCountdown() {
-  const el = document.getElementById("countdown-value");
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
 
-  if (countdownTimer) {
-    clearInterval(countdownTimer);
-    countdownTimer = null;
-  }
+      function tick() {
+        const endIso = getBattleEndIso();
 
-  function tick() {
-    const endIso =
-      clanData?.battle_end_iso ||
-      currentData?.battle_end_iso ||
-      null;
+        if (!endIso) {
+          el.textContent = "—";
+          return;
+        }
 
-    if (!endIso) {
-      el.textContent = "—";
-      return;
+        const end = new Date(endIso).getTime();
+
+        if (Number.isNaN(end)) {
+          el.textContent = "—";
+          return;
+        }
+
+        el.textContent = fmtCountdown(end - Date.now());
+      }
+
+      tick();
+      countdownTimer = setInterval(tick, 1000);
     }
 
-    const end = new Date(endIso).getTime();
-
-    if (Number.isNaN(end)) {
-      el.textContent = "—";
-      return;
-    }
-
-    el.textContent = fmtCountdown(end - Date.now());
-  }
-
-  tick();
-  countdownTimer = setInterval(tick, 1000);
-}
     function setActiveTab(which) {
       const btnLeaderboard = document.getElementById("tab-btn-leaderboard");
       const btnHistory = document.getElementById("tab-btn-history");
@@ -1090,11 +1088,14 @@ function startCountdown() {
         renderLeaderboard();
         renderHistory();
         applyHashRoute();
+        startCountdown();
       } catch (err) {
         console.error(err);
         status.className = "error";
         status.style.display = "block";
         status.textContent = err.message;
+
+        document.getElementById("countdown-value").textContent = "—";
       } finally {
         isLoading = false;
       }
@@ -1112,7 +1113,6 @@ function startCountdown() {
 
     document.addEventListener("DOMContentLoaded", () => {
       wireEvents();
-      startCountdown();
       loadData();
       startAutoRefresh();
     });
