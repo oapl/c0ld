@@ -62,19 +62,27 @@ jobs:
 
       - name: Build player profile data
         env:
+          CLAN_NAME:            ${{ vars.CLAN_NAME }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/build-player-profiles.js
+
+      - name: Show generated avatar files
+        run: |
+          echo "Generated avatar files:"
+          find assets/avatars -maxdepth 1 -type f | sort | head -50 || true
+          echo "Avatar file count:"
+          find assets/avatars -maxdepth 1 -type f | wc -l || true
 
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add README.md Data/
+          git add README.md Data/ assets/avatars/
 
           if git diff --cached --quiet; then
-            echo "No README or Data changes to commit."
+            echo "No README, Data, or avatar changes to commit."
             exit 0
           fi
 
