@@ -453,8 +453,8 @@
         <table>
           <thead>
             <tr>
-              <th data-history-sort="display_name">Battle</th>
               <th data-history-sort="update_number">Update #</th>
+              <th data-history-sort="display_name">Battle</th>
               <th data-history-sort="placement">Placement</th>
               <th data-history-sort="first_snapshot">Start</th>
               <th data-history-sort="last_snapshot">End</th>
@@ -879,8 +879,8 @@
         const tr = document.createElement("tr");
 
         tr.innerHTML = `
-          <td>${escapeHtml(b.display_name || b.battle || "Unknown")}</td>
           <td>${fmtUpdateLink(b)}</td>
+          <td>${escapeHtml(b.display_name || b.battle || "Unknown")}</td>
           <td>${escapeHtml(fmtPlacement(b))}</td>
           <td>${fmtDate(b.first_snapshot)}</td>
           <td>${fmtDate(b.last_snapshot)}</td>
