@@ -1,0 +1,20 @@
+[
+  {
+    "battle": "Spring2026",
+    "display_name": "Spring 2026",
+    "first_snapshot": "2026-04-21T12:14:36.000Z",
+    "last_snapshot": "2026-04-25T13:09:36.000Z",
+    "total_snapshots": 1140,
+    "total_rows": 83827,
+    "unique_players": 84
+  },
+  {
+    "battle": "StarryBattle",
+    "display_name": "Starry Battle",
+    "first_snapshot": "2026-04-29T18:11:01.131Z",
+    "last_snapshot": "2026-04-30T15:37:43.694Z",
+    "total_snapshots": 244,
+    "total_rows": 17730,
+    "unique_players": 73
+  }
+]
