@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NONG Clan Leaderboard</title>
+  <style>
+    /* ─── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f4f4;
+      color: #222;
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────────── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+
+    /* ─── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: #2c2c2c;
+      color: #fff;
+      padding: 14px 0;
+      border-bottom: 3px solid #444;
+    }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .clan-name {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #fff;
+      letter-spacing: 0.02em;
+    }
+    .clan-sub { font-size: 0.78rem; color: #aaa; margin-top: 2px; }
+    .header-meta { font-size: 0.75rem; color: #bbb; text-align: right; }
+    #last-updated { color: #ddd; }
+
+    /* ─── Main ───────────────────────────────────────────────────────── */
+    main { padding: 20px 0 40px; }
+
+    /* ─── Toolbar ────────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .search-wrap { position: relative; }
+    #search-input {
+      width: 220px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      color: #333;
+      background: #fff;
+      outline: none;
+    }
+    #search-input:focus { border-color: #888; }
+    #search-input::placeholder { color: #aaa; }
+    #refresh-btn {
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 6px 12px;
+      color: #444;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    #refresh-btn:hover { background: #e8e8e8; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #refresh-btn.spinning { opacity: 0.6; }
+
+    /* ─── Table ──────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: #e8e8e8; }
+    th {
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: bold;
+      color: #444;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      border-bottom: 1px solid #ccc;
+    }
+    th:hover { background: #ddd; }
+    th.sorted { background: #ddd; }
+    th .sort-icon { display: inline-block; margin-left: 3px; color: #888; font-size: 0.7rem; }
+    td {
+      padding: 0 12px;
+      height: 40px;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #eee;
+      vertical-align: middle;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    tbody tr:nth-child(even) { background: #f9f9f9; }
+    tbody tr:hover { background: #f0f0f0; }
+
+
+    /* Rank cell */
+    .rank-cell {
+      font-weight: bold;
+      width: 44px;
+      text-align: center;
+      color: #555;
+    }
+
+    /* Name cell */
+    .name-cell { font-weight: bold; color: #222; }
+
+    /* Numeric cell */
+    .num-cell { font-variant-numeric: tabular-nums; text-align: right; }
+
+    /* ─── Loading / Error States ──────────────────────────────────────── */
+    .state-box {
+      text-align: center;
+      padding: 50px 20px;
+      color: #666;
+    }
+    .state-box h3 { font-size: 1rem; margin-bottom: 8px; color: #444; }
+    .state-box p { font-size: 0.85rem; color: #888; max-width: 440px; margin: 0 auto; }
+    .loader {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 3px solid #ddd;
+      border-top-color: #666;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    .config-hint {
+      background: #f8f8f8;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 12px 16px;
+      font-size: 0.8rem;
+      color: #666;
+      text-align: left;
+      max-width: 500px;
+      margin: 14px auto 0;
+    }
+    .config-hint code {
+      background: #efefef;
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-family: monospace;
+      color: #333;
+    }
+    a { color: #555; }
+
+    /* ─── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .clan-name { font-size: 1.1rem; }
+      th, td { padding: 7px 8px; }
+      #search-input { width: 160px; }
+      .hide-mobile { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── CONFIG ──────────────────────────────────────────────────────────
+     Edit these values to point the dashboard at your own sheets.
+     SHEET_ID   — the long ID from the Google Sheet URL
+     TABS       — list of battle tabs (gid or sheet name); set to []
+                  to auto-detect the first visible sheet
+     APPSCRIPT  — optional: URL of a published Apps Script web app that
+                  returns JSON rows. If set it takes priority over the
+                  Google Sheets gviz API.
+─────────────────────────────────────────────────────────────────────── -->
+<script>
+const CONFIG = {
+  /* ---- Primary (front-facing) Google Sheet ---- */
+  SHEET_ID: "1JIhSVcbfgEFlz7L20qkQ1QiY95Y0ZZsl8DJmbuB7GJw",
+
+  /* ---- Named tabs to expose as "battles" ----
+     Each entry: { label: "Display Name", gid: 0 }
+     Leave empty to load the first sheet only.           */
+  TABS: [],
+
+  /* ---- Optional: Apps Script published web app URL ----
+     Leave empty ("") to use the Google Sheets gviz API instead.
+     Your Apps Script should return JSON like:
+     { columns: ["Rank","Name","Diamonds"], rows: [[1,"Alice",50000], ...] }
+  */
+  APPSCRIPT_URL: "",
+
+  /* ---- Explicit column list ----
+     Only these columns are shown, in this order.
+     "match" is a regex tested against the sheet's column label.
+     "label" is the header text displayed on the page.             */
+  COLUMNS: [
+    { match: /rank/i,                       label: "RANK" },
+    { match: /user|username/i,              label: "USERNAME" },
+    { match: /total/i,                      label: "TOTAL POINTS" },
+    { match: /inactive/i,                   label: "INACTIVE TIME" },
+    { match: /5.{0,6}min/i,                label: "5 MINUTES" },
+    { match: /60.{0,6}min/i,               label: "60 MINUTES" },
+    { match: /12.{0,6}h/i,                 label: "12 HOURS" },
+    { match: /24.{0,6}h/i,                 label: "24 HOURS" },
+  ],
+
+  /* ---- Column role hints (used for formatting only) ---- */
+  COL_HINTS: {
+    rank:     ["rank","#","place","pos"],
+    name:     ["name","user","player","member","ign"],
+    diamonds: ["diamond","gem","total","score","contrib","point"],
+  },
+
+  /* ---- Clan display name shown in the header ---- */
+  CLAN_NAME: "NONG",
+  CLAN_SUBTITLE: "Pet Simulator 99 · Clan Leaderboard",
+};
+</script>
+
+<!-- ─── MARKUP ─────────────────────────────────────────────────────── -->
+
+<header>
+  <div class="container header-inner">
+    <div>
+      <div class="clan-name" id="clan-name"></div>
+      <div class="clan-sub" id="clan-sub"></div>
+    </div>
+    <div class="header-meta">
+      Last updated: <span id="last-updated">—</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="container">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrap">
+        <input id="search-input" type="text" placeholder="Search member…" autocomplete="off" />
+      </div>
+      <button id="refresh-btn" title="Refresh data">↻ Refresh</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table id="lb-table">
+        <thead id="lb-head"><tr></tr></thead>
+        <tbody id="lb-body"></tbody>
+      </table>
+      <div id="lb-state" class="state-box">
+        <div class="loader"></div>
+        <h3>Loading leaderboard…</h3>
+        <p>Fetching data from Google Sheets.</p>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ─── JAVASCRIPT ─────────────────────────────────────────────────── -->
+<script>
+/* =====================================================================
+   State
+   ===================================================================== */
+let allRows    = [];   // raw parsed rows [{col: value, ...}]
+let columns    = [];   // column descriptors [{key, label, type, role}]
+let sortCol    = null; // key of currently sorted column
+let sortAsc    = false;
+let maxPrimary = 1;    // max value in the primary numeric column (for bars)
+
+/* =====================================================================
+   Boot
+   ===================================================================== */
+document.addEventListener("DOMContentLoaded", () => {
+  // Populate static text from config
+  document.getElementById("clan-name").textContent = CONFIG.CLAN_NAME;
+  document.getElementById("clan-sub").textContent  = CONFIG.CLAN_SUBTITLE;
+
+  loadData();
+
+  document.getElementById("search-input").addEventListener("input", renderTable);
+  document.getElementById("refresh-btn").addEventListener("click", () => {
+    loadData();
+  });
+});
+
+/* =====================================================================
+   Data loading
+   ===================================================================== */
+async function loadData() {
+  showState("loading");
+  setRefreshSpinner(true);
+
+  try {
+    if (CONFIG.APPSCRIPT_URL) {
+      await loadFromAppScript();
+    } else {
+      await loadFromGviz();
+    }
+  } catch (err) {
+    console.error(err);
+    showState("error", err.message);
+  } finally {
+    setRefreshSpinner(false);
+  }
+}
+
+/* ---- AppScript JSON endpoint ---- */
+async function loadFromAppScript() {
+  const sep = CONFIG.APPSCRIPT_URL.includes("?") ? "&" : "?";
+  const url = CONFIG.APPSCRIPT_URL;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`AppScript returned HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.rows || !data.columns)
+    throw new Error("AppScript response must have { columns, rows } keys.");
+  processData(data.columns.map(c => ({ label: c, key: slugify(c) })),
+              data.rows.map(r => Object.fromEntries(data.columns.map((c, i) => [slugify(c), r[i]]))));
+}
+
+/* ---- Google Sheets gviz API ---- */
+async function loadFromGviz() {
+  const gid = 0;
+  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${gid}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Google Sheets returned HTTP ${res.status}. Ensure the sheet is publicly shared (View access).`);
+  const text = await res.text();
+  const json = parseGvizResponse(text);
+  const cols = json.table.cols.map((c, i) => ({
+    label: c.label || c.id || `Col ${i}`,
+    key:   slugify(c.label || c.id || `col_${i}`),
+    type:  c.type,
+  }));
+  const rows = json.table.rows.map(r =>
+    Object.fromEntries(cols.map((c, i) => [
+      c.key,
+      r.c && r.c[i] ? (r.c[i].v !== null && r.c[i].v !== undefined ? r.c[i].v : "") : ""
+    ]))
+  ).filter(row => cols.some(c => row[c.key] !== "" && row[c.key] !== null));
+  processData(cols, rows);
+}
+
+function parseGvizResponse(text) {
+  // Strip the JS wrapper: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
+  const match = text.match(/google\.visualization\.Query\.setResponse\((\{[\s\S]*\})\)/);
+  if (!match) throw new Error("Could not parse Google Sheets response. Is the sheet public?");
+  return JSON.parse(match[1]);
+}
+
+/* =====================================================================
+   Data processing
+   ===================================================================== */
+function processData(cols, rows) {
+  // Filter to only the configured columns, in the declared order, renamed
+  if (CONFIG.COLUMNS && CONFIG.COLUMNS.length > 0) {
+    const mapped = [];
+    CONFIG.COLUMNS.forEach(cfg => {
+      const found = cols.find(c => cfg.match.test(c.label));
+      if (found) mapped.push({ ...found, label: cfg.label, key: found.key });
+    });
+    if (mapped.length > 0) cols = mapped;
+  }
+
+  columns = cols;
+  allRows = rows;
+
+  // Detect column roles
+  columns.forEach(c => {
+    c.role = detectRole(c.label);
+  });
+
+  // Find primary "diamonds" column for bar chart scaling
+  const primCol = columns.find(c => c.role === "diamonds") || columns.find(c => c.type === "number" || typeof allRows[0]?.[c.key] === "number");
+  if (primCol) {
+    const vals = allRows.map(r => toNum(r[primCol.key])).filter(v => isFinite(v));
+    maxPrimary = Math.max(...vals, 1);
+    primCol.isPrimary = true;
+  }
+
+  // Sort by primary numeric column descending by default
+  if (primCol) {
+    sortCol = primCol.key;
+    sortAsc = false;
+  }
+
+  updateTimestamp();
+  buildTableHeader();
+  renderTable();
+  hideState();
+}
+
+/* =====================================================================
+   Role detection
+   ===================================================================== */
+function detectRole(label) {
+  const l = label.toLowerCase();
+  for (const [role, hints] of Object.entries(CONFIG.COL_HINTS)) {
+    if (hints.some(h => l.includes(h))) return role;
+  }
+  return "generic";
+}
+
+/* =====================================================================
+   Table header
+   ===================================================================== */
+function buildTableHeader() {
+  const tr = document.querySelector("#lb-head tr");
+  tr.innerHTML = "";
+
+  // Always inject a rank column first if no rank column exists in data
+  const hasRankCol = columns.some(c => c.role === "rank");
+  if (!hasRankCol) {
+    const th = document.createElement("th");
+    th.textContent = "#";
+    th.style.width = "52px";
+    th.style.textAlign = "center";
+    tr.appendChild(th);
+  }
+
+  columns.forEach(col => {
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    if (col.role === "rank") { th.style.width = "52px"; th.style.textAlign = "center"; }
+    th.dataset.key = col.key;
+    if (col.key === sortCol) { th.classList.add("sorted"); }
+    const icon = document.createElement("span");
+    icon.className = "sort-icon";
+    icon.textContent = col.key === sortCol ? (sortAsc ? "▲" : "▼") : "⇅";
+    th.appendChild(icon);
+    th.addEventListener("click", () => onSort(col.key));
+    tr.appendChild(th);
+  });
+}
+
+function onSort(key) {
+  if (sortCol === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortCol = key;
+    sortAsc = false;
+  }
+  // Update header
+  document.querySelectorAll("#lb-head th").forEach(th => {
+    if (th.dataset.key === key) {
+      th.classList.add("sorted");
+      th.querySelector(".sort-icon").textContent = sortAsc ? "▲" : "▼";
+    } else if (th.dataset.key) {
+      th.classList.remove("sorted");
+      th.querySelector(".sort-icon").textContent = "⇅";
+    }
+  });
+  renderTable();
+}
+
+/* =====================================================================
+   Table body
+   ===================================================================== */
+function renderTable() {
+  const query  = document.getElementById("search-input").value.trim().toLowerCase();
+  const nameCol = columns.find(c => c.role === "name");
+  const primCol = columns.find(c => c.isPrimary);
+  const hasRankCol = columns.some(c => c.role === "rank");
+
+  // Filter
+  let rows = query
+    ? allRows.filter(r => columns.some(c => String(r[c.key] ?? "").toLowerCase().includes(query)))
+    : allRows.slice();
+
+  // Sort
+  if (sortCol) {
+    rows.sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      const an = toNum(av), bn = toNum(bv);
+      if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
+      return sortAsc
+        ? String(av ?? "").localeCompare(String(bv ?? ""))
+        : String(bv ?? "").localeCompare(String(av ?? ""));
+    });
+  }
+
+  const tbody = document.getElementById("lb-body");
+  tbody.innerHTML = "";
+
+  rows.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    const displayRank = i + 1;
+
+    // Injected rank cell
+    if (!hasRankCol) {
+      const td = document.createElement("td");
+      td.className = "rank-cell";
+      td.textContent = displayRank;
+      tr.appendChild(td);
+    }
+
+    columns.forEach(col => {
+      const td  = document.createElement("td");
+      const val = row[col.key];
+
+      if (col.role === "rank") {
+        td.className = "rank-cell";
+        const r = parseInt(val, 10);
+        td.textContent = r || val;
+
+      } else if (col.role === "name") {
+        td.className = "name-cell";
+        td.textContent = val ?? "—";
+
+      } else if (col.isPrimary) {
+        const num = toNum(val);
+        td.className = "num-cell";
+        td.textContent = fmtNum(num);
+
+      } else if (typeof val === "number" || (typeof val === "string" && val !== "" && !isNaN(Number(val)))) {
+        td.className = "num-cell";
+        td.textContent = fmtNum(toNum(val));
+
+      } else {
+        td.textContent = val ?? "—";
+      }
+
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  if (rows.length === 0 && allRows.length > 0) {
+    tbody.innerHTML = `<tr><td colspan="${columns.length + (hasRankCol ? 0 : 1)}" style="text-align:center;padding:32px;color:var(--text-muted);">No members match your search.</td></tr>`;
+  }
+}
+
+/* =====================================================================
+   State UI helpers
+   ===================================================================== */
+function showState(type, msg) {
+  const el = document.getElementById("lb-state");
+  document.getElementById("lb-table").style.display = "none";
+  el.style.display = "block";
+  if (type === "loading") {
+    el.innerHTML = `<div class="loader"></div><h3>Loading leaderboard…</h3><p>Fetching data from Google Sheets.</p>`;
+  } else if (type === "error") {
+    el.innerHTML = `
+      <h3>Could not load data</h3>
+      <p>${escHtml(msg || "An unknown error occurred.")}</p>
+      <div class="config-hint">
+        <strong>Troubleshooting tips:</strong><br>
+        • Make sure the sheet is <strong>shared publicly</strong> (Anyone with link → Viewer).<br>
+        • If using a custom Apps Script, set <code>APPSCRIPT_URL</code> in the CONFIG block.<br>
+        • Open the browser console for more details.
+      </div>`;
+  }
+}
+function hideState() {
+  document.getElementById("lb-state").style.display = "none";
+  document.getElementById("lb-table").style.display = "table";
+}
+function setRefreshSpinner(on) {
+  document.getElementById("refresh-btn").classList.toggle("spinning", on);
+}
+function updateTimestamp() {
+  document.getElementById("last-updated").textContent =
+    new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/* =====================================================================
+   Utilities
+   ===================================================================== */
+function slugify(s) { return String(s).toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, ""); }
+function toNum(v)   { const n = parseFloat(String(v).replace(/,/g, "")); return isNaN(n) ? NaN : n; }
+function fmtNum(n)  {
+  if (isNaN(n) || n === null || n === undefined) return "—";
+  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (Math.abs(n) >= 1_000)     return (n / 1_000).toFixed(1) + "K";
+  return String(Math.round(n));
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>
