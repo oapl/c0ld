@@ -492,12 +492,13 @@ async function main() {
     withGains = computeLastGain(withGains, prevRows);
     console.log(`Found ${prevRows.length} previous-snapshot rows for last-gain calculation.`);
 
-    const toInsert = members.map(m => ({
-      fetched_at:   nowIso,
-      rank:         m.rank,
-      username:     m.username,
-      total_points: m.total_points
-    }));
+const toInsert = members.map(m => ({
+  fetched_at:   nowIso,
+  rank:         m.rank,
+  user_id:      m.user_id,
+  username:     m.username,
+  total_points: m.total_points
+}));
     await sbInsertArchive(toInsert);
     console.log(`Inserted ${toInsert.length} rows into StarryBattleArchive.`);
 
