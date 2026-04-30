@@ -10,19 +10,19 @@ Cloudflare triggers the Action in Github because Github sucks at scheduling.
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 9.29K | 94 |
-| 2 | Yume_Sakurax3 | 9.28K | 94 |
-| 3 | joshuacd2006 | 8.98K | 94 |
-| 4 | Josep_xD2 | 8.72K | 94 |
-| 5 | jupiter0477 | 8.51K | 42 |
-| 6 | Mr_Suter | 8.45K | 94 |
-| 7 | Johnr622_alt2 | 8.01K | 88 |
-| 8 | Johnr622_alt3 | 8.01K | 88 |
-| 9 | Johnr622_alt4 | 7.76K | 88 |
-| 10 | Johnr622_alt5 | 7.75K | 88 |
+| 1 | johnr622 | 9.3K | 84 |
+| 2 | Yume_Sakurax3 | 9.28K | 84 |
+| 3 | joshuacd2006 | 8.99K | 84 |
+| 4 | Josep_xD2 | 8.73K | 84 |
+| 5 | jupiter0477 | 8.51K | 38 |
+| 6 | Mr_Suter | 8.46K | 84 |
+| 7 | Johnr622_alt2 | 8.01K | 80 |
+| 8 | Johnr622_alt3 | 8.01K | 80 |
+| 9 | Johnr622_alt4 | 7.77K | 80 |
+| 10 | Johnr622_alt5 | 7.76K | 80 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-04-30 13:15:38 UTC
+2026-04-30 13:20:45 UTC
 <!-- END_UPDATED -->
