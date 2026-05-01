@@ -5,30 +5,12 @@
 //   Data/current.json
 //   Data/players.json
 //   Data/battles.json
-//   Data/players/<user_id>.json
+//   Data/players/<profile_key>.json
 //   assets/avatars/<user_id>.png
 //
-// Required env:
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_KEY
-//   CURRENT_BATTLE_END_ISO
-//
-// Optional env:
-//   CLAN_NAME = NONG
-//   CURRENT_BATTLE_NAME = StarryBattle
-//   CURRENT_BATTLE_DISPLAY_NAME = Starry Battle
-//   CURRENT_NONG_TABLE = StarryNONG
-//
-// Important:
-//   CURRENT_BATTLE_NAME stays as the Big Games/API key, such as StarryBattle.
-//   CURRENT_NONG_TABLE is the live Supabase player/member table, such as StarryNONG.
-//
-// Data/manual-battles.json:
-//   battle              = website/profile/dropdown key, ex: AbstractNONG
-//   display_name        = pretty website label, ex: Abstract Battle
-//   api_battle_key      = Big Games/API key when known, ex: Spring2026 or StarryBattle
-//   nong_results_table  = exact Supabase NONG/player table, ex: AbstractNONG
-//   clan_results_table  = exact Supabase clans table, ex: AbstractClans
+// This script reads Data/manual-battles.json.
+// For any battle with nong_results_table set, it pulls player rows from that Supabase table.
+// Manual-only battles stay in manual-battles.json and are merged later by merge-manual-battles.js.
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -39,25 +21,12 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
 const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Starry Battle";
-const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO;
-
-function defaultNongTableFromBattleName(battleName) {
-  const clean = String(battleName || "")
-    .replace(/Battle$/i, "")
-    .replace(/Archive$/i, "")
-    .replace(/[^a-zA-Z0-9_]/g, "");
-
-  return `${clean}NONG`;
-}
+const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || null;
 
 const CURRENT_NONG_TABLE =
   process.env.CURRENT_NONG_TABLE ||
   process.env.CURRENT_BATTLE_NONG_TABLE ||
   defaultNongTableFromBattleName(CURRENT_BATTLE_NAME);
-
-if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
-if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
-if (!CURRENT_BATTLE_END_ISO) throw new Error("Missing required env var: CURRENT_BATTLE_END_ISO");
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
@@ -68,14 +37,17 @@ const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
 
-let BATTLES = [];
+if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
+if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
 
-let CURRENT_PROFILE_BATTLE = {
-  name: CURRENT_BATTLE_NAME,
-  displayName: CURRENT_BATTLE_DISPLAY_NAME,
-  table: CURRENT_NONG_TABLE,
-  apiBattleKey: CURRENT_BATTLE_NAME
-};
+function defaultNongTableFromBattleName(battleName) {
+  const clean = String(battleName || "")
+    .replace(/Battle$/i, "")
+    .replace(/Archive$/i, "")
+    .replace(/[^a-zA-Z0-9_]/g, "");
+
+  return `${clean}NONG`;
+}
 
 function sbHeaders(extra = {}) {
   return {
@@ -84,6 +56,48 @@ function sbHeaders(extra = {}) {
     "Content-Type": "application/json",
     ...extra
   };
+}
+
+function normalizeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function stringOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
+}
+
+function safeIso(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function profileKeyFromRow(row) {
+  if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
+    return String(row.user_id);
+  }
+
+  return String(row.username || "unknown")
+    .replace(/[^0-9a-zA-Z_-]/g, "_")
+    .slice(0, 80);
+}
+
+function rowIdentity(row) {
+  if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
+    return `id:${row.user_id}`;
+  }
+
+  return `name:${String(row.username || "").toLowerCase()}`;
 }
 
 function sleep(ms) {
@@ -119,100 +133,119 @@ async function readJsonArray(filePath) {
   }
 }
 
-function normalizeKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
+function cleanManualBattle(record) {
+  return {
+    battle: stringOrNull(record.battle || record.display_name),
+    display_name: stringOrNull(record.display_name || record.battle),
 
-function toNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
+    api_battle_key: stringOrNull(record.api_battle_key),
+    nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
+    clan_results_table: stringOrNull(record.clan_results_table),
 
-function safeIso(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
+    first_snapshot: safeIso(record.first_snapshot),
+    last_snapshot: safeIso(record.last_snapshot),
 
-function fmtSlug(value) {
-  return String(value)
-    .replace(/[^0-9a-zA-Z_-]/g, "_")
-    .slice(0, 80);
-}
+    total_snapshots: numberOrNull(record.total_snapshots),
+    total_rows: numberOrNull(record.total_rows),
+    unique_players: numberOrNull(record.unique_players),
 
-function rowIdentity(row) {
-  if (row.user_id) return `id:${row.user_id}`;
-  return `name:${String(row.username || "").toLowerCase()}`;
+    placement: record.placement ?? null,
+    update_number: record.update_number ?? null,
+    update_url: stringOrNull(record.update_url)
+  };
 }
 
 async function buildBattleConfigs() {
-  const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
-  const map = new Map();
+  const manualRaw = await readJsonArray(MANUAL_BATTLES_FILE);
+  const manual = manualRaw.map(cleanManualBattle);
 
-  for (const record of manualBattles) {
-    const battleName = record.battle || record.display_name;
-    const displayName = record.display_name || record.battle;
-    const nongTable = record.nong_results_table || record.player_results_table;
+  const tableBacked = manual
+    .filter(b => b.battle && b.display_name && b.nong_results_table)
+    .map(b => ({
+      ...b,
+      table: b.nong_results_table
+    }));
 
-    if (!battleName || !displayName || !nongTable) continue;
+  const hasCurrent = tableBacked.some(b =>
+    normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
+    normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
+    normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
+  );
 
-    map.set(normalizeKey(battleName), {
-      name: String(battleName),
-      displayName: String(displayName),
-      table: String(nongTable),
-      apiBattleKey: record.api_battle_key || null
+  if (!hasCurrent) {
+    tableBacked.push({
+      battle: CURRENT_BATTLE_NAME,
+      display_name: CURRENT_BATTLE_DISPLAY_NAME,
+      api_battle_key: CURRENT_BATTLE_NAME,
+      nong_results_table: CURRENT_NONG_TABLE,
+      clan_results_table: null,
+      first_snapshot: null,
+      last_snapshot: null,
+      total_snapshots: null,
+      total_rows: null,
+      unique_players: null,
+      placement: null,
+      update_number: null,
+      update_url: null,
+      table: CURRENT_NONG_TABLE
     });
   }
 
-  const currentFromManual = [...map.values()].find(item =>
-    normalizeKey(item.table) === normalizeKey(CURRENT_NONG_TABLE) ||
-    normalizeKey(item.apiBattleKey) === normalizeKey(CURRENT_BATTLE_NAME)
-  );
+  const deduped = new Map();
 
-  if (currentFromManual) {
-    CURRENT_PROFILE_BATTLE = {
-      name: currentFromManual.name,
-      displayName: currentFromManual.displayName,
-      table: currentFromManual.table,
-      apiBattleKey: currentFromManual.apiBattleKey || CURRENT_BATTLE_NAME
-    };
-  } else {
-    CURRENT_PROFILE_BATTLE = {
-      name: CURRENT_BATTLE_NAME,
-      displayName: CURRENT_BATTLE_DISPLAY_NAME,
-      table: CURRENT_NONG_TABLE,
-      apiBattleKey: CURRENT_BATTLE_NAME
-    };
-
-    map.set(normalizeKey(CURRENT_PROFILE_BATTLE.name), CURRENT_PROFILE_BATTLE);
+  for (const battle of tableBacked) {
+    deduped.set(normalizeKey(battle.battle), battle);
   }
 
-  const configs = [...map.values()];
+  const configs = [...deduped.values()];
 
   configs.sort((a, b) => {
-    const aIsCurrent = normalizeKey(a.name) === normalizeKey(CURRENT_PROFILE_BATTLE.name);
-    const bIsCurrent = normalizeKey(b.name) === normalizeKey(CURRENT_PROFILE_BATTLE.name);
+    const aCurrent =
+      normalizeKey(a.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(a.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(a.table) === normalizeKey(CURRENT_NONG_TABLE);
 
-    if (aIsCurrent && !bIsCurrent) return 1;
-    if (!aIsCurrent && bIsCurrent) return -1;
+    const bCurrent =
+      normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE);
 
-    return String(a.displayName || a.name).localeCompare(String(b.displayName || b.name));
+    if (aCurrent && !bCurrent) return 1;
+    if (!aCurrent && bCurrent) return -1;
+
+    return String(a.display_name || a.battle).localeCompare(String(b.display_name || b.battle));
   });
 
+  console.log("Manual battles read:", manual.length);
+  console.log("Table-backed battles found:", configs.length);
   console.log("Battle profile table configuration:");
-  for (const config of configs) {
-    console.log(`  ${config.name} (${config.displayName}) -> ${config.table}`);
+
+  for (const b of configs) {
+    console.log(`  ${b.battle} (${b.display_name}) -> ${b.table}`);
   }
 
-  console.log(`Current API battle key: ${CURRENT_BATTLE_NAME}`);
-  console.log(`Current profile battle key: ${CURRENT_PROFILE_BATTLE.name}`);
-  console.log(`Current NONG table: ${CURRENT_PROFILE_BATTLE.table}`);
+  const currentProfileBattle =
+    configs.find(b =>
+      normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
+    ) || {
+      battle: CURRENT_BATTLE_NAME,
+      display_name: CURRENT_BATTLE_DISPLAY_NAME,
+      api_battle_key: CURRENT_BATTLE_NAME,
+      table: CURRENT_NONG_TABLE,
+      nong_results_table: CURRENT_NONG_TABLE,
+      clan_results_table: null
+    };
 
-  return configs;
+  console.log("Current API battle key:", CURRENT_BATTLE_NAME);
+  console.log("Current profile battle key:", currentProfileBattle.battle);
+  console.log("Current NONG table:", currentProfileBattle.table);
+
+  return {
+    configs,
+    currentProfileBattle
+  };
 }
 
 async function fetchAllRows(table) {
@@ -303,9 +336,7 @@ function getNearestSnapshotBatch(rows, targetMs, toleranceMin) {
   if (!best) return [];
 
   const toleranceMs = toleranceMin * 60 * 1000;
-  if (best.diff > toleranceMs) return [];
-
-  return best.batch;
+  return best.diff <= toleranceMs ? best.batch : [];
 }
 
 function buildPointMap(rows) {
@@ -355,6 +386,7 @@ function addGainFieldsToCurrent(currentRows, archiveRows) {
 
     for (const win of gainWindows) {
       const oldPoints = oldPointMaps[win.key].get(key);
+
       out[win.key] =
         oldPoints === undefined
           ? null
@@ -406,7 +438,7 @@ async function fetchAvatarHeadshots(userIds) {
       console.warn(`Avatar thumbnail URL batch error: ${err.message}`);
     }
 
-    await sleep(300);
+    await sleep(250);
   }
 
   console.log(`Received ${result.size} Roblox avatar thumbnail URLs.`);
@@ -463,45 +495,61 @@ async function cacheAvatarMap(avatarMap) {
   for (const [userId, imageUrl] of avatarMap.entries()) {
     const localPath = await downloadAvatarToCache(userId, imageUrl);
     cached.set(Number(userId), localPath || imageUrl);
-    await sleep(100);
+    await sleep(75);
   }
 
   console.log(`Avatar cache complete. Cached/linked ${cached.size} avatars.`);
   return cached;
 }
 
-function buildBattleSummary(battleName, displayName, rows) {
+function buildBattleSummary(battleConfig, rows) {
   if (!rows.length) {
     return {
-      battle: battleName,
-      display_name: displayName,
-      first_snapshot: null,
-      last_snapshot: null,
-      total_snapshots: 0,
-      total_rows: 0,
-      unique_players: 0,
-      placement: null
+      battle: battleConfig.battle,
+      display_name: battleConfig.display_name,
+
+      first_snapshot: battleConfig.first_snapshot ?? null,
+      last_snapshot: battleConfig.last_snapshot ?? null,
+
+      total_snapshots: battleConfig.total_snapshots ?? 0,
+      total_rows: battleConfig.total_rows ?? 0,
+      unique_players: battleConfig.unique_players ?? 0,
+
+      placement: battleConfig.placement ?? null,
+      update_number: battleConfig.update_number ?? null,
+      update_url: battleConfig.update_url ?? null,
+
+      api_battle_key: battleConfig.api_battle_key ?? null,
+      nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+      clan_results_table: battleConfig.clan_results_table ?? null
     };
   }
 
   const snapshotTimes = new Set(rows.map(r => r.fetched_at));
-  const playerKeys = new Set(
-    rows.map(r => r.user_id ? `id:${r.user_id}` : `name:${String(r.username).toLowerCase()}`)
-  );
+  const playerKeys = new Set(rows.map(rowIdentity));
 
   return {
-    battle: battleName,
-    display_name: displayName,
+    battle: battleConfig.battle,
+    display_name: battleConfig.display_name,
+
     first_snapshot: safeIso(rows[0].fetched_at),
     last_snapshot: safeIso(rows[rows.length - 1].fetched_at),
+
     total_snapshots: snapshotTimes.size,
     total_rows: rows.length,
     unique_players: playerKeys.size,
-    placement: null
+
+    placement: battleConfig.placement ?? null,
+    update_number: battleConfig.update_number ?? null,
+    update_url: battleConfig.update_url ?? null,
+
+    api_battle_key: battleConfig.api_battle_key ?? null,
+    nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+    clan_results_table: battleConfig.clan_results_table ?? null
   };
 }
 
-function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRows) {
+function summarizePlayerBattle(battleConfig, allBattleRows, playerRows) {
   const sorted = [...playerRows].sort((a, b) => {
     const at = new Date(a.fetched_at).getTime();
     const bt = new Date(b.fetched_at).getTime();
@@ -519,33 +567,22 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
 
-  const startingPoints = toNumber(first.total_points);
-  const endingPoints = toNumber(last.total_points);
+  const ranks = sorted.map(r => numberOrNull(r.rank)).filter(n => n !== null);
+  const points = sorted.map(r => numberOrNull(r.total_points)).filter(n => n !== null);
 
-  const ranks = sorted.map(r => toNumber(r.rank)).filter(n => n !== null);
-  const points = sorted.map(r => toNumber(r.total_points)).filter(n => n !== null);
+  const startingPoints = numberOrNull(first.total_points);
+  const endingPoints = numberOrNull(last.total_points);
 
-  const bestRank = ranks.length ? Math.min(...ranks) : null;
-  const worstRank = ranks.length ? Math.max(...ranks) : null;
-  const maxPoints = points.length ? Math.max(...points) : null;
-
-  const battleEndTime = battleEnd ? new Date(battleEnd).getTime() : null;
-  const playerLastSeenTime = last?.fetched_at ? new Date(last.fetched_at).getTime() : null;
-
-  const missingAtEnd =
-    battleEndTime !== null &&
-    playerLastSeenTime !== null &&
-    battleEndTime - playerLastSeenTime > 30 * 60 * 1000;
-
-  const series = sorted.map(r => ({
-    t: safeIso(r.fetched_at),
-    rank: toNumber(r.rank),
-    points: toNumber(r.total_points)
+  const series = sorted.map(row => ({
+    t: safeIso(row.fetched_at),
+    rank: numberOrNull(row.rank),
+    points: numberOrNull(row.total_points)
   }));
 
   return {
-    battle: battleName,
-    display_name: displayName,
+    battle: battleConfig.battle,
+    display_name: battleConfig.display_name,
+
     battle_first_snapshot: battleStart,
     battle_last_snapshot: battleEnd,
 
@@ -553,23 +590,23 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
     first_active_date: firstActive ? safeIso(firstActive.fetched_at) : null,
     last_seen: safeIso(last.fetched_at),
 
-    starting_rank: toNumber(first.rank),
-    last_rank: toNumber(last.rank),
-    end_rank: toNumber(last.rank),
-    best_rank: bestRank,
-    worst_rank: worstRank,
+    starting_rank: numberOrNull(first.rank),
+    last_rank: numberOrNull(last.rank),
+    end_rank: numberOrNull(last.rank),
+    best_rank: ranks.length ? Math.min(...ranks) : null,
+    worst_rank: ranks.length ? Math.max(...ranks) : null,
 
     starting_points: startingPoints,
     ending_points: endingPoints,
-    max_points: maxPoints,
+    max_points: points.length ? Math.max(...points) : null,
     gained_points:
       startingPoints !== null && endingPoints !== null
         ? endingPoints - startingPoints
         : null,
 
     snapshot_count: sorted.length,
-    present_at_final_snapshot: !missingAtEnd,
-    note: missingAtEnd ? "Last seen before final battle snapshot" : null,
+    present_at_final_snapshot: true,
+    note: null,
 
     series
   };
@@ -597,6 +634,10 @@ async function fetchClanRankSnapshots() {
   return rows;
 }
 
+function clanKey(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
 function getLatestClanSnapshotRows(rows) {
   if (!rows.length) return [];
 
@@ -608,6 +649,15 @@ function getLatestClanSnapshotRows(rows) {
   if (!latestTime) return [];
 
   return rows.filter(row => new Date(row.fetched_at).getTime() === latestTime);
+}
+
+function buildClanPointMap(rows) {
+  return new Map(
+    rows.map(row => [
+      clanKey(row.clan_name),
+      Number(row.points || 0)
+    ])
+  );
 }
 
 function getNearestClanSnapshotRows(rows, targetMs, toleranceMin) {
@@ -628,22 +678,7 @@ function getNearestClanSnapshotRows(rows, targetMs, toleranceMin) {
   if (!best) return [];
 
   const toleranceMs = toleranceMin * 60 * 1000;
-  if (best.diff > toleranceMs) return [];
-
-  return best.batch;
-}
-
-function clanKey(name) {
-  return String(name || "").trim().toLowerCase();
-}
-
-function buildClanPointMap(rows) {
-  return new Map(
-    rows.map(row => [
-      clanKey(row.clan_name),
-      Number(row.points || 0)
-    ])
-  );
+  return best.diff <= toleranceMs ? best.batch : [];
 }
 
 function chooseProjectionRate(clanName, currentPoints, currentTimeMs, snapshotRows) {
@@ -662,20 +697,15 @@ function chooseProjectionRate(clanName, currentPoints, currentTimeMs, snapshotRo
     if (oldPoints === undefined) continue;
 
     const gain = Number(currentPoints || 0) - Number(oldPoints || 0);
-    const ratePerHour = gain / win.hours;
 
     return {
       basis: win.basis,
-      old_points: oldPoints,
-      gain,
-      rate_per_hour: ratePerHour
+      rate_per_hour: gain / win.hours
     };
   }
 
   return {
     basis: "none",
-    old_points: null,
-    gain: 0,
     rate_per_hour: 0
   };
 }
@@ -703,7 +733,7 @@ function calculateClanProjection(snapshotRows) {
       .filter(t => !Number.isNaN(t))
   );
 
-  const battleEndMs = new Date(CURRENT_BATTLE_END_ISO).getTime();
+  const battleEndMs = CURRENT_BATTLE_END_ISO ? new Date(CURRENT_BATTLE_END_ISO).getTime() : NaN;
 
   const hoursRemaining =
     Number.isNaN(battleEndMs) || Number.isNaN(latestTimeMs)
@@ -711,26 +741,21 @@ function calculateClanProjection(snapshotRows) {
       : Math.max(0, (battleEndMs - latestTimeMs) / (60 * 60 * 1000));
 
   const projected = latestRows.map(row => {
-    const rate = chooseProjectionRate(
-      row.clan_name,
-      Number(row.points || 0),
-      latestTimeMs,
-      snapshotRows
-    );
+    const currentPoints = Number(row.points || 0);
+    const rate = chooseProjectionRate(row.clan_name, currentPoints, latestTimeMs, snapshotRows);
 
     return {
       clan_name: row.clan_name,
       current_rank: Number(row.rank || 0) || null,
-      current_points: Number(row.points || 0),
-      rate_per_hour: rate.rate_per_hour,
+      current_points: currentPoints,
       projection_basis: rate.basis,
-      projected_points: Number(row.points || 0) + rate.rate_per_hour * hoursRemaining
+      projected_points: currentPoints + rate.rate_per_hour * hoursRemaining
     };
   });
 
   projected.sort((a, b) => {
     if (b.projected_points !== a.projected_points) return b.projected_points - a.projected_points;
-    return a.clan_name.localeCompare(b.clan_name);
+    return String(a.clan_name).localeCompare(String(b.clan_name));
   });
 
   const target = clanKey(CLAN_NAME);
@@ -754,15 +779,16 @@ function calculateClanProjection(snapshotRows) {
 async function main() {
   await ensureDir(OUT_DIR);
   await ensureDir(AVATAR_DIR);
+
   await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
   await ensureDir(PLAYERS_DIR);
 
-  BATTLES = await buildBattleConfigs();
+  const { configs, currentProfileBattle } = await buildBattleConfigs();
 
   const battleRows = new Map();
   const battlesSummary = [];
 
-  for (const battle of BATTLES) {
+  for (const battle of configs) {
     console.log(`Loading ${battle.table}...`);
     const rows = await fetchAllRows(battle.table);
 
@@ -774,91 +800,95 @@ async function main() {
       return Number(a.rank || 0) - Number(b.rank || 0);
     });
 
-    battleRows.set(battle.name, {
-      ...battle,
+    battleRows.set(battle.battle, {
+      config: battle,
       rows
     });
 
-    battlesSummary.push(buildBattleSummary(battle.name, battle.displayName, rows));
+    battlesSummary.push(buildBattleSummary(battle, rows));
   }
 
   console.log("Loading current leaderboard...");
   const currentRowsRaw = await fetchCurrentLeaderboard();
 
-  const currentArchiveRows = battleRows.get(CURRENT_PROFILE_BATTLE.name)?.rows || [];
+  const currentArchiveRows = battleRows.get(currentProfileBattle.battle)?.rows || [];
   const currentRowsWithGains = addGainFieldsToCurrent(currentRowsRaw, currentArchiveRows);
 
   const playerMap = new Map();
 
-  for (const battle of BATTLES) {
-    const data = battleRows.get(battle.name);
-    const rows = data.rows;
+  for (const battle of configs) {
+    const data = battleRows.get(battle.battle);
+    const rows = data?.rows || [];
 
     for (const row of rows) {
-      const userId = row.user_id ? Number(row.user_id) : null;
-      const key = userId ? `id:${userId}` : `name:${String(row.username).toLowerCase()}`;
+      const profileKey = profileKeyFromRow(row);
 
-      if (!playerMap.has(key)) {
-        playerMap.set(key, {
-          key,
-          user_id: userId,
+      if (!playerMap.has(profileKey)) {
+        playerMap.set(profileKey, {
+          profile_key: profileKey,
+          user_id: row.user_id ? Number(row.user_id) : null,
           username: row.username,
           usernames_seen: new Set(),
           battles_raw: new Map()
         });
       }
 
-      const player = playerMap.get(key);
-      player.usernames_seen.add(row.username);
+      const player = playerMap.get(profileKey);
 
-      if (!player.battles_raw.has(battle.name)) {
-        player.battles_raw.set(battle.name, []);
+      if (row.username) {
+        player.usernames_seen.add(row.username);
+        player.username = row.username;
       }
 
-      player.battles_raw.get(battle.name).push(row);
+      if (!player.battles_raw.has(battle.battle)) {
+        player.battles_raw.set(battle.battle, []);
+      }
+
+      player.battles_raw.get(battle.battle).push(row);
     }
   }
 
   const ids = [...playerMap.values()]
-    .map(p => p.user_id)
+    .map(player => player.user_id)
     .filter(Boolean);
 
-  console.log(`Fetching avatars for ${ids.length} users...`);
-  const remoteAvatars = await fetchAvatarHeadshots(ids);
-  const avatars = await cacheAvatarMap(remoteAvatars);
+  const avatarUrls = await fetchAvatarHeadshots(ids);
+  const cachedAvatars = await cacheAvatarMap(avatarUrls);
 
   const playerIndex = [];
-  let written = 0;
 
   for (const player of playerMap.values()) {
     const battles = [];
 
-    for (const battle of BATTLES) {
-      const data = battleRows.get(battle.name);
-      const playerRows = player.battles_raw.get(battle.name) || [];
-
+    for (const battle of configs) {
+      const playerRows = player.battles_raw.get(battle.battle) || [];
       if (!playerRows.length) continue;
+
+      const allBattleRows = battleRows.get(battle.battle)?.rows || [];
 
       battles.push(
         summarizePlayerBattle(
-          battle.name,
-          battle.displayName,
-          data.rows,
+          battle,
+          allBattleRows,
           playerRows
         )
       );
     }
 
-    const latestBattle = battles
-      .slice()
-      .sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen))[0];
+    battles.sort((a, b) => {
+      const at = new Date(a.battle_last_snapshot || a.last_seen || 0).getTime();
+      const bt = new Date(b.battle_last_snapshot || b.last_seen || 0).getTime();
+      return bt - at;
+    });
+
+    const latestBattle = battles[0] || null;
 
     const profile = {
-      profile_key: player.user_id ? String(player.user_id) : fmtSlug(player.username),
+      profile_key: player.profile_key,
       user_id: player.user_id,
       username: player.username,
       usernames_seen: [...player.usernames_seen].sort(),
-      avatar_url: player.user_id ? avatars.get(player.user_id) || null : null,
+      avatar_url: player.user_id ? cachedAvatars.get(player.user_id) || null : null,
       profile_url: player.user_id ? `https://www.roblox.com/users/${player.user_id}/profile` : null,
 
       total_battles: battles.length,
@@ -869,10 +899,10 @@ async function main() {
       battles
     };
 
-    const filename = `${profile.profile_key}.json`;
+    const fileName = `${profile.profile_key}.json`;
 
     await fs.writeFile(
-      path.join(PLAYERS_DIR, filename),
+      path.join(PLAYERS_DIR, fileName),
       JSON.stringify(profile, null, 2),
       "utf8"
     );
@@ -886,10 +916,8 @@ async function main() {
       latest_seen: profile.latest_seen,
       latest_rank: profile.latest_rank,
       latest_points: profile.latest_points,
-      file: `Data/players/${filename}`
+      file: `Data/players/${fileName}`
     });
-
-    written++;
   }
 
   playerIndex.sort((a, b) => {
@@ -897,26 +925,26 @@ async function main() {
     const bp = b.latest_points ?? -1;
 
     if (bp !== ap) return bp - ap;
-    return String(a.username).localeCompare(String(b.username));
+    return String(a.username || "").localeCompare(String(b.username || ""));
   });
 
-  const playerIndexById = new Map();
-  const playerIndexByName = new Map();
+  const playerById = new Map();
+  const playerByName = new Map();
 
-  for (const p of playerIndex) {
-    if (p.user_id) playerIndexById.set(String(p.user_id), p);
-    if (p.username) playerIndexByName.set(String(p.username).toLowerCase(), p);
+  for (const player of playerIndex) {
+    if (player.user_id) playerById.set(String(player.user_id), player);
+    if (player.username) playerByName.set(String(player.username).toLowerCase(), player);
   }
 
   const currentRows = currentRowsWithGains
     .map(row => {
       const match =
-        (row.user_id ? playerIndexById.get(String(row.user_id)) : null) ||
-        playerIndexByName.get(String(row.username || "").toLowerCase());
+        (row.user_id ? playerById.get(String(row.user_id)) : null) ||
+        playerByName.get(String(row.username || "").toLowerCase());
 
       return {
         ...row,
-        profile_key: match?.profile_key || (row.user_id ? String(row.user_id) : fmtSlug(row.username)),
+        profile_key: match?.profile_key || profileKeyFromRow(row),
         avatar_url: match?.avatar_url || null
       };
     })
@@ -925,19 +953,15 @@ async function main() {
   const clanSnapshotRows = await fetchClanRankSnapshots();
   const clanProjection = calculateClanProjection(clanSnapshotRows);
 
-  console.log(`${CLAN_NAME} current rank from snapshots: ${clanProjection.clan_rank}`);
-  console.log(`${CLAN_NAME} projected rank: ${clanProjection.projected_rank}`);
-  console.log(`${CLAN_NAME} projection basis: ${clanProjection.projection_basis}`);
-
   await fs.writeFile(
     path.join(OUT_DIR, "players.json"),
-    JSON.stringify(playerIndex, null, 2),
+    JSON.stringify(playerIndex, null, 2) + "\n",
     "utf8"
   );
 
   await fs.writeFile(
     path.join(OUT_DIR, "battles.json"),
-    JSON.stringify(battlesSummary, null, 2),
+    JSON.stringify(battlesSummary, null, 2) + "\n",
     "utf8"
   );
 
@@ -945,9 +969,11 @@ async function main() {
     path.join(OUT_DIR, "current.json"),
     JSON.stringify({
       generated_at: new Date().toISOString(),
-      battle: CURRENT_PROFILE_BATTLE.name,
+
+      battle: currentProfileBattle.battle,
       api_battle_key: CURRENT_BATTLE_NAME,
-      display_name: CURRENT_PROFILE_BATTLE.displayName,
+      display_name: currentProfileBattle.display_name,
+
       clan_name: CLAN_NAME,
       battle_end_iso: CURRENT_BATTLE_END_ISO,
 
@@ -963,15 +989,14 @@ async function main() {
       hours_remaining: clanProjection.hours_remaining,
 
       rows: currentRows
-    }, null, 2),
+    }, null, 2) + "\n",
     "utf8"
   );
 
-  console.log(`Wrote ${written} player profiles.`);
+  console.log(`Wrote ${playerIndex.length} player profiles.`);
   console.log("Wrote Data/players.json.");
   console.log("Wrote Data/battles.json.");
   console.log("Wrote Data/current.json.");
-  console.log(`Avatar files are stored in: ${AVATAR_DIR}`);
 }
 
 main().catch(err => {
