@@ -3,14 +3,15 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T18:35:43.161Z",
-    "total_snapshots": 581,
-    "total_rows": 42561,
+    "last_snapshot": "2026-05-01T18:40:39.498Z",
+    "total_snapshots": 582,
+    "total_rows": 42635,
     "unique_players": 74,
     "placement": null,
     "update_number": 77,
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77",
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -24,7 +25,8 @@
     "placement": 10,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -38,7 +40,8 @@
     "placement": 3,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -52,7 +55,8 @@
     "placement": 3,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -66,7 +70,8 @@
     "placement": 2,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -80,7 +85,8 @@
     "placement": 3,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -94,7 +100,8 @@
     "placement": 3,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -108,7 +115,8 @@
     "placement": 3,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -122,7 +130,8 @@
     "placement": 7,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -136,7 +145,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -150,7 +160,8 @@
     "placement": 2,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -164,7 +175,8 @@
     "placement": 2,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -178,7 +190,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -192,7 +205,8 @@
     "placement": 10,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -206,7 +220,8 @@
     "placement": 7,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -220,7 +235,8 @@
     "placement": 4,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -234,7 +250,8 @@
     "placement": 5,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -248,7 +265,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -262,7 +280,8 @@
     "placement": 10,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -276,7 +295,8 @@
     "placement": 6,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -290,7 +310,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -304,7 +325,8 @@
     "placement": 5,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -318,7 +340,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -332,7 +355,8 @@
     "placement": 8,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -346,7 +370,8 @@
     "placement": 8,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -360,7 +385,8 @@
     "placement": 6,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -374,7 +400,8 @@
     "placement": 6,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -388,7 +415,8 @@
     "placement": 13,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -402,7 +430,8 @@
     "placement": 19,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -416,7 +445,8 @@
     "placement": 9,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -430,7 +460,8 @@
     "placement": 32,
     "update_number": null,
     "update_url": null,
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   },
   {
@@ -444,7 +475,8 @@
     "placement": 34,
     "update_number": 75,
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75",
-    "clan_results_battle": null,
+    "api_battle_key": null,
+    "nong_results_table": null,
     "clan_results_table": null
   }
 ]
