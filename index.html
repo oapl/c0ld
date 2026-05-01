@@ -674,26 +674,31 @@
       return "—";
     }
 
-    function calculateHistoryStats() {
-      const totalBattles = battles.length;
+function calculateHistoryStats() {
+  const totalBattles = battles.length;
 
-      const numericPlacements = battles
-        .map(getNumericPlacement)
-        .filter(value => value !== null);
+  const numericPlacements = battles
+    .map(getNumericPlacement)
+    .filter(value => value !== null);
 
-      const participated = numericPlacements.length;
-      const top10 = numericPlacements.filter(value => value <= 10).length;
-      const top30 = numericPlacements.filter(value => value <= 30).length;
-      const top100 = numericPlacements.filter(value => value <= 100).length;
+  const participated = numericPlacements.length;
 
-      return {
-        totalBattles,
-        participated,
-        top10,
-        top30,
-        top100
-      };
-    }
+  // Mutually exclusive buckets:
+  // Top 10  = placements 1-10
+  // Top 30  = placements 11-30
+  // Top 100 = placements 31-100
+  const top10 = numericPlacements.filter(value => value >= 1 && value <= 10).length;
+  const top30 = numericPlacements.filter(value => value >= 11 && value <= 30).length;
+  const top100 = numericPlacements.filter(value => value >= 31 && value <= 100).length;
+
+  return {
+    totalBattles,
+    participated,
+    top10,
+    top30,
+    top100
+  };
+}
 
     function renderHistoryStats() {
       const stats = calculateHistoryStats();
