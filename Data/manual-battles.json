@@ -5,29 +5,29 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2023-12-30T12:00:00.524Z",
     "last_snapshot": "2024-01-19T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 32,
-    "update_number": null,
-    "update_url": null
+    "update_number": 4,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-4"
   },
   {
-    "battle": "Pet Collecting Battle",
+    "battle": "Pet Indexing Battle",
     "display_name": "Pet Collecting Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-01-20T12:00:00.524Z",
     "last_snapshot": "2024-02-09T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 5,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-5"
   },
   {
     "battle": "Achievements Battle",
@@ -35,8 +35,8 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-02-23T12:00:00.524Z",
+    "first_snapshot": "2024-02-10T12:00:00.524Z",
+    "last_snapshot": "2024-02-21T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
@@ -50,14 +50,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-02-24T12:00:00.524Z",
     "last_snapshot": "2024-03-15T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 13,
-    "update_number": null,
-    "update_url": null
+    "update_number": 6,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-6"
   },
   {
     "battle": "Quest Clan Battle",
@@ -65,14 +65,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-03-30T12:00:00.524Z",
+    "first_snapshot": "2024-03-16T12:00:00.524Z",
+    "last_snapshot": "2024-03-29T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 6,
-    "update_number": null,
-    "update_url": null
+    "update_number": 7,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-7"
   },
   {
     "battle": "Pixel Clan Battle",
@@ -80,14 +80,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-04-20T12:00:00.524Z",
+    "first_snapshot": "2024-04-06T12:00:00.524Z",
+    "last_snapshot": "2024-04-19T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 6,
-    "update_number": null,
-    "update_url": null
+    "update_number": 8,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-8"
   },
   {
     "battle": "Fragmented Clan Battle",
@@ -95,14 +95,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-05-31T12:00:00.524Z",
+    "first_snapshot": "2024-06-08T12:00:00.524Z",
+    "last_snapshot": "2024-06-21T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 8,
-    "update_number": null,
-    "update_url": null
+    "update_number": 12,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-12"
   },
   {
     "battle": "Wicked Clan Battle",
@@ -110,14 +110,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-06-08T12:00:00.524Z",
     "last_snapshot": "2024-06-21T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 8,
-    "update_number": null,
-    "update_url": null
+    "update_number": 15,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-15"
   },
   {
     "battle": "Good vs. Evil Battle",
@@ -125,8 +125,8 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-07-05T12:00:00.524Z",
+    "first_snapshot": "2024-07-20T12:00:00.524Z",
+    "last_snapshot": "2024-08-02T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
@@ -140,14 +140,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-08-03T12:00:00.524Z",
+    "first_snapshot": "2024-07-20T12:00:00.524Z",
+    "last_snapshot": "2024-08-02T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 5,
-    "update_number": null,
-    "update_url": null
+    "update_number": 21,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-21"
   },
   {
     "battle": "Ice Cream Clan Battle",
@@ -155,14 +155,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-08-10T12:00:00.524Z",
     "last_snapshot": "2024-08-23T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 24,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-24"
   },
   {
     "battle": "Rave Crab Clan Battle",
@@ -170,14 +170,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-08-31T12:00:00.524Z",
     "last_snapshot": "2024-09-13T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 6,
-    "update_number": null,
-    "update_url": null
+    "update_number": 27,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-27"
   },
   {
     "battle": "Reversed Clan Battle",
@@ -185,14 +185,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-09-21T12:00:00.524Z",
     "last_snapshot": "2024-10-04T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 10,
-    "update_number": null,
-    "update_url": null
+    "update_number": 29,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-29"
   },
   {
     "battle": "Ghost Clan Battle",
@@ -200,14 +200,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2024-10-19T12:00:00.524Z",
     "last_snapshot": "2024-11-01T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 30,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-30"
   },
   {
     "battle": "Blimp Dragon Clan Battle",
@@ -215,14 +215,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2024-11-22T12:00:00.524Z",
+    "first_snapshot": "2024-11-09T12:00:00.524Z",
+    "last_snapshot": "2024-11-23T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 5,
-    "update_number": null,
-    "update_url": null
+    "update_number": 33,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-33"
   },
   {
     "battle": "Blurred Battle",
@@ -230,14 +230,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-01-24T12:00:00.524Z",
+    "first_snapshot": "2024-12-28T12:00:00.524Z",
+    "last_snapshot": "2025-01-03T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 7,
-    "update_number": null,
-    "update_url": null
+    "update_number": 40,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-40"
   },
   {
     "battle": "Wyvern Battle",
@@ -245,14 +245,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2025-01-11T12:00:00.524Z",
     "last_snapshot": "2025-01-24T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 4,
-    "update_number": null,
-    "update_url": null
+    "update_number": 42,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-42"
   },
   {
     "battle": "Mushroom Battle",
@@ -260,14 +260,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2025-01-25T12:00:00.524Z",
     "last_snapshot": "2025-01-31T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 10,
-    "update_number": null,
-    "update_url": null
+    "update_number": 44,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-44"
   },
   {
     "battle": "Holographic Battle",
@@ -275,14 +275,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "first_snapshot": "2025-02-08T12:00:00.524Z",
+    "last_snapshot": "2025-02-14T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 46,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-46"
   },
   {
     "battle": "Egyptian Battle",
@@ -290,14 +290,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "first_snapshot": "2025-03-08T12:00:00.524Z",
+    "last_snapshot": "2025-03-14T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 7,
-    "update_number": null,
-    "update_url": null
+    "update_number": 50,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-50"
   },
   {
     "battle": "Tie Dye Battle",
@@ -305,14 +305,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "first_snapshot": "2025-03-21T12:00:00.524Z",
+    "last_snapshot": "2025-03-21T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 51,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-51"
   },
   {
     "battle": "Athena Battle",
@@ -320,14 +320,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "first_snapshot": "2025-03-29T12:00:00.524Z",
+    "last_snapshot": "2025-04-04T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 3,
-    "update_number": null,
-    "update_url": null
+    "update_number": 53,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-53"
   },
   {
     "battle": "Pixel Chick Battle",
@@ -335,14 +335,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "first_snapshot": "2025-04-19T12:00:00.524Z",
+    "last_snapshot": "2025-04-25T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 2,
-    "update_number": null,
-    "update_url": null
+    "update_number": 56,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-56"
   },
   {
     "battle": "Poison Turtle Battle",
@@ -350,7 +350,7 @@
     "api_battle_key": null,
     "nong_results_table": "PoisonTurtleNONG",
     "clan_results_table": "PoisonTurtleClans",
-    "first_snapshot": null,
+    "first_snapshot": "2025-05-03T12:00:00.524Z",
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
