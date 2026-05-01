@@ -3,9 +3,9 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T20:25:47.975Z",
-    "total_snapshots": 605,
-    "total_rows": 44337,
+    "last_snapshot": "2026-05-01T20:30:50.642Z",
+    "total_snapshots": 606,
+    "total_rows": 44411,
     "unique_players": 74,
     "placement": "TBD",
     "update_number": 77,
@@ -330,7 +330,7 @@
     "clan_results_table": null
   },
   {
-    "battle": "Pet Indexing Battle",
+    "battle": "Pet Collecting Battle",
     "display_name": "Pet Collecting Battle",
     "first_snapshot": "2024-01-20T12:00:00.524Z",
     "last_snapshot": "2024-02-09T12:00:00.524Z",
