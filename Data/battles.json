@@ -3,9 +3,9 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T20:15:43.026Z",
-    "total_snapshots": 603,
-    "total_rows": 44189,
+    "last_snapshot": "2026-05-01T20:20:42.194Z",
+    "total_snapshots": 604,
+    "total_rows": 44263,
     "unique_players": 74,
     "placement": "TBD",
     "update_number": 77,
@@ -240,6 +240,21 @@
     "clan_results_table": null
   },
   {
+    "battle": "Safety Battle",
+    "display_name": "Safety Battle",
+    "first_snapshot": "2024-07-20T12:00:00.524Z",
+    "last_snapshot": "2024-08-02T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": 17,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-17",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null
+  },
+  {
     "battle": "Wicked Clan Battle",
     "display_name": "Wicked Clan Battle",
     "first_snapshot": "2024-06-08T12:00:00.524Z",
@@ -448,21 +463,6 @@
     "api_battle_key": null,
     "nong_results_table": "PoisonTurtleNONG",
     "clan_results_table": "PoisonTurtleClans"
-  },
-  {
-    "battle": "Good vs. Evil Battle",
-    "display_name": "Good vs. Evil Battle",
-    "first_snapshot": "2024-07-20T12:00:00.524Z",
-    "last_snapshot": "2024-08-02T12:00:00.524Z",
-    "total_snapshots": null,
-    "total_rows": null,
-    "unique_players": null,
-    "placement": 9,
-    "update_number": null,
-    "update_url": null,
-    "api_battle_key": null,
-    "nong_results_table": null,
-    "clan_results_table": null
   },
   {
     "battle": "Achievements Battle",
