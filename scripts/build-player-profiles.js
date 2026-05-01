@@ -11,12 +11,25 @@
 // Required env:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_KEY
+//   CURRENT_BATTLE_END_ISO
 //
 // Optional env:
 //   CLAN_NAME = NONG
 //   CURRENT_BATTLE_NAME = StarryBattle
 //   CURRENT_BATTLE_DISPLAY_NAME = Starry Battle
-//   CURRENT_BATTLE_END_ISO = 2026-05-03T18:00:00Z
+//   CURRENT_NONG_TABLE = StarryNONG
+//
+// Historical battle table convention:
+//   [BattleName]NONG
+//
+// This script reads Data/manual-battles.json and uses:
+//   battle               = internal battle key for profiles/dropdowns
+//   display_name         = visible battle name
+//   clan_results_battle  = NONG/player archive table, example StarryNONG
+//
+// Supported extra aliases for future cleanup:
+//   player_results_table
+//   nong_results_table
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -29,35 +42,47 @@ const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
 const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Starry Battle";
 const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO;
 
+function defaultNongTableFromBattleName(battleName) {
+  const clean = String(battleName || "")
+    .replace(/Battle$/i, "")
+    .replace(/Archive$/i, "")
+    .replace(/[^a-zA-Z0-9_]/g, "");
+
+  return `${clean}NONG`;
+}
+
+const CURRENT_NONG_TABLE =
+  process.env.CURRENT_NONG_TABLE ||
+  process.env.CURRENT_BATTLE_NONG_TABLE ||
+  defaultNongTableFromBattleName(CURRENT_BATTLE_NAME);
+
 if (!CURRENT_BATTLE_END_ISO) {
   throw new Error("Missing required env var: CURRENT_BATTLE_END_ISO");
 }
 
+if (!SUPABASE_URL) {
+  throw new Error("Missing required env var: SUPABASE_URL");
+}
+
+if (!SUPABASE_KEY) {
+  throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
+}
+
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
+const MANUAL_BATTLES_FILE = path.join(OUT_DIR, "manual-battles.json");
 
 const AVATAR_DIR = path.join(process.cwd(), "assets", "avatars");
 const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
 
-const BATTLES = [
-  {
-    name: "Spring2026",
-    table: "Spring2026Archive",
-    displayName: "Spring 2026"
-  },
-  {
-    name: "StarryBattle",
-    table: "StarryBattleArchive",
-    displayName: "Starry Battle"
-  }
-];
+let BATTLES = [];
 
 const CURRENT_BATTLE = {
   name: CURRENT_BATTLE_NAME,
   displayName: CURRENT_BATTLE_DISPLAY_NAME,
-  archiveTable: "StarryBattleArchive"
+  archiveTable: CURRENT_NONG_TABLE
 };
 
 function sbHeaders(extra = {}) {
@@ -86,6 +111,32 @@ async function fileExists(filePath) {
   }
 }
 
+async function readJsonArray(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      throw new Error(`${filePath} must contain a JSON array.`);
+    }
+
+    return parsed;
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return [];
+    }
+
+    throw err;
+  }
+}
+
+function normalizeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -109,6 +160,59 @@ function rowIdentity(row) {
   return `name:${String(row.username || "").toLowerCase()}`;
 }
 
+function getManualNongTable(record) {
+  return (
+    record.player_results_table ||
+    record.nong_results_table ||
+    record.clan_results_battle ||
+    null
+  );
+}
+
+async function buildBattleConfigs() {
+  const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
+  const byBattle = new Map();
+
+  for (const record of manualBattles) {
+    const battleName = record.battle || record.display_name;
+    const displayName = record.display_name || record.battle;
+    const tableName = getManualNongTable(record);
+
+    if (!battleName || !displayName || !tableName) {
+      continue;
+    }
+
+    byBattle.set(normalizeKey(battleName), {
+      name: String(battleName),
+      table: String(tableName),
+      displayName: String(displayName)
+    });
+  }
+
+  const currentKey = normalizeKey(CURRENT_BATTLE_NAME);
+
+  byBattle.set(currentKey, {
+    name: CURRENT_BATTLE_NAME,
+    table: CURRENT_NONG_TABLE,
+    displayName: CURRENT_BATTLE_DISPLAY_NAME
+  });
+
+  const configs = [...byBattle.values()];
+
+  configs.sort((a, b) => {
+    if (normalizeKey(a.name) === currentKey) return 1;
+    if (normalizeKey(b.name) === currentKey) return -1;
+    return String(a.displayName || a.name).localeCompare(String(b.displayName || b.name));
+  });
+
+  console.log("Battle archive table configuration:");
+  for (const config of configs) {
+    console.log(`  ${config.name} (${config.displayName}) -> ${config.table}`);
+  }
+
+  return configs;
+}
+
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const text = await res.text();
@@ -129,7 +233,7 @@ async function fetchAllRows(table) {
   let offset = 0;
 
   while (true) {
-    const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
+    const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(table)}`);
     url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
     url.searchParams.set("order", "fetched_at.asc");
     url.searchParams.set("limit", String(PAGE_SIZE));
@@ -434,6 +538,9 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
   const battleStart = allBattleRows.length ? safeIso(allBattleRows[0].fetched_at) : null;
   const battleEnd = allBattleRows.length ? safeIso(allBattleRows[allBattleRows.length - 1].fetched_at) : null;
 
+  const nonZeroRows = sorted.filter(row => Number(row.total_points || 0) > 0);
+  const firstActive = nonZeroRows[0] || sorted[0];
+
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
 
@@ -468,10 +575,12 @@ function summarizePlayerBattle(battleName, displayName, allBattleRows, playerRow
     battle_last_snapshot: battleEnd,
 
     first_seen: safeIso(first.fetched_at),
+    first_active_date: firstActive ? safeIso(firstActive.fetched_at) : null,
     last_seen: safeIso(last.fetched_at),
 
     starting_rank: toNumber(first.rank),
     last_rank: toNumber(last.rank),
+    end_rank: toNumber(last.rank),
     best_rank: bestRank,
     worst_rank: worstRank,
 
@@ -690,14 +799,12 @@ function calculateClanProjection(snapshotRows) {
 }
 
 async function main() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.");
-  }
-
   await ensureDir(OUT_DIR);
   await ensureDir(AVATAR_DIR);
   await fs.rm(PLAYERS_DIR, { recursive: true, force: true });
   await ensureDir(PLAYERS_DIR);
+
+  BATTLES = await buildBattleConfigs();
 
   const battleRows = new Map();
   const battlesSummary = [];
