@@ -275,18 +275,21 @@
     "update_number": null,
     "update_url": null
   },
-  {
-    "battle": "Poison Turtle Battle",
-    "display_name": "Poison Turtle Battle",
-    "first_snapshot": null,
-    "last_snapshot": "2025-05-09T12:00:00.524Z",
-    "total_snapshots": null,
-    "total_rows": null,
-    "unique_players": null,
-    "placement": 2,
-    "update_number": null,
-    "update_url": null
-  },
+{
+  "battle": "Poison Turtle Battle",
+  "display_name": "Poison Turtle Battle",
+  "api_battle_key": null,
+  "nong_results_table": "PoisonTurtleNONG",
+  "clan_results_table": "PoisonTurtleClans",
+  "first_snapshot": null,
+  "last_snapshot": "2025-05-09T12:00:00.524Z",
+  "total_snapshots": null,
+  "total_rows": null,
+  "unique_players": null,
+  "placement": 2,
+  "update_number": null,
+  "update_url": null
+},
   {
     "battle": "Balloon Corgi Battle",
     "display_name": "Balloon Corgi Battle",
