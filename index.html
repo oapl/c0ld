@@ -496,6 +496,13 @@
         .replace(/"/g, "&quot;");
     }
 
+    function normalizeKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
     function fmtNum(n) {
       if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
       return Number(n).toLocaleString("en-US");
@@ -602,11 +609,11 @@
     function fmtBattleHistoryLink(battle) {
       const label = escapeHtml(battle.display_name || battle.battle || "Unknown");
 
-      if (!battle.clan_results_battle) {
+      if (!battle.clan_results_table) {
         return label;
       }
 
-      return `<a href="clans.html?battle=${encodeURIComponent(battle.clan_results_battle)}">${label}</a>`;
+      return `<a href="clans.html?battle=${encodeURIComponent(battle.battle)}">${label}</a>`;
     }
 
     function getCurrentFetchedAt() {
@@ -946,12 +953,23 @@
       select.appendChild(currentOpt);
 
       seen.add("current");
-      if (currentBattleName) seen.add(String(currentBattleName).toLowerCase());
-      if (currentDisplayName) seen.add(String(currentDisplayName).toLowerCase());
+      if (currentBattleName) seen.add(normalizeKey(currentBattleName));
+      if (currentDisplayName) seen.add(normalizeKey(currentDisplayName));
 
-      for (const battle of battles) {
-        const battleKey = String(battle.battle || "").toLowerCase();
-        const displayKey = String(battle.display_name || battle.battle || "").toLowerCase();
+      const sortedBattles = battles.slice().sort((a, b) => {
+        const ad = parseDateValue(a.last_snapshot) || 0;
+        const bd = parseDateValue(b.last_snapshot) || 0;
+
+        if (ad !== bd) return bd - ad;
+
+        return String(a.display_name || a.battle || "").localeCompare(
+          String(b.display_name || b.battle || "")
+        );
+      });
+
+      for (const battle of sortedBattles) {
+        const battleKey = normalizeKey(battle.battle);
+        const displayKey = normalizeKey(battle.display_name || battle.battle);
 
         if (seen.has(battleKey) || seen.has(displayKey)) {
           continue;
@@ -964,6 +982,12 @@
 
         seen.add(battleKey);
         seen.add(displayKey);
+      }
+
+      const optionValues = [...select.options].map(option => option.value);
+
+      if (!optionValues.includes(activeBattle)) {
+        activeBattle = "current";
       }
 
       select.value = activeBattle;
@@ -1104,6 +1128,13 @@
         }
 
         populateBattleDropdown();
+
+        if (activeBattle === "current") {
+          currentRows = normalizeCurrentRows(currentData.rows || []);
+        } else {
+          currentRows = await buildHistoricalRows(activeBattle);
+        }
+
         renderCards();
         renderLeaderboard();
         renderHistory();
