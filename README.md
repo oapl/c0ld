@@ -1,4 +1,19 @@
 
+2026-05-01 18:30:43 UTC
+
+| Rank | Member | Total Points | 60m Gain |
+|---:|---|---:|---:|
+| 1 | Yume_Sakurax3 | 11.89K | 95 |
+| 2 | johnr622 | 11.65K | 95 |
+| 3 | joshuacd2006 | 11.51K | 95 |
+| 4 | Josep_xD2 | 11.21K | 95 |
+| 5 | jupiter0477 | 11.1K | 95 |
+| 6 | Mr_Suter | 10.88K | 95 |
+| 7 | Johnr622_alt2 | 10.32K | 88 |
+| 8 | Johnr622_alt3 | 10.32K | 88 |
+| 9 | Johnr622_alt4 | 10.07K | 88 |
+| 10 | Johnr622_alt5 | 10.07K | 88 |
+
 2026-05-01 18:25:42 UTC
 
 | Rank | Member | Total Points | 60m Gain |
