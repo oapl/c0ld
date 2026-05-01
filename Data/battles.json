@@ -3,9 +3,9 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T19:45:41.667Z",
-    "total_snapshots": 597,
-    "total_rows": 43745,
+    "last_snapshot": "2026-05-01T19:50:41.769Z",
+    "total_snapshots": 598,
+    "total_rows": 43819,
     "unique_players": 74,
     "placement": "TBD",
     "update_number": 77,
@@ -13,21 +13,6 @@
     "api_battle_key": "StarryBattle",
     "nong_results_table": "StarryNONG",
     "clan_results_table": null
-  },
-  {
-    "battle": "Poison Turtle Battle",
-    "display_name": "Poison Turtle Battle",
-    "first_snapshot": "2026-05-01T17:23:15.585Z",
-    "last_snapshot": "2026-05-01T17:23:15.585Z",
-    "total_snapshots": 1,
-    "total_rows": 75,
-    "unique_players": 75,
-    "placement": 2,
-    "update_number": null,
-    "update_url": null,
-    "api_battle_key": null,
-    "nong_results_table": "PoisonTurtleNONG",
-    "clan_results_table": "PoisonTurtleClans"
   },
   {
     "battle": "Spring2026",
@@ -193,6 +178,21 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null
+  },
+  {
+    "battle": "Poison Turtle Battle",
+    "display_name": "Poison Turtle Battle",
+    "first_snapshot": "2026-05-01T17:23:15.585Z",
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": 1,
+    "total_rows": 75,
+    "unique_players": 75,
+    "placement": 2,
+    "update_number": null,
+    "update_url": null,
+    "api_battle_key": null,
+    "nong_results_table": "PoisonTurtleNONG",
+    "clan_results_table": "PoisonTurtleClans"
   },
   {
     "battle": "Tie Dye Battle",
