@@ -4,9 +4,10 @@
 // Reads:
 //   Data/manual-battles.json
 //
-// For each manual battle with:
-//   clan_results_battle = website dropdown/URL key, ex: PoisonTurtleNONG
-//   clan_results_table  = Supabase top-clans table, ex: PoisonTurtleClans
+// Uses:
+//   battle              = website/dropdown/URL key
+//   display_name        = pretty label
+//   clan_results_table  = exact Supabase top-clans table
 //
 // Output:
 //   Data/clans-history.json
@@ -14,6 +15,8 @@
 // Required env:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_KEY
+//
+// Missing clan tables are skipped instead of failing the whole workflow.
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -27,13 +30,8 @@ const OUTPUT_FILE = path.join(DATA_DIR, "clans-history.json");
 
 const PAGE_SIZE = 1000;
 
-if (!SUPABASE_URL) {
-  throw new Error("Missing required env var: SUPABASE_URL");
-}
-
-if (!SUPABASE_KEY) {
-  throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
-}
+if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
+if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
 
 function normalizeKey(value) {
   return String(value || "")
@@ -44,7 +42,6 @@ function normalizeKey(value) {
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
-
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -56,14 +53,8 @@ function stringOrNull(value) {
 
 function dateOrNull(value) {
   if (!value) return null;
-
   const d = new Date(value);
-
-  if (Number.isNaN(d.getTime())) {
-    return null;
-  }
-
-  return d.toISOString();
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 async function readJsonArray(filePath) {
@@ -77,10 +68,7 @@ async function readJsonArray(filePath) {
 
     return parsed;
   } catch (err) {
-    if (err.code === "ENOENT") {
-      return [];
-    }
-
+    if (err.code === "ENOENT") return [];
     throw err;
   }
 }
@@ -109,6 +97,12 @@ async function supabaseSelectAll(tableName) {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+
+      if (res.status === 404 || text.includes("PGRST205")) {
+        console.warn(`Skipping missing historical clan table: ${tableName}`);
+        return null;
+      }
+
       throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
     }
 
@@ -120,10 +114,7 @@ async function supabaseSelectAll(tableName) {
 
     rows.push(...batch);
 
-    if (batch.length < PAGE_SIZE) {
-      break;
-    }
-
+    if (batch.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
 
@@ -151,9 +142,7 @@ function sortRows(rows) {
     const ap = Number(a.points || 0);
     const bp = Number(b.points || 0);
 
-    if (ap !== bp) {
-      return bp - ap;
-    }
+    if (ap !== bp) return bp - ap;
 
     return String(a.clan || "").localeCompare(String(b.clan || ""));
   });
@@ -165,12 +154,11 @@ async function main() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
 
   const declared = manualBattles
-    .filter(battle => battle.clan_results_battle && battle.clan_results_table)
+    .filter(battle => battle.battle && battle.display_name && battle.clan_results_table)
     .map(battle => ({
-      battle: String(battle.clan_results_battle),
-      display_name: String(battle.display_name || battle.battle || battle.clan_results_battle),
-      source_table: String(battle.clan_results_table),
-      manual_battle: String(battle.battle || battle.display_name || battle.clan_results_battle)
+      battle: String(battle.battle),
+      display_name: String(battle.display_name),
+      source_table: String(battle.clan_results_table)
     }));
 
   const deduped = new Map();
@@ -185,6 +173,10 @@ async function main() {
     console.log(`Reading historical clan table: ${item.source_table} -> ${item.battle}`);
 
     const rawRows = await supabaseSelectAll(item.source_table);
+
+    if (rawRows === null) {
+      continue;
+    }
 
     const rows = sortRows(
       rawRows
