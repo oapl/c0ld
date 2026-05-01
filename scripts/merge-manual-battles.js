@@ -5,6 +5,8 @@
 //   - placement is ALWAYS manual
 //   - update_number is ALWAYS manual
 //   - update_url is ALWAYS manual
+//   - clan_results_battle is ALWAYS manual
+//   - clan_results_table is ALWAYS manual
 //   - manual display_name wins when present
 //   - manual dates/counts win when present, otherwise generated fills gaps
 //   - duplicate battle rows are collapsed into one row
@@ -23,7 +25,7 @@ const DATA_DIR = path.join(process.cwd(), "Data");
 const GENERATED_FILE = path.join(DATA_DIR, "battles.json");
 const MANUAL_FILE = path.join(DATA_DIR, "manual-battles.json");
 
-function normalizeBattleKey(value) {
+function normalizeKey(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -71,7 +73,10 @@ function cleanManualRecord(record) {
 
     placement: numberOrNull(record.placement),
     update_number: numberOrNull(record.update_number),
-    update_url: stringOrNull(record.update_url)
+    update_url: stringOrNull(record.update_url),
+
+    clan_results_battle: stringOrNull(record.clan_results_battle),
+    clan_results_table: stringOrNull(record.clan_results_table)
   };
 }
 
@@ -124,7 +129,10 @@ function preferBetterManual(existing, incoming) {
 
     placement: incoming.placement ?? existing.placement ?? null,
     update_number: incoming.update_number ?? existing.update_number ?? null,
-    update_url: incoming.update_url ?? existing.update_url ?? null
+    update_url: incoming.update_url ?? existing.update_url ?? null,
+
+    clan_results_battle: incoming.clan_results_battle ?? existing.clan_results_battle ?? null,
+    clan_results_table: incoming.clan_results_table ?? existing.clan_results_table ?? null
   };
 }
 
@@ -142,7 +150,10 @@ function mergeRecord(manual, generated) {
 
     placement: manual?.placement ?? null,
     update_number: manual?.update_number ?? null,
-    update_url: manual?.update_url ?? null
+    update_url: manual?.update_url ?? null,
+
+    clan_results_battle: manual?.clan_results_battle ?? null,
+    clan_results_table: manual?.clan_results_table ?? null
   };
 }
 
@@ -187,7 +198,7 @@ async function main() {
     const record = cleanGeneratedRecord(raw);
     if (!record.battle || !record.display_name) continue;
 
-    const key = normalizeBattleKey(record.battle);
+    const key = normalizeKey(record.battle);
     generatedMap.set(key, preferBetterGenerated(generatedMap.get(key), record));
   }
 
@@ -195,7 +206,7 @@ async function main() {
     const record = cleanManualRecord(raw);
     if (!record.battle || !record.display_name) continue;
 
-    const key = normalizeBattleKey(record.battle);
+    const key = normalizeKey(record.battle);
     manualMap.set(key, preferBetterManual(manualMap.get(key), record));
   }
 
@@ -234,6 +245,8 @@ async function main() {
   console.log("  - placement");
   console.log("  - update_number");
   console.log("  - update_url");
+  console.log("  - clan_results_battle");
+  console.log("  - clan_results_table");
   console.log(`Updated ${GENERATED_FILE}`);
 }
 
