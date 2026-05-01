@@ -561,25 +561,8 @@
       return Number.isNaN(t) ? null : t;
     }
 
-    function resolveValue(obj, keys) {
-      for (const key of keys) {
-        if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
-          return obj[key];
-        }
-      }
-
-      return null;
-    }
-
     function getPlacement(b) {
-      return resolveValue(b, [
-        "placement",
-        "final_placement",
-        "nong_placement",
-        "rank",
-        "final_rank",
-        "place"
-      ]);
+      return b?.placement ?? null;
     }
 
     function fmtPlacement(b) {
@@ -614,6 +597,16 @@
       }
 
       return label;
+    }
+
+    function fmtBattleHistoryLink(battle) {
+      const label = escapeHtml(battle.display_name || battle.battle || "Unknown");
+
+      if (!battle.clan_results_battle) {
+        return label;
+      }
+
+      return `<a href="clans.html?battle=${encodeURIComponent(battle.clan_results_battle)}">${label}</a>`;
     }
 
     function getCurrentFetchedAt() {
@@ -880,7 +873,7 @@
 
         tr.innerHTML = `
           <td>${fmtUpdateLink(b)}</td>
-          <td>${escapeHtml(b.display_name || b.battle || "Unknown")}</td>
+          <td>${fmtBattleHistoryLink(b)}</td>
           <td>${escapeHtml(fmtPlacement(b))}</td>
           <td>${fmtDate(b.first_snapshot)}</td>
           <td>${fmtDate(b.last_snapshot)}</td>
