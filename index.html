@@ -307,6 +307,34 @@
       line-height: 1.5;
     }
 
+    .history-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 0 16px 16px;
+    }
+
+    .history-stat {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 11px 12px;
+      min-height: 64px;
+    }
+
+    .history-stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .history-stat-value {
+      color: var(--text);
+      font-size: 18px;
+      font-weight: bold;
+      line-height: 1.2;
+    }
+
     .error {
       border: 1px solid var(--danger);
       background: var(--danger-bg);
@@ -327,6 +355,12 @@
 
     @media (max-width: 1000px) {
       .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 900px) {
+      .history-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
@@ -359,6 +393,12 @@
 
       .menu-bar {
         justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 550px) {
+      .history-stats {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -449,6 +489,28 @@
         This page needs more work. I'm planning to go back into our spreadsheets and extract as MUCH as possible though. I'm le tired tho..
       </div>
 
+      <div class="history-stats" id="history-stats">
+        <div class="history-stat">
+          <div class="history-stat-label">CB Participation</div>
+          <div class="history-stat-value" id="stat-participation">—</div>
+        </div>
+
+        <div class="history-stat">
+          <div class="history-stat-label">Top 10 Placements</div>
+          <div class="history-stat-value" id="stat-top-10">—</div>
+        </div>
+
+        <div class="history-stat">
+          <div class="history-stat-label">Top 30 Placements</div>
+          <div class="history-stat-value" id="stat-top-30">—</div>
+        </div>
+
+        <div class="history-stat">
+          <div class="history-stat-label">Top 100 Placements</div>
+          <div class="history-stat-value" id="stat-top-100">—</div>
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -481,7 +543,7 @@
     let sortKey = "rank";
     let sortAsc = true;
 
-    let historySortKey = "last_snapshot";
+    let historySortKey = "update_number";
     let historySortAsc = false;
 
     let refreshTimer = null;
@@ -501,6 +563,10 @@
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
+    }
+
+    function normalizeName(value) {
+      return String(value || "").trim().toLowerCase();
     }
 
     function fmtNum(n) {
@@ -572,11 +638,30 @@
       return b?.placement ?? null;
     }
 
+    function getNumericPlacement(battle) {
+      const raw = getPlacement(battle);
+
+      if (raw === null || raw === undefined || raw === "") {
+        return null;
+      }
+
+      const cleaned = String(raw).replace("#", "").trim();
+      const value = Number(cleaned);
+
+      return Number.isFinite(value) ? value : null;
+    }
+
     function fmtPlacement(b) {
       const placement = getPlacement(b);
 
       if (placement !== null && placement !== undefined && placement !== "") {
-        return `#${placement}`;
+        const numeric = getNumericPlacement(b);
+
+        if (numeric !== null) {
+          return `#${numeric}`;
+        }
+
+        return String(placement);
       }
 
       const endMs = parseDateValue(b.last_snapshot);
@@ -587,6 +672,43 @@
       }
 
       return "—";
+    }
+
+    function calculateHistoryStats() {
+      const totalBattles = battles.length;
+
+      const numericPlacements = battles
+        .map(getNumericPlacement)
+        .filter(value => value !== null);
+
+      const participated = numericPlacements.length;
+      const top10 = numericPlacements.filter(value => value <= 10).length;
+      const top30 = numericPlacements.filter(value => value <= 30).length;
+      const top100 = numericPlacements.filter(value => value <= 100).length;
+
+      return {
+        totalBattles,
+        participated,
+        top10,
+        top30,
+        top100
+      };
+    }
+
+    function renderHistoryStats() {
+      const stats = calculateHistoryStats();
+
+      document.getElementById("stat-participation").textContent =
+        `${stats.participated}/${stats.totalBattles}`;
+
+      document.getElementById("stat-top-10").textContent =
+        stats.top10.toLocaleString("en-US");
+
+      document.getElementById("stat-top-30").textContent =
+        stats.top30.toLocaleString("en-US");
+
+      document.getElementById("stat-top-100").textContent =
+        stats.top100.toLocaleString("en-US");
     }
 
     function fmtUpdateLink(battle) {
@@ -632,7 +754,8 @@
 
       const match = playerIndex.find(p =>
         String(p.user_id || "") === String(row.user_id || "") ||
-        String(p.profile_key || "") === String(row.profile_key || "")
+        String(p.profile_key || "") === String(row.profile_key || "") ||
+        normalizeName(p.username) === normalizeName(row.username)
       );
 
       return match?.avatar_url || "assets/embed-spacer.png";
@@ -648,7 +771,7 @@
       return rows.map(row => {
         const match = playerIndex.find(p =>
           String(p.user_id || "") === String(row.user_id || "") ||
-          String(p.username || "").toLowerCase() === String(row.username || "").toLowerCase()
+          normalizeName(p.username) === normalizeName(row.username)
         );
 
         return {
@@ -762,8 +885,8 @@
         let bv;
 
         if (historySortKey === "placement") {
-          av = getPlacement(a);
-          bv = getPlacement(b);
+          av = getNumericPlacement(a);
+          bv = getNumericPlacement(b);
         } else if (historySortKey === "update_number") {
           av = a.update_number;
           bv = b.update_number;
@@ -794,6 +917,29 @@
       });
 
       return list;
+    }
+
+    function sortBattlesForDropdown(list) {
+      return list.slice().sort((a, b) => {
+        const au = Number(a.update_number);
+        const bu = Number(b.update_number);
+
+        if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
+          return bu - au;
+        }
+
+        if (Number.isFinite(au) && !Number.isFinite(bu)) return -1;
+        if (!Number.isFinite(au) && Number.isFinite(bu)) return 1;
+
+        const ad = parseDateValue(a.last_snapshot) || 0;
+        const bd = parseDateValue(b.last_snapshot) || 0;
+
+        if (ad !== bd) return bd - ad;
+
+        return String(a.display_name || a.battle || "").localeCompare(
+          String(b.display_name || b.battle || "")
+        );
+      });
     }
 
     function getBattleEndIso() {
@@ -859,6 +1005,8 @@
     }
 
     function renderHistory() {
+      renderHistoryStats();
+
       const tbody = document.getElementById("history-body");
       const visible = getVisibleHistory();
 
@@ -956,16 +1104,7 @@
       if (currentBattleName) seen.add(normalizeKey(currentBattleName));
       if (currentDisplayName) seen.add(normalizeKey(currentDisplayName));
 
-      const sortedBattles = battles.slice().sort((a, b) => {
-        const ad = parseDateValue(a.last_snapshot) || 0;
-        const bd = parseDateValue(b.last_snapshot) || 0;
-
-        if (ad !== bd) return bd - ad;
-
-        return String(a.display_name || a.battle || "").localeCompare(
-          String(b.display_name || b.battle || "")
-        );
-      });
+      const sortedBattles = sortBattlesForDropdown(battles);
 
       for (const battle of sortedBattles) {
         const battleKey = normalizeKey(battle.battle);
@@ -1018,6 +1157,15 @@
       }
     }
 
+    function readInitialBattleFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const battle = params.get("battle");
+
+      if (battle) {
+        activeBattle = battle;
+      }
+    }
+
     function wireEvents() {
       document.getElementById("search").addEventListener("input", renderLeaderboard);
       document.getElementById("refresh").addEventListener("click", () => loadData());
@@ -1032,36 +1180,37 @@
       });
 
       document.getElementById("tab-btn-history").addEventListener("click", () => {
-        window.location.hash = "history";
+        history.pushState("", document.title, window.location.pathname + window.location.search + "#history");
         setActiveTab("history");
+        renderHistory();
       });
 
       window.addEventListener("hashchange", applyHashRoute);
 
-      document.querySelectorAll("th[data-sort]").forEach(th => {
+      document.querySelectorAll("[data-sort]").forEach(th => {
         th.addEventListener("click", () => {
-          const key = th.dataset.sort;
+          const key = th.getAttribute("data-sort");
 
           if (sortKey === key) {
             sortAsc = !sortAsc;
           } else {
             sortKey = key;
-            sortAsc = key === "rank";
+            sortAsc = key === "rank" || key === "username";
           }
 
           renderLeaderboard();
         });
       });
 
-      document.querySelectorAll("th[data-history-sort]").forEach(th => {
+      document.querySelectorAll("[data-history-sort]").forEach(th => {
         th.addEventListener("click", () => {
-          const key = th.dataset.historySort;
+          const key = th.getAttribute("data-history-sort");
 
           if (historySortKey === key) {
             historySortAsc = !historySortAsc;
           } else {
             historySortKey = key;
-            historySortAsc = key === "placement";
+            historySortAsc = key === "display_name";
           }
 
           renderHistory();
@@ -1069,84 +1218,68 @@
       });
     }
 
-    async function loadData() {
-      if (isLoading) return;
+    function showError(message) {
+      const status = document.getElementById("status");
+      status.className = "error";
+      status.style.display = "block";
+      status.innerHTML = escapeHtml(message);
+    }
 
-      isLoading = true;
-
+    function clearError() {
       const status = document.getElementById("status");
       status.className = "";
-      status.textContent = "";
       status.style.display = "none";
+      status.innerHTML = "";
+    }
+
+    async function fetchJson(path, fallback = null) {
+      try {
+        const res = await fetch(`${path}?v=${Date.now()}`);
+
+        if (!res.ok) {
+          if (fallback !== null) return fallback;
+          throw new Error(`${path} returned HTTP ${res.status}`);
+        }
+
+        return await res.json();
+      } catch (err) {
+        if (fallback !== null) return fallback;
+        throw err;
+      }
+    }
+
+    async function loadData() {
+      if (isLoading) return;
+      isLoading = true;
 
       try {
-        const previousActiveBattle = activeBattle;
-        const cacheBust = Date.now();
+        clearError();
 
-        const [currentRes, battlesRes, playersRes, clansRes] = await Promise.all([
-          fetch(`Data/current.json?v=${cacheBust}`),
-          fetch(`Data/battles.json?v=${cacheBust}`),
-          fetch(`Data/players.json?v=${cacheBust}`),
-          fetch(`Data/clans-current.json?v=${cacheBust}`)
+        const [current, clans, battleList, players] = await Promise.all([
+          fetchJson("Data/current.json"),
+          fetchJson("Data/clans-current.json", null),
+          fetchJson("Data/battles.json", []),
+          fetchJson("Data/players.json", [])
         ]);
 
-        if (!currentRes.ok) {
-          throw new Error(`Could not load Data/current.json (HTTP ${currentRes.status}). Run the updated profile builder first.`);
-        }
+        currentData = current;
+        clanData = clans;
+        battles = Array.isArray(battleList) ? battleList : [];
+        playerIndex = Array.isArray(players) ? players : [];
 
-        if (!battlesRes.ok) {
-          throw new Error(`Could not load Data/battles.json (HTTP ${battlesRes.status})`);
-        }
-
-        if (!playersRes.ok) {
-          throw new Error(`Could not load Data/players.json (HTTP ${playersRes.status})`);
-        }
-
-        if (!clansRes.ok) {
-          throw new Error(`Could not load Data/clans-current.json (HTTP ${clansRes.status}). Run the updated clan builder first.`);
-        }
-
-        currentData = await currentRes.json();
-        battles = await battlesRes.json();
-        playerIndex = await playersRes.json();
-        clanData = await clansRes.json();
-
-        if (!currentData || !Array.isArray(currentData.rows)) {
-          throw new Error("Data/current.json loaded, but it does not contain a valid rows array.");
-        }
-
-        if (!clanData || !Array.isArray(clanData.rows)) {
-          throw new Error("Data/clans-current.json loaded, but it does not contain a valid rows array.");
-        }
-
-        activeBattle = previousActiveBattle || "current";
-
-        if (activeBattle === "current") {
-          currentRows = normalizeCurrentRows(currentData.rows || []);
-        } else {
-          currentRows = await buildHistoricalRows(activeBattle);
-        }
+        currentRows = normalizeCurrentRows(currentData.rows || []);
 
         populateBattleDropdown();
-
-        if (activeBattle === "current") {
-          currentRows = normalizeCurrentRows(currentData.rows || []);
-        } else {
-          currentRows = await buildHistoricalRows(activeBattle);
-        }
+        await handleBattleChange();
 
         renderCards();
         renderLeaderboard();
         renderHistory();
-        applyHashRoute();
         startCountdown();
+        applyHashRoute();
       } catch (err) {
         console.error(err);
-        status.className = "error";
-        status.style.display = "block";
-        status.textContent = err.message;
-
-        document.getElementById("countdown-value").textContent = "—";
+        showError(`Failed to load leaderboard data: ${err.message}`);
       } finally {
         isLoading = false;
       }
@@ -1158,15 +1291,16 @@
       }
 
       refreshTimer = setInterval(() => {
-        loadData();
+        if (activeBattle === "current") {
+          loadData();
+        }
       }, AUTO_REFRESH_MS);
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-      wireEvents();
-      loadData();
-      startAutoRefresh();
-    });
+    readInitialBattleFromUrl();
+    wireEvents();
+    loadData();
+    startAutoRefresh();
   </script>
 </body>
 </html>
