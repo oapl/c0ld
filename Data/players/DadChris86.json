@@ -1,0 +1,44 @@
+{
+  "profile_key": "DadChris86",
+  "user_id": null,
+  "username": "DadChris86",
+  "usernames_seen": [
+    "DadChris86"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
+  "latest_rank": 59,
+  "latest_points": 1543517,
+  "battles": [
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 59,
+      "last_rank": 59,
+      "end_rank": 59,
+      "best_rank": 59,
+      "worst_rank": 59,
+      "starting_points": 1543517,
+      "ending_points": 1543517,
+      "max_points": 1543517,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 59,
+          "points": 1543517
+        }
+      ]
+    }
+  ]
+}

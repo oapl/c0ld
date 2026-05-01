@@ -1,1 +1,310 @@
-[]
+[
+  {
+    "battle": "Poison Turtle Battle",
+    "display_name": "Poison Turtle Battle",
+    "source_table": "PoisonTurtleClans",
+    "generated_at": "2026-05-01T19:44:23.319Z",
+    "rows": [
+      {
+        "rank": 1,
+        "clan": "UNO",
+        "points": 302676726,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 2,
+        "clan": "NONG",
+        "points": 274868552,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 3,
+        "clan": "Goop",
+        "points": 262242692,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 4,
+        "clan": "BOSS",
+        "points": 253883324,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 5,
+        "clan": "HROT",
+        "points": 246470565,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 6,
+        "clan": "1PNX",
+        "points": 234072240,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 7,
+        "clan": "SOPU",
+        "points": 232783626,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 8,
+        "clan": "RFIL",
+        "points": 222013039,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 9,
+        "clan": "B2SS",
+        "points": 215239595,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 10,
+        "clan": "POPS",
+        "points": 206380519,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 11,
+        "clan": "GANG",
+        "points": 205447341,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 12,
+        "clan": "YLW",
+        "points": 203789016,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 13,
+        "clan": "OFCL",
+        "points": 202760885,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 14,
+        "clan": "H8ER",
+        "points": 197781262,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 15,
+        "clan": "Winr",
+        "points": 196618807,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 16,
+        "clan": "minx",
+        "points": 195950605,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 17,
+        "clan": "VP88",
+        "points": 193850605,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 18,
+        "clan": "FFLH",
+        "points": 191320874,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 19,
+        "clan": "PAAC",
+        "points": 190302188,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 20,
+        "clan": "PABS",
+        "points": 190266970,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 21,
+        "clan": "HSTL",
+        "points": 190164899,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 22,
+        "clan": "HARM",
+        "points": 180061396,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 23,
+        "clan": "GSTG",
+        "points": 179164757,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 24,
+        "clan": "K0ii",
+        "points": 174369608,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 25,
+        "clan": "UNTY",
+        "points": 169952918,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 26,
+        "clan": "DLOW",
+        "points": 159078864,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 27,
+        "clan": "RRON",
+        "points": 158991332,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 28,
+        "clan": "OG99",
+        "points": 156795137,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 29,
+        "clan": "FMLY",
+        "points": 152831811,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 30,
+        "clan": "OLDD",
+        "points": 145406158,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 31,
+        "clan": "BAZO",
+        "points": 142952520,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 32,
+        "clan": "TPGD",
+        "points": 140091522,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 33,
+        "clan": "KOR_",
+        "points": 139996005,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 34,
+        "clan": "Z3PP",
+        "points": 139988752,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 35,
+        "clan": "XREX",
+        "points": 136952854,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 36,
+        "clan": "BOSK",
+        "points": 135634871,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 37,
+        "clan": "S2PU",
+        "points": 134206945,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 38,
+        "clan": "TAIN",
+        "points": 133570394,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 39,
+        "clan": "DKWR",
+        "points": 131711335,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 40,
+        "clan": "TKLF",
+        "points": 130960832,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 41,
+        "clan": "Valx",
+        "points": 130629067,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 42,
+        "clan": "BUTI",
+        "points": 130554584,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 43,
+        "clan": "S7NS",
+        "points": 128648321,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 44,
+        "clan": "BEZE",
+        "points": 127959270,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 45,
+        "clan": "FNXX",
+        "points": 127749549,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 46,
+        "clan": "FaZ",
+        "points": 125460579,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 47,
+        "clan": "NS4R",
+        "points": 125434289,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 48,
+        "clan": "CBNS",
+        "points": 122321131,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 49,
+        "clan": "vvip",
+        "points": 120822730,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      },
+      {
+        "rank": 50,
+        "clan": "TAIQ",
+        "points": 117679823,
+        "created_at": "2026-05-01T17:35:39.877Z"
+      }
+    ]
+  }
+]

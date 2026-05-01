@@ -7,29 +7,29 @@
   ],
   "avatar_url": "assets/avatars/1178078831.png",
   "profile_url": "https://www.roblox.com/users/1178078831/profile",
-  "total_battles": 1,
-  "latest_seen": "2026-05-01T19:20:50.008Z",
+  "total_battles": 2,
+  "latest_seen": "2026-05-01T19:43:53.385Z",
   "latest_rank": 57,
-  "latest_points": 5301,
+  "latest_points": 5335,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-05-01T19:20:50.008Z",
+      "battle_last_snapshot": "2026-05-01T19:43:53.385Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
       "first_active_date": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-05-01T19:20:50.008Z",
+      "last_seen": "2026-05-01T19:43:53.385Z",
       "starting_rank": 54,
       "last_rank": 57,
       "end_rank": 57,
       "best_rank": 54,
       "worst_rank": 57,
       "starting_points": 2938,
-      "ending_points": 5301,
-      "max_points": 5301,
-      "gained_points": 2363,
-      "snapshot_count": 591,
+      "ending_points": 5335,
+      "max_points": 5335,
+      "gained_points": 2397,
+      "snapshot_count": 596,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -2987,6 +2987,239 @@
           "t": "2026-05-01T19:20:50.008Z",
           "rank": 57,
           "points": 5301
+        },
+        {
+          "t": "2026-05-01T19:25:46.979Z",
+          "rank": 57,
+          "points": 5308
+        },
+        {
+          "t": "2026-05-01T19:30:47.467Z",
+          "rank": 57,
+          "points": 5316
+        },
+        {
+          "t": "2026-05-01T19:35:42.810Z",
+          "rank": 57,
+          "points": 5323
+        },
+        {
+          "t": "2026-05-01T19:40:43.729Z",
+          "rank": 57,
+          "points": 5331
+        },
+        {
+          "t": "2026-05-01T19:43:53.385Z",
+          "rank": 57,
+          "points": 5335
+        }
+      ]
+    },
+    {
+      "battle": "Spring2026",
+      "display_name": "Abstract Battle",
+      "battle_first_snapshot": "2026-04-21T12:14:36.000Z",
+      "battle_last_snapshot": "2026-04-25T13:09:36.000Z",
+      "first_seen": "2026-04-25T10:04:36.000Z",
+      "first_active_date": "2026-04-25T10:04:36.000Z",
+      "last_seen": "2026-04-25T13:09:36.000Z",
+      "starting_rank": 61,
+      "last_rank": 60,
+      "end_rank": 60,
+      "best_rank": 60,
+      "worst_rank": 61,
+      "starting_points": 0,
+      "ending_points": 0,
+      "max_points": 0,
+      "gained_points": 0,
+      "snapshot_count": 37,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-04-25T10:04:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:09:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:14:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:19:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:29:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:34:36.000Z",
+          "rank": 61,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:39:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:44:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:49:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:54:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T10:59:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:04:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:09:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:14:39.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:19:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:24:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:29:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:34:37.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:39:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:44:37.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:49:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:54:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T11:59:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:04:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:09:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:14:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:19:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:24:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:29:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:34:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:39:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:44:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:49:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:54:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T12:59:36.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T13:04:35.000Z",
+          "rank": 60,
+          "points": 0
+        },
+        {
+          "t": "2026-04-25T13:09:36.000Z",
+          "rank": 60,
+          "points": 0
         }
       ]
     }

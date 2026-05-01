@@ -7,29 +7,29 @@
   ],
   "avatar_url": "assets/avatars/5475802198.png",
   "profile_url": "https://www.roblox.com/users/5475802198/profile",
-  "total_battles": 1,
-  "latest_seen": "2026-05-01T19:20:50.008Z",
+  "total_battles": 2,
+  "latest_seen": "2026-05-01T19:43:53.385Z",
   "latest_rank": 50,
-  "latest_points": 7069,
+  "latest_points": 7099,
   "battles": [
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-05-01T19:20:50.008Z",
+      "battle_last_snapshot": "2026-05-01T19:43:53.385Z",
       "first_seen": "2026-04-29T18:11:01.131Z",
       "first_active_date": "2026-04-29T18:11:01.131Z",
-      "last_seen": "2026-05-01T19:20:50.008Z",
+      "last_seen": "2026-05-01T19:43:53.385Z",
       "starting_rank": 50,
       "last_rank": 50,
       "end_rank": 50,
       "best_rank": 48,
       "worst_rank": 50,
       "starting_points": 3167,
-      "ending_points": 7069,
-      "max_points": 7069,
-      "gained_points": 3902,
-      "snapshot_count": 591,
+      "ending_points": 7099,
+      "max_points": 7099,
+      "gained_points": 3932,
+      "snapshot_count": 596,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -2987,6 +2987,59 @@
           "t": "2026-05-01T19:20:50.008Z",
           "rank": 50,
           "points": 7069
+        },
+        {
+          "t": "2026-05-01T19:25:46.979Z",
+          "rank": 50,
+          "points": 7074
+        },
+        {
+          "t": "2026-05-01T19:30:47.467Z",
+          "rank": 50,
+          "points": 7082
+        },
+        {
+          "t": "2026-05-01T19:35:42.810Z",
+          "rank": 50,
+          "points": 7088
+        },
+        {
+          "t": "2026-05-01T19:40:43.729Z",
+          "rank": 50,
+          "points": 7095
+        },
+        {
+          "t": "2026-05-01T19:43:53.385Z",
+          "rank": 50,
+          "points": 7099
+        }
+      ]
+    },
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 70,
+      "last_rank": 70,
+      "end_rank": 70,
+      "best_rank": 70,
+      "worst_rank": 70,
+      "starting_points": 851811,
+      "ending_points": 851811,
+      "max_points": 851811,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 70,
+          "points": 851811
         }
       ]
     }

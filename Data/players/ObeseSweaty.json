@@ -1,0 +1,44 @@
+{
+  "profile_key": "ObeseSweaty",
+  "user_id": null,
+  "username": "ObeseSweaty",
+  "usernames_seen": [
+    "ObeseSweaty"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
+  "latest_rank": 10,
+  "latest_points": 7853324,
+  "battles": [
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 10,
+      "last_rank": 10,
+      "end_rank": 10,
+      "best_rank": 10,
+      "worst_rank": 10,
+      "starting_points": 7853324,
+      "ending_points": 7853324,
+      "max_points": 7853324,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 10,
+          "points": 7853324
+        }
+      ]
+    }
+  ]
+}

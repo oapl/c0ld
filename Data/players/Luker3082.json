@@ -1,0 +1,44 @@
+{
+  "profile_key": "Luker3082",
+  "user_id": null,
+  "username": "Luker3082",
+  "usernames_seen": [
+    "Luker3082"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
+  "latest_rank": 25,
+  "latest_points": 4106202,
+  "battles": [
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 25,
+      "last_rank": 25,
+      "end_rank": 25,
+      "best_rank": 25,
+      "worst_rank": 25,
+      "starting_points": 4106202,
+      "ending_points": 4106202,
+      "max_points": 4106202,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 25,
+          "points": 4106202
+        }
+      ]
+    }
+  ]
+}

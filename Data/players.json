@@ -1,13 +1,860 @@
 [
   {
+    "profile_key": "925748045",
+    "user_id": 925748045,
+    "username": "PossiblyLlama",
+    "avatar_url": "assets/avatars/925748045.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T13:09:36.000Z",
+    "latest_rank": 6,
+    "latest_points": 79626381,
+    "file": "Data/players/925748045.json"
+  },
+  {
+    "profile_key": "3261177309",
+    "user_id": 3261177309,
+    "username": "EyeRockett",
+    "avatar_url": "assets/avatars/3261177309.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T13:09:36.000Z",
+    "latest_rank": 7,
+    "latest_points": 78816944,
+    "file": "Data/players/3261177309.json"
+  },
+  {
+    "profile_key": "5135204617",
+    "user_id": 5135204617,
+    "username": "xDonkyKxng",
+    "avatar_url": "assets/avatars/5135204617.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-23T14:29:36.000Z",
+    "latest_rank": 20,
+    "latest_points": 44439222,
+    "file": "Data/players/5135204617.json"
+  },
+  {
+    "profile_key": "8845275755",
+    "user_id": 8845275755,
+    "username": "FORTINITEEEORLABUBAG",
+    "avatar_url": "assets/avatars/8845275755.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T13:09:36.000Z",
+    "latest_rank": 49,
+    "latest_points": 34565478,
+    "file": "Data/players/8845275755.json"
+  },
+  {
+    "profile_key": "559606496",
+    "user_id": 559606496,
+    "username": "therealyojisopi1",
+    "avatar_url": "assets/avatars/559606496.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:54:36.000Z",
+    "latest_rank": 55,
+    "latest_points": 13268050,
+    "file": "Data/players/559606496.json"
+  },
+  {
+    "profile_key": "BKteamhaveityourway",
+    "user_id": null,
+    "username": "BKteamhaveityourway",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 1,
+    "latest_points": 12188644,
+    "file": "Data/players/BKteamhaveityourway.json"
+  },
+  {
+    "profile_key": "sosd35",
+    "user_id": null,
+    "username": "sosd35",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 2,
+    "latest_points": 11731616,
+    "file": "Data/players/sosd35.json"
+  },
+  {
+    "profile_key": "FIGHTER92399_alt",
+    "user_id": null,
+    "username": "FIGHTER92399_alt",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 3,
+    "latest_points": 11329877,
+    "file": "Data/players/FIGHTER92399_alt.json"
+  },
+  {
+    "profile_key": "E1izabeth_Eh",
+    "user_id": null,
+    "username": "E1izabeth_Eh",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 4,
+    "latest_points": 10968983,
+    "file": "Data/players/E1izabeth_Eh.json"
+  },
+  {
+    "profile_key": "reubenninjago",
+    "user_id": null,
+    "username": "reubenninjago",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 5,
+    "latest_points": 10178793,
+    "file": "Data/players/reubenninjago.json"
+  },
+  {
+    "profile_key": "Ryman77781",
+    "user_id": null,
+    "username": "Ryman77781",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 6,
+    "latest_points": 9936415,
+    "file": "Data/players/Ryman77781.json"
+  },
+  {
+    "profile_key": "DevilekCZE",
+    "user_id": null,
+    "username": "DevilekCZE",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 7,
+    "latest_points": 9406380,
+    "file": "Data/players/DevilekCZE.json"
+  },
+  {
+    "profile_key": "iGotEm4",
+    "user_id": null,
+    "username": "iGotEm4",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 8,
+    "latest_points": 9147011,
+    "file": "Data/players/iGotEm4.json"
+  },
+  {
+    "profile_key": "DumpDaClutch",
+    "user_id": null,
+    "username": "DumpDaClutch",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 9,
+    "latest_points": 8128411,
+    "file": "Data/players/DumpDaClutch.json"
+  },
+  {
+    "profile_key": "ObeseSweaty",
+    "user_id": null,
+    "username": "ObeseSweaty",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 10,
+    "latest_points": 7853324,
+    "file": "Data/players/ObeseSweaty.json"
+  },
+  {
+    "profile_key": "FrankyArt1",
+    "user_id": null,
+    "username": "FrankyArt1",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 11,
+    "latest_points": 7832757,
+    "file": "Data/players/FrankyArt1.json"
+  },
+  {
+    "profile_key": "iDuzel",
+    "user_id": null,
+    "username": "iDuzel",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 12,
+    "latest_points": 7648691,
+    "file": "Data/players/iDuzel.json"
+  },
+  {
+    "profile_key": "dmrfree",
+    "user_id": null,
+    "username": "dmrfree",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 13,
+    "latest_points": 7454113,
+    "file": "Data/players/dmrfree.json"
+  },
+  {
+    "profile_key": "5040654367",
+    "user_id": 5040654367,
+    "username": "mybanana366",
+    "avatar_url": "assets/avatars/5040654367.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:44:35.000Z",
+    "latest_rank": 61,
+    "latest_points": 7184533,
+    "file": "Data/players/5040654367.json"
+  },
+  {
+    "profile_key": "981140069",
+    "user_id": 981140069,
+    "username": "viancia51911",
+    "avatar_url": "assets/avatars/981140069.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:44:35.000Z",
+    "latest_rank": 62,
+    "latest_points": 7080009,
+    "file": "Data/players/981140069.json"
+  },
+  {
+    "profile_key": "BigTony404",
+    "user_id": null,
+    "username": "BigTony404",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 14,
+    "latest_points": 6874777,
+    "file": "Data/players/BigTony404.json"
+  },
+  {
+    "profile_key": "Ahmederson1",
+    "user_id": null,
+    "username": "Ahmederson1",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 15,
+    "latest_points": 6150443,
+    "file": "Data/players/Ahmederson1.json"
+  },
+  {
+    "profile_key": "BestRobloxSimsPlayer",
+    "user_id": null,
+    "username": "BestRobloxSimsPlayer",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 16,
+    "latest_points": 6079619,
+    "file": "Data/players/BestRobloxSimsPlayer.json"
+  },
+  {
+    "profile_key": "AgentP_0928",
+    "user_id": null,
+    "username": "AgentP_0928",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 17,
+    "latest_points": 5325610,
+    "file": "Data/players/AgentP_0928.json"
+  },
+  {
+    "profile_key": "UnstableVenom",
+    "user_id": null,
+    "username": "UnstableVenom",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 18,
+    "latest_points": 5200834,
+    "file": "Data/players/UnstableVenom.json"
+  },
+  {
+    "profile_key": "ariusanis",
+    "user_id": null,
+    "username": "ariusanis",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 19,
+    "latest_points": 5159625,
+    "file": "Data/players/ariusanis.json"
+  },
+  {
+    "profile_key": "MeowMeow2828MeowMeow",
+    "user_id": null,
+    "username": "MeowMeow2828MeowMeow",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 20,
+    "latest_points": 4735260,
+    "file": "Data/players/MeowMeow2828MeowMeow.json"
+  },
+  {
+    "profile_key": "Latvietis10",
+    "user_id": null,
+    "username": "Latvietis10",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 23,
+    "latest_points": 4236930,
+    "file": "Data/players/Latvietis10.json"
+  },
+  {
+    "profile_key": "suter1000",
+    "user_id": null,
+    "username": "suter1000",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 24,
+    "latest_points": 4116412,
+    "file": "Data/players/suter1000.json"
+  },
+  {
+    "profile_key": "Luker3082",
+    "user_id": null,
+    "username": "Luker3082",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 25,
+    "latest_points": 4106202,
+    "file": "Data/players/Luker3082.json"
+  },
+  {
+    "profile_key": "kyllor06",
+    "user_id": null,
+    "username": "kyllor06",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 26,
+    "latest_points": 3455297,
+    "file": "Data/players/kyllor06.json"
+  },
+  {
+    "profile_key": "Sky_RG",
+    "user_id": null,
+    "username": "Sky_RG",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 27,
+    "latest_points": 3414860,
+    "file": "Data/players/Sky_RG.json"
+  },
+  {
+    "profile_key": "8701600831",
+    "user_id": 8701600831,
+    "username": "corrosion_alt2",
+    "avatar_url": "assets/avatars/8701600831.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:44:35.000Z",
+    "latest_rank": 63,
+    "latest_points": 3357800,
+    "file": "Data/players/8701600831.json"
+  },
+  {
+    "profile_key": "luvlorena",
+    "user_id": null,
+    "username": "luvlorena",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 28,
+    "latest_points": 3159195,
+    "file": "Data/players/luvlorena.json"
+  },
+  {
+    "profile_key": "noa420",
+    "user_id": null,
+    "username": "noa420",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 29,
+    "latest_points": 3135708,
+    "file": "Data/players/noa420.json"
+  },
+  {
+    "profile_key": "MattH0use",
+    "user_id": null,
+    "username": "MattH0use",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 30,
+    "latest_points": 2938585,
+    "file": "Data/players/MattH0use.json"
+  },
+  {
+    "profile_key": "joeycb",
+    "user_id": null,
+    "username": "joeycb",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 31,
+    "latest_points": 2810658,
+    "file": "Data/players/joeycb.json"
+  },
+  {
+    "profile_key": "AcropSama",
+    "user_id": null,
+    "username": "AcropSama",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 32,
+    "latest_points": 2804437,
+    "file": "Data/players/AcropSama.json"
+  },
+  {
+    "profile_key": "Impxrium",
+    "user_id": null,
+    "username": "Impxrium",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 33,
+    "latest_points": 2513849,
+    "file": "Data/players/Impxrium.json"
+  },
+  {
+    "profile_key": "36907350",
+    "user_id": 36907350,
+    "username": "Warmogs",
+    "avatar_url": "assets/avatars/36907350.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 65,
+    "latest_points": 2495100,
+    "file": "Data/players/36907350.json"
+  },
+  {
+    "profile_key": "Poke_Scott86",
+    "user_id": null,
+    "username": "Poke_Scott86",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 34,
+    "latest_points": 2404499,
+    "file": "Data/players/Poke_Scott86.json"
+  },
+  {
+    "profile_key": "1894585550",
+    "user_id": 1894585550,
+    "username": "ThisMiyo",
+    "avatar_url": "assets/avatars/1894585550.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 35,
+    "latest_points": 2402304,
+    "file": "Data/players/1894585550.json"
+  },
+  {
+    "profile_key": "Scytive",
+    "user_id": null,
+    "username": "Scytive",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 36,
+    "latest_points": 2332840,
+    "file": "Data/players/Scytive.json"
+  },
+  {
+    "profile_key": "Nope777777777",
+    "user_id": null,
+    "username": "Nope777777777",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 37,
+    "latest_points": 2263590,
+    "file": "Data/players/Nope777777777.json"
+  },
+  {
+    "profile_key": "Thorsoe2",
+    "user_id": null,
+    "username": "Thorsoe2",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 38,
+    "latest_points": 2252899,
+    "file": "Data/players/Thorsoe2.json"
+  },
+  {
+    "profile_key": "Gigel_pro3",
+    "user_id": null,
+    "username": "Gigel_pro3",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 39,
+    "latest_points": 2239829,
+    "file": "Data/players/Gigel_pro3.json"
+  },
+  {
+    "profile_key": "Vaalea1",
+    "user_id": null,
+    "username": "Vaalea1",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 42,
+    "latest_points": 2194374,
+    "file": "Data/players/Vaalea1.json"
+  },
+  {
+    "profile_key": "148251054",
+    "user_id": 148251054,
+    "username": "EpicRider6729",
+    "avatar_url": "assets/avatars/148251054.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 67,
+    "latest_points": 2145550,
+    "file": "Data/players/148251054.json"
+  },
+  {
+    "profile_key": "Epicteebag73",
+    "user_id": null,
+    "username": "Epicteebag73",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 43,
+    "latest_points": 2038237,
+    "file": "Data/players/Epicteebag73.json"
+  },
+  {
+    "profile_key": "MelNutz1981",
+    "user_id": null,
+    "username": "MelNutz1981",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 44,
+    "latest_points": 2015474,
+    "file": "Data/players/MelNutz1981.json"
+  },
+  {
+    "profile_key": "Maxick166",
+    "user_id": null,
+    "username": "Maxick166",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 45,
+    "latest_points": 1992907,
+    "file": "Data/players/Maxick166.json"
+  },
+  {
+    "profile_key": "Surebudjr",
+    "user_id": null,
+    "username": "Surebudjr",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 46,
+    "latest_points": 1952257,
+    "file": "Data/players/Surebudjr.json"
+  },
+  {
+    "profile_key": "Mr_DingIes",
+    "user_id": null,
+    "username": "Mr_DingIes",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 47,
+    "latest_points": 1938768,
+    "file": "Data/players/Mr_DingIes.json"
+  },
+  {
+    "profile_key": "skyenalalove",
+    "user_id": null,
+    "username": "skyenalalove",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 48,
+    "latest_points": 1917535,
+    "file": "Data/players/skyenalalove.json"
+  },
+  {
+    "profile_key": "hellix001",
+    "user_id": null,
+    "username": "hellix001",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 49,
+    "latest_points": 1917475,
+    "file": "Data/players/hellix001.json"
+  },
+  {
+    "profile_key": "1033236880",
+    "user_id": 1033236880,
+    "username": "Bol1is",
+    "avatar_url": "assets/avatars/1033236880.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 50,
+    "latest_points": 1828818,
+    "file": "Data/players/1033236880.json"
+  },
+  {
+    "profile_key": "iiYoToii",
+    "user_id": null,
+    "username": "iiYoToii",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 51,
+    "latest_points": 1804198,
+    "file": "Data/players/iiYoToii.json"
+  },
+  {
+    "profile_key": "pipsqueakthecat22",
+    "user_id": null,
+    "username": "pipsqueakthecat22",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 52,
+    "latest_points": 1737328,
+    "file": "Data/players/pipsqueakthecat22.json"
+  },
+  {
+    "profile_key": "Ms_sadtsigitsul",
+    "user_id": null,
+    "username": "Ms_sadtsigitsul",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 53,
+    "latest_points": 1732849,
+    "file": "Data/players/Ms_sadtsigitsul.json"
+  },
+  {
+    "profile_key": "M4stters",
+    "user_id": null,
+    "username": "M4stters",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 54,
+    "latest_points": 1681791,
+    "file": "Data/players/M4stters.json"
+  },
+  {
+    "profile_key": "Solocrazywazy",
+    "user_id": null,
+    "username": "Solocrazywazy",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 55,
+    "latest_points": 1578138,
+    "file": "Data/players/Solocrazywazy.json"
+  },
+  {
+    "profile_key": "Not_IcePop",
+    "user_id": null,
+    "username": "Not_IcePop",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 56,
+    "latest_points": 1569153,
+    "file": "Data/players/Not_IcePop.json"
+  },
+  {
+    "profile_key": "Glibbidymom",
+    "user_id": null,
+    "username": "Glibbidymom",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 58,
+    "latest_points": 1559849,
+    "file": "Data/players/Glibbidymom.json"
+  },
+  {
+    "profile_key": "DadChris86",
+    "user_id": null,
+    "username": "DadChris86",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 59,
+    "latest_points": 1543517,
+    "file": "Data/players/DadChris86.json"
+  },
+  {
+    "profile_key": "2489885181",
+    "user_id": 2489885181,
+    "username": "Ewan_314",
+    "avatar_url": "assets/avatars/2489885181.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 60,
+    "latest_points": 1495765,
+    "file": "Data/players/2489885181.json"
+  },
+  {
+    "profile_key": "109818",
+    "user_id": 109818,
+    "username": "Cinnamowopal",
+    "avatar_url": "assets/avatars/109818.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 61,
+    "latest_points": 1493137,
+    "file": "Data/players/109818.json"
+  },
+  {
+    "profile_key": "MercilessBanditTaken",
+    "user_id": null,
+    "username": "MercilessBanditTaken",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 62,
+    "latest_points": 1291581,
+    "file": "Data/players/MercilessBanditTaken.json"
+  },
+  {
+    "profile_key": "Kiritsugu",
+    "user_id": null,
+    "username": "Kiritsugu",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 63,
+    "latest_points": 1276103,
+    "file": "Data/players/Kiritsugu.json"
+  },
+  {
+    "profile_key": "ahguaman",
+    "user_id": null,
+    "username": "ahguaman",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 64,
+    "latest_points": 1182283,
+    "file": "Data/players/ahguaman.json"
+  },
+  {
+    "profile_key": "dont_phlix",
+    "user_id": null,
+    "username": "dont_phlix",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 66,
+    "latest_points": 1065778,
+    "file": "Data/players/dont_phlix.json"
+  },
+  {
+    "profile_key": "Corrupt_Junior",
+    "user_id": null,
+    "username": "Corrupt_Junior",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 67,
+    "latest_points": 1051112,
+    "file": "Data/players/Corrupt_Junior.json"
+  },
+  {
+    "profile_key": "2657006836",
+    "user_id": 2657006836,
+    "username": "MemeePlays",
+    "avatar_url": "assets/avatars/2657006836.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 68,
+    "latest_points": 943890,
+    "file": "Data/players/2657006836.json"
+  },
+  {
+    "profile_key": "slapdash84",
+    "user_id": null,
+    "username": "slapdash84",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 69,
+    "latest_points": 907496,
+    "file": "Data/players/slapdash84.json"
+  },
+  {
+    "profile_key": "FlawedButLoved",
+    "user_id": null,
+    "username": "FlawedButLoved",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 72,
+    "latest_points": 654521,
+    "file": "Data/players/FlawedButLoved.json"
+  },
+  {
+    "profile_key": "bubblegumsimulateu",
+    "user_id": null,
+    "username": "bubblegumsimulateu",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 73,
+    "latest_points": 562370,
+    "file": "Data/players/bubblegumsimulateu.json"
+  },
+  {
+    "profile_key": "24072218",
+    "user_id": 24072218,
+    "username": "olikim",
+    "avatar_url": "assets/avatars/24072218.png",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 74,
+    "latest_points": 534769,
+    "file": "Data/players/24072218.json"
+  },
+  {
+    "profile_key": "youunes89755",
+    "user_id": null,
+    "username": "youunes89755",
+    "avatar_url": null,
+    "total_battles": 1,
+    "latest_seen": "2026-05-01T17:23:15.585Z",
+    "latest_rank": 75,
+    "latest_points": 412765,
+    "file": "Data/players/youunes89755.json"
+  },
+  {
     "profile_key": "1717352176",
     "user_id": 1717352176,
     "username": "Yume_Sakurax3",
     "avatar_url": "assets/avatars/1717352176.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 1,
-    "latest_points": 11969,
+    "latest_points": 12006,
     "file": "Data/players/1717352176.json"
   },
   {
@@ -15,10 +862,10 @@
     "user_id": 671239684,
     "username": "johnr622",
     "avatar_url": "assets/avatars/671239684.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 2,
-    "latest_points": 11726,
+    "latest_points": 11763,
     "file": "Data/players/671239684.json"
   },
   {
@@ -26,10 +873,10 @@
     "user_id": 381111505,
     "username": "joshuacd2006",
     "avatar_url": "assets/avatars/381111505.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 3,
-    "latest_points": 11591,
+    "latest_points": 11628,
     "file": "Data/players/381111505.json"
   },
   {
@@ -37,10 +884,10 @@
     "user_id": 3402015952,
     "username": "Josep_xD2",
     "avatar_url": "assets/avatars/3402015952.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 4,
-    "latest_points": 11291,
+    "latest_points": 11328,
     "file": "Data/players/3402015952.json"
   },
   {
@@ -48,10 +895,10 @@
     "user_id": 1299086053,
     "username": "jupiter0477",
     "avatar_url": "assets/avatars/1299086053.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 5,
-    "latest_points": 11180,
+    "latest_points": 11217,
     "file": "Data/players/1299086053.json"
   },
   {
@@ -59,10 +906,10 @@
     "user_id": 1175926698,
     "username": "Mr_Suter",
     "avatar_url": "assets/avatars/1175926698.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 6,
-    "latest_points": 10954,
+    "latest_points": 10991,
     "file": "Data/players/1175926698.json"
   },
   {
@@ -71,9 +918,9 @@
     "username": "Johnr622_alt2",
     "avatar_url": "assets/avatars/7663866545.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 7,
-    "latest_points": 10392,
+    "latest_points": 10426,
     "file": "Data/players/7663866545.json"
   },
   {
@@ -82,9 +929,9 @@
     "username": "Johnr622_alt3",
     "avatar_url": "assets/avatars/7663873917.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 8,
-    "latest_points": 10392,
+    "latest_points": 10426,
     "file": "Data/players/7663873917.json"
   },
   {
@@ -93,9 +940,9 @@
     "username": "Johnr622_alt4",
     "avatar_url": "assets/avatars/7663874609.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 9,
-    "latest_points": 10148,
+    "latest_points": 10182,
     "file": "Data/players/7663874609.json"
   },
   {
@@ -104,9 +951,9 @@
     "username": "Johnr622_alt5",
     "avatar_url": "assets/avatars/7663882112.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 10,
-    "latest_points": 10142,
+    "latest_points": 10176,
     "file": "Data/players/7663882112.json"
   },
   {
@@ -114,10 +961,10 @@
     "user_id": 3399221091,
     "username": "SupaAnTz",
     "avatar_url": "assets/avatars/3399221091.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 11,
-    "latest_points": 9428,
+    "latest_points": 9465,
     "file": "Data/players/3399221091.json"
   },
   {
@@ -125,10 +972,10 @@
     "user_id": 5746935453,
     "username": "Panthers_1995",
     "avatar_url": "assets/avatars/5746935453.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 12,
-    "latest_points": 9305,
+    "latest_points": 9337,
     "file": "Data/players/5746935453.json"
   },
   {
@@ -136,10 +983,10 @@
     "user_id": 1991450795,
     "username": "ArcticGalaxy149",
     "avatar_url": "assets/avatars/1991450795.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 13,
-    "latest_points": 9295,
+    "latest_points": 9327,
     "file": "Data/players/1991450795.json"
   },
   {
@@ -147,10 +994,10 @@
     "user_id": 7311843702,
     "username": "Doobydoobydoo_bah",
     "avatar_url": "assets/avatars/7311843702.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 14,
-    "latest_points": 9294,
+    "latest_points": 9326,
     "file": "Data/players/7311843702.json"
   },
   {
@@ -158,10 +1005,10 @@
     "user_id": 1534184237,
     "username": "MrChicken66666",
     "avatar_url": "assets/avatars/1534184237.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 15,
-    "latest_points": 9289,
+    "latest_points": 9319,
     "file": "Data/players/1534184237.json"
   },
   {
@@ -169,10 +1016,10 @@
     "user_id": 5736974936,
     "username": "Odierulz01",
     "avatar_url": "assets/avatars/5736974936.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 16,
-    "latest_points": 9275,
+    "latest_points": 9307,
     "file": "Data/players/5736974936.json"
   },
   {
@@ -180,10 +1027,10 @@
     "user_id": 7349191010,
     "username": "DiscoGuy86",
     "avatar_url": "assets/avatars/7349191010.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 17,
-    "latest_points": 9272,
+    "latest_points": 9304,
     "file": "Data/players/7349191010.json"
   },
   {
@@ -191,10 +1038,10 @@
     "user_id": 5605744293,
     "username": "Ilikecheesepuffs26",
     "avatar_url": "assets/avatars/5605744293.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 18,
-    "latest_points": 9270,
+    "latest_points": 9302,
     "file": "Data/players/5605744293.json"
   },
   {
@@ -202,10 +1049,10 @@
     "user_id": 7649276875,
     "username": "PartyCorgi_70",
     "avatar_url": "assets/avatars/7649276875.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 19,
-    "latest_points": 9262,
+    "latest_points": 9294,
     "file": "Data/players/7649276875.json"
   },
   {
@@ -213,10 +1060,10 @@
     "user_id": 5317753904,
     "username": "TealPlatypus747",
     "avatar_url": "assets/avatars/5317753904.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 20,
-    "latest_points": 9255,
+    "latest_points": 9287,
     "file": "Data/players/5317753904.json"
   },
   {
@@ -224,10 +1071,10 @@
     "user_id": 5395148535,
     "username": "WhereIsPerry0",
     "avatar_url": "assets/avatars/5395148535.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 21,
-    "latest_points": 9237,
+    "latest_points": 9269,
     "file": "Data/players/5395148535.json"
   },
   {
@@ -235,10 +1082,10 @@
     "user_id": 5349160911,
     "username": "ArcticGalaxy14",
     "avatar_url": "assets/avatars/5349160911.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 22,
-    "latest_points": 9235,
+    "latest_points": 9267,
     "file": "Data/players/5349160911.json"
   },
   {
@@ -246,10 +1093,10 @@
     "user_id": 2341656429,
     "username": "LawnMp3",
     "avatar_url": "assets/avatars/2341656429.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 23,
-    "latest_points": 9209,
+    "latest_points": 9246,
     "file": "Data/players/2341656429.json"
   },
   {
@@ -257,10 +1104,10 @@
     "user_id": 5746073588,
     "username": "AgentP_2928",
     "avatar_url": "assets/avatars/5746073588.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 24,
-    "latest_points": 8952,
+    "latest_points": 8984,
     "file": "Data/players/5746073588.json"
   },
   {
@@ -268,10 +1115,10 @@
     "user_id": 5747257442,
     "username": "AgentP_10928",
     "avatar_url": "assets/avatars/5747257442.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
-    "latest_rank": 25,
-    "latest_points": 8941,
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
+    "latest_rank": 26,
+    "latest_points": 8972,
     "file": "Data/players/5747257442.json"
   },
   {
@@ -279,10 +1126,10 @@
     "user_id": 5749961520,
     "username": "WhereIsPerry20",
     "avatar_url": "assets/avatars/5749961520.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
-    "latest_rank": 26,
-    "latest_points": 8940,
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
+    "latest_rank": 25,
+    "latest_points": 8972,
     "file": "Data/players/5749961520.json"
   },
   {
@@ -290,10 +1137,10 @@
     "user_id": 1686892886,
     "username": "Bader2007hero",
     "avatar_url": "assets/avatars/1686892886.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 27,
-    "latest_points": 8931,
+    "latest_points": 8961,
     "file": "Data/players/1686892886.json"
   },
   {
@@ -301,10 +1148,10 @@
     "user_id": 5740243512,
     "username": "ArcticGalaxy179",
     "avatar_url": "assets/avatars/5740243512.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 29,
-    "latest_points": 8922,
+    "latest_points": 8954,
     "file": "Data/players/5740243512.json"
   },
   {
@@ -312,10 +1159,10 @@
     "user_id": 5742594228,
     "username": "TealPlatypus777",
     "avatar_url": "assets/avatars/5742594228.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 28,
-    "latest_points": 8922,
+    "latest_points": 8954,
     "file": "Data/players/5742594228.json"
   },
   {
@@ -323,10 +1170,10 @@
     "user_id": 5740701737,
     "username": "ArcticGalaxy219",
     "avatar_url": "assets/avatars/5740701737.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 30,
-    "latest_points": 8921,
+    "latest_points": 8952,
     "file": "Data/players/5740701737.json"
   },
   {
@@ -334,10 +1181,10 @@
     "user_id": 5746246129,
     "username": "Agentp_3928",
     "avatar_url": "assets/avatars/5746246129.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 31,
-    "latest_points": 8912,
+    "latest_points": 8944,
     "file": "Data/players/5746246129.json"
   },
   {
@@ -345,10 +1192,10 @@
     "user_id": 5747185527,
     "username": "Panthers_1996",
     "avatar_url": "assets/avatars/5747185527.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 32,
-    "latest_points": 8910,
+    "latest_points": 8941,
     "file": "Data/players/5747185527.json"
   },
   {
@@ -356,10 +1203,10 @@
     "user_id": 5749844896,
     "username": "WhereIsPerry10",
     "avatar_url": "assets/avatars/5749844896.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 33,
-    "latest_points": 8862,
+    "latest_points": 8894,
     "file": "Data/players/5749844896.json"
   },
   {
@@ -367,10 +1214,10 @@
     "user_id": 5746891823,
     "username": "AgentP_8928",
     "avatar_url": "assets/avatars/5746891823.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 34,
-    "latest_points": 8843,
+    "latest_points": 8875,
     "file": "Data/players/5746891823.json"
   },
   {
@@ -378,10 +1225,10 @@
     "user_id": 5740627123,
     "username": "ArcticGalaxy199",
     "avatar_url": "assets/avatars/5740627123.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 35,
-    "latest_points": 8839,
+    "latest_points": 8871,
     "file": "Data/players/5740627123.json"
   },
   {
@@ -389,10 +1236,10 @@
     "user_id": 5739780190,
     "username": "ArcticGalaxy159",
     "avatar_url": "assets/avatars/5739780190.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 36,
-    "latest_points": 8734,
+    "latest_points": 8765,
     "file": "Data/players/5739780190.json"
   },
   {
@@ -400,10 +1247,10 @@
     "user_id": 5740310828,
     "username": "ArcticGalaxy189",
     "avatar_url": "assets/avatars/5740310828.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 37,
-    "latest_points": 8721,
+    "latest_points": 8753,
     "file": "Data/players/5740310828.json"
   },
   {
@@ -411,10 +1258,10 @@
     "user_id": 5743015743,
     "username": "TealPlatypus787",
     "avatar_url": "assets/avatars/5743015743.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 38,
-    "latest_points": 8719,
+    "latest_points": 8750,
     "file": "Data/players/5743015743.json"
   },
   {
@@ -422,10 +1269,10 @@
     "user_id": 5746424404,
     "username": "AgentP_4928",
     "avatar_url": "assets/avatars/5746424404.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 39,
-    "latest_points": 8661,
+    "latest_points": 8692,
     "file": "Data/players/5746424404.json"
   },
   {
@@ -433,10 +1280,10 @@
     "user_id": 5740665068,
     "username": "ArcticGalaxy209",
     "avatar_url": "assets/avatars/5740665068.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 40,
-    "latest_points": 8646,
+    "latest_points": 8677,
     "file": "Data/players/5740665068.json"
   },
   {
@@ -444,10 +1291,10 @@
     "user_id": 5745852697,
     "username": "AgentP_1928",
     "avatar_url": "assets/avatars/5745852697.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 41,
-    "latest_points": 8533,
+    "latest_points": 8565,
     "file": "Data/players/5745852697.json"
   },
   {
@@ -455,10 +1302,10 @@
     "user_id": 5742465610,
     "username": "TealPlatypus767",
     "avatar_url": "assets/avatars/5742465610.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 42,
-    "latest_points": 8289,
+    "latest_points": 8320,
     "file": "Data/players/5742465610.json"
   },
   {
@@ -466,10 +1313,10 @@
     "user_id": 5742408445,
     "username": "TealPlatypus757",
     "avatar_url": "assets/avatars/5742408445.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 43,
-    "latest_points": 8217,
+    "latest_points": 8248,
     "file": "Data/players/5742408445.json"
   },
   {
@@ -477,10 +1324,10 @@
     "user_id": 3302444862,
     "username": "EndOfAnEra007",
     "avatar_url": "assets/avatars/3302444862.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 44,
-    "latest_points": 8056,
+    "latest_points": 8080,
     "file": "Data/players/3302444862.json"
   },
   {
@@ -488,10 +1335,10 @@
     "user_id": 3424299777,
     "username": "Pay2Lose0",
     "avatar_url": "assets/avatars/3424299777.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 45,
-    "latest_points": 8053,
+    "latest_points": 8077,
     "file": "Data/players/3424299777.json"
   },
   {
@@ -499,10 +1346,10 @@
     "user_id": 1462748729,
     "username": "dragonballx1412",
     "avatar_url": "assets/avatars/1462748729.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 46,
-    "latest_points": 7903,
+    "latest_points": 7937,
     "file": "Data/players/1462748729.json"
   },
   {
@@ -511,9 +1358,9 @@
     "username": "littledraiken",
     "avatar_url": "assets/avatars/610979543.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 47,
-    "latest_points": 7766,
+    "latest_points": 7800,
     "file": "Data/players/610979543.json"
   },
   {
@@ -521,10 +1368,10 @@
     "user_id": 455361347,
     "username": "tycoonmasterou",
     "avatar_url": "assets/avatars/455361347.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 48,
-    "latest_points": 7187,
+    "latest_points": 7221,
     "file": "Data/players/455361347.json"
   },
   {
@@ -533,9 +1380,9 @@
     "username": "sarahr26",
     "avatar_url": "assets/avatars/411587057.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 49,
-    "latest_points": 7133,
+    "latest_points": 7167,
     "file": "Data/players/411587057.json"
   },
   {
@@ -543,10 +1390,10 @@
     "user_id": 5475802198,
     "username": "ManapuaMan8O8",
     "avatar_url": "assets/avatars/5475802198.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 50,
-    "latest_points": 7069,
+    "latest_points": 7099,
     "file": "Data/players/5475802198.json"
   },
   {
@@ -554,10 +1401,10 @@
     "user_id": 6132975232,
     "username": "Pay2Lose02",
     "avatar_url": "assets/avatars/6132975232.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 51,
-    "latest_points": 7036,
+    "latest_points": 7063,
     "file": "Data/players/6132975232.json"
   },
   {
@@ -566,9 +1413,9 @@
     "username": "itankidddd",
     "avatar_url": "assets/avatars/3254310724.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 52,
-    "latest_points": 6545,
+    "latest_points": 6579,
     "file": "Data/players/3254310724.json"
   },
   {
@@ -576,8 +1423,8 @@
     "user_id": 4002011090,
     "username": "Bol2is",
     "avatar_url": "assets/avatars/4002011090.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 53,
     "latest_points": 6451,
     "file": "Data/players/4002011090.json"
@@ -588,9 +1435,9 @@
     "username": "NatsdudeYT",
     "avatar_url": "assets/avatars/3220548476.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 54,
-    "latest_points": 6154,
+    "latest_points": 6191,
     "file": "Data/players/3220548476.json"
   },
   {
@@ -598,11 +1445,22 @@
     "user_id": 2463883764,
     "username": "testbeeswS",
     "avatar_url": "assets/avatars/2463883764.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 55,
-    "latest_points": 5984,
+    "latest_points": 6014,
     "file": "Data/players/2463883764.json"
+  },
+  {
+    "profile_key": "94549709",
+    "user_id": 94549709,
+    "username": "SainttCoco",
+    "avatar_url": "assets/avatars/94549709.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-21T15:49:36.000Z",
+    "latest_rank": 61,
+    "latest_points": 5657,
+    "file": "Data/players/94549709.json"
   },
   {
     "profile_key": "1281614396",
@@ -610,7 +1468,7 @@
     "username": "wqmike",
     "avatar_url": "assets/avatars/1281614396.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 56,
     "latest_points": 5432,
     "file": "Data/players/1281614396.json"
@@ -620,10 +1478,10 @@
     "user_id": 1178078831,
     "username": "mavilure",
     "avatar_url": "assets/avatars/1178078831.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 57,
-    "latest_points": 5301,
+    "latest_points": 5335,
     "file": "Data/players/1178078831.json"
   },
   {
@@ -631,10 +1489,10 @@
     "user_id": 1759425897,
     "username": "Elsa1000_11",
     "avatar_url": "assets/avatars/1759425897.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 58,
-    "latest_points": 3707,
+    "latest_points": 3729,
     "file": "Data/players/1759425897.json"
   },
   {
@@ -642,10 +1500,10 @@
     "user_id": 5145664688,
     "username": "mybananafarm1",
     "avatar_url": "assets/avatars/5145664688.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 59,
-    "latest_points": 3658,
+    "latest_points": 3688,
     "file": "Data/players/5145664688.json"
   },
   {
@@ -654,9 +1512,9 @@
     "username": "ArcticGalaxy229",
     "avatar_url": "assets/avatars/5740759683.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 60,
-    "latest_points": 3644,
+    "latest_points": 3675,
     "file": "Data/players/5740759683.json"
   },
   {
@@ -664,10 +1522,10 @@
     "user_id": 3753977683,
     "username": "mybanana367",
     "avatar_url": "assets/avatars/3753977683.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 61,
-    "latest_points": 3591,
+    "latest_points": 3621,
     "file": "Data/players/3753977683.json"
   },
   {
@@ -676,9 +1534,9 @@
     "username": "Baddie_true1223",
     "avatar_url": "assets/avatars/2866508217.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 62,
-    "latest_points": 3212,
+    "latest_points": 3236,
     "file": "Data/players/2866508217.json"
   },
   {
@@ -686,10 +1544,10 @@
     "user_id": 5145682484,
     "username": "mybananafarm2",
     "avatar_url": "assets/avatars/5145682484.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 63,
-    "latest_points": 3172,
+    "latest_points": 3202,
     "file": "Data/players/5145682484.json"
   },
   {
@@ -698,7 +1556,7 @@
     "username": "owendemey",
     "avatar_url": "assets/avatars/284297706.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 64,
     "latest_points": 2931,
     "file": "Data/players/284297706.json"
@@ -708,8 +1566,8 @@
     "user_id": 2598850443,
     "username": "Sprintbooter",
     "avatar_url": "assets/avatars/2598850443.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 65,
     "latest_points": 2398,
     "file": "Data/players/2598850443.json"
@@ -720,9 +1578,9 @@
     "username": "unoob922",
     "avatar_url": "assets/avatars/5048273223.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 66,
-    "latest_points": 2094,
+    "latest_points": 2131,
     "file": "Data/players/5048273223.json"
   },
   {
@@ -730,8 +1588,8 @@
     "user_id": 844720150,
     "username": "sebastjan35",
     "avatar_url": "assets/avatars/844720150.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 67,
     "latest_points": 1911,
     "file": "Data/players/844720150.json"
@@ -741,10 +1599,10 @@
     "user_id": 25894803,
     "username": "Malmortius",
     "avatar_url": "assets/avatars/25894803.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 68,
-    "latest_points": 1736,
+    "latest_points": 1751,
     "file": "Data/players/25894803.json"
   },
   {
@@ -753,7 +1611,7 @@
     "username": "herlama20000000",
     "avatar_url": "assets/avatars/1633820341.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 69,
     "latest_points": 1280,
     "file": "Data/players/1633820341.json"
@@ -763,8 +1621,8 @@
     "user_id": 7658867394,
     "username": "Sprintbooteralt",
     "avatar_url": "assets/avatars/7658867394.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 70,
     "latest_points": 421,
     "file": "Data/players/7658867394.json"
@@ -774,8 +1632,8 @@
     "user_id": 1619137057,
     "username": "Drator477",
     "avatar_url": "assets/avatars/1619137057.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 2,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 71,
     "latest_points": 228,
     "file": "Data/players/1619137057.json"
@@ -785,19 +1643,52 @@
     "user_id": 2286082684,
     "username": "Darwinaknox",
     "avatar_url": "assets/avatars/2286082684.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 72,
     "latest_points": 0,
     "file": "Data/players/2286082684.json"
+  },
+  {
+    "profile_key": "7572096148",
+    "user_id": 7572096148,
+    "username": "Darwinaknox2",
+    "avatar_url": "assets/avatars/7572096148.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 70,
+    "latest_points": 0,
+    "file": "Data/players/7572096148.json"
+  },
+  {
+    "profile_key": "7573730688",
+    "user_id": 7573730688,
+    "username": "Darwinaknox3",
+    "avatar_url": "assets/avatars/7573730688.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-21T15:14:36.000Z",
+    "latest_rank": 65,
+    "latest_points": 0,
+    "file": "Data/players/7573730688.json"
+  },
+  {
+    "profile_key": "2496465954",
+    "user_id": 2496465954,
+    "username": "donnylolz",
+    "avatar_url": "assets/avatars/2496465954.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-21T15:19:35.000Z",
+    "latest_rank": 65,
+    "latest_points": 0,
+    "file": "Data/players/2496465954.json"
   },
   {
     "profile_key": "193523401",
     "user_id": 193523401,
     "username": "gbotgamer11",
     "avatar_url": "assets/avatars/193523401.png",
-    "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "total_battles": 3,
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 73,
     "latest_points": 0,
     "file": "Data/players/193523401.json"
@@ -808,9 +1699,75 @@
     "username": "iilazy_younes",
     "avatar_url": "assets/avatars/2280844769.png",
     "total_battles": 1,
-    "latest_seen": "2026-05-01T19:20:50.008Z",
+    "latest_seen": "2026-05-01T19:43:53.385Z",
     "latest_rank": 74,
     "latest_points": 0,
     "file": "Data/players/2280844769.json"
+  },
+  {
+    "profile_key": "952582145",
+    "user_id": 952582145,
+    "username": "McPay2WinFace",
+    "avatar_url": "assets/avatars/952582145.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 71,
+    "latest_points": 0,
+    "file": "Data/players/952582145.json"
+  },
+  {
+    "profile_key": "4790459317",
+    "user_id": 4790459317,
+    "username": "Ronin_1150",
+    "avatar_url": "assets/avatars/4790459317.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-23T05:39:36.000Z",
+    "latest_rank": 73,
+    "latest_points": 0,
+    "file": "Data/players/4790459317.json"
+  },
+  {
+    "profile_key": "3205138115",
+    "user_id": 3205138115,
+    "username": "SloLol4",
+    "avatar_url": "assets/avatars/3205138115.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-22T12:09:37.000Z",
+    "latest_rank": 74,
+    "latest_points": 0,
+    "file": "Data/players/3205138115.json"
+  },
+  {
+    "profile_key": "7767973448",
+    "user_id": 7767973448,
+    "username": "TheMostMiyo",
+    "avatar_url": "assets/avatars/7767973448.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 72,
+    "latest_points": 0,
+    "file": "Data/players/7767973448.json"
+  },
+  {
+    "profile_key": "3751174689",
+    "user_id": 3751174689,
+    "username": "TheOtherMiyo",
+    "avatar_url": "assets/avatars/3751174689.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 73,
+    "latest_points": 0,
+    "file": "Data/players/3751174689.json"
+  },
+  {
+    "profile_key": "7290768806",
+    "user_id": 7290768806,
+    "username": "WhichMiyo",
+    "avatar_url": "assets/avatars/7290768806.png",
+    "total_battles": 1,
+    "latest_seen": "2026-04-25T09:39:36.000Z",
+    "latest_rank": 74,
+    "latest_points": 0,
+    "file": "Data/players/7290768806.json"
   }
 ]

@@ -1,0 +1,44 @@
+{
+  "profile_key": "youunes89755",
+  "user_id": null,
+  "username": "youunes89755",
+  "usernames_seen": [
+    "youunes89755"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
+  "latest_rank": 75,
+  "latest_points": 412765,
+  "battles": [
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 75,
+      "last_rank": 75,
+      "end_rank": 75,
+      "best_rank": 75,
+      "worst_rank": 75,
+      "starting_points": 412765,
+      "ending_points": 412765,
+      "max_points": 412765,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 75,
+          "points": 412765
+        }
+      ]
+    }
+  ]
+}

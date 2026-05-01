@@ -1,0 +1,44 @@
+{
+  "profile_key": "DumpDaClutch",
+  "user_id": null,
+  "username": "DumpDaClutch",
+  "usernames_seen": [
+    "DumpDaClutch"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
+  "latest_rank": 9,
+  "latest_points": 8128411,
+  "battles": [
+    {
+      "battle": "Poison Turtle Battle",
+      "display_name": "Poison Turtle Battle",
+      "battle_first_snapshot": "2026-05-01T17:23:15.585Z",
+      "battle_last_snapshot": "2026-05-01T17:23:15.585Z",
+      "first_seen": "2026-05-01T17:23:15.585Z",
+      "first_active_date": "2026-05-01T17:23:15.585Z",
+      "last_seen": "2026-05-01T17:23:15.585Z",
+      "starting_rank": 9,
+      "last_rank": 9,
+      "end_rank": 9,
+      "best_rank": 9,
+      "worst_rank": 9,
+      "starting_points": 8128411,
+      "ending_points": 8128411,
+      "max_points": 8128411,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-01T17:23:15.585Z",
+          "rank": 9,
+          "points": 8128411
+        }
+      ]
+    }
+  ]
+}
