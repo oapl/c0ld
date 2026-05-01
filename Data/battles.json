@@ -1,11 +1,11 @@
 [
   {
     "battle": "StarryBattle",
-    "display_name": "Starry Clan Battle",
+    "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T21:00:49.424Z",
-    "total_snapshots": 612,
-    "total_rows": 44855,
+    "last_snapshot": "2026-05-01T21:05:44.530Z",
+    "total_snapshots": 613,
+    "total_rows": 44929,
     "unique_players": 74,
     "placement": "TBD",
     "update_number": 76,
@@ -16,7 +16,7 @@
   },
   {
     "battle": "Spring2026",
-    "display_name": "Abstract Clan Battle",
+    "display_name": "Abstract Battle",
     "first_snapshot": "2026-04-21T12:14:36.000Z",
     "last_snapshot": "2026-04-25T13:09:36.000Z",
     "total_snapshots": 1140,
@@ -31,7 +31,7 @@
   },
   {
     "battle": "Clover Clan Battle",
-    "display_name": "Clover Clan Battle",
+    "display_name": "Clover Battle",
     "first_snapshot": "2026-03-14T12:00:00.524Z",
     "last_snapshot": "2026-03-28T12:00:00.524Z",
     "total_snapshots": null,
@@ -46,7 +46,7 @@
   },
   {
     "battle": "Silver Clan Battle",
-    "display_name": "Silver Clan Battle",
+    "display_name": "Silver Battle",
     "first_snapshot": "2025-12-20T12:00:00.524Z",
     "last_snapshot": "2025-12-26T12:00:00.524Z",
     "total_snapshots": null,
@@ -62,7 +62,7 @@
   {
     "battle": "Forged Battle",
     "display_name": "Forged Battle",
-    "first_snapshot": null,
+    "first_snapshot": "2025-01-29T12:00:00.524Z",
     "last_snapshot": "2025-12-06T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
@@ -286,7 +286,7 @@
   },
   {
     "battle": "Diamond Clan Battle",
-    "display_name": "Diamond Clan Battle",
+    "display_name": "Diamond Battle",
     "first_snapshot": "2024-12-21T12:00:00.524Z",
     "last_snapshot": "2024-12-27T12:00:00.524Z",
     "total_snapshots": null,
@@ -301,7 +301,7 @@
   },
   {
     "battle": "Gingerbread Clan Battle",
-    "display_name": "Gingerbread Clan Battle",
+    "display_name": "Gingerbread Battle",
     "first_snapshot": "2024-12-14T12:00:00.524Z",
     "last_snapshot": "2024-12-20T12:00:00.524Z",
     "total_snapshots": null,
@@ -316,7 +316,7 @@
   },
   {
     "battle": "Bee Clan Battle",
-    "display_name": "Bee Clan Battle",
+    "display_name": "Bee Battle",
     "first_snapshot": "2024-12-07T12:00:00.524Z",
     "last_snapshot": "2024-12-13T12:00:00.524Z",
     "total_snapshots": null,
@@ -331,7 +331,7 @@
   },
   {
     "battle": "Blimp Dragon Clan Battle",
-    "display_name": "Blimp Dragon Clan Battle",
+    "display_name": "Blimp Dragon Battle",
     "first_snapshot": "2024-11-09T12:00:00.524Z",
     "last_snapshot": "2024-11-23T12:00:00.524Z",
     "total_snapshots": null,
@@ -346,7 +346,7 @@
   },
   {
     "battle": "Ghost Clan Battle",
-    "display_name": "Ghost Clan Battle",
+    "display_name": "Ghost Battle",
     "first_snapshot": "2024-10-19T12:00:00.524Z",
     "last_snapshot": "2024-11-01T12:00:00.524Z",
     "total_snapshots": null,
@@ -361,7 +361,7 @@
   },
   {
     "battle": "Reversed Clan Battle",
-    "display_name": "Reversed Clan Battle",
+    "display_name": "Reversed Battle",
     "first_snapshot": "2024-09-21T12:00:00.524Z",
     "last_snapshot": "2024-10-04T12:00:00.524Z",
     "total_snapshots": null,
@@ -376,7 +376,7 @@
   },
   {
     "battle": "Rave Crab Clan Battle",
-    "display_name": "Rave Crab Clan Battle",
+    "display_name": "Rave Crab Battle",
     "first_snapshot": "2024-08-31T12:00:00.524Z",
     "last_snapshot": "2024-09-13T12:00:00.524Z",
     "total_snapshots": null,
@@ -391,7 +391,7 @@
   },
   {
     "battle": "Ice Cream Clan Battle",
-    "display_name": "Ice Cream Clan Battle",
+    "display_name": "Ice Cream Battle",
     "first_snapshot": "2024-08-10T12:00:00.524Z",
     "last_snapshot": "2024-08-23T12:00:00.524Z",
     "total_snapshots": null,
@@ -406,7 +406,7 @@
   },
   {
     "battle": "Clown Clan Battle",
-    "display_name": "Clown Clan Battle",
+    "display_name": "Clown Battle",
     "first_snapshot": "2024-07-20T12:00:00.524Z",
     "last_snapshot": "2024-08-02T12:00:00.524Z",
     "total_snapshots": null,
@@ -436,7 +436,7 @@
   },
   {
     "battle": "Wicked Clan Battle",
-    "display_name": "Wicked Clan Battle",
+    "display_name": "Wicked Battle",
     "first_snapshot": "2024-06-08T12:00:00.524Z",
     "last_snapshot": "2024-06-21T12:00:00.524Z",
     "total_snapshots": null,
@@ -451,7 +451,7 @@
   },
   {
     "battle": "Fragmented Clan Battle",
-    "display_name": "Fragmented Clan Battle",
+    "display_name": "Fragmented Battle",
     "first_snapshot": "2024-06-08T12:00:00.524Z",
     "last_snapshot": "2024-06-21T12:00:00.524Z",
     "total_snapshots": null,
@@ -466,7 +466,7 @@
   },
   {
     "battle": "Bubble Clan Battle",
-    "display_name": "Bubble Clan Battle",
+    "display_name": "Bubble Battle",
     "first_snapshot": "2024-04-06T12:00:00.524Z",
     "last_snapshot": "2024-04-19T12:00:00.524Z",
     "total_snapshots": null,
@@ -481,7 +481,7 @@
   },
   {
     "battle": "Pixel Clan Battle",
-    "display_name": "Pixel Clan Battle",
+    "display_name": "Pixel Battle",
     "first_snapshot": "2024-04-06T12:00:00.524Z",
     "last_snapshot": "2024-04-19T12:00:00.524Z",
     "total_snapshots": null,
@@ -496,7 +496,7 @@
   },
   {
     "battle": "Quest Clan Battle",
-    "display_name": "Quest Clan Battle",
+    "display_name": "Quest Battle",
     "first_snapshot": "2024-03-16T12:00:00.524Z",
     "last_snapshot": "2024-03-29T12:00:00.524Z",
     "total_snapshots": null,
@@ -511,7 +511,7 @@
   },
   {
     "battle": "Raid Clan Battle",
-    "display_name": "Raid Clan Battle",
+    "display_name": "Raid Battle",
     "first_snapshot": "2024-02-24T12:00:00.524Z",
     "last_snapshot": "2024-03-15T12:00:00.524Z",
     "total_snapshots": null,
@@ -556,7 +556,7 @@
   },
   {
     "battle": "New Years Clan Battle",
-    "display_name": "New Years Clan Battle",
+    "display_name": "New Years Battle",
     "first_snapshot": "2023-12-30T12:00:00.524Z",
     "last_snapshot": "2024-01-19T12:00:00.524Z",
     "total_snapshots": null,
@@ -571,7 +571,7 @@
   },
   {
     "battle": "Festive Clan Battle",
-    "display_name": "Festive Clan Battle",
+    "display_name": "Festive Battle",
     "first_snapshot": "2023-12-16T12:00:00.524Z",
     "last_snapshot": "2023-12-29T12:00:00.524Z",
     "total_snapshots": null,
