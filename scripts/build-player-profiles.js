@@ -69,10 +69,12 @@ const AVATAR_PUBLIC_PATH = "assets/avatars";
 const PAGE_SIZE = 1000;
 
 let BATTLES = [];
+
 let CURRENT_PROFILE_BATTLE = {
   name: CURRENT_BATTLE_NAME,
   displayName: CURRENT_BATTLE_DISPLAY_NAME,
-  table: CURRENT_NONG_TABLE
+  table: CURRENT_NONG_TABLE,
+  apiBattleKey: CURRENT_BATTLE_NAME
 };
 
 function sbHeaders(extra = {}) {
@@ -175,21 +177,18 @@ async function buildBattleConfigs() {
     CURRENT_PROFILE_BATTLE = {
       name: currentFromManual.name,
       displayName: currentFromManual.displayName,
-      table: currentFromManual.table
+      table: currentFromManual.table,
+      apiBattleKey: currentFromManual.apiBattleKey || CURRENT_BATTLE_NAME
     };
   } else {
     CURRENT_PROFILE_BATTLE = {
       name: CURRENT_BATTLE_NAME,
       displayName: CURRENT_BATTLE_DISPLAY_NAME,
-      table: CURRENT_NONG_TABLE
+      table: CURRENT_NONG_TABLE,
+      apiBattleKey: CURRENT_BATTLE_NAME
     };
 
-    map.set(normalizeKey(CURRENT_PROFILE_BATTLE.name), {
-      name: CURRENT_PROFILE_BATTLE.name,
-      displayName: CURRENT_PROFILE_BATTLE.displayName,
-      table: CURRENT_PROFILE_BATTLE.table,
-      apiBattleKey: CURRENT_BATTLE_NAME
-    });
+    map.set(normalizeKey(CURRENT_PROFILE_BATTLE.name), CURRENT_PROFILE_BATTLE);
   }
 
   const configs = [...map.values()];
