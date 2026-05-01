@@ -1,254 +1,395 @@
-// scripts/merge-manual-battles.js
-// Merges Data/manual-battles.json into Data/battles.json.
-//
-// Manual is source of truth for:
-//   placement
-//   update_number
-//   update_url
-//   api_battle_key
-//   nong_results_table
-//   clan_results_table
-//
-// Generated data fills:
-//   first_snapshot
-//   last_snapshot
-//   total_snapshots
-//   total_rows
-//   unique_players
-//
-// Inputs:
-//   Data/battles.json
-//   Data/manual-battles.json
-//
-// Output:
-//   Data/battles.json
-
-const fs = require("fs/promises");
-const path = require("path");
-
-const DATA_DIR = path.join(process.cwd(), "Data");
-const GENERATED_FILE = path.join(DATA_DIR, "battles.json");
-const MANUAL_FILE = path.join(DATA_DIR, "manual-battles.json");
-
-function normalizeKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function numberOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function stringOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  return String(value);
-}
-
-function dateOrNull(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function cleanManualRecord(record) {
-  const battle = stringOrNull(record.battle || record.display_name);
-  const displayName = stringOrNull(record.display_name || record.battle);
-
-  return {
-    battle,
-    display_name: displayName,
-
-    first_snapshot: dateOrNull(record.first_snapshot),
-    last_snapshot: dateOrNull(record.last_snapshot),
-
-    total_snapshots: numberOrNull(record.total_snapshots),
-    total_rows: numberOrNull(record.total_rows),
-    unique_players: numberOrNull(record.unique_players),
-
-    placement: numberOrNull(record.placement),
-    update_number: numberOrNull(record.update_number),
-    update_url: stringOrNull(record.update_url),
-
-    api_battle_key: stringOrNull(record.api_battle_key),
-    nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
-    clan_results_table: stringOrNull(record.clan_results_table)
-  };
-}
-
-function cleanGeneratedRecord(record) {
-  const battle = stringOrNull(record.battle || record.display_name);
-  const displayName = stringOrNull(record.display_name || record.battle);
-
-  return {
-    battle,
-    display_name: displayName,
-
-    first_snapshot: dateOrNull(record.first_snapshot),
-    last_snapshot: dateOrNull(record.last_snapshot),
-
-    total_snapshots: numberOrNull(record.total_snapshots),
-    total_rows: numberOrNull(record.total_rows),
-    unique_players: numberOrNull(record.unique_players)
-  };
-}
-
-function preferGenerated(existing, incoming) {
-  if (!existing) return incoming;
-
-  return {
-    battle: existing.battle || incoming.battle,
-    display_name: existing.display_name || incoming.display_name,
-
-    first_snapshot: existing.first_snapshot ?? incoming.first_snapshot,
-    last_snapshot: existing.last_snapshot ?? incoming.last_snapshot,
-
-    total_snapshots: existing.total_snapshots ?? incoming.total_snapshots,
-    total_rows: existing.total_rows ?? incoming.total_rows,
-    unique_players: existing.unique_players ?? incoming.unique_players
-  };
-}
-
-function preferManual(existing, incoming) {
-  if (!existing) return incoming;
-
-  return {
-    battle: incoming.battle || existing.battle,
-    display_name: incoming.display_name || existing.display_name,
-
-    first_snapshot: incoming.first_snapshot ?? existing.first_snapshot,
-    last_snapshot: incoming.last_snapshot ?? existing.last_snapshot,
-
-    total_snapshots: incoming.total_snapshots ?? existing.total_snapshots,
-    total_rows: incoming.total_rows ?? existing.total_rows,
-    unique_players: incoming.unique_players ?? existing.unique_players,
-
-    placement: incoming.placement ?? existing.placement ?? null,
-    update_number: incoming.update_number ?? existing.update_number ?? null,
-    update_url: incoming.update_url ?? existing.update_url ?? null,
-
-    api_battle_key: incoming.api_battle_key ?? existing.api_battle_key ?? null,
-    nong_results_table: incoming.nong_results_table ?? existing.nong_results_table ?? null,
-    clan_results_table: incoming.clan_results_table ?? existing.clan_results_table ?? null
-  };
-}
-
-function mergeRecord(manual, generated) {
-  return {
-    battle: manual?.battle || generated?.battle || null,
-    display_name: manual?.display_name || generated?.display_name || null,
-
-    first_snapshot: manual?.first_snapshot ?? generated?.first_snapshot ?? null,
-    last_snapshot: manual?.last_snapshot ?? generated?.last_snapshot ?? null,
-
-    total_snapshots: manual?.total_snapshots ?? generated?.total_snapshots ?? null,
-    total_rows: manual?.total_rows ?? generated?.total_rows ?? null,
-    unique_players: manual?.unique_players ?? generated?.unique_players ?? null,
-
-    placement: manual?.placement ?? null,
-    update_number: manual?.update_number ?? null,
-    update_url: manual?.update_url ?? null,
-
-    api_battle_key: manual?.api_battle_key ?? null,
-    nong_results_table: manual?.nong_results_table ?? null,
-    clan_results_table: manual?.clan_results_table ?? null
-  };
-}
-
-function sortBattles(a, b) {
-  const ad = a.last_snapshot ? new Date(a.last_snapshot).getTime() : 0;
-  const bd = b.last_snapshot ? new Date(b.last_snapshot).getTime() : 0;
-
-  if (ad !== bd) return bd - ad;
-
-  return String(a.display_name || a.battle || "").localeCompare(
-    String(b.display_name || b.battle || "")
-  );
-}
-
-async function readJsonArray(filePath) {
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      throw new Error(`${filePath} must contain a JSON array.`);
-    }
-
-    return parsed;
-  } catch (err) {
-    if (err.code === "ENOENT") return [];
-    throw err;
+[
+  {
+    "battle": "New Years Clan Battle",
+    "display_name": "New Years Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-01-19T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 32,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Pet Collecting Battle",
+    "display_name": "Pet Collecting Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-02-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Achievements Battle",
+    "display_name": "Achievements Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-02-23T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 19,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Raid Clan Battle",
+    "display_name": "Raid Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-03-15T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 13,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Quest Clan Battle",
+    "display_name": "Quest Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-03-30T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Pixel Clan Battle",
+    "display_name": "Pixel Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-04-20T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Fragmented Clan Battle",
+    "display_name": "Fragmented Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-05-31T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 8,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Wicked Clan Battle",
+    "display_name": "Wicked Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-06-21T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 8,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Good vs. Evil Battle",
+    "display_name": "Good vs. Evil Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-07-05T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Clown Clan Battle",
+    "display_name": "Clown Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-08-03T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 5,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Ice Cream Clan Battle",
+    "display_name": "Ice Cream Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-08-23T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Rave Crab Clan Battle",
+    "display_name": "Rave Crab Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-09-13T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 6,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Reversed Clan Battle",
+    "display_name": "Reversed Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-10-04T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Ghost Clan Battle",
+    "display_name": "Ghost Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-11-01T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Blimp Dragon Clan Battle",
+    "display_name": "Blimp Dragon Clan Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2024-11-22T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 5,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Blurred Battle",
+    "display_name": "Blurred Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-01-24T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 7,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Wyvern Battle",
+    "display_name": "Wyvern Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-01-24T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 4,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Mushroom Battle",
+    "display_name": "Mushroom Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-01-31T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Holographic Battle",
+    "display_name": "Holographic Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Egyptian Battle",
+    "display_name": "Egyptian Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 7,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Tie Dye Battle",
+    "display_name": "Tie Dye Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 9,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Athena Battle",
+    "display_name": "Athena Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Pixel Chick Battle",
+    "display_name": "Pixel Chick Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "PoisonTurtleNONG",
+    "display_name": "Poison Turtle Battle",
+    "api_battle_key": null,
+    "nong_results_table": "PoisonTurtleNONG",
+    "clan_results_table": "PoisonTurtleClans",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Balloon Corgi Battle",
+    "display_name": "Balloon Corgi Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-06-07T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Junkyard Hound Battle",
+    "display_name": "Junkyard Hound Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-06-07T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Nightmare Cyclops Battle",
+    "display_name": "Nightmare Cyclops Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-06-20T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Scuba Dog Battle",
+    "display_name": "Scuba Dog Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-07-04T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Sun Angelus Battle",
+    "display_name": "Sun Angelus Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-07-18T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 3,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "Forged Battle",
+    "display_name": "Forged Battle",
+    "first_snapshot": null,
+    "last_snapshot": "2025-12-05T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 10,
+    "update_number": null,
+    "update_url": null
+  },
+  {
+    "battle": "AbstractNONG",
+    "display_name": "Abstract Battle",
+    "api_battle_key": "Spring2026",
+    "nong_results_table": "AbstractNONG",
+    "clan_results_table": "AbstractClans",
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 34,
+    "update_number": 75,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
+  },
+  {
+    "battle": "StarryNONG",
+    "display_name": "Starry Battle",
+    "api_battle_key": "StarryBattle",
+    "nong_results_table": "StarryNONG",
+    "clan_results_table": "StarryClans",
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": null,
+    "update_number": 77,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77"
   }
-}
-
-async function main() {
-  const generatedRaw = await readJsonArray(GENERATED_FILE);
-  const manualRaw = await readJsonArray(MANUAL_FILE);
-
-  const generatedMap = new Map();
-  const manualMap = new Map();
-
-  for (const raw of generatedRaw) {
-    const record = cleanGeneratedRecord(raw);
-    if (!record.battle || !record.display_name) continue;
-
-    const key = normalizeKey(record.battle);
-    generatedMap.set(key, preferGenerated(generatedMap.get(key), record));
-  }
-
-  for (const raw of manualRaw) {
-    const record = cleanManualRecord(raw);
-    if (!record.battle || !record.display_name) continue;
-
-    const key = normalizeKey(record.battle);
-    manualMap.set(key, preferManual(manualMap.get(key), record));
-  }
-
-  const allKeys = new Set([
-    ...generatedMap.keys(),
-    ...manualMap.keys()
-  ]);
-
-  const finalRecords = [];
-
-  for (const key of allKeys) {
-    const generated = generatedMap.get(key) || null;
-    const manual = manualMap.get(key) || null;
-    const merged = mergeRecord(manual, generated);
-
-    if (merged.battle && merged.display_name) {
-      finalRecords.push(merged);
-    }
-  }
-
-  finalRecords.sort(sortBattles);
-
-  await fs.writeFile(
-    GENERATED_FILE,
-    JSON.stringify(finalRecords, null, 2) + "\n",
-    "utf8"
-  );
-
-  console.log(`Generated raw battles read: ${generatedRaw.length}`);
-  console.log(`Manual raw battles read: ${manualRaw.length}`);
-  console.log(`Generated unique battles: ${generatedMap.size}`);
-  console.log(`Manual unique battles: ${manualMap.size}`);
-  console.log(`Final battles written: ${finalRecords.length}`);
-  console.log("Manual fields preserved:");
-  console.log("  - placement");
-  console.log("  - update_number");
-  console.log("  - update_url");
-  console.log("  - api_battle_key");
-  console.log("  - nong_results_table");
-  console.log("  - clan_results_table");
-  console.log(`Updated ${GENERATED_FILE}`);
-}
-
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+]
