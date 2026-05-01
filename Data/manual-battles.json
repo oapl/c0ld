@@ -368,8 +368,8 @@
   "total_rows": null,
   "unique_players": null,
   "placement": 34,
-  "update_number": null,
-  "update_url": null
+  "update_number": 75,
+  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
 },
 {
   "battle": "StarryBattle",
@@ -381,6 +381,6 @@
   "unique_players": null,
   "placement": "TBD",
   "update_number": 77,
-  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
+  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77"
 }
 ]
