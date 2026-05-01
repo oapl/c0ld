@@ -1,151 +1,12 @@
-
-2026-05-01 19:05:45 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.95K | 126 |
-| 2 | johnr622 | 11.7K | 126 |
-| 3 | joshuacd2006 | 11.57K | 126 |
-| 4 | Josep_xD2 | 11.27K | 126 |
-| 5 | jupiter0477 | 11.16K | 126 |
-| 6 | Mr_Suter | 10.93K | 126 |
-| 7 | Johnr622_alt2 | 10.37K | 120 |
-| 8 | Johnr622_alt3 | 10.37K | 120 |
-| 9 | Johnr622_alt4 | 10.13K | 120 |
-| 10 | Johnr622_alt5 | 10.12K | 120 |
-
-2026-05-01 19:00:43 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.94K | 118 |
-| 2 | johnr622 | 11.7K | 118 |
-| 3 | joshuacd2006 | 11.56K | 118 |
-| 4 | Josep_xD2 | 11.26K | 118 |
-| 5 | jupiter0477 | 11.15K | 118 |
-| 6 | Mr_Suter | 10.92K | 118 |
-| 7 | Johnr622_alt2 | 10.36K | 112 |
-| 8 | Johnr622_alt3 | 10.36K | 112 |
-| 9 | Johnr622_alt4 | 10.12K | 112 |
-| 10 | Johnr622_alt5 | 10.11K | 112 |
-
-2026-05-01 18:55:44 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.93K | 111 |
-| 2 | johnr622 | 11.69K | 111 |
-| 3 | joshuacd2006 | 11.55K | 111 |
-| 4 | Josep_xD2 | 11.25K | 111 |
-| 5 | jupiter0477 | 11.14K | 111 |
-| 6 | Mr_Suter | 10.92K | 111 |
-| 7 | Johnr622_alt2 | 10.36K | 105 |
-| 8 | Johnr622_alt3 | 10.36K | 105 |
-| 9 | Johnr622_alt4 | 10.11K | 105 |
-| 10 | Johnr622_alt5 | 10.11K | 105 |
-
-2026-05-01 18:50:49 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.92K | 103 |
-| 2 | johnr622 | 11.68K | 103 |
-| 3 | joshuacd2006 | 11.54K | 103 |
-| 4 | Josep_xD2 | 11.24K | 103 |
-| 5 | jupiter0477 | 11.13K | 103 |
-| 6 | Mr_Suter | 10.91K | 103 |
-| 7 | Johnr622_alt2 | 10.35K | 98 |
-| 8 | Johnr622_alt3 | 10.35K | 98 |
-| 9 | Johnr622_alt4 | 10.1K | 98 |
-| 10 | Johnr622_alt5 | 10.1K | 98 |
-
-2026-05-01 18:45:48 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.92K | 96 |
-| 2 | johnr622 | 11.67K | 96 |
-| 3 | joshuacd2006 | 11.54K | 96 |
-| 4 | Josep_xD2 | 11.24K | 96 |
-| 5 | jupiter0477 | 11.13K | 96 |
-| 6 | Mr_Suter | 10.9K | 96 |
-| 7 | Johnr622_alt2 | 10.34K | 90 |
-| 8 | Johnr622_alt3 | 10.34K | 90 |
-| 9 | Johnr622_alt4 | 10.1K | 90 |
-| 10 | Johnr622_alt5 | 10.09K | 90 |
-
-2026-05-01 18:40:39 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.91K | 95 |
-| 2 | johnr622 | 11.66K | 95 |
-| 3 | joshuacd2006 | 11.53K | 95 |
-| 4 | Josep_xD2 | 11.23K | 95 |
-| 5 | jupiter0477 | 11.12K | 95 |
-| 6 | Mr_Suter | 10.89K | 95 |
-| 7 | Johnr622_alt2 | 10.33K | 89 |
-| 8 | Johnr622_alt3 | 10.33K | 89 |
-| 9 | Johnr622_alt4 | 10.09K | 89 |
-| 10 | Johnr622_alt5 | 10.08K | 89 |
-
-2026-05-01 18:35:43 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.9K | 93 |
-| 2 | johnr622 | 11.65K | 93 |
-| 3 | joshuacd2006 | 11.52K | 93 |
-| 4 | Josep_xD2 | 11.22K | 93 |
-| 5 | jupiter0477 | 11.11K | 93 |
-| 6 | Mr_Suter | 10.88K | 93 |
-| 7 | Johnr622_alt2 | 10.32K | 90 |
-| 8 | Johnr622_alt3 | 10.32K | 90 |
-| 9 | Johnr622_alt4 | 10.08K | 90 |
-| 10 | Johnr622_alt5 | 10.07K | 90 |
-
-2026-05-01 18:30:43 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.89K | 95 |
-| 2 | johnr622 | 11.65K | 95 |
-| 3 | joshuacd2006 | 11.51K | 95 |
-| 4 | Josep_xD2 | 11.21K | 95 |
-| 5 | jupiter0477 | 11.1K | 95 |
-| 6 | Mr_Suter | 10.88K | 95 |
-| 7 | Johnr622_alt2 | 10.32K | 88 |
-| 8 | Johnr622_alt3 | 10.32K | 88 |
-| 9 | Johnr622_alt4 | 10.07K | 88 |
-| 10 | Johnr622_alt5 | 10.07K | 88 |
-
-2026-05-01 18:25:42 UTC
-
-| Rank | Member | Total Points | 60m Gain |
-|---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.88K | 94 |
-| 2 | johnr622 | 11.64K | 94 |
-| 3 | joshuacd2006 | 11.51K | 94 |
-| 4 | Josep_xD2 | 11.21K | 94 |
-| 5 | jupiter0477 | 11.1K | 94 |
-| 6 | Mr_Suter | 10.87K | 94 |
-| 7 | Johnr622_alt2 | 10.31K | 89 |
-| 8 | Johnr622_alt3 | 10.31K | 89 |
-| 9 | Johnr622_alt4 | 10.07K | 89 |
-| 10 | Johnr622_alt5 | 10.06K | 89 |
 # NONG_Leaderboard
 
 Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
 
-
 <img width="449" height="378" alt="image" src="https://github.com/user-attachments/assets/76bb0823-d0c0-4e65-a329-3d6aece55ed7" />
-
 
 First and foremost, I'm **_tired_**.
 
-
 I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
-
 
 _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
@@ -153,19 +14,10 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.82K | 93 |
-| 2 | johnr622 | 11.58K | 93 |
-| 3 | joshuacd2006 | 11.44K | 93 |
-| 4 | Josep_xD2 | 11.14K | 93 |
-| 5 | jupiter0477 | 11.03K | 93 |
-| 6 | Mr_Suter | 10.8K | 93 |
-| 7 | Johnr622_alt2 | 10.25K | 88 |
-| 8 | Johnr622_alt3 | 10.25K | 88 |
-| 9 | Johnr622_alt4 | 10.01K | 88 |
-| 10 | Johnr622_alt5 | 10K | 88 |
+| — | — | — | — |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-01 17:45:42 UTC
+Pending first clean update
 <!-- END_UPDATED -->
