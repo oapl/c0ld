@@ -23,7 +23,6 @@
       --nong-bg: rgba(255, 153, 51, 0.18);
       --nong-border: rgba(255, 153, 51, 0.65);
       --nong-text: #ffb15c;
-      --danger: #f85149;
     }
 
     html, body {
@@ -420,6 +419,8 @@
     const AUTO_REFRESH_MS = 60 * 1000;
 
     let currentData = null;
+    let historyData = [];
+    let selectedBattle = "current";
     let countdownTimer = null;
     let autoRefreshTimer = null;
 
@@ -437,14 +438,15 @@
         .trim();
     }
 
-    function normalizeClanKey(name) {
-      return cleanClanName(name)
-        .toUpperCase()
-        .replace(/\s+/g, "");
+    function normalizeKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
     }
 
     function isTargetClan(name) {
-      return normalizeClanKey(name) === TARGET_CLAN;
+      return normalizeKey(cleanClanName(name)) === normalizeKey(TARGET_CLAN);
     }
 
     function fmtShortNumber(value) {
@@ -526,7 +528,24 @@
       countdownTimer = setInterval(tick, 1000);
     }
 
-    function getRows() {
+    function getUrlBattle() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("battle") || "current";
+    }
+
+    function updateUrlBattle(value) {
+      const url = new URL(window.location.href);
+
+      if (value === "current") {
+        url.searchParams.delete("battle");
+      } else {
+        url.searchParams.set("battle", value);
+      }
+
+      history.replaceState({}, "", url.toString());
+    }
+
+    function getCurrentRows() {
       if (!currentData || !Array.isArray(currentData.rows)) return [];
 
       return currentData.rows.map(row => ({
@@ -541,23 +560,81 @@
       }));
     }
 
-    function getNongRow() {
-      return getRows().find(row => isTargetClan(row.clan_name)) || null;
+    function getHistoryBattle() {
+      return historyData.find(item => normalizeKey(item.battle) === normalizeKey(selectedBattle)) || null;
+    }
+
+    function getHistoryRows() {
+      const battle = getHistoryBattle();
+
+      if (!battle || !Array.isArray(battle.rows)) return [];
+
+      return battle.rows.map(row => ({
+        rank: row.rank,
+        clan_name: cleanClanName(row.clan || row.clan_name || row.name || row.tag),
+        points: row.points ?? row.total_points,
+        gain_5m: null,
+        gain_1h: null,
+        gain_12h: null,
+        gain_24h: null,
+        projected_rank: null
+      }));
+    }
+
+    function getRows() {
+      if (selectedBattle === "current") {
+        return getCurrentRows();
+      }
+
+      return getHistoryRows();
     }
 
     function renderCards() {
-      const nong = getNongRow();
+      const currentRows = getCurrentRows();
+      const currentNong = currentRows.find(row => isTargetClan(row.clan_name)) || null;
 
       document.getElementById("nong-current-rank").textContent =
-        fmtRank(nong?.rank ?? currentData?.clan_rank);
+        fmtRank(currentNong?.rank ?? currentData?.clan_rank);
 
       document.getElementById("nong-projected-rank").textContent =
-        fmtRank(nong?.projected_rank ?? currentData?.projected_rank);
+        fmtRank(currentNong?.projected_rank ?? currentData?.projected_rank);
 
       document.getElementById("last-db-update").textContent =
         fmtDateTime(currentData?.snapshot_at || currentData?.generated_at);
 
       startCountdown(currentData?.battle_end_iso);
+    }
+
+    function renderBattleOptions() {
+      const select = document.getElementById("battle-select");
+
+      const options = [
+        {
+          value: "current",
+          label: "Current Clan Battle"
+        }
+      ];
+
+      for (const item of historyData) {
+        if (!item.battle) continue;
+
+        options.push({
+          value: item.battle,
+          label: item.display_name || item.battle
+        });
+      }
+
+      const exists = options.some(option => normalizeKey(option.value) === normalizeKey(selectedBattle));
+
+      if (!exists) {
+        selectedBattle = "current";
+      }
+
+      select.innerHTML = options.map(option => `
+        <option value="${htmlEscape(option.value)}" ${normalizeKey(option.value) === normalizeKey(selectedBattle) ? "selected" : ""}>
+          ${htmlEscape(option.label)}
+        </option>
+      `).join("");
     }
 
     function renderTable() {
@@ -569,6 +646,17 @@
       if (searchText) {
         rows = rows.filter(row => String(row.clan_name || "").toLowerCase().includes(searchText));
       }
+
+      rows.sort((a, b) => {
+        const ar = Number(a.rank);
+        const br = Number(b.rank);
+
+        if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) {
+          return ar - br;
+        }
+
+        return Number(b.points || 0) - Number(a.points || 0);
+      });
 
       if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No clans found.</td></tr>`;
@@ -595,6 +683,7 @@
 
     function renderAll() {
       renderCards();
+      renderBattleOptions();
       renderTable();
     }
 
@@ -602,28 +691,49 @@
       const tbody = document.getElementById("clans-tbody");
 
       try {
-        const response = await fetch(`Data/clans-current.json?v=${Date.now()}`, {
-          cache: "no-store"
-        });
+        const cacheBust = Date.now();
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        const [currentRes, historyRes] = await Promise.all([
+          fetch(`Data/clans-current.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
+        ]);
+
+        if (!currentRes.ok) {
+          throw new Error(`Could not load Data/clans-current.json. HTTP ${currentRes.status}`);
         }
 
-        currentData = await response.json();
+        currentData = await currentRes.json();
 
         if (!currentData || !Array.isArray(currentData.rows)) {
           throw new Error("Data/clans-current.json does not contain a rows array.");
         }
 
+        if (historyRes.ok) {
+          historyData = await historyRes.json();
+
+          if (!Array.isArray(historyData)) {
+            historyData = [];
+          }
+        } else {
+          historyData = [];
+        }
+
+        selectedBattle = getUrlBattle();
+
         renderAll();
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="8" class="error-state">Failed to load Data/clans-current.json.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;
       }
     }
 
     function wireEvents() {
+      document.getElementById("battle-select").addEventListener("change", event => {
+        selectedBattle = event.target.value;
+        updateUrlBattle(selectedBattle);
+        renderAll();
+      });
+
       document.getElementById("search-input").addEventListener("input", () => {
         renderTable();
       });
@@ -631,13 +741,11 @@
       document.getElementById("refresh-btn").addEventListener("click", () => {
         loadData();
       });
-
-      document.getElementById("battle-select").addEventListener("change", () => {
-        renderAll();
-      });
     }
 
     async function init() {
+      selectedBattle = getUrlBattle();
+
       wireEvents();
       await loadData();
 
