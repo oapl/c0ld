@@ -20,17 +20,17 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 |---:|---|---:|---:|
 | 1 | Yume_Sakurax3 | 10.64K | 86 |
 | 2 | johnr622 | 10.36K | 93 |
-| 3 | joshuacd2006 | 10.22K | 93 |
-| 4 | Josep_xD2 | 9.92K | 93 |
-| 5 | jupiter0477 | 9.81K | 84 |
-| 6 | Mr_Suter | 9.58K | 93 |
-| 7 | Johnr622_alt2 | 9.07K | 92 |
-| 8 | Johnr622_alt3 | 9.07K | 92 |
-| 9 | Johnr622_alt4 | 8.83K | 92 |
-| 10 | Johnr622_alt5 | 8.82K | 92 |
+| 3 | joshuacd2006 | 10.23K | 93 |
+| 4 | Josep_xD2 | 9.93K | 93 |
+| 5 | jupiter0477 | 9.82K | 84 |
+| 6 | Mr_Suter | 9.59K | 93 |
+| 7 | Johnr622_alt2 | 9.08K | 93 |
+| 8 | Johnr622_alt3 | 9.08K | 93 |
+| 9 | Johnr622_alt4 | 8.84K | 93 |
+| 10 | Johnr622_alt5 | 8.83K | 93 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-01 04:40:51 UTC
+2026-05-01 04:45:55 UTC
 <!-- END_UPDATED -->
