@@ -1,7 +1,7 @@
 [
   {
     "battle": "Festive Clan Battle",
-    "display_name": "Festive Clan Battle",
+    "display_name": "Festive Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -16,7 +16,7 @@
   },
   {
     "battle": "New Years Clan Battle",
-    "display_name": "New Years Clan Battle",
+    "display_name": "New Years Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -61,7 +61,7 @@
   },
   {
     "battle": "Raid Clan Battle",
-    "display_name": "Raid Clan Battle",
+    "display_name": "Raid Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -76,7 +76,7 @@
   },
   {
     "battle": "Quest Clan Battle",
-    "display_name": "Quest Clan Battle",
+    "display_name": "Quest Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -91,7 +91,7 @@
   },
   {
     "battle": "Pixel Clan Battle",
-    "display_name": "Pixel Clan Battle",
+    "display_name": "Pixel Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -106,7 +106,7 @@
   },
     {
     "battle": "Bubble Clan Battle",
-    "display_name": "Bubble Clan Battle",
+    "display_name": "Bubble Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -121,7 +121,7 @@
   },
   {
     "battle": "Fragmented Clan Battle",
-    "display_name": "Fragmented Clan Battle",
+    "display_name": "Fragmented Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -136,7 +136,7 @@
   },
   {
     "battle": "Wicked Clan Battle",
-    "display_name": "Wicked Clan Battle",
+    "display_name": "Wicked Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -166,7 +166,7 @@
   },
   {
     "battle": "Clown Clan Battle",
-    "display_name": "Clown Clan Battle",
+    "display_name": "Clown Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -181,7 +181,7 @@
   },
   {
     "battle": "Ice Cream Clan Battle",
-    "display_name": "Ice Cream Clan Battle",
+    "display_name": "Ice Cream Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -196,7 +196,7 @@
   },
   {
     "battle": "Rave Crab Clan Battle",
-    "display_name": "Rave Crab Clan Battle",
+    "display_name": "Rave Crab Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -211,7 +211,7 @@
   },
   {
     "battle": "Reversed Clan Battle",
-    "display_name": "Reversed Clan Battle",
+    "display_name": "Reversed Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -226,7 +226,7 @@
   },
   {
     "battle": "Ghost Clan Battle",
-    "display_name": "Ghost Clan Battle",
+    "display_name": "Ghost Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -241,7 +241,7 @@
   },
   {
     "battle": "Blimp Dragon Clan Battle",
-    "display_name": "Blimp Dragon Clan Battle",
+    "display_name": "Blimp Dragon Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -256,7 +256,7 @@
   },
     {
     "battle": "Bee Clan Battle",
-    "display_name": "Bee Clan Battle",
+    "display_name": "Bee Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -271,7 +271,7 @@
   },
       {
     "battle": "Gingerbread Clan Battle",
-    "display_name": "Gingerbread Clan Battle",
+    "display_name": "Gingerbread Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -286,7 +286,7 @@
   },
         {
     "battle": "Diamond Clan Battle",
-    "display_name": "Diamond Clan Battle",
+    "display_name": "Diamond Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -530,7 +530,7 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": "2025-1-29T12:00:00.524Z",
+    "first_snapshot": "2025-01-29T12:00:00.524Z",
     "last_snapshot": "2025-12-06T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
@@ -541,7 +541,7 @@
   },
     {
     "battle": "Silver Clan Battle",
-    "display_name": "Silver Clan Battle",
+    "display_name": "Silver Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -556,7 +556,7 @@
   },
       {
     "battle": "Clover Clan Battle",
-    "display_name": "Clover Clan Battle",
+    "display_name": "Clover Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -571,7 +571,7 @@
   },
   {
     "battle": "Spring2026",
-    "display_name": "Abstract Clan Battle",
+    "display_name": "Abstract Battle",
     "api_battle_key": "Spring2026",
     "nong_results_table": "AbstractNONG",
     "clan_results_table": null,
@@ -586,7 +586,7 @@
   },
   {
     "battle": "StarryBattle",
-    "display_name": "Starry Clan Battle",
+    "display_name": "Starry Battle",
     "api_battle_key": "StarryBattle",
     "nong_results_table": "StarryNONG",
     "clan_results_table": null,
