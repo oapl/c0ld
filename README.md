@@ -18,19 +18,19 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Yume_Sakurax3 | 11.25K | 91 |
-| 2 | johnr622 | 11.01K | 92 |
-| 3 | joshuacd2006 | 10.87K | 92 |
-| 4 | Josep_xD2 | 10.57K | 92 |
-| 5 | jupiter0477 | 10.46K | 92 |
-| 6 | Mr_Suter | 10.24K | 92 |
-| 7 | Johnr622_alt2 | 9.7K | 91 |
-| 8 | Johnr622_alt3 | 9.7K | 91 |
-| 9 | Johnr622_alt4 | 9.46K | 91 |
-| 10 | Johnr622_alt5 | 9.45K | 91 |
+| 1 | Yume_Sakurax3 | 11.26K | 92 |
+| 2 | johnr622 | 11.02K | 94 |
+| 3 | joshuacd2006 | 10.88K | 94 |
+| 4 | Josep_xD2 | 10.58K | 94 |
+| 5 | jupiter0477 | 10.47K | 94 |
+| 6 | Mr_Suter | 10.24K | 94 |
+| 7 | Johnr622_alt2 | 9.71K | 91 |
+| 8 | Johnr622_alt3 | 9.71K | 91 |
+| 9 | Johnr622_alt4 | 9.47K | 91 |
+| 10 | Johnr622_alt5 | 9.46K | 91 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-01 11:40:53 UTC
+2026-05-01 11:45:55 UTC
 <!-- END_UPDATED -->
