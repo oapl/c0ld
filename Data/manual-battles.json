@@ -356,8 +356,8 @@
     "total_rows": null,
     "unique_players": null,
     "placement": 2,
-    "update_number": null,
-    "update_url": null
+    "update_number": 58,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-58"
   },
   {
     "battle": "Balloon Corgi Battle",
@@ -365,14 +365,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-06-07T12:00:00.524Z",
+    "first_snapshot": "2025-05-17T12:00:00.524Z",
+    "last_snapshot": "2025-05-24T12:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 3,
-    "update_number": null,
-    "update_url": null
+    "update_number": 60,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-60"
   },
   {
     "battle": "Junkyard Hound Battle",
@@ -380,14 +380,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-06-07T12:00:00.524Z",
+    "first_snapshot": "2025-05-31T12:00:00.524Z",
+    "last_snapshot": "2025-06-07T12:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 3,
-    "update_number": null,
-    "update_url": null
+    "update_number": 62,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-62"
   },
   {
     "battle": "Nightmare Cyclops Battle",
@@ -395,14 +395,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-06-20T12:00:00.524Z",
+    "first_snapshot": "2025-06-14T12:00:00.524Z",
+    "last_snapshot": "2025-06-21T12:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 2,
-    "update_number": null,
-    "update_url": null
+    "update_number": 64,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-64"
   },
   {
     "battle": "Scuba Dog Battle",
@@ -410,14 +410,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2025-06-28T12:00:00.524Z",
     "last_snapshot": "2025-07-04T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 3,
-    "update_number": null,
-    "update_url": null
+    "update_number": 66,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-66"
   },
   {
     "battle": "Sun Angelus Battle",
@@ -425,14 +425,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
+    "first_snapshot": "2025-07-25T12:00:00.524Z",
     "last_snapshot": "2025-07-18T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 3,
-    "update_number": null,
-    "update_url": null
+    "update_number": 68,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-68"
   },
   {
     "battle": "Forged Battle",
@@ -440,14 +440,14 @@
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
-    "first_snapshot": null,
-    "last_snapshot": "2025-12-05T12:00:00.524Z",
+    "first_snapshot": "2025-1-29T12:00:00.524Z",
+    "last_snapshot": "2025-12-06T12:00:00.524Z",
     "total_snapshots": null,
     "total_rows": null,
     "unique_players": null,
     "placement": 10,
-    "update_number": null,
-    "update_url": null
+    "update_number": 71,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-71"
   },
   {
     "battle": "Spring2026",
@@ -476,7 +476,7 @@
     "total_rows": null,
     "unique_players": null,
     "placement": "TBD",
-    "update_number": 77,
-    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77"
+    "update_number": 76,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-76"
   }
 ]
