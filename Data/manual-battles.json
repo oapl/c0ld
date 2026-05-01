@@ -2,6 +2,9 @@
   {
     "battle": "New Years Clan Battle",
     "display_name": "New Years Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-01-19T12:00:00.524Z",
     "total_snapshots": null,
@@ -14,6 +17,9 @@
   {
     "battle": "Pet Collecting Battle",
     "display_name": "Pet Collecting Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-02-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -26,6 +32,9 @@
   {
     "battle": "Achievements Battle",
     "display_name": "Achievements Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-02-23T12:00:00.524Z",
     "total_snapshots": null,
@@ -38,6 +47,9 @@
   {
     "battle": "Raid Clan Battle",
     "display_name": "Raid Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-03-15T12:00:00.524Z",
     "total_snapshots": null,
@@ -50,6 +62,9 @@
   {
     "battle": "Quest Clan Battle",
     "display_name": "Quest Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-03-30T12:00:00.524Z",
     "total_snapshots": null,
@@ -62,6 +77,9 @@
   {
     "battle": "Pixel Clan Battle",
     "display_name": "Pixel Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-04-20T12:00:00.524Z",
     "total_snapshots": null,
@@ -74,6 +92,9 @@
   {
     "battle": "Fragmented Clan Battle",
     "display_name": "Fragmented Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-05-31T12:00:00.524Z",
     "total_snapshots": null,
@@ -86,6 +107,9 @@
   {
     "battle": "Wicked Clan Battle",
     "display_name": "Wicked Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-06-21T12:00:00.524Z",
     "total_snapshots": null,
@@ -98,6 +122,9 @@
   {
     "battle": "Good vs. Evil Battle",
     "display_name": "Good vs. Evil Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-07-05T12:00:00.524Z",
     "total_snapshots": null,
@@ -110,6 +137,9 @@
   {
     "battle": "Clown Clan Battle",
     "display_name": "Clown Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-08-03T12:00:00.524Z",
     "total_snapshots": null,
@@ -122,6 +152,9 @@
   {
     "battle": "Ice Cream Clan Battle",
     "display_name": "Ice Cream Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-08-23T12:00:00.524Z",
     "total_snapshots": null,
@@ -134,6 +167,9 @@
   {
     "battle": "Rave Crab Clan Battle",
     "display_name": "Rave Crab Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-09-13T12:00:00.524Z",
     "total_snapshots": null,
@@ -146,6 +182,9 @@
   {
     "battle": "Reversed Clan Battle",
     "display_name": "Reversed Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-10-04T12:00:00.524Z",
     "total_snapshots": null,
@@ -158,6 +197,9 @@
   {
     "battle": "Ghost Clan Battle",
     "display_name": "Ghost Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-11-01T12:00:00.524Z",
     "total_snapshots": null,
@@ -170,6 +212,9 @@
   {
     "battle": "Blimp Dragon Clan Battle",
     "display_name": "Blimp Dragon Clan Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2024-11-22T12:00:00.524Z",
     "total_snapshots": null,
@@ -182,6 +227,9 @@
   {
     "battle": "Blurred Battle",
     "display_name": "Blurred Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-01-24T12:00:00.524Z",
     "total_snapshots": null,
@@ -194,6 +242,9 @@
   {
     "battle": "Wyvern Battle",
     "display_name": "Wyvern Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-01-24T12:00:00.524Z",
     "total_snapshots": null,
@@ -206,6 +257,9 @@
   {
     "battle": "Mushroom Battle",
     "display_name": "Mushroom Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-01-31T12:00:00.524Z",
     "total_snapshots": null,
@@ -218,6 +272,9 @@
   {
     "battle": "Holographic Battle",
     "display_name": "Holographic Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -230,6 +287,9 @@
   {
     "battle": "Egyptian Battle",
     "display_name": "Egyptian Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -242,6 +302,9 @@
   {
     "battle": "Tie Dye Battle",
     "display_name": "Tie Dye Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -254,6 +317,9 @@
   {
     "battle": "Athena Battle",
     "display_name": "Athena Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -266,6 +332,9 @@
   {
     "battle": "Pixel Chick Battle",
     "display_name": "Pixel Chick Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
     "total_snapshots": null,
@@ -275,24 +344,27 @@
     "update_number": null,
     "update_url": null
   },
-{
-  "battle": "Poison Turtle Battle",
-  "display_name": "Poison Turtle Battle",
-  "api_battle_key": null,
-  "nong_results_table": "PoisonTurtleNONG",
-  "clan_results_table": "PoisonTurtleClans",
-  "first_snapshot": null,
-  "last_snapshot": "2025-05-09T12:00:00.524Z",
-  "total_snapshots": null,
-  "total_rows": null,
-  "unique_players": null,
-  "placement": 2,
-  "update_number": null,
-  "update_url": null
-},
+  {
+    "battle": "Poison Turtle Battle",
+    "display_name": "Poison Turtle Battle",
+    "api_battle_key": null,
+    "nong_results_table": "PoisonTurtleNONG",
+    "clan_results_table": "PoisonTurtleClans",
+    "first_snapshot": null,
+    "last_snapshot": "2025-05-09T12:00:00.524Z",
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 2,
+    "update_number": null,
+    "update_url": null
+  },
   {
     "battle": "Balloon Corgi Battle",
     "display_name": "Balloon Corgi Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-06-07T12:00:00.524Z",
     "total_snapshots": null,
@@ -305,6 +377,9 @@
   {
     "battle": "Junkyard Hound Battle",
     "display_name": "Junkyard Hound Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-06-07T12:00:00.524Z",
     "total_snapshots": null,
@@ -317,6 +392,9 @@
   {
     "battle": "Nightmare Cyclops Battle",
     "display_name": "Nightmare Cyclops Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-06-20T12:00:00.524Z",
     "total_snapshots": null,
@@ -329,6 +407,9 @@
   {
     "battle": "Scuba Dog Battle",
     "display_name": "Scuba Dog Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-07-04T12:00:00.524Z",
     "total_snapshots": null,
@@ -341,6 +422,9 @@
   {
     "battle": "Sun Angelus Battle",
     "display_name": "Sun Angelus Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-07-18T12:00:00.524Z",
     "total_snapshots": null,
@@ -353,6 +437,9 @@
   {
     "battle": "Forged Battle",
     "display_name": "Forged Battle",
+    "api_battle_key": null,
+    "nong_results_table": null,
+    "clan_results_table": null,
     "first_snapshot": null,
     "last_snapshot": "2025-12-05T12:00:00.524Z",
     "total_snapshots": null,
@@ -362,28 +449,34 @@
     "update_number": null,
     "update_url": null
   },
-{
-  "battle": "Spring2026",
-  "display_name": "Abstract Battle",
-  "first_snapshot": null,
-  "last_snapshot": null,
-  "total_snapshots": null,
-  "total_rows": null,
-  "unique_players": null,
-  "placement": 34,
-  "update_number": 75,
-  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
-},
-{
-  "battle": "StarryBattle",
-  "display_name": "Starry Battle",
-  "first_snapshot": null,
-  "last_snapshot": null,
-  "total_snapshots": null,
-  "total_rows": null,
-  "unique_players": null,
-  "placement": "TBD",
-  "update_number": 77,
-  "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77"
-}
+  {
+    "battle": "Spring2026",
+    "display_name": "Abstract Battle",
+    "api_battle_key": "Spring2026",
+    "nong_results_table": "AbstractNONG",
+    "clan_results_table": null,
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 34,
+    "update_number": 75,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
+  },
+  {
+    "battle": "StarryBattle",
+    "display_name": "Starry Battle",
+    "api_battle_key": "StarryBattle",
+    "nong_results_table": "StarryNONG",
+    "clan_results_table": null,
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": "TBD",
+    "update_number": 77,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77"
+  }
 ]
