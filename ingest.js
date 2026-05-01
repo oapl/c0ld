@@ -2,13 +2,6 @@
 // Fetches clan leaderboard from the Big Games API, stores a snapshot in Supabase,
 // computes gain values, updates README.md, and posts/updates Discord embeds.
 //
-// Current table naming format:
-//   [BattleName]NONG
-//
-// Example:
-//   CURRENT_BATTLE_NAME=StarryBattle
-//   CURRENT_NONG_TABLE=StarryNONG
-//
 // Required env vars:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_KEY
@@ -56,34 +49,28 @@ const BIG_GAMES_API = `https://biggamesapi.io/api/clan/${encodeURIComponent(CLAN
 
 const CURRENT_TABLE = "leaderboard_snapshots";
 
-// Custom Discord emoji used in card "Points" line.
 const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
-
-// Embed accent color.
 const EMBED_COLOR = 0xf5a623;
 
-// Raw GitHub URL of a 600x1 transparent PNG committed to this repo.
 const SPACER_IMAGE_URL_BASE =
   "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
 
 const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
-// Discord embed update cadence.
 const UPDATE_INTERVAL_MIN = 5;
 const UPDATE_INTERVAL_MS = UPDATE_INTERVAL_MIN * 60 * 1000;
 
-// Gain window configuration.
 const GAIN_TARGET_MIN = 60;
 const GAIN_WINDOW_MIN = 5;
 const KEEP_HOURS = 336;
 
-// README markers.
-// Leaving these as-is to preserve your current repo behavior.
 const README_PATH = "README.md";
-const LB_START = "";
-const LB_END = "";
-const UPD_START = "";
-const UPD_END = "";
+
+// These must NOT be blank. Blank markers caused tables to be prepended repeatedly.
+const LB_START = "<!-- START_LEADERBOARD -->";
+const LB_END = "<!-- END_LEADERBOARD -->";
+const UPD_START = "<!-- START_UPDATED -->";
+const UPD_END = "<!-- END_UPDATED -->";
 
 function requireSupabaseConfig() {
   if (!SUPABASE_URL) {
@@ -95,7 +82,6 @@ function requireSupabaseConfig() {
   }
 }
 
-// Resolves an array of Roblox UserIDs to a Map in batches of 100.
 async function resolveRobloxUsernames(userIds) {
   const ROBLOX_USERS_API = "https://users.roblox.com/v1/users";
   const BATCH_SIZE = 100;
@@ -143,7 +129,6 @@ async function resolveRobloxUsernames(userIds) {
   return result;
 }
 
-// Big Games API
 async function fetchClanMembers() {
   const res = await fetch(BIG_GAMES_API, {
     headers: {
@@ -177,7 +162,6 @@ async function fetchClanMembers() {
 
   const battleData =
     json.data?.Battles?.[CURRENT_BATTLE_NAME] ??
-    json.data?.Battles?.StarryBattle ??
     null;
 
   const pointData = battleData?.PointContributions ?? [];
@@ -211,7 +195,6 @@ async function fetchClanMembers() {
   };
 }
 
-// Supabase REST helpers
 function sbHeaders(extra = {}) {
   return {
     apikey: SUPABASE_KEY,
@@ -352,7 +335,6 @@ async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
   return res.json();
 }
 
-// Gain calculations
 function computeGains(current, oldRows) {
   if (!oldRows.length) {
     return current.map(m => ({
@@ -425,7 +407,38 @@ function escapePipe(s) {
     .trim();
 }
 
-// README update
+function replaceBetweenMarkers(source, startMarker, endMarker, replacementBody) {
+  const startIndex = source.indexOf(startMarker);
+  const endIndex = source.indexOf(endMarker);
+
+  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+    return `${source.trimEnd()}
+
+${startMarker}
+${replacementBody}
+${endMarker}
+`;
+  }
+
+  const before = source.slice(0, startIndex + startMarker.length);
+  const after = source.slice(endIndex);
+
+  return `${before}
+${replacementBody}
+${after}`;
+}
+
+function cleanupReadmePreamble(readme) {
+  const canonicalHeader = "# NONG_Leaderboard";
+  const idx = readme.indexOf(canonicalHeader);
+
+  if (idx > 0) {
+    return readme.slice(idx);
+  }
+
+  return readme;
+}
+
 async function updateReadme(rows, updatedAt) {
   const lines = [
     "| Rank | Member | Total Points | 60m Gain |",
@@ -437,21 +450,27 @@ async function updateReadme(rows, updatedAt) {
 
   let readme = await fs.readFile(README_PATH, "utf8");
 
-  readme = readme.replace(
-    new RegExp(`${LB_START}[\\s\\S]*?${LB_END}`, "m"),
-    `${LB_START}\n${lines.join("\n")}\n${LB_END}`
+  // Removes the broken duplicated tables that were inserted before the README title.
+  readme = cleanupReadmePreamble(readme);
+
+  readme = replaceBetweenMarkers(
+    readme,
+    LB_START,
+    LB_END,
+    lines.join("\n")
   );
 
-  readme = readme.replace(
-    new RegExp(`${UPD_START}[\\s\\S]*?${UPD_END}`, "m"),
-    `${UPD_START}\n${updatedAt}\n${UPD_END}`
+  readme = replaceBetweenMarkers(
+    readme,
+    UPD_START,
+    UPD_END,
+    updatedAt
   );
 
   await fs.writeFile(README_PATH, readme, "utf8");
   console.log("README updated.");
 }
 
-// Discord webhook
 async function postDiscord(rows, updatedAt) {
   if (!DISCORD_WEBHOOK) return;
 
@@ -469,7 +488,6 @@ async function postDiscord(rows, updatedAt) {
     .map(s => s.trim())
     .filter(Boolean);
 
-  // Discord embed hard cap: 25 fields per embed.
   const PAGE_CARD_LIMITS = [24, 25, 25];
   const TOTAL_PAGES = PAGE_CARD_LIMITS.length;
 
@@ -603,7 +621,6 @@ async function postDiscord(rows, updatedAt) {
   }
 }
 
-// Main
 async function main() {
   const now = new Date();
   const nowIso = now.toISOString();
