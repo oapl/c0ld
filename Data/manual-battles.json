@@ -120,8 +120,8 @@
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-15"
   },
   {
-    "battle": "Good vs. Evil Battle",
-    "display_name": "Good vs. Evil Battle",
+    "battle": "Safety Battle",
+    "display_name": "Safety Battle",
     "api_battle_key": null,
     "nong_results_table": null,
     "clan_results_table": null,
@@ -131,8 +131,8 @@
     "total_rows": null,
     "unique_players": null,
     "placement": 9,
-    "update_number": null,
-    "update_url": null
+    "update_number": 17,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-17"
   },
   {
     "battle": "Clown Clan Battle",
