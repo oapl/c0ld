@@ -8,9 +8,20 @@
 //   Data/players/<profile_key>.json
 //   assets/avatars/<user_id>.png
 //
-// This script reads Data/manual-battles.json.
-// For any battle with nong_results_table set, it pulls player rows from that Supabase table.
-// Manual-only battles stay in manual-battles.json and are merged later by merge-manual-battles.js.
+// Supports both table formats:
+//
+// StarryNONG / AbstractNONG:
+//   id, fetched_at, rank, username, total_points, user_id
+//
+// PoisonTurtleNONG:
+//   battle, rank, username, points, created_at
+//
+// Normalized output:
+//   fetched_at     = fetched_at OR created_at OR snapshot_at
+//   total_points   = total_points OR points
+//   username       = username OR player OR member
+//   rank           = rank
+//   user_id        = user_id OR null
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -65,8 +76,13 @@ function normalizeKey(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -78,26 +94,9 @@ function stringOrNull(value) {
 
 function safeIso(value) {
   if (!value) return null;
+
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function profileKeyFromRow(row) {
-  if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
-    return String(row.user_id);
-  }
-
-  return String(row.username || "unknown")
-    .replace(/[^0-9a-zA-Z_-]/g, "_")
-    .slice(0, 80);
-}
-
-function rowIdentity(row) {
-  if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
-    return `id:${row.user_id}`;
-  }
-
-  return `name:${String(row.username || "").toLowerCase()}`;
 }
 
 function sleep(ms) {
@@ -133,6 +132,50 @@ async function readJsonArray(filePath) {
   }
 }
 
+function getCaseInsensitiveValue(row, candidates) {
+  const keys = Object.keys(row || {});
+  const lowerMap = new Map(keys.map(k => [String(k).toLowerCase(), k]));
+
+  for (const candidate of candidates) {
+    const exact = lowerMap.get(String(candidate).toLowerCase());
+
+    if (exact !== undefined) {
+      const value = row[exact];
+
+      if (value !== null && value !== undefined && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getCaseInsensitiveColumnName(columns, candidates) {
+  const lowerMap = new Map(columns.map(k => [String(k).toLowerCase(), k]));
+
+  for (const candidate of candidates) {
+    const exact = lowerMap.get(String(candidate).toLowerCase());
+    if (exact !== undefined) return exact;
+  }
+
+  return null;
+}
+
+function slugFromUsername(username) {
+  return String(username || "unknown")
+    .replace(/[^0-9a-zA-Z_-]/g, "_")
+    .slice(0, 80);
+}
+
+function rowIdentity(row) {
+  if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
+    return `id:${row.user_id}`;
+  }
+
+  return `name:${normalizeName(row.username)}`;
+}
+
 function cleanManualBattle(record) {
   return {
     battle: stringOrNull(record.battle || record.display_name),
@@ -152,6 +195,112 @@ function cleanManualBattle(record) {
     placement: record.placement ?? null,
     update_number: record.update_number ?? null,
     update_url: stringOrNull(record.update_url)
+  };
+}
+
+function normalizeTableRow(row, battleConfig, tableName) {
+  const fallbackTimestamp =
+    battleConfig.last_snapshot ||
+    battleConfig.first_snapshot ||
+    null;
+
+  const timestamp =
+    getCaseInsensitiveValue(row, [
+      "fetched_at",
+      "created_at",
+      "snapshot_at",
+      "createdAt",
+      "snapshotAt",
+      "timestamp",
+      "time",
+      "date"
+    ]) || fallbackTimestamp;
+
+  const username =
+    getCaseInsensitiveValue(row, [
+      "username",
+      "user_name",
+      "member",
+      "member_name",
+      "player",
+      "player_name",
+      "name",
+      "roblox_username"
+    ]);
+
+  const points =
+    getCaseInsensitiveValue(row, [
+      "total_points",
+      "points",
+      "score",
+      "total",
+      "value"
+    ]);
+
+  const userId =
+    getCaseInsensitiveValue(row, [
+      "user_id",
+      "userid",
+      "userId",
+      "UserID",
+      "roblox_user_id",
+      "robloxId",
+      "roblox_id"
+    ]);
+
+  const rank =
+    getCaseInsensitiveValue(row, [
+      "rank",
+      "placement",
+      "position"
+    ]);
+
+  const normalized = {
+    fetched_at: safeIso(timestamp),
+    rank: numberOrNull(rank),
+    username: stringOrNull(username),
+    total_points: numberOrNull(points),
+    user_id: numberOrNull(userId),
+    _source_table: tableName
+  };
+
+  if (!normalized.fetched_at) {
+    normalized.fetched_at = fallbackTimestamp || new Date(0).toISOString();
+  }
+
+  if (normalized.total_points === null) {
+    normalized.total_points = 0;
+  }
+
+  return normalized;
+}
+
+async function probeTableColumns(tableName) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}`);
+  url.searchParams.set("select", "*");
+  url.searchParams.set("limit", "1");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase probe failed for ${tableName} (${res.status}): ${text}`);
+  }
+
+  const rows = await res.json();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      columns: [],
+      sample: null
+    };
+  }
+
+  return {
+    columns: Object.keys(rows[0]),
+    sample: rows[0]
   };
 }
 
@@ -248,16 +397,46 @@ async function buildBattleConfigs() {
   };
 }
 
-async function fetchAllRows(table) {
-  const all = [];
+async function fetchAllRows(tableName, battleConfig) {
+  const probe = await probeTableColumns(tableName);
+  const columns = probe.columns;
+
+  console.log(`${tableName}: columns detected: ${columns.length ? columns.join(", ") : "(empty table)"}`);
+
+  const timestampColumn = getCaseInsensitiveColumnName(columns, [
+    "fetched_at",
+    "created_at",
+    "snapshot_at",
+    "createdAt",
+    "snapshotAt",
+    "timestamp",
+    "time",
+    "date"
+  ]);
+
+  const idColumn = getCaseInsensitiveColumnName(columns, ["id"]);
+  const rankColumn = getCaseInsensitiveColumnName(columns, ["rank"]);
+
+  const orderColumn = timestampColumn || idColumn || rankColumn || null;
+
+  if (orderColumn) {
+    console.log(`${tableName}: ordering by ${orderColumn}.asc`);
+  } else {
+    console.log(`${tableName}: no timestamp/id/rank order column found; using unordered paging`);
+  }
+
+  const rawRows = [];
   let offset = 0;
 
   while (true) {
-    const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(table)}`);
-    url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
-    url.searchParams.set("order", "fetched_at.asc");
+    const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}`);
+    url.searchParams.set("select", "*");
     url.searchParams.set("limit", String(PAGE_SIZE));
     url.searchParams.set("offset", String(offset));
+
+    if (orderColumn) {
+      url.searchParams.set("order", `${orderColumn}.asc`);
+    }
 
     const res = await fetch(url.toString(), {
       headers: sbHeaders({ Prefer: "return=representation" })
@@ -265,19 +444,49 @@ async function fetchAllRows(table) {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Supabase fetch failed for ${table} (${res.status}): ${text}`);
+      throw new Error(`Supabase fetch failed for ${tableName} (${res.status}): ${text}`);
     }
 
     const rows = await res.json();
-    all.push(...rows);
+    rawRows.push(...rows);
 
-    console.log(`${table}: fetched ${all.length} rows...`);
+    console.log(`${tableName}: fetched ${rawRows.length} rows...`);
 
     if (rows.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
   }
 
-  return all;
+  const normalizedRows = rawRows
+    .map(row => normalizeTableRow(row, battleConfig, tableName))
+    .filter(row => row.username);
+
+  normalizedRows.sort((a, b) => {
+    const at = new Date(a.fetched_at).getTime();
+    const bt = new Date(b.fetched_at).getTime();
+
+    if (at !== bt) return at - bt;
+
+    const ar = Number(a.rank || 999999);
+    const br = Number(b.rank || 999999);
+
+    if (ar !== br) return ar - br;
+
+    const bp = Number(b.total_points || 0);
+    const ap = Number(a.total_points || 0);
+
+    if (bp !== ap) return bp - ap;
+
+    return String(a.username || "").localeCompare(String(b.username || ""));
+  });
+
+  console.log(`${tableName}: normalized ${normalizedRows.length} usable player rows.`);
+
+  if (rawRows.length && !normalizedRows.length) {
+    console.warn(`${tableName}: WARNING - table had rows but none could be normalized as player rows.`);
+    console.warn(`${tableName}: sample row: ${JSON.stringify(rawRows[0])}`);
+  }
+
+  return normalizedRows;
 }
 
 async function fetchCurrentLeaderboard() {
@@ -776,6 +985,34 @@ function calculateClanProjection(snapshotRows) {
   };
 }
 
+function buildUsernameToUserIdMap(allBattleRows) {
+  const usernameToUserId = new Map();
+
+  for (const rows of allBattleRows.values()) {
+    for (const row of rows.rows || []) {
+      if (!row.username || !row.user_id) continue;
+
+      usernameToUserId.set(normalizeName(row.username), Number(row.user_id));
+    }
+  }
+
+  return usernameToUserId;
+}
+
+function profileKeyForNormalizedRow(row, usernameToUserId) {
+  if (row.user_id) {
+    return String(row.user_id);
+  }
+
+  const mappedId = usernameToUserId.get(normalizeName(row.username));
+
+  if (mappedId) {
+    return String(mappedId);
+  }
+
+  return slugFromUsername(row.username);
+}
+
 async function main() {
   await ensureDir(OUT_DIR);
   await ensureDir(AVATAR_DIR);
@@ -790,15 +1027,7 @@ async function main() {
 
   for (const battle of configs) {
     console.log(`Loading ${battle.table}...`);
-    const rows = await fetchAllRows(battle.table);
-
-    rows.sort((a, b) => {
-      const at = new Date(a.fetched_at).getTime();
-      const bt = new Date(b.fetched_at).getTime();
-
-      if (at !== bt) return at - bt;
-      return Number(a.rank || 0) - Number(b.rank || 0);
-    });
+    const rows = await fetchAllRows(battle.table, battle);
 
     battleRows.set(battle.battle, {
       config: battle,
@@ -807,6 +1036,10 @@ async function main() {
 
     battlesSummary.push(buildBattleSummary(battle, rows));
   }
+
+  const usernameToUserId = buildUsernameToUserIdMap(battleRows);
+
+  console.log(`Username-to-user-id mappings available: ${usernameToUserId.size}`);
 
   console.log("Loading current leaderboard...");
   const currentRowsRaw = await fetchCurrentLeaderboard();
@@ -821,12 +1054,16 @@ async function main() {
     const rows = data?.rows || [];
 
     for (const row of rows) {
-      const profileKey = profileKeyFromRow(row);
+      const profileKey = profileKeyForNormalizedRow(row, usernameToUserId);
+      const mappedUserId =
+        row.user_id ||
+        usernameToUserId.get(normalizeName(row.username)) ||
+        null;
 
       if (!playerMap.has(profileKey)) {
         playerMap.set(profileKey, {
           profile_key: profileKey,
-          user_id: row.user_id ? Number(row.user_id) : null,
+          user_id: mappedUserId ? Number(mappedUserId) : null,
           username: row.username,
           usernames_seen: new Set(),
           battles_raw: new Map()
@@ -834,6 +1071,10 @@ async function main() {
       }
 
       const player = playerMap.get(profileKey);
+
+      if (!player.user_id && mappedUserId) {
+        player.user_id = Number(mappedUserId);
+      }
 
       if (row.username) {
         player.usernames_seen.add(row.username);
@@ -933,18 +1174,20 @@ async function main() {
 
   for (const player of playerIndex) {
     if (player.user_id) playerById.set(String(player.user_id), player);
-    if (player.username) playerByName.set(String(player.username).toLowerCase(), player);
+    if (player.username) playerByName.set(normalizeName(player.username), player);
   }
 
   const currentRows = currentRowsWithGains
     .map(row => {
       const match =
         (row.user_id ? playerById.get(String(row.user_id)) : null) ||
-        playerByName.get(String(row.username || "").toLowerCase());
+        playerByName.get(normalizeName(row.username));
 
       return {
         ...row,
-        profile_key: match?.profile_key || profileKeyFromRow(row),
+        profile_key:
+          match?.profile_key ||
+          (row.user_id ? String(row.user_id) : slugFromUsername(row.username)),
         avatar_url: match?.avatar_url || null
       };
     })
