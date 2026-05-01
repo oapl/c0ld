@@ -19,17 +19,15 @@
 //   CURRENT_BATTLE_DISPLAY_NAME = Starry Battle
 //   CURRENT_NONG_TABLE = StarryNONG
 //
-// Historical battle table convention:
-//   [BattleName]NONG
+// Important:
+//   CURRENT_BATTLE_NAME stays as the Big Games/API key, such as StarryBattle.
+//   CURRENT_NONG_TABLE is the Supabase player/member history table, such as StarryNONG.
 //
-// This script reads Data/manual-battles.json and uses:
-//   battle               = internal battle key for profiles/dropdowns
-//   display_name         = visible battle name
-//   clan_results_battle  = NONG/player archive table, example StarryNONG
-//
-// Supported extra aliases for future cleanup:
-//   player_results_table
-//   nong_results_table
+// Data/manual-battles.json supports:
+//   battle              = internal/API/profile key
+//   display_name        = pretty website label
+//   nong_results_table  = exact Supabase NONG/player table
+//   clan_results_table  = exact Supabase top-clans table
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -56,16 +54,16 @@ const CURRENT_NONG_TABLE =
   process.env.CURRENT_BATTLE_NONG_TABLE ||
   defaultNongTableFromBattleName(CURRENT_BATTLE_NAME);
 
-if (!CURRENT_BATTLE_END_ISO) {
-  throw new Error("Missing required env var: CURRENT_BATTLE_END_ISO");
-}
-
 if (!SUPABASE_URL) {
   throw new Error("Missing required env var: SUPABASE_URL");
 }
 
 if (!SUPABASE_KEY) {
   throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
+}
+
+if (!CURRENT_BATTLE_END_ISO) {
+  throw new Error("Missing required env var: CURRENT_BATTLE_END_ISO");
 }
 
 const OUT_DIR = path.join(process.cwd(), "Data");
@@ -77,13 +75,13 @@ const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
 
-let BATTLES = [];
-
 const CURRENT_BATTLE = {
   name: CURRENT_BATTLE_NAME,
   displayName: CURRENT_BATTLE_DISPLAY_NAME,
   archiveTable: CURRENT_NONG_TABLE
 };
+
+let BATTLES = [];
 
 function sbHeaders(extra = {}) {
   return {
@@ -139,12 +137,14 @@ function normalizeKey(value) {
 
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
+
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
 function safeIso(value) {
   if (!value) return null;
+
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
@@ -160,10 +160,10 @@ function rowIdentity(row) {
   return `name:${String(row.username || "").toLowerCase()}`;
 }
 
-function getManualNongTable(record) {
+function getNongResultsTable(record) {
   return (
-    record.player_results_table ||
     record.nong_results_table ||
+    record.player_results_table ||
     record.clan_results_battle ||
     null
   );
@@ -171,61 +171,48 @@ function getManualNongTable(record) {
 
 async function buildBattleConfigs() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
-  const byBattle = new Map();
+  const map = new Map();
 
   for (const record of manualBattles) {
     const battleName = record.battle || record.display_name;
     const displayName = record.display_name || record.battle;
-    const tableName = getManualNongTable(record);
+    const tableName = getNongResultsTable(record);
 
     if (!battleName || !displayName || !tableName) {
       continue;
     }
 
-    byBattle.set(normalizeKey(battleName), {
+    map.set(normalizeKey(battleName), {
       name: String(battleName),
-      table: String(tableName),
-      displayName: String(displayName)
+      displayName: String(displayName),
+      table: String(tableName)
     });
   }
 
-  const currentKey = normalizeKey(CURRENT_BATTLE_NAME);
-
-  byBattle.set(currentKey, {
+  map.set(normalizeKey(CURRENT_BATTLE_NAME), {
     name: CURRENT_BATTLE_NAME,
-    table: CURRENT_NONG_TABLE,
-    displayName: CURRENT_BATTLE_DISPLAY_NAME
+    displayName: CURRENT_BATTLE_DISPLAY_NAME,
+    table: CURRENT_NONG_TABLE
   });
 
-  const configs = [...byBattle.values()];
+  const configs = [...map.values()];
 
   configs.sort((a, b) => {
-    if (normalizeKey(a.name) === currentKey) return 1;
-    if (normalizeKey(b.name) === currentKey) return -1;
+    const aIsCurrent = normalizeKey(a.name) === normalizeKey(CURRENT_BATTLE_NAME);
+    const bIsCurrent = normalizeKey(b.name) === normalizeKey(CURRENT_BATTLE_NAME);
+
+    if (aIsCurrent && !bIsCurrent) return 1;
+    if (!aIsCurrent && bIsCurrent) return -1;
+
     return String(a.displayName || a.name).localeCompare(String(b.displayName || b.name));
   });
 
-  console.log("Battle archive table configuration:");
+  console.log("Battle profile table configuration:");
   for (const config of configs) {
     console.log(`  ${config.name} (${config.displayName}) -> ${config.table}`);
   }
 
   return configs;
-}
-
-async function fetchJson(url, options = {}) {
-  const res = await fetch(url, options);
-  const text = await res.text();
-
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from ${url}: ${text}`);
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON from ${url}: ${text.slice(0, 500)}`);
-  }
 }
 
 async function fetchAllRows(table) {
