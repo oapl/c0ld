@@ -3,25 +3,15 @@
     "battle": "StarryBattle",
     "display_name": "Starry Battle",
     "first_snapshot": "2026-04-29T18:11:01.131Z",
-    "last_snapshot": "2026-05-01T17:45:42.074Z",
-    "total_snapshots": 577,
-    "total_rows": 42265,
+    "last_snapshot": "2026-05-01T18:25:42.853Z",
+    "total_snapshots": 579,
+    "total_rows": 42413,
     "unique_players": 74,
     "placement": null,
     "update_number": 77,
-    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75"
-  },
-  {
-    "battle": "Spring2026",
-    "display_name": "Abstract Battle",
-    "first_snapshot": "2026-04-21T12:14:36.000Z",
-    "last_snapshot": "2026-04-25T13:09:36.000Z",
-    "total_snapshots": 1140,
-    "total_rows": 83827,
-    "unique_players": 84,
-    "placement": 34,
-    "update_number": null,
-    "update_url": null
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-77",
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Forged Battle",
@@ -33,7 +23,9 @@
     "unique_players": null,
     "placement": 10,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Sun Angelus Battle",
@@ -45,7 +37,9 @@
     "unique_players": null,
     "placement": 3,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Scuba Dog Battle",
@@ -57,7 +51,9 @@
     "unique_players": null,
     "placement": 3,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Nightmare Cyclops Battle",
@@ -69,7 +65,9 @@
     "unique_players": null,
     "placement": 2,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Balloon Corgi Battle",
@@ -81,7 +79,9 @@
     "unique_players": null,
     "placement": 3,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Junkyard Hound Battle",
@@ -93,7 +93,9 @@
     "unique_players": null,
     "placement": 3,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Athena Battle",
@@ -105,7 +107,9 @@
     "unique_players": null,
     "placement": 3,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Egyptian Battle",
@@ -117,7 +121,9 @@
     "unique_players": null,
     "placement": 7,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Holographic Battle",
@@ -129,7 +135,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Pixel Chick Battle",
@@ -141,7 +149,9 @@
     "unique_players": null,
     "placement": 2,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Poison Turtle Battle",
@@ -153,7 +163,9 @@
     "unique_players": null,
     "placement": 2,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Tie Dye Battle",
@@ -165,7 +177,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Mushroom Battle",
@@ -177,7 +191,9 @@
     "unique_players": null,
     "placement": 10,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Blurred Battle",
@@ -189,7 +205,9 @@
     "unique_players": null,
     "placement": 7,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Wyvern Battle",
@@ -201,7 +219,9 @@
     "unique_players": null,
     "placement": 4,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Blimp Dragon Clan Battle",
@@ -213,7 +233,9 @@
     "unique_players": null,
     "placement": 5,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Ghost Clan Battle",
@@ -225,7 +247,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Reversed Clan Battle",
@@ -237,7 +261,9 @@
     "unique_players": null,
     "placement": 10,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Rave Crab Clan Battle",
@@ -249,7 +275,9 @@
     "unique_players": null,
     "placement": 6,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Ice Cream Clan Battle",
@@ -261,7 +289,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Clown Clan Battle",
@@ -273,7 +303,9 @@
     "unique_players": null,
     "placement": 5,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Good vs. Evil Battle",
@@ -285,7 +317,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Wicked Clan Battle",
@@ -297,7 +331,9 @@
     "unique_players": null,
     "placement": 8,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Fragmented Clan Battle",
@@ -309,7 +345,9 @@
     "unique_players": null,
     "placement": 8,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Pixel Clan Battle",
@@ -321,7 +359,9 @@
     "unique_players": null,
     "placement": 6,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Quest Clan Battle",
@@ -333,7 +373,9 @@
     "unique_players": null,
     "placement": 6,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Raid Clan Battle",
@@ -345,7 +387,9 @@
     "unique_players": null,
     "placement": 13,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Achievements Battle",
@@ -357,7 +401,9 @@
     "unique_players": null,
     "placement": 19,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "Pet Collecting Battle",
@@ -369,7 +415,9 @@
     "unique_players": null,
     "placement": 9,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
   },
   {
     "battle": "New Years Clan Battle",
@@ -381,6 +429,22 @@
     "unique_players": null,
     "placement": 32,
     "update_number": null,
-    "update_url": null
+    "update_url": null,
+    "clan_results_battle": null,
+    "clan_results_table": null
+  },
+  {
+    "battle": "Spring2026",
+    "display_name": "Abstract Battle",
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": 34,
+    "update_number": 75,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-75",
+    "clan_results_battle": null,
+    "clan_results_table": null
   }
 ]

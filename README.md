@@ -1,3 +1,18 @@
+
+2026-05-01 18:25:42 UTC
+
+| Rank | Member | Total Points | 60m Gain |
+|---:|---|---:|---:|
+| 1 | Yume_Sakurax3 | 11.88K | 94 |
+| 2 | johnr622 | 11.64K | 94 |
+| 3 | joshuacd2006 | 11.51K | 94 |
+| 4 | Josep_xD2 | 11.21K | 94 |
+| 5 | jupiter0477 | 11.1K | 94 |
+| 6 | Mr_Suter | 10.87K | 94 |
+| 7 | Johnr622_alt2 | 10.31K | 89 |
+| 8 | Johnr622_alt3 | 10.31K | 89 |
+| 9 | Johnr622_alt4 | 10.07K | 89 |
+| 10 | Johnr622_alt5 | 10.06K | 89 |
 # NONG_Leaderboard
 
 Leaderboard Page: https://opalapocalypse.github.io/NONG_Leaderboard/
