@@ -1,15 +1,20 @@
 // scripts/merge-manual-battles.js
 // Merges Data/manual-battles.json into Data/battles.json.
 //
-// Source of truth rules:
-//   - placement is ALWAYS manual
-//   - update_number is ALWAYS manual
-//   - update_url is ALWAYS manual
-//   - clan_results_battle is ALWAYS manual
-//   - clan_results_table is ALWAYS manual
-//   - manual display_name wins when present
-//   - manual dates/counts win when present, otherwise generated fills gaps
-//   - duplicate battle rows are collapsed into one row
+// Manual is source of truth for:
+//   placement
+//   update_number
+//   update_url
+//   api_battle_key
+//   nong_results_table
+//   clan_results_table
+//
+// Generated data fills:
+//   first_snapshot
+//   last_snapshot
+//   total_snapshots
+//   total_rows
+//   unique_players
 //
 // Inputs:
 //   Data/battles.json
@@ -34,7 +39,6 @@ function normalizeKey(value) {
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
-
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -46,14 +50,8 @@ function stringOrNull(value) {
 
 function dateOrNull(value) {
   if (!value) return null;
-
   const d = new Date(value);
-
-  if (Number.isNaN(d.getTime())) {
-    return null;
-  }
-
-  return d.toISOString();
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 function cleanManualRecord(record) {
@@ -75,7 +73,8 @@ function cleanManualRecord(record) {
     update_number: numberOrNull(record.update_number),
     update_url: stringOrNull(record.update_url),
 
-    clan_results_battle: stringOrNull(record.clan_results_battle),
+    api_battle_key: stringOrNull(record.api_battle_key),
+    nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
     clan_results_table: stringOrNull(record.clan_results_table)
   };
 }
@@ -97,7 +96,7 @@ function cleanGeneratedRecord(record) {
   };
 }
 
-function preferBetterGenerated(existing, incoming) {
+function preferGenerated(existing, incoming) {
   if (!existing) return incoming;
 
   return {
@@ -113,7 +112,7 @@ function preferBetterGenerated(existing, incoming) {
   };
 }
 
-function preferBetterManual(existing, incoming) {
+function preferManual(existing, incoming) {
   if (!existing) return incoming;
 
   return {
@@ -131,7 +130,8 @@ function preferBetterManual(existing, incoming) {
     update_number: incoming.update_number ?? existing.update_number ?? null,
     update_url: incoming.update_url ?? existing.update_url ?? null,
 
-    clan_results_battle: incoming.clan_results_battle ?? existing.clan_results_battle ?? null,
+    api_battle_key: incoming.api_battle_key ?? existing.api_battle_key ?? null,
+    nong_results_table: incoming.nong_results_table ?? existing.nong_results_table ?? null,
     clan_results_table: incoming.clan_results_table ?? existing.clan_results_table ?? null
   };
 }
@@ -152,7 +152,8 @@ function mergeRecord(manual, generated) {
     update_number: manual?.update_number ?? null,
     update_url: manual?.update_url ?? null,
 
-    clan_results_battle: manual?.clan_results_battle ?? null,
+    api_battle_key: manual?.api_battle_key ?? null,
+    nong_results_table: manual?.nong_results_table ?? null,
     clan_results_table: manual?.clan_results_table ?? null
   };
 }
@@ -179,10 +180,7 @@ async function readJsonArray(filePath) {
 
     return parsed;
   } catch (err) {
-    if (err.code === "ENOENT") {
-      return [];
-    }
-
+    if (err.code === "ENOENT") return [];
     throw err;
   }
 }
@@ -199,7 +197,7 @@ async function main() {
     if (!record.battle || !record.display_name) continue;
 
     const key = normalizeKey(record.battle);
-    generatedMap.set(key, preferBetterGenerated(generatedMap.get(key), record));
+    generatedMap.set(key, preferGenerated(generatedMap.get(key), record));
   }
 
   for (const raw of manualRaw) {
@@ -207,7 +205,7 @@ async function main() {
     if (!record.battle || !record.display_name) continue;
 
     const key = normalizeKey(record.battle);
-    manualMap.set(key, preferBetterManual(manualMap.get(key), record));
+    manualMap.set(key, preferManual(manualMap.get(key), record));
   }
 
   const allKeys = new Set([
@@ -220,7 +218,6 @@ async function main() {
   for (const key of allKeys) {
     const generated = generatedMap.get(key) || null;
     const manual = manualMap.get(key) || null;
-
     const merged = mergeRecord(manual, generated);
 
     if (merged.battle && merged.display_name) {
@@ -241,11 +238,12 @@ async function main() {
   console.log(`Generated unique battles: ${generatedMap.size}`);
   console.log(`Manual unique battles: ${manualMap.size}`);
   console.log(`Final battles written: ${finalRecords.length}`);
-  console.log("Manual-only fields preserved:");
+  console.log("Manual fields preserved:");
   console.log("  - placement");
   console.log("  - update_number");
   console.log("  - update_url");
-  console.log("  - clan_results_battle");
+  console.log("  - api_battle_key");
+  console.log("  - nong_results_table");
   console.log("  - clan_results_table");
   console.log(`Updated ${GENERATED_FILE}`);
 }
