@@ -8,7 +8,7 @@
   "avatar_url": "assets/avatars/3753977683.png",
   "profile_url": "https://www.roblox.com/users/3753977683/profile",
   "total_battles": 3,
-  "latest_seen": "2026-05-02T15:06:13.479Z",
+  "latest_seen": "2026-05-02T15:11:13.910Z",
   "latest_rank": 58,
   "latest_points": 5081,
   "battles": [
@@ -16,10 +16,10 @@
       "battle": "StarryBattle",
       "display_name": "Starry Battle",
       "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
-      "battle_last_snapshot": "2026-05-02T15:06:13.479Z",
+      "battle_last_snapshot": "2026-05-02T15:11:13.910Z",
       "first_seen": "2026-04-29T21:52:29.426Z",
       "first_active_date": "2026-04-29T21:52:29.426Z",
-      "last_seen": "2026-05-02T15:06:13.479Z",
+      "last_seen": "2026-05-02T15:11:13.910Z",
       "starting_rank": 71,
       "last_rank": 58,
       "end_rank": 58,
@@ -29,7 +29,7 @@
       "ending_points": 5081,
       "max_points": 5081,
       "gained_points": 5076,
-      "snapshot_count": 794,
+      "snapshot_count": 795,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -4000,6 +4000,11 @@
         },
         {
           "t": "2026-05-02T15:06:13.479Z",
+          "rank": 58,
+          "points": 5081
+        },
+        {
+          "t": "2026-05-02T15:11:13.910Z",
           "rank": 58,
           "points": 5081
         }
