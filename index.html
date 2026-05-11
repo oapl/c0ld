@@ -345,14 +345,6 @@
       margin-bottom: 18px;
     }
 
-    code {
-      color: var(--text);
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 1px 4px;
-    }
-
     @media (max-width: 1000px) {
       .cards {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -547,7 +539,6 @@
     let battles = [];
     let nongHistoryData = [];
     let playerIndex = [];
-    let profileCache = new Map();
 
     let playerIndexByUserId = new Map();
     let playerIndexByProfileKey = new Map();
@@ -653,32 +644,6 @@
       return Number.isNaN(t) ? null : t;
     }
 
-    function getRobloxHeadshotUrl(userId) {
-      const id = String(userId || "").trim();
-      if (!id) return DEFAULT_AVATAR_SVG;
-
-      return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(id)}&width=150&height=150&format=png`;
-    }
-
-    function getAvatarFallbackUrl(row) {
-      const userId = String(row.user_id || "").trim();
-
-      if (userId) {
-        return getRobloxHeadshotUrl(userId);
-      }
-
-      return DEFAULT_AVATAR_SVG;
-    }
-
-    function buildAvatarImg(row) {
-      const primary = escapeHtml(getAvatar(row));
-      const fallback1 = escapeHtml(getAvatarFallbackUrl(row));
-      const fallback2 = escapeHtml(DEFAULT_AVATAR_SVG);
-
-      return `<img class="avatar" src="${primary}" alt="" loading="lazy"
-        onerror="if(this.dataset.fallback!=='1'){this.dataset.fallback='1';this.src='${fallback1}';}else{this.onerror=null;this.src='${fallback2}';}">`;
-    }
-
     function rebuildPlayerIndexMaps() {
       playerIndexByUserId = new Map();
       playerIndexByProfileKey = new Map();
@@ -689,17 +654,9 @@
         const profileKey = String(p.profile_key || "").trim();
         const usernameKey = normalizeName(p.username);
 
-        if (userId) {
-          playerIndexByUserId.set(userId, p);
-        }
-
-        if (profileKey) {
-          playerIndexByProfileKey.set(profileKey, p);
-        }
-
-        if (usernameKey) {
-          playerIndexByUsername.set(usernameKey, p);
-        }
+        if (userId) playerIndexByUserId.set(userId, p);
+        if (profileKey) playerIndexByProfileKey.set(profileKey, p);
+        if (usernameKey) playerIndexByUsername.set(usernameKey, p);
       }
     }
 
@@ -819,35 +776,38 @@
       return new Date(Math.max(...rowTimes)).toISOString();
     }
 
-    function getAvatar(row) {
-      if (row.avatar_url || row.avatar) {
-        return row.avatar_url || row.avatar;
-      }
-
+    function getAvatarMatch(row) {
       const userId = String(row.user_id || "").trim();
       const profileKey = String(row.profile_key || "").trim();
       const usernameKey = normalizeName(row.username);
 
-      let match = null;
-
       if (userId && playerIndexByUserId.has(userId)) {
-        match = playerIndexByUserId.get(userId);
+        return playerIndexByUserId.get(userId);
       }
 
-      if (!match && profileKey && playerIndexByProfileKey.has(profileKey)) {
-        match = playerIndexByProfileKey.get(profileKey);
+      if (profileKey && playerIndexByProfileKey.has(profileKey)) {
+        return playerIndexByProfileKey.get(profileKey);
       }
 
-      if (!match && usernameKey && playerIndexByUsername.has(usernameKey)) {
-        match = playerIndexByUsername.get(usernameKey);
+      if (usernameKey && playerIndexByUsername.has(usernameKey)) {
+        return playerIndexByUsername.get(usernameKey);
       }
 
-      if (match?.avatar_url) {
-        return match.avatar_url;
-      }
+      return null;
+    }
 
-      if (userId) {
-        return getRobloxHeadshotUrl(userId);
+    function getAvatar(row) {
+      const match = getAvatarMatch(row);
+
+      if (row.avatar_url) return row.avatar_url;
+      if (match?.avatar_url) return match.avatar_url;
+
+      const profileKey =
+        String(row.profile_key || "").trim() ||
+        String(match?.profile_key || "").trim();
+
+      if (profileKey) {
+        return `assets/avatars/${encodeURIComponent(profileKey)}.png`;
       }
 
       return DEFAULT_AVATAR_SVG;
@@ -874,44 +834,22 @@
 
     function normalizeCurrentRows(rows) {
       return rows.map(row => {
-        const userId = String(row.user_id || "").trim();
-        const usernameKey = normalizeName(row.username);
-
-        let match = null;
-
-        if (userId && playerIndexByUserId.has(userId)) {
-          match = playerIndexByUserId.get(userId);
-        }
-
-        if (!match && usernameKey && playerIndexByUsername.has(usernameKey)) {
-          match = playerIndexByUsername.get(usernameKey);
-        }
+        const match = getAvatarMatch(row);
 
         return {
           ...row,
-          profile_key: match?.profile_key || row.user_id || row.username,
-          avatar_url: match?.avatar_url || row.avatar_url || null
+          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || match?.avatar_url || null
         };
       });
     }
 
-    async function getAllProfiles() {
-      const missing = playerIndex.filter(p => !profileCache.has(p.profile_key));
+    function buildAvatarImg(row) {
+      const primary = escapeHtml(getAvatar(row));
+      const fallback1 = escapeHtml(DEFAULT_AVATAR_SVG);
 
-      await Promise.all(
-        missing.map(async p => {
-          try {
-            const res = await fetch(`${p.file}?v=${Date.now()}`);
-            if (!res.ok) return;
-
-            const profile = await res.json();
-            profileCache.set(p.profile_key, profile);
-          } catch {
-          }
-        })
-      );
-
-      return [...profileCache.values()];
+      return `<img class="avatar" src="${primary}" alt="" loading="lazy"
+        onerror="this.onerror=null;this.src='${fallback1}';">`;
     }
 
     async function buildHistoricalRows(battleName) {
@@ -923,20 +861,24 @@
         return [];
       }
 
-      return battle.rows.map(row => ({
-        rank: row.rank,
-        stored_rank: row.rank,
-        username: row.username,
-        user_id: row.user_id,
-        profile_key: row.profile_key || row.user_id || row.username,
-        avatar_url: row.avatar_url || null,
-        total_points: row.total_points,
-        gain_5m: row.gain_5m ?? null,
-        gain_1h: row.gain_1h ?? null,
-        gain_12h: row.gain_12h ?? null,
-        gain_24h: row.gain_24h ?? null,
-        fetched_at: row.fetched_at || battle.snapshot_at || null
-      }));
+      return battle.rows.map(row => {
+        const match = getAvatarMatch(row);
+
+        return {
+          rank: row.rank,
+          stored_rank: row.rank,
+          username: row.username,
+          user_id: row.user_id,
+          profile_key: row.profile_key || match?.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || match?.avatar_url || null,
+          total_points: row.total_points,
+          gain_5m: row.gain_5m ?? null,
+          gain_1h: row.gain_1h ?? null,
+          gain_12h: row.gain_12h ?? null,
+          gain_24h: row.gain_24h ?? null,
+          fetched_at: row.fetched_at || battle.snapshot_at || null
+        };
+      });
     }
 
     function getVisibleRows() {
