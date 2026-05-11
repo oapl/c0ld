@@ -21,12 +21,12 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 | 5 | jupiter0477 | 750M | 0 |
 | 6 | joshuacd2006 | 750M | 0 |
 | 7 | mavilure | 750M | 0 |
-| 8 | wqmike | 750M | 660M |
+| 8 | wqmike | 750M | 0 |
 | 9 | mecduqgtryhard | 750M | 0 |
 | 10 | Ewan_314 | 750M | 0 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-11 17:11:19 UTC
+2026-05-11 17:21:28 UTC
 <!-- END_UPDATED -->
