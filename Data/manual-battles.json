@@ -604,7 +604,7 @@
     "display_name": "Angel Battle 2026",
     "api_battle_key": "AngelBattle2026",
     "nong_results_table": "AngelBattle2026NONG",
-    "clan_results_table": null,
+    "clan_results_table": "AngelBattle2026Clans",
     "first_snapshot": null,
     "last_snapshot": null,
     "total_snapshots": null,
