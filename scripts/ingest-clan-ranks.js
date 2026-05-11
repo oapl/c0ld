@@ -1,5 +1,6 @@
 // scripts/ingest-clan-ranks.js
-// Fetches top clan rankings from BIG Games PS99 API and stores them in Supabase.
+// Fetches top clan rankings from BIG Games PS99 API and stores only the CURRENT
+// snapshot per clan per battle in Supabase.
 //
 // Output table:
 //   public.clan_rank_snapshots
@@ -10,14 +11,14 @@
 //
 // Optional env:
 //   CLAN_NAME = NONG
-//   CURRENT_BATTLE_NAME = StarryBattle
+//   CURRENT_BATTLE_NAME = AngelBattle2026
 //   CLAN_RANK_TOP_N = 100
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
-const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
+const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
 const TOP_N = Number(process.env.CLAN_RANK_TOP_N || 100);
 
 const PAGE_SIZE = 100;
@@ -222,10 +223,8 @@ async function fetchTopClans() {
 
       for (const row of collected) {
         const key = row.clan_name.toLowerCase();
-
         if (seen.has(key)) continue;
         seen.add(key);
-
         deduped.push(row);
       }
 
@@ -252,9 +251,9 @@ async function fetchTopClans() {
   throw lastError || new Error("No clan ranking data could be fetched.");
 }
 
-async function insertClanSnapshots(rows) {
+async function upsertClanSnapshots(rows) {
   if (!rows.length) {
-    console.log("No clan rows to insert.");
+    console.log("No clan rows to upsert.");
     return;
   }
 
@@ -268,31 +267,36 @@ async function insertClanSnapshots(rows) {
     points: row.points
   }));
 
-  const url = `${SUPABASE_URL}/rest/v1/clan_rank_snapshots`;
+  const url = new URL(`${SUPABASE_URL}/rest/v1/clan_rank_snapshots`);
+  url.searchParams.set("on_conflict", "battle,clan_name");
 
-  const res = await fetch(url, {
+  const res = await fetch(url.toString(), {
     method: "POST",
     headers: sbHeaders({
-      Prefer: "resolution=ignore-duplicates"
+      Prefer: "resolution=merge-duplicates,return=minimal"
     }),
     body: JSON.stringify(payload)
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Supabase insert failed (${res.status}): ${text}`);
+    throw new Error(`Supabase upsert failed (${res.status}): ${text}`);
   }
 
-  const nong = payload.find(row => row.clan_name.toLowerCase() === CLAN_NAME.toLowerCase());
+  const trackedClan = payload.find(
+    row => row.clan_name.toLowerCase() === CLAN_NAME.toLowerCase()
+  );
 
-  console.log(`Inserted ${payload.length} clan rank snapshot rows.`);
+  console.log(`Upserted ${payload.length} clan rank rows.`);
   console.log(`Snapshot time: ${fetchedAt}`);
   console.log(`Battle: ${CURRENT_BATTLE_NAME}`);
 
-  if (nong) {
-    console.log(`${CLAN_NAME} current rank in inserted snapshot: #${nong.rank} with ${nong.points} points.`);
+  if (trackedClan) {
+    console.log(
+      `${CLAN_NAME} current rank in current-state table: #${trackedClan.rank} with ${trackedClan.points} points.`
+    );
   } else {
-    console.log(`${CLAN_NAME} was not found in the top ${payload.length} clans inserted.`);
+    console.log(`${CLAN_NAME} was not found in the top ${payload.length} clans.`);
   }
 }
 
@@ -306,8 +310,7 @@ async function main() {
   console.log(`CLAN_RANK_TOP_N=${TOP_N}`);
 
   const clans = await fetchTopClans();
-
-  await insertClanSnapshots(clans);
+  await upsertClanSnapshots(clans);
 }
 
 main().catch(err => {
