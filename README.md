@@ -14,19 +14,19 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 13.55K | 0 |
-| 2 | joshuacd2006 | 13.41K | 0 |
-| 3 | jupiter0477 | 12.98K | 0 |
-| 4 | SupaAnTz | 11.16K | 0 |
-| 5 | LawnMp3 | 11.03K | 0 |
-| 6 | Panthers_1995 | 10.95K | 0 |
-| 7 | Doobydoobydoo_bah | 10.94K | 0 |
-| 8 | ArcticGalaxy149 | 10.94K | 0 |
-| 9 | Odierulz01 | 10.92K | 0 |
-| 10 | DiscoGuy86 | 10.91K | 0 |
+| 1 | Darwinaknox | 0 | N/A |
+| 2 | EndOfAnEra007 | 0 | N/A |
+| 3 | SupaAnTz | 0 | N/A |
+| 4 | LawnMp3 | 0 | N/A |
+| 5 | dragonballx1412 | 0 | N/A |
+| 6 | sebastjan35 | 0 | N/A |
+| 7 | jupiter0477 | 0 | N/A |
+| 8 | Sprintbooter | 0 | N/A |
+| 9 | johnr622 | 0 | N/A |
+| 10 | MrChicken66666 | 0 | N/A |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-11 13:51:38 UTC
+2026-05-11 14:03:09 UTC
 <!-- END_UPDATED -->
