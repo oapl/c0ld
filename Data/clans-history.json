@@ -3,7 +3,7 @@
     "battle": "AngelBattle2026",
     "display_name": "Angel Battle 2026",
     "source_table": "AngelBattle2026Clans",
-    "generated_at": "2026-05-11T17:07:16.403Z",
+    "generated_at": "2026-05-11T17:11:53.721Z",
     "rows": [
       {
         "rank": 1,
@@ -18611,7 +18611,7 @@
     "battle": "Poison Turtle Battle",
     "display_name": "Poison Turtle Battle",
     "source_table": "PoisonTurtleClans",
-    "generated_at": "2026-05-11T17:07:15.869Z",
+    "generated_at": "2026-05-11T17:11:53.085Z",
     "rows": [
       {
         "rank": 1,
