@@ -536,6 +536,7 @@
     let clanData = null;
     let currentRows = [];
     let battles = [];
+    let nongHistoryData = [];
     let playerIndex = [];
     let profileCache = new Map();
 
@@ -733,11 +734,11 @@
     function fmtBattleHistoryLink(battle) {
       const label = escapeHtml(battle.display_name || battle.battle || "Unknown");
 
-      if (!battle.clan_results_table) {
+      if (!battle.nong_results_table) {
         return label;
       }
 
-      return `<a href="clans.html?battle=${encodeURIComponent(battle.battle)}">${label}</a>`;
+      return `<a href="?battle=${encodeURIComponent(battle.battle)}">${label}</a>`;
     }
 
     function getCurrentFetchedAt() {
@@ -804,45 +805,28 @@
     }
 
     async function buildHistoricalRows(battleName) {
-      const profiles = await getAllProfiles();
-      const rows = [];
+      const battle = (nongHistoryData || []).find(
+        item => normalizeKey(item.battle) === normalizeKey(battleName)
+      );
 
-      for (const profile of profiles) {
-        const battle = (profile.battles || []).find(b => b.battle === battleName);
-        if (!battle) continue;
-
-        const endingPoints = Number(battle.ending_points || 0);
-
-        rows.push({
-          rank: null,
-          stored_rank: battle.last_rank,
-          username: profile.username,
-          user_id: profile.user_id,
-          profile_key: profile.profile_key,
-          avatar_url: profile.avatar_url,
-          total_points: endingPoints,
-          gain_5m: null,
-          gain_1h: null,
-          gain_12h: null,
-          gain_24h: null,
-          fetched_at: battle.last_seen
-        });
+      if (!battle || !Array.isArray(battle.rows)) {
+        return [];
       }
 
-      rows.sort((a, b) => {
-        const ap = Number(a.total_points || 0);
-        const bp = Number(b.total_points || 0);
-
-        if (bp !== ap) return bp - ap;
-
-        return String(a.username || "").localeCompare(String(b.username || ""));
-      });
-
-      rows.forEach((row, index) => {
-        row.rank = index + 1;
-      });
-
-      return rows;
+      return battle.rows.map(row => ({
+        rank: row.rank,
+        stored_rank: row.rank,
+        username: row.username,
+        user_id: row.user_id,
+        profile_key: row.user_id || row.username,
+        avatar_url: null,
+        total_points: row.total_points,
+        gain_5m: row.gain_5m ?? null,
+        gain_1h: row.gain_1h ?? null,
+        gain_12h: row.gain_12h ?? null,
+        gain_24h: row.gain_24h ?? null,
+        fetched_at: row.fetched_at || battle.snapshot_at || null
+      }));
     }
 
     function getVisibleRows() {
@@ -1144,13 +1128,17 @@
 
       currentRows = await buildHistoricalRows(selected.battle);
 
+      const historicalMeta = (nongHistoryData || []).find(
+        item => normalizeKey(item.battle) === normalizeKey(selected.battle)
+      );
+
       clanData = {
         battle: selected.battle,
         display_name: selected.display_name || selected.battle,
         battle_end_iso: null,
         clan_rank: getNumericPlacement(selected),
         projected_rank: null,
-        snapshot_at: selected.last_snapshot || null
+        snapshot_at: historicalMeta?.snapshot_at || selected.last_snapshot || null
       };
 
       startCountdown(null);
@@ -1166,10 +1154,11 @@
       try {
         const cacheBust = Date.now();
 
-        const [currentRes, battlesRes, playersRes] = await Promise.all([
+        const [currentRes, battlesRes, playersRes, nongHistoryRes] = await Promise.all([
           fetch(`Data/current.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" })
+          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/nong-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
         if (!currentRes.ok) {
@@ -1187,6 +1176,9 @@
 
         playerIndex = playersRes.ok ? await playersRes.json() : [];
         if (!Array.isArray(playerIndex)) playerIndex = [];
+
+        nongHistoryData = nongHistoryRes.ok ? await nongHistoryRes.json() : [];
+        if (!Array.isArray(nongHistoryData)) nongHistoryData = [];
 
         if (!activeBattle) {
           activeBattle = "current";
