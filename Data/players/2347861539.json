@@ -1,0 +1,44 @@
+{
+  "profile_key": "2347861539",
+  "user_id": 2347861539,
+  "username": "Rocky_0310",
+  "usernames_seen": [
+    "Rocky_0310"
+  ],
+  "avatar_url": "assets/avatars/2347861539.png",
+  "profile_url": "https://www.roblox.com/users/2347861539/profile",
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T13:51:38.704Z",
+  "latest_rank": 57,
+  "latest_points": 0,
+  "battles": [
+    {
+      "battle": "StarryBattle",
+      "display_name": "Starry Battle",
+      "battle_first_snapshot": "2026-04-29T18:11:01.131Z",
+      "battle_last_snapshot": "2026-05-11T13:51:38.704Z",
+      "first_seen": "2026-05-11T13:51:38.704Z",
+      "first_active_date": "2026-05-11T13:51:38.704Z",
+      "last_seen": "2026-05-11T13:51:38.704Z",
+      "starting_rank": 57,
+      "last_rank": 57,
+      "end_rank": 57,
+      "best_rank": 57,
+      "worst_rank": 57,
+      "starting_points": 0,
+      "ending_points": 0,
+      "max_points": 0,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T13:51:38.704Z",
+          "rank": 57,
+          "points": 0
+        }
+      ]
+    }
+  ]
+}
