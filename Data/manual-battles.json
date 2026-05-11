@@ -153,7 +153,7 @@
     "battle": "Safety Battle",
     "display_name": "Safety Battle",
     "api_battle_key": null,
-    "nong_results_table": null,
+    "nong_results_table": "SafetyBattleNONG",
     "clan_results_table": null,
     "first_snapshot": "2024-07-20T12:00:00.524Z",
     "last_snapshot": "2024-08-02T12:00:00.524Z",
