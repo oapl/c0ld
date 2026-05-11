@@ -19,7 +19,10 @@
   <meta name="twitter:image" content="https://opalapocalypse.github.io/NONG_Leaderboard/assets/preview.png" />
 
   <style>
-    *, *::before, *::after { box-sizing: border-box; }
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
     :root {
       --bg: #0d1117;
       --panel: #161b22;
@@ -41,8 +44,14 @@
       min-height: 100vh;
     }
 
-    a { color: var(--link); text-decoration: none; }
-    a:hover { text-decoration: none; }
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: none;
+    }
 
     header {
       background: var(--panel);
@@ -206,8 +215,13 @@
       transition: background 0.15s ease, border-color 0.15s ease;
     }
 
-    input { min-width: 230px; }
-    button { cursor: pointer; }
+    input {
+      min-width: 230px;
+    }
+
+    button {
+      cursor: pointer;
+    }
 
     button:hover,
     select:hover,
@@ -216,7 +230,9 @@
       background: var(--hover);
     }
 
-    .table-wrap { overflow-x: auto; }
+    .table-wrap {
+      overflow-x: auto;
+    }
 
     table {
       width: 100%;
@@ -239,10 +255,17 @@
       cursor: pointer;
     }
 
-    th:hover { color: var(--text); }
+    th:hover {
+      color: var(--text);
+    }
 
-    tbody tr { transition: background 0.12s ease; }
-    tbody tr:hover { background: var(--hover); }
+    tbody tr {
+      transition: background 0.12s ease;
+    }
+
+    tbody tr:hover {
+      background: var(--hover);
+    }
 
     .rank {
       width: 80px;
@@ -264,14 +287,18 @@
       flex: 0 0 auto;
     }
 
-    .player-name { font-weight: bold; }
+    .player-name {
+      font-weight: bold;
+    }
 
     .num {
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
 
-    .hidden { display: none; }
+    .hidden {
+      display: none;
+    }
 
     .history-note {
       color: var(--muted);
@@ -319,25 +346,52 @@
     }
 
     @media (max-width: 1000px) {
-      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 900px) {
-      .history-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .history-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 700px) {
-      header { padding: 14px 16px 10px; }
-      main { padding: 16px; }
-      .title-wrap h1 { font-size: 24px; }
-      input, select { width: 100%; min-width: 0; }
-      .toolbar { width: 100%; }
-      .cards { grid-template-columns: 1fr; }
-      .menu-bar { justify-content: flex-start; }
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 24px;
+      }
+
+      input, select {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .toolbar {
+        width: 100%;
+      }
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
     }
 
     @media (max-width: 550px) {
-      .history-stats { grid-template-columns: 1fr; }
+      .history-stats {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -492,10 +546,13 @@
     let playerIndexByUsername = new Map();
 
     let activeBattle = "current";
+
     let sortKey = "rank";
     let sortAsc = true;
+
     let historySortKey = "update_number";
     let historySortAsc = false;
+
     let refreshTimer = null;
     let countdownTimer = null;
     let isLoading = false;
@@ -530,6 +587,7 @@
 
     function fmtShortNum(n) {
       if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
+
       const num = Number(n);
       const tiers = [
         { value: 1e12, suffix: "T" },
@@ -537,11 +595,13 @@
         { value: 1e6, suffix: "M" },
         { value: 1e3, suffix: "K" }
       ];
+
       for (const tier of tiers) {
         if (Math.abs(num) >= tier.value) {
           return (num / tier.value).toFixed(2).replace(/\.?0+$/, "") + tier.suffix;
         }
       }
+
       return String(num);
     }
 
@@ -549,6 +609,7 @@
       if (!s) return "—";
       const d = new Date(s);
       if (Number.isNaN(d.getTime())) return "—";
+
       return d.toLocaleDateString(undefined, {
         year: "numeric",
         month: "short",
@@ -560,6 +621,7 @@
       if (!s) return "—";
       const d = new Date(s);
       if (Number.isNaN(d.getTime())) return "—";
+
       return d.toLocaleString(undefined, {
         dateStyle: "short",
         timeStyle: "short"
@@ -568,11 +630,13 @@
 
     function fmtCountdown(ms) {
       if (ms <= 0) return "Ended";
+
       const totalSeconds = Math.floor(ms / 1000);
       const days = Math.floor(totalSeconds / 86400);
       const hours = Math.floor((totalSeconds % 86400) / 3600);
       const minutes = Math.floor((totalSeconds % 3600) / 60);
       const seconds = totalSeconds % 60;
+
       return `${days}d ${hours}h ${minutes}m ${seconds}s`;
     }
 
@@ -599,7 +663,9 @@
 
     async function resolveLiveAvatarUrls(rows) {
       const ids = [...new Set(
-        rows.map(r => String(r.user_id || "").trim()).filter(Boolean)
+        rows
+          .map(r => String(r.user_id || "").trim())
+          .filter(Boolean)
       )];
 
       if (!ids.length) {
@@ -649,9 +715,14 @@
 
     function getNumericPlacement(battle) {
       const raw = getPlacement(battle);
-      if (raw === null || raw === undefined || raw === "") return null;
+
+      if (raw === null || raw === undefined || raw === "") {
+        return null;
+      }
+
       const cleaned = String(raw).replace("#", "").trim();
       const value = Number(cleaned);
+
       return Number.isFinite(value) ? value : null;
     }
 
@@ -660,33 +731,60 @@
 
       if (placement !== null && placement !== undefined && placement !== "") {
         const numeric = getNumericPlacement(b);
-        if (numeric !== null) return `#${numeric}`;
+
+        if (numeric !== null) {
+          return `#${numeric}`;
+        }
+
         return String(placement);
       }
 
       const endMs = parseDateValue(b.last_snapshot);
       const nowMs = Date.now();
-      if (endMs && endMs > nowMs - 48 * 60 * 60 * 1000) return "TBD";
+
+      if (endMs && endMs > nowMs - 48 * 60 * 60 * 1000) {
+        return "TBD";
+      }
+
       return "—";
     }
 
     function calculateHistoryStats() {
       const totalBattles = battles.length;
-      const numericPlacements = battles.map(getNumericPlacement).filter(value => value !== null);
+
+      const numericPlacements = battles
+        .map(getNumericPlacement)
+        .filter(value => value !== null);
+
       const participated = numericPlacements.length;
+
       const top10 = numericPlacements.filter(value => value >= 1 && value <= 10).length;
       const top30 = numericPlacements.filter(value => value >= 11 && value <= 30).length;
       const top100 = numericPlacements.filter(value => value >= 31 && value <= 100).length;
 
-      return { totalBattles, participated, top10, top30, top100 };
+      return {
+        totalBattles,
+        participated,
+        top10,
+        top30,
+        top100
+      };
     }
 
     function renderHistoryStats() {
       const stats = calculateHistoryStats();
-      document.getElementById("stat-participation").textContent = `${stats.participated}/${stats.totalBattles}`;
-      document.getElementById("stat-top-10").textContent = stats.top10.toLocaleString("en-US");
-      document.getElementById("stat-top-30").textContent = stats.top30.toLocaleString("en-US");
-      document.getElementById("stat-top-100").textContent = stats.top100.toLocaleString("en-US");
+
+      document.getElementById("stat-participation").textContent =
+        `${stats.participated}/${stats.totalBattles}`;
+
+      document.getElementById("stat-top-10").textContent =
+        stats.top10.toLocaleString("en-US");
+
+      document.getElementById("stat-top-30").textContent =
+        stats.top30.toLocaleString("en-US");
+
+      document.getElementById("stat-top-100").textContent =
+        stats.top100.toLocaleString("en-US");
     }
 
     function fmtUpdateLink(battle) {
@@ -698,15 +796,21 @@
       }
 
       const label = `Update #${escapeHtml(updateNumber)}`;
+
       if (updateUrl) {
         return `<a href="${escapeHtml(updateUrl)}" target="_blank" rel="noopener">${label}</a>`;
       }
+
       return label;
     }
 
     function fmtBattleHistoryLink(battle) {
       const label = escapeHtml(battle.display_name || battle.battle || "Unknown");
-      if (!battle.nong_results_table) return label;
+
+      if (!battle.nong_results_table) {
+        return label;
+      }
+
       return `<a href="?battle=${encodeURIComponent(battle.battle)}">${label}</a>`;
     }
 
@@ -717,6 +821,7 @@
         .filter(v => v !== null);
 
       if (!rowTimes.length) return currentData?.generated_at || null;
+
       return new Date(Math.max(...rowTimes)).toISOString();
     }
 
@@ -725,9 +830,18 @@
       const profileKey = String(row.profile_key || "").trim();
       const usernameKey = normalizeName(row.username);
 
-      if (userId && playerIndexByUserId.has(userId)) return playerIndexByUserId.get(userId);
-      if (profileKey && playerIndexByProfileKey.has(profileKey)) return playerIndexByProfileKey.get(profileKey);
-      if (usernameKey && playerIndexByUsername.has(usernameKey)) return playerIndexByUsername.get(usernameKey);
+      if (userId && playerIndexByUserId.has(userId)) {
+        return playerIndexByUserId.get(userId);
+      }
+
+      if (profileKey && playerIndexByProfileKey.has(profileKey)) {
+        return playerIndexByProfileKey.get(profileKey);
+      }
+
+      if (usernameKey && playerIndexByUsername.has(usernameKey)) {
+        return playerIndexByUsername.get(usernameKey);
+      }
+
       return null;
     }
 
@@ -735,9 +849,12 @@
       const userId = String(row.user_id || "").trim();
       const match = getAvatarMatch(row);
 
+      if (row.avatar_url) return row.avatar_url;
+      if (match?.avatar_url) return match.avatar_url;
       if (userId && liveAvatarUrls.has(userId)) return liveAvatarUrls.get(userId);
       if (match?.profile_key) return `assets/avatars/${encodeURIComponent(match.profile_key)}.png`;
       if (row.profile_key) return `assets/avatars/${encodeURIComponent(row.profile_key)}.png`;
+
       return DEFAULT_AVATAR_SVG;
     }
 
@@ -747,8 +864,15 @@
       const usernameKey = normalizeName(row.username);
 
       if (profileKey) return profileKey;
-      if (userId && playerIndexByUserId.has(userId)) return playerIndexByUserId.get(userId).profile_key || userId;
-      if (usernameKey && playerIndexByUsername.has(usernameKey)) return playerIndexByUsername.get(usernameKey).profile_key || row.username;
+
+      if (userId && playerIndexByUserId.has(userId)) {
+        return playerIndexByUserId.get(userId).profile_key || userId;
+      }
+
+      if (usernameKey && playerIndexByUsername.has(usernameKey)) {
+        return playerIndexByUsername.get(usernameKey).profile_key || row.username;
+      }
+
       if (userId) return userId;
       return row.username;
     }
@@ -756,9 +880,11 @@
     function normalizeCurrentRows(rows) {
       return rows.map(row => {
         const match = getAvatarMatch(row);
+
         return {
           ...row,
-          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username
+          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || match?.avatar_url || null
         };
       });
     }
@@ -776,7 +902,9 @@
         item => normalizeKey(item.battle) === normalizeKey(battleName)
       );
 
-      if (!battle || !Array.isArray(battle.rows)) return [];
+      if (!battle || !Array.isArray(battle.rows)) {
+        return [];
+      }
 
       return battle.rows.map(row => {
         const match = getAvatarMatch(row);
@@ -787,6 +915,7 @@
           username: row.username,
           user_id: row.user_id,
           profile_key: row.profile_key || match?.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || match?.avatar_url || null,
           total_points: row.total_points,
           gain_5m: row.gain_5m ?? null,
           gain_1h: row.gain_1h ?? null,
@@ -799,6 +928,7 @@
 
     function getVisibleRows() {
       const q = document.getElementById("search").value.trim().toLowerCase();
+
       let list = currentRows.slice();
 
       if (q) {
@@ -811,10 +941,12 @@
       list.sort((a, b) => {
         const av = a[sortKey];
         const bv = b[sortKey];
+
         const an = Number(av);
         const bn = Number(bv);
 
         let result;
+
         if (!Number.isNaN(an) && !Number.isNaN(bn)) {
           result = an - bn;
         } else {
@@ -849,6 +981,7 @@
         const bd = parseDateValue(bv);
 
         let result;
+
         if (ad !== null && bd !== null) {
           result = ad - bd;
         } else {
@@ -882,6 +1015,7 @@
 
         const ad = parseDateValue(a.last_snapshot) || 0;
         const bd = parseDateValue(b.last_snapshot) || 0;
+
         if (ad !== bd) return bd - ad;
 
         return String(a.display_name || a.battle || "").localeCompare(
@@ -898,16 +1032,22 @@
       const rank = clanData?.clan_rank ?? currentData?.clan_rank ?? null;
       const projectedRank = clanData?.projected_rank ?? currentData?.projected_rank ?? null;
 
-      document.getElementById("nong-rank-value").textContent = rank ? `#${rank}` : "—";
+      document.getElementById("nong-rank-value").textContent =
+        rank ? `#${rank}` : "—";
 
       const latest = clanData?.snapshot_at || getCurrentFetchedAt();
-      document.getElementById("db-update-value").textContent = latest ? fmtDateTime(latest) : "—";
-      document.getElementById("projected-rank-value").textContent = projectedRank ? `#${projectedRank}` : "—";
+
+      document.getElementById("db-update-value").textContent =
+        latest ? fmtDateTime(latest) : "—";
+
+      document.getElementById("projected-rank-value").textContent =
+        projectedRank ? `#${projectedRank}` : "—";
     }
 
     function renderLeaderboard() {
       const tbody = document.getElementById("leaderboard-body");
       const visible = getVisibleRows();
+
       tbody.innerHTML = "";
 
       if (!visible.length) {
@@ -949,6 +1089,7 @@
     function renderHistoryTable() {
       const tbody = document.getElementById("history-body");
       const visible = getVisibleHistory();
+
       tbody.innerHTML = "";
 
       if (!visible.length) {
@@ -1000,7 +1141,9 @@
         option => normalizeKey(option.value) === normalizeKey(activeBattle)
       );
 
-      if (!exists) activeBattle = "current";
+      if (!exists) {
+        activeBattle = "current";
+      }
 
       select.innerHTML = options.map(option => `
         <option value="${escapeHtml(option.value)}" ${
@@ -1136,7 +1279,9 @@
         nongHistoryData = nongHistoryRes.ok ? await nongHistoryRes.json() : [];
         if (!Array.isArray(nongHistoryData)) nongHistoryData = [];
 
-        if (!activeBattle) activeBattle = "current";
+        if (!activeBattle) {
+          activeBattle = "current";
+        }
 
         await applyBattleSelection();
 
@@ -1217,12 +1362,17 @@
       if (window.location.search) {
         const params = new URLSearchParams(window.location.search);
         const battle = params.get("battle");
-        if (battle) activeBattle = battle;
+        if (battle) {
+          activeBattle = battle;
+        }
       }
 
       await loadData();
 
-      if (refreshTimer) clearInterval(refreshTimer);
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+
       refreshTimer = setInterval(() => {
         loadData();
       }, AUTO_REFRESH_MS);
