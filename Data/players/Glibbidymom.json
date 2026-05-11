@@ -1,16 +1,13 @@
 {
   "profile_key": "Glibbidymom",
-  "user_id": null,
   "username": "Glibbidymom",
-  "usernames_seen": [
-    "Glibbidymom"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 58,
   "latest_points": 1559849,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",

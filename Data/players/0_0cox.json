@@ -1,16 +1,13 @@
 {
   "profile_key": "0_0cox",
-  "user_id": null,
   "username": "0_0cox",
-  "usernames_seen": [
-    "0_0cox"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 67,
   "latest_points": 517510,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

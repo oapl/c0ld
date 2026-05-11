@@ -1,16 +1,13 @@
 {
   "profile_key": "Aqua_MC",
-  "user_id": null,
   "username": "Aqua_MC",
-  "usernames_seen": [
-    "Aqua_MC"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 8,
   "latest_points": 899250,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

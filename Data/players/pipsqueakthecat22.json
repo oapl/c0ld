@@ -1,16 +1,13 @@
 {
   "profile_key": "pipsqueakthecat22",
-  "user_id": null,
   "username": "pipsqueakthecat22",
-  "usernames_seen": [
-    "pipsqueakthecat22"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 52,
   "latest_points": 1737328,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",

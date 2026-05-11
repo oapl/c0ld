@@ -1,16 +1,13 @@
 {
   "profile_key": "LegendaryDarkwolf1",
-  "user_id": null,
   "username": "LegendaryDarkwolf1",
-  "usernames_seen": [
-    "LegendaryDarkwolf1"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 34,
   "latest_points": 733510,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

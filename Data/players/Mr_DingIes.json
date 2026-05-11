@@ -1,16 +1,13 @@
 {
   "profile_key": "Mr_DingIes",
-  "user_id": null,
   "username": "Mr_DingIes",
-  "usernames_seen": [
-    "Mr_DingIes"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 47,
   "latest_points": 1938768,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",

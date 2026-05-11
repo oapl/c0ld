@@ -1,16 +1,13 @@
 {
   "profile_key": "xtwinsiewitx",
-  "user_id": null,
   "username": "xtwinsiewitx",
-  "usernames_seen": [
-    "xtwinsiewitx"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 18,
   "latest_points": 820450,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

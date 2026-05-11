@@ -1,16 +1,13 @@
 {
   "profile_key": "jonizzy113",
-  "user_id": null,
   "username": "jonizzy113",
-  "usernames_seen": [
-    "jonizzy113"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 75,
   "latest_points": 150050,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

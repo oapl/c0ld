@@ -1,16 +1,13 @@
 {
   "profile_key": "Not_IcePop",
-  "user_id": null,
   "username": "Not_IcePop",
-  "usernames_seen": [
-    "Not_IcePop"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 56,
   "latest_points": 1569153,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",

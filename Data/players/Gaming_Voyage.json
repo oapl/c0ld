@@ -1,16 +1,13 @@
 {
   "profile_key": "Gaming_Voyage",
-  "user_id": null,
   "username": "Gaming_Voyage",
-  "usernames_seen": [
-    "Gaming_Voyage"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 65,
   "latest_points": 556880,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

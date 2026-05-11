@@ -1,16 +1,13 @@
 {
   "profile_key": "JFoley26",
-  "user_id": null,
   "username": "JFoley26",
-  "usernames_seen": [
-    "JFoley26"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 42,
   "latest_points": 691820,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

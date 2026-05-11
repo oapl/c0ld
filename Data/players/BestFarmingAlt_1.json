@@ -1,16 +1,13 @@
 {
   "profile_key": "BestFarmingAlt_1",
-  "user_id": null,
   "username": "BestFarmingAlt_1",
-  "usernames_seen": [
-    "BestFarmingAlt_1"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 9,
   "latest_points": 882160,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

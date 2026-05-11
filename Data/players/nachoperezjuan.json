@@ -1,16 +1,13 @@
 {
   "profile_key": "nachoperezjuan",
-  "user_id": null,
   "username": "nachoperezjuan",
-  "usernames_seen": [
-    "nachoperezjuan"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 44,
   "latest_points": 682130,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

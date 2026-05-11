@@ -1,16 +1,13 @@
 {
   "profile_key": "Zen_Syre",
-  "user_id": null,
   "username": "Zen_Syre",
-  "usernames_seen": [
-    "Zen_Syre"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 23,
   "latest_points": 802090,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

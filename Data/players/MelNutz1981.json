@@ -1,16 +1,13 @@
 {
   "profile_key": "MelNutz1981",
-  "user_id": null,
   "username": "MelNutz1981",
-  "usernames_seen": [
-    "MelNutz1981"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 2,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 7,
   "latest_points": 907840,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

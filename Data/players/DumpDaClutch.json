@@ -1,16 +1,13 @@
 {
   "profile_key": "DumpDaClutch",
-  "user_id": null,
   "username": "DumpDaClutch",
-  "usernames_seen": [
-    "DumpDaClutch"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 9,
   "latest_points": 8128411,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",

@@ -1,16 +1,13 @@
 {
   "profile_key": "anrijs9991",
-  "user_id": null,
   "username": "anrijs9991",
-  "usernames_seen": [
-    "anrijs9991"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
   "latest_rank": 55,
   "latest_points": 597730,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
   "battles": [
     {
       "battle": "Safety Battle",

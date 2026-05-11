@@ -1,16 +1,13 @@
 {
   "profile_key": "Scytive",
-  "user_id": null,
   "username": "Scytive",
-  "usernames_seen": [
-    "Scytive"
-  ],
+  "user_id": null,
   "avatar_url": null,
   "profile_url": null,
   "total_battles": 1,
-  "latest_seen": "2026-05-01T17:23:15.585Z",
   "latest_rank": 36,
   "latest_points": 2332840,
+  "latest_seen": "2026-05-01T17:23:15.585Z",
   "battles": [
     {
       "battle": "Poison Turtle Battle",
