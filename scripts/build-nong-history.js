@@ -8,6 +8,8 @@ const DATA_DIR = path.join(process.cwd(), "Data");
 const MANUAL_BATTLES_FILE = path.join(DATA_DIR, "manual-battles.json");
 const PLAYER_INDEX_FILE = path.join(DATA_DIR, "player-index.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "nong-history.json");
+const AVATAR_DIR = path.join(process.cwd(), "assets", "avatars");
+const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
 const ROBLOX_USERNAME_BATCH_SIZE = 100;
@@ -54,6 +56,19 @@ function chunkArray(arr, size) {
     out.push(arr.slice(i, i + size));
   }
   return out;
+}
+
+async function ensureDir(dir) {
+  await fs.mkdir(dir, { recursive: true });
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readJsonArray(filePath) {
@@ -144,7 +159,6 @@ async function supabaseSelectAll(tableName) {
     }
 
     const batch = await res.json();
-
     if (!Array.isArray(batch)) {
       throw new Error(`Supabase response for ${tableName} was not an array.`);
     }
@@ -339,6 +353,48 @@ async function fetchRobloxHeadshots(userIds) {
   return map;
 }
 
+async function downloadAvatarToCache(cacheKey, imageUrl) {
+  if (!cacheKey || !imageUrl) return null;
+
+  await ensureDir(AVATAR_DIR);
+
+  const fileName = `${cacheKey}.png`;
+  const filePath = path.join(AVATAR_DIR, fileName);
+  const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
+
+  if (await fileExists(filePath)) return publicPath;
+
+  try {
+    const res = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "NONG-Leaderboard-History-Avatar-Cache"
+      }
+    });
+
+    if (!res.ok) {
+      console.warn(`Historical avatar download failed for ${cacheKey}: HTTP ${res.status}`);
+      return imageUrl;
+    }
+
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!bytes.length) return imageUrl;
+
+    await fs.writeFile(filePath, bytes);
+    return publicPath;
+  } catch (err) {
+    console.warn(`Historical avatar cache error for ${cacheKey}: ${err.message}`);
+    return imageUrl;
+  }
+}
+
+async function cacheAvatarRows(rows) {
+  for (const row of rows) {
+    const cacheKey = String(row.profile_key || row.user_id || row.username || "").trim();
+    if (!cacheKey || !row.avatar_url) continue;
+    row.avatar_url = await downloadAvatarToCache(cacheKey, row.avatar_url);
+  }
+}
+
 async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
   const missingUsernameLookups = rows
     .filter(row => !row.user_id && row.username)
@@ -379,10 +435,11 @@ async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
       match = playerMaps.byUsername.get(usernameKey);
     }
 
-    row.profile_key = match?.profile_key || row.profile_key || row.user_id || row.username;
+    row.profile_key = String(match?.profile_key || row.profile_key || row.user_id || row.username || "").trim();
     row.avatar_url = row.avatar_url || match?.avatar_url || (userId ? thumbMap.get(userId) || null : null);
   }
 
+  await cacheAvatarRows(rows);
   return rows;
 }
 
@@ -451,9 +508,7 @@ async function main() {
     }));
 
   const deduped = new Map();
-  for (const item of declared) {
-    deduped.set(normalizeKey(item.battle), item);
-  }
+  for (const item of declared) deduped.set(normalizeKey(item.battle), item);
 
   const output = [];
 
@@ -461,7 +516,6 @@ async function main() {
     console.log(`Reading historical NONG table: ${item.source_table} -> ${item.battle}`);
 
     const rawRows = await supabaseSelectAll(item.source_table);
-
     const normalizedRows = rawRows
       .map(normalizePlayerRow)
       .filter(row => row.username && row.total_points !== null);
@@ -489,27 +543,17 @@ async function main() {
   output.sort((a, b) => {
     const au = Number(a.update_number);
     const bu = Number(b.update_number);
-
-    if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
-      return bu - au;
-    }
-
+    if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) return bu - au;
     if (Number.isFinite(au) && !Number.isFinite(bu)) return -1;
     if (!Number.isFinite(au) && Number.isFinite(bu)) return 1;
 
     const ad = new Date(a.last_snapshot || a.snapshot_at || 0).getTime() || 0;
     const bd = new Date(b.last_snapshot || b.snapshot_at || 0).getTime() || 0;
-
     return bd - ad;
   });
 
   await fs.mkdir(DATA_DIR, { recursive: true });
-
-  await fs.writeFile(
-    OUTPUT_FILE,
-    JSON.stringify(output, null, 2) + "\n",
-    "utf8"
-  );
+  await fs.writeFile(OUTPUT_FILE, JSON.stringify(output, null, 2) + "\n", "utf8");
 
   console.log(`Historical NONG battles written: ${output.length}`);
   console.log(`Updated ${OUTPUT_FILE}`);
