@@ -1,6 +1,10 @@
 // scripts/build-clan-history.js
 // Builds Data/clans-history.json from battle-specific historical clan tables.
 //
+// Supports both:
+//   - newer tables with fetched_at
+//   - older legacy tables with created_at / snapshot_at / no timestamp
+//
 // Reads:
 //   Data/manual-battles.json
 //
@@ -11,10 +15,6 @@
 //
 // Output:
 //   Data/clans-history.json
-//
-// Each battle entry contains only the LATEST snapshot rows from that battle's
-// historical clan table, plus computed gains and projected ranks based on that
-// table's own historical snapshots.
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -59,6 +59,15 @@ function dateOrNull(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
 async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
@@ -78,16 +87,17 @@ async function readJsonArray(filePath) {
 async function supabaseSelectAll(tableName) {
   const rows = [];
   let from = 0;
+  let orderClause = "fetched_at.desc";
 
   while (true) {
     const to = from + PAGE_SIZE - 1;
 
-    const url =
+    let url =
       `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
       `?select=*` +
-      `&order=fetched_at.desc`;
+      `&order=${encodeURIComponent(orderClause)}`;
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: "GET",
       headers: {
         apikey: SUPABASE_KEY,
@@ -105,7 +115,35 @@ async function supabaseSelectAll(tableName) {
         return null;
       }
 
-      throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
+      const missingFetchedAt =
+        res.status === 400 &&
+        text.toLowerCase().includes("fetched_at") &&
+        text.toLowerCase().includes("does not exist");
+
+      if (missingFetchedAt && orderClause === "fetched_at.desc") {
+        orderClause = "rank.asc.nullslast";
+        url =
+          `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
+          `?select=*` +
+          `&order=${encodeURIComponent(orderClause)}`;
+
+        res = await fetch(url, {
+          method: "GET",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            Range: `${from}-${to}`,
+            Prefer: "count=exact"
+          }
+        });
+
+        if (!res.ok) {
+          const retryText = await res.text().catch(() => "");
+          throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${retryText}`);
+        }
+      } else {
+        throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
+      }
     }
 
     const batch = await res.json();
@@ -125,10 +163,20 @@ async function supabaseSelectAll(tableName) {
 
 function normalizeClanRow(row) {
   return {
-    fetched_at: dateOrNull(row.fetched_at || row.created_at || row.snapshot_at),
+    fetched_at: dateOrNull(
+      firstNonEmpty(
+        row.fetched_at,
+        row.created_at,
+        row.snapshot_at,
+        row.updated_at,
+        row.inserted_at
+      )
+    ),
     rank: numberOrNull(row.rank),
-    clan_name: stringOrNull(row.clan_name || row.clan || row.name || row.tag),
-    points: numberOrNull(row.points ?? row.total_points)
+    clan_name: stringOrNull(
+      firstNonEmpty(row.clan_name, row.clan, row.name, row.tag)
+    ),
+    points: numberOrNull(firstNonEmpty(row.points, row.total_points))
   };
 }
 
@@ -136,8 +184,7 @@ function groupRowsByTimestamp(rows) {
   const map = new Map();
 
   for (const row of rows) {
-    const ts = row.fetched_at;
-    if (!ts) continue;
+    const ts = row.fetched_at || "__no_timestamp__";
     if (!map.has(ts)) map.set(ts, []);
     map.get(ts).push(row);
   }
@@ -148,15 +195,33 @@ function groupRowsByTimestamp(rows) {
 function getLatestSnapshotRows(rows) {
   if (!rows.length) return [];
 
+  const timestamped = rows.filter(row => row.fetched_at);
+
+  if (!timestamped.length) {
+    return rows
+      .slice()
+      .sort((a, b) => {
+        const ar = Number(a.rank ?? 999999);
+        const br = Number(b.rank ?? 999999);
+        if (ar !== br) return ar - br;
+
+        const ap = Number(a.points || 0);
+        const bp = Number(b.points || 0);
+        if (ap !== bp) return bp - ap;
+
+        return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+      });
+  }
+
   const latestMs = Math.max(
-    ...rows
+    ...timestamped
       .map(row => new Date(row.fetched_at).getTime())
       .filter(ms => !Number.isNaN(ms))
   );
 
   if (!Number.isFinite(latestMs)) return [];
 
-  return rows
+  return timestamped
     .filter(row => new Date(row.fetched_at).getTime() === latestMs)
     .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 }
@@ -166,6 +231,8 @@ function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
   let best = null;
 
   for (const [ts, batch] of grouped.entries()) {
+    if (ts === "__no_timestamp__") continue;
+
     const ms = new Date(ts).getTime();
     if (Number.isNaN(ms)) continue;
 
@@ -194,6 +261,8 @@ function buildPointMap(rows) {
 }
 
 function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
+  if (!Number.isFinite(latestMs)) return null;
+
   const targetMs = latestMs - hours * 60 * 60 * 1000;
   const oldRows = getNearestSnapshotRows(allRows, targetMs, toleranceMin);
   const oldMap = buildPointMap(oldRows);
@@ -262,21 +331,25 @@ function calculateBattleRows(snapshotRows) {
 
   const latestMs = Math.max(
     ...latestRows
-      .map(row => new Date(row.fetched_at).getTime())
+      .map(row => row.fetched_at ? new Date(row.fetched_at).getTime() : NaN)
       .filter(ms => !Number.isNaN(ms))
   );
 
+  const hasHistoricalTimestamps = Number.isFinite(latestMs);
+
   const projectedRows = latestRows.map(row => {
-    const rate = chooseProjectionRate(row, snapshotRows, latestMs);
+    const rate = hasHistoricalTimestamps
+      ? chooseProjectionRate(row, snapshotRows, latestMs)
+      : { basis: "none", gain: 0, rate_per_hour: 0 };
 
     return {
       rank: numberOrNull(row.rank),
       clan_name: row.clan_name,
       points: numberOrNull(row.points),
-      gain_5m: getGain(row, snapshotRows, latestMs, 5 / 60, 4),
-      gain_1h: getGain(row, snapshotRows, latestMs, 1, 15),
-      gain_12h: getGain(row, snapshotRows, latestMs, 12, 45),
-      gain_24h: getGain(row, snapshotRows, latestMs, 24, 90),
+      gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
+      gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
+      gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
+      gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null,
       projection_basis: rate.basis,
       rate_per_hour: rate.rate_per_hour,
       projected_points: Math.round(Number(row.points || 0))
@@ -338,7 +411,7 @@ async function main() {
 
     const normalizedRows = rawRows
       .map(normalizeClanRow)
-      .filter(row => row.clan_name && row.points !== null && row.fetched_at);
+      .filter(row => row.clan_name && row.points !== null);
 
     const calculated = calculateBattleRows(normalizedRows);
 
