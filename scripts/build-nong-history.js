@@ -10,6 +10,7 @@ const PLAYER_INDEX_FILE = path.join(DATA_DIR, "player-index.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "nong-history.json");
 
 const PAGE_SIZE = 1000;
+const ROBLOX_THUMB_BATCH_SIZE = 100;
 
 if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
 if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
@@ -44,6 +45,14 @@ function dateOrNull(value) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
 }
 
 async function readJsonArray(filePath) {
@@ -156,7 +165,9 @@ function normalizePlayerRow(row) {
     rank: numberOrNull(row.rank),
     username: stringOrNull(row.username || row.user || row.name),
     total_points: numberOrNull(row.total_points ?? row.points),
-    user_id: numberOrNull(row.user_id)
+    user_id: numberOrNull(row.user_id),
+    avatar_url: stringOrNull(row.avatar_url),
+    profile_key: stringOrNull(row.profile_key)
   };
 }
 
@@ -250,7 +261,45 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   return Number(currentRow.total_points || 0) - oldPoints;
 }
 
-function calculateBattleRows(snapshotRows, playerMaps) {
+async function fetchRobloxHeadshots(userIds) {
+  const map = new Map();
+  const uniqueIds = [...new Set((userIds || []).map(v => String(v || "").trim()).filter(Boolean))];
+
+  for (const batch of chunkArray(uniqueIds, ROBLOX_THUMB_BATCH_SIZE)) {
+    const url =
+      "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
+      `?userIds=${encodeURIComponent(batch.join(","))}` +
+      "&size=150x150&format=Png&isCircular=false";
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "NONG-Leaderboard-Avatar-Enrichment"
+      }
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Roblox thumbnail lookup failed (${res.status}): ${text}`);
+    }
+
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+
+    for (const item of data) {
+      const id = String(item?.targetId || "").trim();
+      const imageUrl = String(item?.imageUrl || "").trim();
+
+      if (id && imageUrl) {
+        map.set(id, imageUrl);
+      }
+    }
+  }
+
+  return map;
+}
+
+async function calculateBattleRows(snapshotRows, playerMaps) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
   if (!latestRows.length) {
@@ -268,6 +317,12 @@ function calculateBattleRows(snapshotRows, playerMaps) {
 
   const hasHistoricalTimestamps = Number.isFinite(latestMs);
 
+  const unresolvedUserIds = latestRows
+    .map(row => String(row.user_id || "").trim())
+    .filter(Boolean);
+
+  const thumbnailMap = await fetchRobloxHeadshots(unresolvedUserIds);
+
   const rows = latestRows.map(row => {
     const userId = String(row.user_id || "").trim();
     const usernameKey = normalizeName(row.username);
@@ -282,13 +337,18 @@ function calculateBattleRows(snapshotRows, playerMaps) {
       match = playerMaps.byUsername.get(usernameKey);
     }
 
+    const avatarUrl =
+      row.avatar_url ||
+      match?.avatar_url ||
+      (userId ? thumbnailMap.get(userId) || null : null);
+
     return {
       rank: numberOrNull(row.rank),
       username: row.username,
       total_points: numberOrNull(row.total_points),
       user_id: numberOrNull(row.user_id),
-      profile_key: match?.profile_key || row.user_id || row.username,
-      avatar_url: match?.avatar_url || null,
+      profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
+      avatar_url: avatarUrl,
       fetched_at: row.fetched_at,
       gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
       gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
@@ -344,7 +404,7 @@ async function main() {
       .map(normalizePlayerRow)
       .filter(row => row.username && row.total_points !== null);
 
-    const calculated = calculateBattleRows(normalizedRows, playerMaps);
+    const calculated = await calculateBattleRows(normalizedRows, playerMaps);
 
     output.push({
       battle: item.battle,
