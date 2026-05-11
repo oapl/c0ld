@@ -1,22 +1,20 @@
 // scripts/build-clan-history.js
-// Builds Data/clans-history.json from manually declared historical clan tables.
+// Builds Data/clans-history.json from battle-specific historical clan tables.
 //
 // Reads:
 //   Data/manual-battles.json
 //
 // Uses:
-//   battle              = website/dropdown/URL key
-//   display_name        = pretty label
-//   clan_results_table  = exact Supabase top-clans table
+//   battle
+//   display_name
+//   clan_results_table
 //
 // Output:
 //   Data/clans-history.json
 //
-// Required env:
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_KEY
-//
-// Missing clan tables are skipped instead of failing the whole workflow.
+// Each battle entry contains only the LATEST snapshot rows from that battle's
+// historical clan table, plus computed gains and projected ranks based on that
+// table's own historical snapshots.
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -38,6 +36,10 @@ function normalizeKey(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+}
+
+function clanKey(name) {
+  return normalizeKey(name);
 }
 
 function numberOrNull(value) {
@@ -83,7 +85,7 @@ async function supabaseSelectAll(tableName) {
     const url =
       `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
       `?select=*` +
-      `&order=rank.asc.nullslast`;
+      `&order=fetched_at.desc`;
 
     const res = await fetch(url, {
       method: "GET",
@@ -123,10 +125,108 @@ async function supabaseSelectAll(tableName) {
 
 function normalizeClanRow(row) {
   return {
+    fetched_at: dateOrNull(row.fetched_at || row.created_at || row.snapshot_at),
     rank: numberOrNull(row.rank),
-    clan: stringOrNull(row.clan || row.clan_name || row.name || row.tag),
-    points: numberOrNull(row.points ?? row.total_points),
-    created_at: dateOrNull(row.created_at || row.fetched_at || row.snapshot_at)
+    clan_name: stringOrNull(row.clan_name || row.clan || row.name || row.tag),
+    points: numberOrNull(row.points ?? row.total_points)
+  };
+}
+
+function groupRowsByTimestamp(rows) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const ts = row.fetched_at;
+    if (!ts) continue;
+    if (!map.has(ts)) map.set(ts, []);
+    map.get(ts).push(row);
+  }
+
+  return map;
+}
+
+function getLatestSnapshotRows(rows) {
+  if (!rows.length) return [];
+
+  const latestMs = Math.max(
+    ...rows
+      .map(row => new Date(row.fetched_at).getTime())
+      .filter(ms => !Number.isNaN(ms))
+  );
+
+  if (!Number.isFinite(latestMs)) return [];
+
+  return rows
+    .filter(row => new Date(row.fetched_at).getTime() === latestMs)
+    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
+}
+
+function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
+  const grouped = groupRowsByTimestamp(rows);
+  let best = null;
+
+  for (const [ts, batch] of grouped.entries()) {
+    const ms = new Date(ts).getTime();
+    if (Number.isNaN(ms)) continue;
+
+    const diff = Math.abs(ms - targetMs);
+
+    if (!best || diff < best.diff) {
+      best = { ts, batch, diff };
+    }
+  }
+
+  if (!best) return [];
+
+  const toleranceMs = toleranceMin * 60 * 1000;
+  if (best.diff > toleranceMs) return [];
+
+  return best.batch;
+}
+
+function buildPointMap(rows) {
+  return new Map(
+    rows.map(row => [
+      clanKey(row.clan_name),
+      Number(row.points || 0)
+    ])
+  );
+}
+
+function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
+  const targetMs = latestMs - hours * 60 * 60 * 1000;
+  const oldRows = getNearestSnapshotRows(allRows, targetMs, toleranceMin);
+  const oldMap = buildPointMap(oldRows);
+  const oldPoints = oldMap.get(clanKey(currentRow.clan_name));
+
+  if (oldPoints === undefined) return null;
+
+  return Number(currentRow.points || 0) - oldPoints;
+}
+
+function chooseProjectionRate(currentRow, allRows, latestMs) {
+  const windows = [
+    { basis: "12h", hours: 12, toleranceMin: 45 },
+    { basis: "1h", hours: 1, toleranceMin: 15 },
+    { basis: "24h", hours: 24, toleranceMin: 90 }
+  ];
+
+  for (const win of windows) {
+    const gain = getGain(currentRow, allRows, latestMs, win.hours, win.toleranceMin);
+
+    if (gain === null) continue;
+
+    return {
+      basis: win.basis,
+      gain,
+      rate_per_hour: gain / win.hours
+    };
+  }
+
+  return {
+    basis: "none",
+    gain: 0,
+    rate_per_hour: 0
   };
 }
 
@@ -144,10 +244,69 @@ function sortRows(rows) {
 
     if (ap !== bp) return bp - ap;
 
-    return String(a.clan || "").localeCompare(String(b.clan || ""));
+    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
   });
 
   return rows;
+}
+
+function calculateBattleRows(snapshotRows) {
+  const latestRows = getLatestSnapshotRows(snapshotRows);
+
+  if (!latestRows.length) {
+    return {
+      snapshot_at: null,
+      rows: []
+    };
+  }
+
+  const latestMs = Math.max(
+    ...latestRows
+      .map(row => new Date(row.fetched_at).getTime())
+      .filter(ms => !Number.isNaN(ms))
+  );
+
+  const projectedRows = latestRows.map(row => {
+    const rate = chooseProjectionRate(row, snapshotRows, latestMs);
+
+    return {
+      rank: numberOrNull(row.rank),
+      clan_name: row.clan_name,
+      points: numberOrNull(row.points),
+      gain_5m: getGain(row, snapshotRows, latestMs, 5 / 60, 4),
+      gain_1h: getGain(row, snapshotRows, latestMs, 1, 15),
+      gain_12h: getGain(row, snapshotRows, latestMs, 12, 45),
+      gain_24h: getGain(row, snapshotRows, latestMs, 24, 90),
+      projection_basis: rate.basis,
+      rate_per_hour: rate.rate_per_hour,
+      projected_points: Math.round(Number(row.points || 0))
+    };
+  });
+
+  const projectedSorted = [...projectedRows].sort((a, b) => {
+    const ap = Number(a.projected_points || 0);
+    const bp = Number(b.projected_points || 0);
+
+    if (bp !== ap) return bp - ap;
+    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+  });
+
+  const projectedRankMap = new Map();
+  projectedSorted.forEach((row, index) => {
+    projectedRankMap.set(clanKey(row.clan_name), index + 1);
+  });
+
+  const rows = sortRows(
+    projectedRows.map(row => ({
+      ...row,
+      projected_rank: projectedRankMap.get(clanKey(row.clan_name)) || null
+    }))
+  );
+
+  return {
+    snapshot_at: latestRows[0]?.fetched_at || null,
+    rows
+  };
 }
 
 async function main() {
@@ -162,7 +321,6 @@ async function main() {
     }));
 
   const deduped = new Map();
-
   for (const item of declared) {
     deduped.set(normalizeKey(item.battle), item);
   }
@@ -178,21 +336,22 @@ async function main() {
       continue;
     }
 
-    const rows = sortRows(
-      rawRows
-        .map(normalizeClanRow)
-        .filter(row => row.clan && row.points !== null)
-    );
+    const normalizedRows = rawRows
+      .map(normalizeClanRow)
+      .filter(row => row.clan_name && row.points !== null && row.fetched_at);
+
+    const calculated = calculateBattleRows(normalizedRows);
 
     output.push({
       battle: item.battle,
       display_name: item.display_name,
       source_table: item.source_table,
       generated_at: new Date().toISOString(),
-      rows
+      snapshot_at: calculated.snapshot_at,
+      rows: calculated.rows
     });
 
-    console.log(`  rows: ${rows.length}`);
+    console.log(`  latest rows: ${calculated.rows.length}`);
   }
 
   output.sort((a, b) => {
