@@ -76,13 +76,11 @@ async function resolveBattleMeta() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
   const targetKey = normalizeKey(CURRENT_BATTLE_NAME);
 
-  const match = manualBattles.find(item => {
-    return [
-      item?.battle,
-      item?.api_battle_key,
-      item?.display_name
-    ].some(value => normalizeKey(value) === targetKey);
-  });
+  const match = manualBattles.find(item =>
+    [item?.battle, item?.api_battle_key, item?.display_name].some(
+      value => normalizeKey(value) === targetKey
+    )
+  );
 
   return {
     battle: match?.battle || CURRENT_BATTLE_NAME,
@@ -184,10 +182,7 @@ function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
 
 function buildPointMap(rows) {
   return new Map(
-    rows.map(row => [
-      clanKey(row.clan_name),
-      Number(row.points || 0)
-    ])
+    rows.map(row => [clanKey(row.clan_name), Number(row.points || 0)])
   );
 }
 
@@ -210,7 +205,6 @@ function chooseProjectionRate(currentRow, allRows, latestMs) {
 
   for (const win of windows) {
     const gain = getGain(currentRow, allRows, latestMs, win.hours, win.toleranceMin);
-
     if (gain === null) continue;
 
     return {
@@ -247,6 +241,7 @@ async function fetchClanIconMap(clanNames) {
 
       const json = await res.json();
       const iconId = extractClanImageId(json?.data?.Icon || json?.data?.icon);
+
       map.set(clanKey(clanName), {
         icon_id: iconId || null,
         icon_url: buildClanIconUrl(iconId)
@@ -313,7 +308,6 @@ function calculateRows(snapshotRows, battleEndIso, iconMap) {
     if (b.projected_points !== a.projected_points) {
       return b.projected_points - a.projected_points;
     }
-
     return String(a.clan_name).localeCompare(String(b.clan_name));
   });
 
@@ -368,11 +362,7 @@ async function patchCurrentJson(clanOutput) {
     hours_remaining: clanOutput.hours_remaining
   };
 
-  await fs.writeFile(
-    CURRENT_FILE,
-    JSON.stringify(patched, null, 2) + "\n",
-    "utf8"
-  );
+  await fs.writeFile(CURRENT_FILE, JSON.stringify(patched, null, 2) + "\n", "utf8");
 }
 
 async function main() {
@@ -399,23 +389,16 @@ async function main() {
     display_name: meta.display_name,
     battle_end_iso: meta.battle_end_iso,
     clan_name: CLAN_NAME,
-
     clan_rank: calculated.nong?.rank ?? null,
     clan_points: calculated.nong?.points ?? null,
     projected_rank: calculated.nong?.projected_rank ?? null,
     projected_points: calculated.nong?.projected_points ?? null,
     projection_basis: calculated.nong?.projection_basis ?? null,
     hours_remaining: calculated.hoursRemaining,
-
     rows: calculated.rows
   };
 
-  await fs.writeFile(
-    CLANS_CURRENT_FILE,
-    JSON.stringify(output, null, 2) + "\n",
-    "utf8"
-  );
-
+  await fs.writeFile(CLANS_CURRENT_FILE, JSON.stringify(output, null, 2) + "\n", "utf8");
   await patchCurrentJson(output);
 }
 
