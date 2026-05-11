@@ -11,7 +11,6 @@ const OUTPUT_FILE = path.join(DATA_DIR, "nong-history.json");
 
 const PAGE_SIZE = 1000;
 const ROBLOX_USERNAME_BATCH_SIZE = 100;
-const ROBLOX_THUMB_BATCH_SIZE = 100;
 
 if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
 if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
@@ -167,7 +166,6 @@ function normalizePlayerRow(row) {
     username: stringOrNull(row.username || row.user || row.name),
     total_points: numberOrNull(row.total_points ?? row.points),
     user_id: numberOrNull(row.user_id),
-    avatar_url: stringOrNull(row.avatar_url),
     profile_key: stringOrNull(row.profile_key)
   };
 }
@@ -300,44 +298,6 @@ async function resolveUserIdsByUsername(usernames) {
   return map;
 }
 
-async function fetchRobloxHeadshots(userIds) {
-  const map = new Map();
-  const uniqueIds = [...new Set((userIds || []).map(v => String(v || "").trim()).filter(Boolean))];
-
-  for (const batch of chunkArray(uniqueIds, ROBLOX_THUMB_BATCH_SIZE)) {
-    const url =
-      "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
-      `?userIds=${encodeURIComponent(batch.join(","))}` +
-      "&size=150x150&format=Png&isCircular=false";
-
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "NONG-Leaderboard-Avatar-Enrichment"
-      }
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Roblox thumbnail lookup failed (${res.status}): ${text}`);
-    }
-
-    const json = await res.json();
-    const data = Array.isArray(json?.data) ? json.data : [];
-
-    for (const item of data) {
-      const id = String(item?.targetId || "").trim();
-      const imageUrl = String(item?.imageUrl || "").trim();
-
-      if (id && imageUrl) {
-        map.set(id, imageUrl);
-      }
-    }
-  }
-
-  return map;
-}
-
 async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
   const missingUsernameLookups = rows
     .filter(row => !row.user_id && row.username)
@@ -353,12 +313,6 @@ async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
       }
     }
   }
-
-  const userIdsToThumb = rows
-    .map(row => String(row.user_id || "").trim())
-    .filter(Boolean);
-
-  const thumbMap = await fetchRobloxHeadshots(userIdsToThumb);
 
   for (const row of rows) {
     const userId = String(row.user_id || "").trim();
@@ -379,7 +333,6 @@ async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
     }
 
     row.profile_key = match?.profile_key || row.profile_key || row.user_id || row.username;
-    row.avatar_url = row.avatar_url || match?.avatar_url || (userId ? thumbMap.get(userId) || null : null);
   }
 
   return rows;
@@ -410,7 +363,6 @@ async function calculateBattleRows(snapshotRows, playerMaps) {
     total_points: numberOrNull(row.total_points),
     user_id: numberOrNull(row.user_id),
     profile_key: row.profile_key || row.user_id || row.username,
-    avatar_url: row.avatar_url || null,
     fetched_at: row.fetched_at,
     gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
     gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
