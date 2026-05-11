@@ -540,6 +540,10 @@
     let playerIndex = [];
     let profileCache = new Map();
 
+    let playerIndexByUserId = new Map();
+    let playerIndexByProfileKey = new Map();
+    let playerIndexByUsername = new Map();
+
     let activeBattle = "current";
 
     let sortKey = "rank";
@@ -568,7 +572,11 @@
     }
 
     function normalizeName(value) {
-      return String(value || "").trim().toLowerCase();
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/[^a-z0-9_]/g, "");
     }
 
     function fmtNum(n) {
@@ -634,6 +642,30 @@
     function parseDateValue(v) {
       const t = new Date(v).getTime();
       return Number.isNaN(t) ? null : t;
+    }
+
+    function rebuildPlayerIndexMaps() {
+      playerIndexByUserId = new Map();
+      playerIndexByProfileKey = new Map();
+      playerIndexByUsername = new Map();
+
+      for (const p of playerIndex || []) {
+        const userId = String(p.user_id || "").trim();
+        const profileKey = String(p.profile_key || "").trim();
+        const usernameKey = normalizeName(p.username);
+
+        if (userId) {
+          playerIndexByUserId.set(userId, p);
+        }
+
+        if (profileKey) {
+          playerIndexByProfileKey.set(profileKey, p);
+        }
+
+        if (usernameKey) {
+          playerIndexByUsername.set(usernameKey, p);
+        }
+      }
     }
 
     function getPlacement(b) {
@@ -753,29 +785,72 @@
     }
 
     function getAvatar(row) {
-      if (row.avatar_url || row.avatar) return row.avatar_url || row.avatar;
+      if (row.avatar_url || row.avatar) {
+        return row.avatar_url || row.avatar;
+      }
 
-      const match = playerIndex.find(p =>
-        String(p.user_id || "") === String(row.user_id || "") ||
-        String(p.profile_key || "") === String(row.profile_key || "") ||
-        normalizeName(p.username) === normalizeName(row.username)
-      );
+      const userId = String(row.user_id || "").trim();
+      const profileKey = String(row.profile_key || "").trim();
+      const usernameKey = normalizeName(row.username);
 
-      return match?.avatar_url || "assets/embed-spacer.png";
+      let match = null;
+
+      if (userId && playerIndexByUserId.has(userId)) {
+        match = playerIndexByUserId.get(userId);
+      }
+
+      if (!match && profileKey && playerIndexByProfileKey.has(profileKey)) {
+        match = playerIndexByProfileKey.get(profileKey);
+      }
+
+      if (!match && usernameKey && playerIndexByUsername.has(usernameKey)) {
+        match = playerIndexByUsername.get(usernameKey);
+      }
+
+      if (match?.avatar_url) {
+        return match.avatar_url;
+      }
+
+      if (userId) {
+        return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(userId)}&width=150&height=150&format=png`;
+      }
+
+      return "assets/embed-spacer.png";
     }
 
     function getProfileKey(row) {
-      if (row.profile_key) return row.profile_key;
-      if (row.user_id) return row.user_id;
+      const userId = String(row.user_id || "").trim();
+      const profileKey = String(row.profile_key || "").trim();
+      const usernameKey = normalizeName(row.username);
+
+      if (profileKey) return profileKey;
+
+      if (userId && playerIndexByUserId.has(userId)) {
+        return playerIndexByUserId.get(userId).profile_key || userId;
+      }
+
+      if (usernameKey && playerIndexByUsername.has(usernameKey)) {
+        return playerIndexByUsername.get(usernameKey).profile_key || row.username;
+      }
+
+      if (userId) return userId;
       return row.username;
     }
 
     function normalizeCurrentRows(rows) {
       return rows.map(row => {
-        const match = playerIndex.find(p =>
-          String(p.user_id || "") === String(row.user_id || "") ||
-          normalizeName(p.username) === normalizeName(row.username)
-        );
+        const userId = String(row.user_id || "").trim();
+        const usernameKey = normalizeName(row.username);
+
+        let match = null;
+
+        if (userId && playerIndexByUserId.has(userId)) {
+          match = playerIndexByUserId.get(userId);
+        }
+
+        if (!match && usernameKey && playerIndexByUsername.has(usernameKey)) {
+          match = playerIndexByUsername.get(usernameKey);
+        }
 
         return {
           ...row,
@@ -818,8 +893,8 @@
         stored_rank: row.rank,
         username: row.username,
         user_id: row.user_id,
-        profile_key: row.user_id || row.username,
-        avatar_url: null,
+        profile_key: row.profile_key || row.user_id || row.username,
+        avatar_url: row.avatar_url || null,
         total_points: row.total_points,
         gain_5m: row.gain_5m ?? null,
         gain_1h: row.gain_1h ?? null,
@@ -1176,6 +1251,7 @@
 
         playerIndex = playersRes.ok ? await playersRes.json() : [];
         if (!Array.isArray(playerIndex)) playerIndex = [];
+        rebuildPlayerIndexMaps();
 
         nongHistoryData = nongHistoryRes.ok ? await nongHistoryRes.json() : [];
         if (!Array.isArray(nongHistoryData)) nongHistoryData = [];
