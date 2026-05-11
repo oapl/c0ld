@@ -598,5 +598,20 @@
     "placement": "28",
     "update_number": 76,
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-76"
+  },
+    {
+    "battle": "AngelBattle2026",
+    "display_name": "Angel Battle 2026",
+    "api_battle_key": "AngelBattle2026",
+    "nong_results_table": "AngelBattle2026NONG",
+    "clan_results_table": null,
+    "first_snapshot": null,
+    "last_snapshot": null,
+    "total_snapshots": null,
+    "total_rows": null,
+    "unique_players": null,
+    "placement": "TBD",
+    "update_number": 78,
+    "update_url": "https://www.biggames.io/post/pet-simulator-99-update-78"
   }
 ]
