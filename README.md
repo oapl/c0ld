@@ -14,19 +14,19 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 1B | N/A |
-| 2 | littledraiken | 1B | N/A |
-| 3 | LeRatRuse666 | 1B | N/A |
-| 4 | sebastjan35 | 750M | N/A |
-| 5 | jupiter0477 | 750M | N/A |
-| 6 | joshuacd2006 | 750M | N/A |
-| 7 | mavilure | 750M | N/A |
-| 8 | mecduqgtryhard | 750M | N/A |
-| 9 | Ewan_314 | 750M | N/A |
-| 10 | Fallen_Angel1989 | 750M | N/A |
+| 1 | johnr622 | 1B | 0 |
+| 2 | littledraiken | 1B | 0 |
+| 3 | LeRatRuse666 | 1B | 0 |
+| 4 | sebastjan35 | 750M | 0 |
+| 5 | jupiter0477 | 750M | 0 |
+| 6 | joshuacd2006 | 750M | 0 |
+| 7 | mavilure | 750M | 0 |
+| 8 | mecduqgtryhard | 750M | 0 |
+| 9 | Ewan_314 | 750M | 0 |
+| 10 | Fallen_Angel1989 | 750M | 0 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-11 15:16:30 UTC
+2026-05-11 15:21:30 UTC
 <!-- END_UPDATED -->
