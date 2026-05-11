@@ -644,6 +644,12 @@
       return Number.isNaN(t) ? null : t;
     }
 
+    function getRobloxHeadshotUrl(userId) {
+      const id = String(userId || "").trim();
+      if (!id) return DEFAULT_AVATAR_SVG;
+      return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(id)}&width=150&height=150&format=png`;
+    }
+
     function rebuildPlayerIndexMaps() {
       playerIndexByUserId = new Map();
       playerIndexByProfileKey = new Map();
@@ -798,16 +804,28 @@
 
     function getAvatar(row) {
       const match = getAvatarMatch(row);
+      const userId = String(row.user_id || "").trim();
 
-      if (row.avatar_url) return row.avatar_url;
-      if (match?.avatar_url) return match.avatar_url;
+      if (match?.profile_key) {
+        return `assets/avatars/${encodeURIComponent(match.profile_key)}.png`;
+      }
 
-      const profileKey =
-        String(row.profile_key || "").trim() ||
-        String(match?.profile_key || "").trim();
+      if (row.profile_key) {
+        return `assets/avatars/${encodeURIComponent(row.profile_key)}.png`;
+      }
 
-      if (profileKey) {
-        return `assets/avatars/${encodeURIComponent(profileKey)}.png`;
+      if (userId) {
+        return getRobloxHeadshotUrl(userId);
+      }
+
+      return DEFAULT_AVATAR_SVG;
+    }
+
+    function getAvatarFallback(row) {
+      const userId = String(row.user_id || "").trim();
+
+      if (userId) {
+        return getRobloxHeadshotUrl(userId);
       }
 
       return DEFAULT_AVATAR_SVG;
@@ -838,18 +856,18 @@
 
         return {
           ...row,
-          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
-          avatar_url: row.avatar_url || match?.avatar_url || null
+          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username
         };
       });
     }
 
     function buildAvatarImg(row) {
       const primary = escapeHtml(getAvatar(row));
-      const fallback1 = escapeHtml(DEFAULT_AVATAR_SVG);
+      const fallback1 = escapeHtml(getAvatarFallback(row));
+      const fallback2 = escapeHtml(DEFAULT_AVATAR_SVG);
 
       return `<img class="avatar" src="${primary}" alt="" loading="lazy"
-        onerror="this.onerror=null;this.src='${fallback1}';">`;
+        onerror="if(this.dataset.fallback!=='1'){this.dataset.fallback='1';this.src='${fallback1}';}else{this.onerror=null;this.src='${fallback2}';}">`;
     }
 
     async function buildHistoricalRows(battleName) {
@@ -870,7 +888,6 @@
           username: row.username,
           user_id: row.user_id,
           profile_key: row.profile_key || match?.profile_key || row.user_id || row.username,
-          avatar_url: row.avatar_url || match?.avatar_url || null,
           total_points: row.total_points,
           gain_5m: row.gain_5m ?? null,
           gain_1h: row.gain_1h ?? null,
