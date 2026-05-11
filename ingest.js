@@ -19,7 +19,7 @@ const fs = require("fs/promises");
 
 // Config
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
-const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
+const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle";
 const CURRENT_BATTLE_DISPLAY_NAME =
   process.env.CURRENT_BATTLE_DISPLAY_NAME || CURRENT_BATTLE_NAME;
 
