@@ -589,7 +589,7 @@
     "display_name": "Starry Battle",
     "api_battle_key": "StarryBattle",
     "nong_results_table": "StarryNONG",
-    "clan_results_table": null,
+    "clan_results_table": "StarryClans",
     "first_snapshot": null,
     "last_snapshot": null,
     "total_snapshots": null,
