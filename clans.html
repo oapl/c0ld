@@ -1,413 +1,849 @@
-<script>
-  const TARGET_CLAN = "NONG";
-  const AUTO_REFRESH_MS = 60 * 1000;
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clans Leaderboard</title>
 
-  const DEFAULT_CLAN_ICON =
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-        <rect width="64" height="64" rx="12" fill="#21262d"/>
-        <path d="M20 44V24l12-6 12 6v20l-12 6-12-6z" fill="#6e7681"/>
-      </svg>
-    `);
-
-  let currentData = null;
-  let historyData = [];
-  let selectedBattle = "current";
-  let countdownTimer = null;
-  let autoRefreshTimer = null;
-
-  function htmlEscape(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function cleanClanName(name) {
-    return String(name ?? "")
-      .replace(/★/g, "")
-      .trim();
-  }
-
-  function normalizeKey(value) {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-  }
-
-  function isTargetClan(name) {
-    return normalizeKey(cleanClanName(name)) === normalizeKey(TARGET_CLAN);
-  }
-
-  function fmtShortNumber(value) {
-    if (value === null || value === undefined || value === "") return "—";
-
-    const n = Number(value);
-    if (Number.isNaN(n)) return htmlEscape(value);
-
-    const abs = Math.abs(n);
-
-    if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
-    if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
-    if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
-    if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
-
-    return n.toLocaleString("en-US");
-  }
-
-  function fmtRank(value) {
-    if (value === null || value === undefined || value === "") return "—";
-
-    const n = Number(value);
-    if (Number.isNaN(n)) return htmlEscape(value);
-
-    return "#" + n.toLocaleString("en-US");
-  }
-
-  function fmtDateTime(value) {
-    if (!value) return "—";
-
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "—";
-
-    return d.toLocaleString(undefined, {
-      year: "2-digit",
-      month: "numeric",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit"
-    });
-  }
-
-  function fmtCountdown(ms) {
-    if (ms <= 0) return "Ended";
-
-    const totalSeconds = Math.floor(ms / 1000);
-    const days = Math.floor(totalSeconds / 86400);
-    const hours = Math.floor((totalSeconds % 86400) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-  }
-
-  function parseDateValue(v) {
-    const t = new Date(v).getTime();
-    return Number.isNaN(t) ? null : t;
-  }
-
-  function startCountdown(endValue) {
-    const el = document.getElementById("battle-countdown");
-
-    if (countdownTimer) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
     }
 
-    if (!endValue) {
-      el.textContent = "—";
-      return;
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --accent: #58a6ff;
+      --nong-bg: rgba(255, 153, 51, 0.18);
+      --nong-border: rgba(255, 153, 51, 0.65);
+      --nong-text: #ffb15c;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
     }
 
-    const end = new Date(endValue);
-    if (Number.isNaN(end.getTime())) {
-      el.textContent = "—";
-      return;
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
     }
 
-    function tick() {
-      el.textContent = fmtCountdown(end.getTime() - Date.now());
+    a {
+      color: var(--link);
+      text-decoration: none;
     }
 
-    tick();
-    countdownTimer = setInterval(tick, 1000);
-  }
-
-  function getUrlBattle() {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("battle") || "current";
-  }
-
-  function updateUrlBattle(value) {
-    const url = new URL(window.location.href);
-
-    if (value === "current") {
-      url.searchParams.delete("battle");
-    } else {
-      url.searchParams.set("battle", value);
+    a:hover {
+      text-decoration: none;
     }
 
-    history.replaceState({}, "", url.toString());
-  }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
 
-  function sortBattlesNewestFirst(list) {
-    return list.slice().sort((a, b) => {
-      const au = Number(a.update_number);
-      const bu = Number(b.update_number);
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
 
-      if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
-        return bu - au;
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .github-btn {
+      display: inline-block;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .github-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    select,
+    input,
+    button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 9px 11px;
+      font-size: 14px;
+      outline: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    input {
+      min-width: 230px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:hover,
+    select:hover,
+    input:focus {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .rank,
+    .projected {
+      font-weight: 700;
+    }
+
+    .numeric,
+    .projected {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .clan-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .clan-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .nong-row {
+      background: var(--nong-bg);
+    }
+
+    .nong-row:hover {
+      background: rgba(255, 153, 51, 0.24);
+    }
+
+    .nong-row td {
+      border-top: 1px solid var(--nong-border);
+      border-bottom: 1px solid var(--nong-border);
+    }
+
+    .nong-row td.rank,
+    .nong-row td.projected,
+    .nong-row .clan-name {
+      color: var(--nong-text);
+      font-weight: 700;
+    }
+
+    .empty-state,
+    .error-state {
+      padding: 20px 18px;
+    }
+
+    .empty-state {
+      color: var(--muted);
+    }
+
+    .error-state {
+      color: #ffb4ad;
+      background: var(--danger-bg);
+    }
+
+    @media (max-width: 1050px) {
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
       }
 
-      if (Number.isFinite(au) && !Number.isFinite(bu)) return -1;
-      if (!Number.isFinite(au) && Number.isFinite(bu)) return 1;
-
-      const ad =
-        parseDateValue(a.last_snapshot) ||
-        parseDateValue(a.snapshot_at) ||
-        parseDateValue(a.generated_at) ||
-        0;
-
-      const bd =
-        parseDateValue(b.last_snapshot) ||
-        parseDateValue(b.snapshot_at) ||
-        parseDateValue(b.generated_at) ||
-        0;
-
-      if (ad !== bd) return bd - ad;
-
-      return String(a.display_name || a.battle || "").localeCompare(
-        String(b.display_name || b.battle || "")
-      );
-    });
-  }
-
-  function getClanIconUrl(row) {
-    return row.icon_url || DEFAULT_CLAN_ICON;
-  }
-
-  function buildClanIconImg(row) {
-    const url = getClanIconUrl(row);
-
-    return `<img class="clan-icon" src="${htmlEscape(url)}" alt="" loading="lazy"
-      onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">`;
-  }
-
-  function getCurrentRows() {
-    if (!currentData || !Array.isArray(currentData.rows)) return [];
-
-    return currentData.rows.map(row => ({
-      rank: row.rank,
-      clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
-      points: row.points ?? row.total_points,
-      gain_5m: row.gain_5m,
-      gain_1h: row.gain_1h,
-      gain_12h: row.gain_12h,
-      gain_24h: row.gain_24h,
-      projected_rank: row.projected_rank,
-      icon_url: row.icon_url || null
-    }));
-  }
-
-  function getHistoryBattle() {
-    return historyData.find(item => normalizeKey(item.battle) === normalizeKey(selectedBattle)) || null;
-  }
-
-  function getHistoryRows() {
-    const battle = getHistoryBattle();
-
-    if (!battle || !Array.isArray(battle.rows)) return [];
-
-    return battle.rows.map(row => ({
-      rank: row.rank,
-      clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
-      points: row.points ?? row.total_points,
-      gain_5m: row.gain_5m ?? null,
-      gain_1h: row.gain_1h ?? null,
-      gain_12h: row.gain_12h ?? null,
-      gain_24h: row.gain_24h ?? null,
-      projected_rank: row.projected_rank ?? null,
-      icon_url: row.icon_url || null
-    }));
-  }
-
-  function getRows() {
-    return selectedBattle === "current" ? getCurrentRows() : getHistoryRows();
-  }
-
-  function renderCards() {
-    const currentRows = getCurrentRows();
-    const currentNong = currentRows.find(row => isTargetClan(row.clan_name)) || null;
-
-    document.getElementById("nong-current-rank").textContent =
-      fmtRank(currentNong?.rank ?? currentData?.clan_rank);
-
-    document.getElementById("nong-projected-rank").textContent =
-      fmtRank(currentNong?.projected_rank ?? currentData?.projected_rank);
-
-    document.getElementById("last-db-update").textContent =
-      fmtDateTime(currentData?.snapshot_at || currentData?.generated_at);
-
-    startCountdown(currentData?.battle_end_iso);
-  }
-
-  function renderBattleOptions() {
-    const select = document.getElementById("battle-select");
-
-    const filteredHistory = sortBattlesNewestFirst(
-      (historyData || []).filter(item =>
-        item &&
-        item.battle &&
-        (item.source_table || item.clan_results_table) &&
-        Array.isArray(item.rows) &&
-        item.rows.length > 0
-      )
-    );
-
-    const options = [
-      {
-        value: "current",
-        label: "Current Clan Battle"
-      },
-      ...filteredHistory.map(item => ({
-        value: item.battle,
-        label: item.display_name || item.battle
-      }))
-    ];
-
-    const exists = options.some(
-      option => normalizeKey(option.value) === normalizeKey(selectedBattle)
-    );
-
-    if (!exists) {
-      selectedBattle = "current";
-    }
-
-    select.innerHTML = options.map(option => `
-      <option value="${htmlEscape(option.value)}" ${
-        normalizeKey(option.value) === normalizeKey(selectedBattle) ? "selected" : ""
-      }>
-        ${htmlEscape(option.label)}
-      </option>
-    `).join("");
-  }
-
-  function renderTable() {
-    const tbody = document.getElementById("clans-tbody");
-    const searchText = document.getElementById("search-input").value.trim().toLowerCase();
-
-    let rows = getRows();
-
-    if (searchText) {
-      rows = rows.filter(row =>
-        String(row.clan_name || "").toLowerCase().includes(searchText)
-      );
-    }
-
-    rows.sort((a, b) => {
-      const ar = Number(a.rank);
-      const br = Number(b.rank);
-
-      if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) {
-        return ar - br;
+      main {
+        padding: 16px;
       }
 
-      return Number(b.points || 0) - Number(a.points || 0);
-    });
+      .title-wrap h1 {
+        font-size: 24px;
+      }
 
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No clans found.</td></tr>`;
-      return;
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        width: 100%;
+      }
+
+      .controls select,
+      .controls input,
+      .controls button {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Clans Leaderboard</h1>
+        <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
+      </div>
+
+      <a
+        class="github-btn"
+        href="https://github.com/OpalApocalypse/NONG_Leaderboard"
+        target="_blank"
+        rel="noopener"
+      >GitHub</a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">NONG Leaderboard</a>
+      <a class="menu-btn active" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="players.html">Player Profiles</a>
+      <a class="menu-btn" href="index.html#history">Clan History</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="cards">
+      <div class="card">
+        <div class="label">NONG Current Rank</div>
+        <div class="value" id="nong-current-rank">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Current Clan Battle Ends In</div>
+        <div class="value" id="battle-countdown">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Last DB Update</div>
+        <div class="value" id="last-db-update">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Projected Rank</div>
+        <div class="value" id="nong-projected-rank">—</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">Clans Leaderboard</h2>
+
+        <div class="controls">
+          <select id="battle-select">
+            <option value="current">Current Clan Battle</option>
+          </select>
+          <input id="search-input" type="text" placeholder="Search clans..." />
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Clan</th>
+              <th class="numeric">Total Points</th>
+              <th class="numeric">5 Minutes</th>
+              <th class="numeric">1 Hour</th>
+              <th class="numeric">12 Hours</th>
+              <th class="numeric">24 Hours</th>
+              <th class="projected">Projected Rank</th>
+            </tr>
+          </thead>
+          <tbody id="clans-tbody">
+            <tr>
+              <td colspan="8" class="empty-state">Loading clans leaderboard...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const TARGET_CLAN = "NONG";
+    const AUTO_REFRESH_MS = 60 * 1000;
+
+    const DEFAULT_CLAN_ICON =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="12" fill="#21262d"/>
+          <path d="M20 44V24l12-6 12 6v20l-12 6-12-6z" fill="#6e7681"/>
+        </svg>
+      `);
+
+    let currentData = null;
+    let historyData = [];
+    let selectedBattle = "current";
+    let countdownTimer = null;
+    let autoRefreshTimer = null;
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
-    tbody.innerHTML = rows.map(row => {
-      const isNong = isTargetClan(row.clan_name);
+    function cleanClanName(name) {
+      return String(name ?? "")
+        .replace(/★/g, "")
+        .trim();
+    }
 
-      return `
-        <tr class="${isNong ? "nong-row" : ""}">
-          <td class="rank">${fmtRank(row.rank)}</td>
-          <td class="clan">
-            <div class="clan-cell">
-              ${buildClanIconImg(row)}
-              <span class="clan-name">${htmlEscape(row.clan_name)}</span>
-            </div>
-          </td>
-          <td class="numeric">${fmtShortNumber(row.points)}</td>
-          <td class="numeric">${fmtShortNumber(row.gain_5m)}</td>
-          <td class="numeric">${fmtShortNumber(row.gain_1h)}</td>
-          <td class="numeric">${fmtShortNumber(row.gain_12h)}</td>
-          <td class="numeric">${fmtShortNumber(row.gain_24h)}</td>
-          <td class="projected">${fmtRank(row.projected_rank)}</td>
-        </tr>
-      `;
-    }).join("");
-  }
+    function normalizeKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
 
-  async function renderAll() {
-    renderCards();
-    renderBattleOptions();
-    renderTable();
-  }
+    function isTargetClan(name) {
+      return normalizeKey(cleanClanName(name)) === normalizeKey(TARGET_CLAN);
+    }
 
-  async function loadData() {
-    const tbody = document.getElementById("clans-tbody");
+    function fmtShortNumber(value) {
+      if (value === null || value === undefined || value === "") return "—";
 
-    try {
-      const cacheBust = Date.now();
+      const n = Number(value);
+      if (Number.isNaN(n)) return htmlEscape(value);
 
-      const [currentRes, historyRes] = await Promise.all([
-        fetch(`Data/clans-current.json?v=${cacheBust}`, { cache: "no-store" }),
-        fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
-      ]);
+      const abs = Math.abs(n);
 
-      if (!currentRes.ok) {
-        throw new Error(`Could not load Data/clans-current.json. HTTP ${currentRes.status}`);
+      if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
+      if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
+      if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
+      if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
+
+      return n.toLocaleString("en-US");
+    }
+
+    function fmtRank(value) {
+      if (value === null || value === undefined || value === "") return "—";
+
+      const n = Number(value);
+      if (Number.isNaN(n)) return htmlEscape(value);
+
+      return "#" + n.toLocaleString("en-US");
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "—";
+
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleString(undefined, {
+        year: "2-digit",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    }
+
+    function fmtCountdown(ms) {
+      if (ms <= 0) return "Ended";
+
+      const totalSeconds = Math.floor(ms / 1000);
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+    }
+
+    function parseDateValue(v) {
+      const t = new Date(v).getTime();
+      return Number.isNaN(t) ? null : t;
+    }
+
+    function startCountdown(endValue) {
+      const el = document.getElementById("battle-countdown");
+
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
       }
 
-      currentData = await currentRes.json();
-
-      if (!currentData || !Array.isArray(currentData.rows)) {
-        throw new Error("Data/clans-current.json does not contain a rows array.");
+      if (!endValue) {
+        el.textContent = "—";
+        return;
       }
 
-      if (historyRes.ok) {
-        historyData = await historyRes.json();
-        if (!Array.isArray(historyData)) historyData = [];
+      const end = new Date(endValue);
+      if (Number.isNaN(end.getTime())) {
+        el.textContent = "—";
+        return;
+      }
+
+      function tick() {
+        el.textContent = fmtCountdown(end.getTime() - Date.now());
+      }
+
+      tick();
+      countdownTimer = setInterval(tick, 1000);
+    }
+
+    function getUrlBattle() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("battle") || "current";
+    }
+
+    function updateUrlBattle(value) {
+      const url = new URL(window.location.href);
+
+      if (value === "current") {
+        url.searchParams.delete("battle");
       } else {
-        historyData = [];
+        url.searchParams.set("battle", value);
       }
 
-      selectedBattle = getUrlBattle();
-      await renderAll();
-    } catch (error) {
-      console.error(error);
-      tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;
+      history.replaceState({}, "", url.toString());
     }
-  }
 
-  function wireEvents() {
-    document.getElementById("battle-select").addEventListener("change", async event => {
-      selectedBattle = event.target.value;
-      updateUrlBattle(selectedBattle);
-      await renderAll();
-    });
+    function sortBattlesNewestFirst(list) {
+      return list.slice().sort((a, b) => {
+        const au = Number(a.update_number);
+        const bu = Number(b.update_number);
 
-    document.getElementById("search-input").addEventListener("input", () => {
+        if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
+          return bu - au;
+        }
+
+        if (Number.isFinite(au) && !Number.isFinite(bu)) return -1;
+        if (!Number.isFinite(au) && Number.isFinite(bu)) return 1;
+
+        const ad =
+          parseDateValue(a.last_snapshot) ||
+          parseDateValue(a.snapshot_at) ||
+          parseDateValue(a.generated_at) ||
+          0;
+
+        const bd =
+          parseDateValue(b.last_snapshot) ||
+          parseDateValue(b.snapshot_at) ||
+          parseDateValue(b.generated_at) ||
+          0;
+
+        if (ad !== bd) return bd - ad;
+
+        return String(a.display_name || a.battle || "").localeCompare(
+          String(b.display_name || b.battle || "")
+        );
+      });
+    }
+
+    function getClanIconUrl(row) {
+      return row.icon_url || DEFAULT_CLAN_ICON;
+    }
+
+    function buildClanIconImg(row) {
+      const url = getClanIconUrl(row);
+
+      return `<img class="clan-icon" src="${htmlEscape(url)}" alt="" loading="lazy"
+        onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">`;
+    }
+
+    function getCurrentRows() {
+      if (!currentData || !Array.isArray(currentData.rows)) return [];
+
+      return currentData.rows.map(row => ({
+        rank: row.rank,
+        clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
+        points: row.points ?? row.total_points,
+        gain_5m: row.gain_5m,
+        gain_1h: row.gain_1h,
+        gain_12h: row.gain_12h,
+        gain_24h: row.gain_24h,
+        projected_rank: row.projected_rank,
+        icon_url: row.icon_url || null
+      }));
+    }
+
+    function getHistoryBattle() {
+      return historyData.find(item => normalizeKey(item.battle) === normalizeKey(selectedBattle)) || null;
+    }
+
+    function getHistoryRows() {
+      const battle = getHistoryBattle();
+
+      if (!battle || !Array.isArray(battle.rows)) return [];
+
+      return battle.rows.map(row => ({
+        rank: row.rank,
+        clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
+        points: row.points ?? row.total_points,
+        gain_5m: row.gain_5m ?? null,
+        gain_1h: row.gain_1h ?? null,
+        gain_12h: row.gain_12h ?? null,
+        gain_24h: row.gain_24h ?? null,
+        projected_rank: row.projected_rank ?? null,
+        icon_url: row.icon_url || null
+      }));
+    }
+
+    function getRows() {
+      return selectedBattle === "current" ? getCurrentRows() : getHistoryRows();
+    }
+
+    function renderCards() {
+      const currentRows = getCurrentRows();
+      const currentNong = currentRows.find(row => isTargetClan(row.clan_name)) || null;
+
+      document.getElementById("nong-current-rank").textContent =
+        fmtRank(currentNong?.rank ?? currentData?.clan_rank);
+
+      document.getElementById("nong-projected-rank").textContent =
+        fmtRank(currentNong?.projected_rank ?? currentData?.projected_rank);
+
+      document.getElementById("last-db-update").textContent =
+        fmtDateTime(currentData?.snapshot_at || currentData?.generated_at);
+
+      startCountdown(currentData?.battle_end_iso);
+    }
+
+    function renderBattleOptions() {
+      const select = document.getElementById("battle-select");
+
+      const filteredHistory = sortBattlesNewestFirst(
+        (historyData || []).filter(item =>
+          item &&
+          item.battle &&
+          (item.source_table || item.clan_results_table) &&
+          Array.isArray(item.rows) &&
+          item.rows.length > 0
+        )
+      );
+
+      const options = [
+        {
+          value: "current",
+          label: "Current Clan Battle"
+        },
+        ...filteredHistory.map(item => ({
+          value: item.battle,
+          label: item.display_name || item.battle
+        }))
+      ];
+
+      const exists = options.some(
+        option => normalizeKey(option.value) === normalizeKey(selectedBattle)
+      );
+
+      if (!exists) {
+        selectedBattle = "current";
+      }
+
+      select.innerHTML = options.map(option => `
+        <option value="${htmlEscape(option.value)}" ${
+          normalizeKey(option.value) === normalizeKey(selectedBattle) ? "selected" : ""
+        }>
+          ${htmlEscape(option.label)}
+        </option>
+      `).join("");
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("clans-tbody");
+      const searchText = document.getElementById("search-input").value.trim().toLowerCase();
+
+      let rows = getRows();
+
+      if (searchText) {
+        rows = rows.filter(row =>
+          String(row.clan_name || "").toLowerCase().includes(searchText)
+        );
+      }
+
+      rows.sort((a, b) => {
+        const ar = Number(a.rank);
+        const br = Number(b.rank);
+
+        if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) {
+          return ar - br;
+        }
+
+        return Number(b.points || 0) - Number(a.points || 0);
+      });
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No clans found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(row => {
+        const isNong = isTargetClan(row.clan_name);
+
+        return `
+          <tr class="${isNong ? "nong-row" : ""}">
+            <td class="rank">${fmtRank(row.rank)}</td>
+            <td class="clan">
+              <div class="clan-cell">
+                ${buildClanIconImg(row)}
+                <span class="clan-name">${htmlEscape(row.clan_name)}</span>
+              </div>
+            </td>
+            <td class="numeric">${fmtShortNumber(row.points)}</td>
+            <td class="numeric">${fmtShortNumber(row.gain_5m)}</td>
+            <td class="numeric">${fmtShortNumber(row.gain_1h)}</td>
+            <td class="numeric">${fmtShortNumber(row.gain_12h)}</td>
+            <td class="numeric">${fmtShortNumber(row.gain_24h)}</td>
+            <td class="projected">${fmtRank(row.projected_rank)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function renderAll() {
+      renderCards();
+      renderBattleOptions();
       renderTable();
-    });
-
-    document.getElementById("refresh-btn").addEventListener("click", () => {
-      loadData();
-    });
-  }
-
-  async function init() {
-    selectedBattle = getUrlBattle();
-
-    wireEvents();
-    await loadData();
-
-    if (autoRefreshTimer) {
-      clearInterval(autoRefreshTimer);
     }
 
-    autoRefreshTimer = setInterval(() => {
-      loadData();
-    }, AUTO_REFRESH_MS);
-  }
+    async function loadData() {
+      const tbody = document.getElementById("clans-tbody");
 
-  init();
-</script>
+      try {
+        const cacheBust = Date.now();
+
+        const [currentRes, historyRes] = await Promise.all([
+          fetch(`Data/clans-current.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
+        ]);
+
+        if (!currentRes.ok) {
+          throw new Error(`Could not load Data/clans-current.json. HTTP ${currentRes.status}`);
+        }
+
+        currentData = await currentRes.json();
+
+        if (!currentData || !Array.isArray(currentData.rows)) {
+          throw new Error("Data/clans-current.json does not contain a rows array.");
+        }
+
+        if (historyRes.ok) {
+          historyData = await historyRes.json();
+          if (!Array.isArray(historyData)) historyData = [];
+        } else {
+          historyData = [];
+        }
+
+        selectedBattle = getUrlBattle();
+        await renderAll();
+      } catch (error) {
+        console.error(error);
+        tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;
+      }
+    }
+
+    function wireEvents() {
+      document.getElementById("battle-select").addEventListener("change", async event => {
+        selectedBattle = event.target.value;
+        updateUrlBattle(selectedBattle);
+        await renderAll();
+      });
+
+      document.getElementById("search-input").addEventListener("input", () => {
+        renderTable();
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        loadData();
+      });
+    }
+
+    async function init() {
+      selectedBattle = getUrlBattle();
+
+      wireEvents();
+      await loadData();
+
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+      }
+
+      autoRefreshTimer = setInterval(() => {
+        loadData();
+      }, AUTO_REFRESH_MS);
+    }
+
+    init();
+  </script>
+</body>
+</html>
