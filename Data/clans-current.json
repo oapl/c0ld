@@ -1,44 +1,44 @@
 {
-  "generated_at": "2026-05-11T15:12:03.397Z",
-  "snapshot_at": "2026-05-11T15:11:32.860Z",
+  "generated_at": "2026-05-11T15:17:19.197Z",
+  "snapshot_at": "2026-05-11T15:16:36.444Z",
   "battle": "AngelBattle2026",
   "display_name": "AngelBattle2026",
   "battle_end_iso": "2026-05-16T14:00:00Z",
   "clan_name": "NONG",
   "clan_rank": 62,
   "clan_points": 13196173310,
-  "projected_rank": 59,
-  "projected_points": 23949640281,
+  "projected_rank": 64,
+  "projected_points": 23942007534,
   "projection_basis": "1h",
-  "hours_remaining": 118.808,
+  "hours_remaining": 118.723,
   "rows": [
     {
       "rank": 1,
       "clan_name": "UN0",
-      "points": 51458516215,
-      "gain_5m": -789995020,
-      "gain_1h": -1635978017,
+      "points": 50583385923,
+      "gain_5m": -875130292,
+      "gain_1h": -2511108309,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": -1635978017,
+      "rate_per_hour": -2511108309,
       "projection_basis": "1h",
-      "projected_points": -142908005661,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": -247543453179,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 100
     },
     {
       "rank": 2,
       "clan_name": "SOPU",
-      "points": 42060328971,
-      "gain_5m": 0,
-      "gain_1h": 1583511077,
+      "points": 42060663971,
+      "gain_5m": 335000,
+      "gain_1h": 1583846077,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1583511077,
+      "rate_per_hour": 1583846077,
       "projection_basis": "1h",
-      "projected_points": 230193382833,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 2
+      "projected_points": 230099954378,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 3
     },
     {
       "rank": 3,
@@ -50,23 +50,23 @@
       "gain_24h": null,
       "rate_per_hour": 450000000,
       "projection_basis": "1h",
-      "projected_points": 94191392500,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 17
+      "projected_points": 94153444500,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 20
     },
     {
       "rank": 4,
       "clan_name": "RFIL",
-      "points": 39618463592,
-      "gain_5m": 803000000,
-      "gain_1h": 1475000000,
+      "points": 39638463592,
+      "gain_5m": 20000000,
+      "gain_1h": 1495000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1475000000,
+      "rate_per_hour": 1495000000,
       "projection_basis": "1h",
-      "projected_points": 214859583453,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 4
+      "projected_points": 217129662542,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 5
     },
     {
       "rank": 5,
@@ -79,78 +79,78 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 38287269162,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 35
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 43
     },
     {
       "rank": 6,
-      "clan_name": "K0i2",
-      "points": 37028847690,
-      "gain_5m": -49350000,
-      "gain_1h": 1550650000,
+      "clan_name": "BOSS",
+      "points": 37434197234,
+      "gain_5m": 619000000,
+      "gain_1h": 1930000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1550650000,
+      "rate_per_hour": 1930000000,
       "projection_basis": "1h",
-      "projected_points": 221257757868,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 3
+      "projected_points": 266569992534,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 1
     },
     {
       "rank": 7,
-      "clan_name": "BOSS",
-      "points": 36815197234,
-      "gain_5m": -34000032,
-      "gain_1h": 1311000000,
+      "clan_name": "K0i2",
+      "points": 37028197690,
+      "gain_5m": -650000,
+      "gain_1h": 1550000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1311000000,
+      "rate_per_hour": 1550000000,
       "projection_basis": "1h",
-      "projected_points": 192571880717,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 6
+      "projected_points": 221049173190,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 4
     },
     {
       "rank": 8,
       "clan_name": "3zEZ",
-      "points": 32757999999,
-      "gain_5m": -50000000,
-      "gain_1h": 50000000,
+      "points": 32797999999,
+      "gain_5m": 40000000,
+      "gain_1h": 90000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 50000000,
+      "rate_per_hour": 90000000,
       "projection_basis": "1h",
-      "projected_points": 38698376943,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 34
+      "projected_points": 43483088899,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 35
     },
     {
       "rank": 9,
       "clan_name": "VPT0",
-      "points": 32034093614,
-      "gain_5m": -110999968,
-      "gain_1h": 1109963700,
+      "points": 31988093646,
+      "gain_5m": -45999968,
+      "gain_1h": 1063963732,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1109963700,
+      "rate_per_hour": 1063963732,
       "projection_basis": "1h",
-      "projected_points": 163906149067,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 158305283233,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 8
     },
     {
       "rank": 10,
       "clan_name": "H8M3",
-      "points": 31851397162,
-      "gain_5m": 0,
-      "gain_1h": 32000000,
+      "points": 31891397162,
+      "gain_5m": 40000000,
+      "gain_1h": 72000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 32000000,
+      "rate_per_hour": 72000000,
       "projection_basis": "1h",
-      "projected_points": 35653238406,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 39
+      "projected_points": 40439468282,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 38
     },
     {
       "rank": 11,
@@ -162,51 +162,51 @@
       "gain_24h": null,
       "rate_per_hour": 100000000,
       "projection_basis": "1h",
-      "projected_points": 42840753889,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 30
+      "projected_points": 42832321000,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 36
     },
     {
       "rank": 12,
       "clan_name": "GANG",
-      "points": 29895580023,
-      "gain_5m": 0,
-      "gain_1h": 220000000,
+      "points": 30005580023,
+      "gain_5m": 110000000,
+      "gain_1h": 330000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 220000000,
+      "rate_per_hour": 330000000,
       "projection_basis": "1h",
-      "projected_points": 56033238579,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 27
+      "projected_points": 69184239323,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 28
     },
     {
       "rank": 13,
       "clan_name": "POPS",
       "points": 29244400933,
-      "gain_5m": 20000000,
+      "gain_5m": 0,
       "gain_1h": 20000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 20000000,
       "projection_basis": "1h",
-      "projected_points": 31620551711,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 46
+      "projected_points": 31618865133,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 50
     },
     {
       "rank": 14,
       "clan_name": "TPGD",
-      "points": 27895092983,
-      "gain_5m": 0,
-      "gain_1h": 9999990,
+      "points": 28495092983,
+      "gain_5m": 600000000,
+      "gain_1h": 609999990,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 9999990,
+      "rate_per_hour": 609999990,
       "projection_basis": "1h",
-      "projected_points": 29083167184,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 51
+      "projected_points": 100916249896,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 15
     },
     {
       "rank": 15,
@@ -219,8 +219,8 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 27115000000,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 52
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 57
     },
     {
       "rank": 16,
@@ -232,23 +232,23 @@
       "gain_24h": null,
       "rate_per_hour": 60000000,
       "projection_basis": "1h",
-      "projected_points": 34011452333,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 41
+      "projected_points": 34006392600,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 47
     },
     {
       "rank": 17,
       "clan_name": "H8ER",
-      "points": 25138000000,
-      "gain_5m": 0,
-      "gain_1h": 8000000,
+      "points": 25738000000,
+      "gain_5m": 600000000,
+      "gain_1h": 608000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 8000000,
+      "rate_per_hour": 608000000,
       "projection_basis": "1h",
-      "projected_points": 26088460311,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 55
+      "projected_points": 97921711680,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 16
     },
     {
       "rank": 18,
@@ -260,9 +260,9 @@
       "gain_24h": null,
       "rate_per_hour": 125000000,
       "projection_basis": "1h",
-      "projected_points": 39295362401,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 33
+      "projected_points": 39284821290,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 41
     },
     {
       "rank": 19,
@@ -275,22 +275,22 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 24252700000,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 58
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 63
     },
     {
       "rank": 20,
       "clan_name": "XB0X",
       "points": 24031098923,
-      "gain_5m": 100000000,
+      "gain_5m": 0,
       "gain_1h": 100000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 100000000,
       "projection_basis": "1h",
-      "projected_points": 35911852812,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 38
+      "projected_points": 35903419923,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 45
     },
     {
       "rank": 21,
@@ -302,50 +302,50 @@
       "gain_24h": null,
       "rate_per_hour": 150000000,
       "projection_basis": "1h",
-      "projected_points": 41718698629,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 31
+      "projected_points": 41706049296,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 37
     },
     {
       "rank": 22,
       "clan_name": "KOHV",
       "points": 23835888312,
-      "gain_5m": 100000000,
+      "gain_5m": 0,
       "gain_1h": 320488345,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 320488345,
       "projection_basis": "1h",
-      "projected_points": 61912319824,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 25
+      "projected_points": 61885293398,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 31
     },
     {
       "rank": 23,
       "clan_name": "EDS1",
-      "points": 23699214391,
-      "gain_5m": 510000000,
-      "gain_1h": 1888483803,
+      "points": 23705214391,
+      "gain_5m": 6000000,
+      "gain_1h": 1894483803,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1888483803,
+      "rate_per_hour": 1894483803,
       "projection_basis": "1h",
-      "projected_points": 248065327257,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 1
+      "projected_points": 248624412776,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 2
     },
     {
       "rank": 24,
       "clan_name": "S7PY",
-      "points": 23149000490,
-      "gain_5m": 5698149,
-      "gain_1h": 1224000490,
+      "points": 23149650010,
+      "gain_5m": 649520,
+      "gain_1h": 1224650010,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1224000490,
+      "rate_per_hour": 1224650010,
       "projection_basis": "1h",
-      "projected_points": 168569486306,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 168544030324,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 7
     },
     {
@@ -359,64 +359,64 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 22554000000,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 62
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 66
     },
     {
       "rank": 26,
       "clan_name": "st1z",
-      "points": 22238990998,
-      "gain_5m": 0,
-      "gain_1h": 0,
+      "points": 22278990998,
+      "gain_5m": 40000000,
+      "gain_1h": 40000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 0,
+      "rate_per_hour": 40000000,
       "projection_basis": "1h",
-      "projected_points": 22238990998,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 64
+      "projected_points": 27027919398,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 58
     },
     {
       "rank": 27,
       "clan_name": "UNTY",
       "points": 21293835426,
-      "gain_5m": 3000000,
+      "gain_5m": 0,
       "gain_1h": 47000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 47000000,
       "projection_basis": "1h",
-      "projected_points": 26877789754,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 53
+      "projected_points": 26873826296,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 59
     },
     {
       "rank": 28,
       "clan_name": "RY0",
-      "points": 20819000032,
-      "gain_5m": 32,
-      "gain_1h": -4999968,
+      "points": 20830000000,
+      "gain_5m": 10999968,
+      "gain_1h": 6000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": -4999968,
+      "rate_per_hour": 6000000,
       "projection_basis": "1h",
-      "projected_points": 20224966139,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 67
+      "projected_points": 21542339260,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 69
     },
     {
       "rank": 29,
       "clan_name": "FaZ",
       "points": 20571204906,
-      "gain_5m": 5000000,
+      "gain_5m": 0,
       "gain_1h": 455000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 455000000,
       "projection_basis": "1h",
-      "projected_points": 74628635100,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 22
+      "projected_points": 74590265456,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 25
     },
     {
       "rank": 30,
@@ -429,8 +429,8 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 20145960291,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 68
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 73
     },
     {
       "rank": 31,
@@ -442,37 +442,37 @@
       "gain_24h": null,
       "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 24276940273,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 57
+      "projected_points": 24273988762,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 62
     },
     {
       "rank": 32,
       "clan_name": "LSQ",
       "points": 19647749999,
-      "gain_5m": 150000000,
+      "gain_5m": 0,
       "gain_1h": 867000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 867000000,
       "projection_basis": "1h",
-      "projected_points": 122653886216,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 12
+      "projected_points": 122580773069,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 13
     },
     {
       "rank": 33,
       "clan_name": "HSTL",
       "points": 19438145069,
-      "gain_5m": 35000000,
+      "gain_5m": 0,
       "gain_1h": 95000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 95000000,
       "projection_basis": "1h",
-      "projected_points": 30724861263,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 48
+      "projected_points": 30716850019,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 53
     },
     {
       "rank": 34,
@@ -484,23 +484,23 @@
       "gain_24h": null,
       "rate_per_hour": 175000000,
       "projection_basis": "1h",
-      "projected_points": 40162319306,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 32
+      "projected_points": 40147561750,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 39
     },
     {
       "rank": 35,
       "clan_name": "R0MU",
-      "points": 19312612432,
-      "gain_5m": 0,
-      "gain_1h": 115000000,
+      "points": 19313561655,
+      "gain_5m": 949223,
+      "gain_1h": 115949223,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 115000000,
+      "rate_per_hour": 115949223,
       "projection_basis": "1h",
-      "projected_points": 32975479404,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 42
+      "projected_points": 33079425607,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 48
     },
     {
       "rank": 36,
@@ -512,9 +512,9 @@
       "gain_24h": null,
       "rate_per_hour": 632000000,
       "projection_basis": "1h",
-      "projected_points": 94222216355,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 15
+      "projected_points": 94168920497,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 19
     },
     {
       "rank": 37,
@@ -526,9 +526,9 @@
       "gain_24h": null,
       "rate_per_hour": 94000000,
       "projection_basis": "1h",
-      "projected_points": 30247908656,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 49
+      "projected_points": 30239981740,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 54
     },
     {
       "rank": 38,
@@ -540,9 +540,9 @@
       "gain_24h": null,
       "rate_per_hour": 100000000,
       "projection_basis": "1h",
-      "projected_points": 30909192755,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 47
+      "projected_points": 30900759866,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 52
     },
     {
       "rank": 39,
@@ -554,40 +554,54 @@
       "gain_24h": null,
       "rate_per_hour": 40000000,
       "projection_basis": "1h",
-      "projected_points": 23544326792,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 61
+      "projected_points": 23540953636,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 65
     },
     {
       "rank": 40,
       "clan_name": "eguh",
-      "points": 18613500000,
-      "gain_5m": 0,
-      "gain_1h": 660000000,
+      "points": 18617500000,
+      "gain_5m": 4000000,
+      "gain_1h": 664000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 660000000,
+      "rate_per_hour": 664000000,
       "projection_basis": "1h",
-      "projected_points": 97026475667,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 13
+      "projected_points": 97449711440,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 17
     },
     {
       "rank": 41,
       "clan_name": "JJ07",
-      "points": 17896721310,
-      "gain_5m": 0,
-      "gain_1h": 1264000,
+      "points": 18357209655,
+      "gain_5m": 460488345,
+      "gain_1h": 461752345,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1264000,
+      "rate_per_hour": 461752345,
       "projection_basis": "1h",
-      "projected_points": 18046894039,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 72
+      "projected_points": 73177930278,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 27
     },
     {
       "rank": 42,
+      "clan_name": "BYRD",
+      "points": 18091459318,
+      "gain_5m": 910000000,
+      "gain_1h": 915000000,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 915000000,
+      "projection_basis": "1h",
+      "projected_points": 126723196468,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 12
+    },
+    {
+      "rank": 43,
       "clan_name": "BEZE",
       "points": 17539000000,
       "gain_5m": 0,
@@ -597,22 +611,8 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 17539000000,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 74
-    },
-    {
-      "rank": 43,
-      "clan_name": "BYRD",
-      "points": 17181459318,
-      "gain_5m": 0,
-      "gain_1h": 5000000,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 5000000,
-      "projection_basis": "1h",
-      "projected_points": 17775497012,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 73
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 77
     },
     {
       "rank": 44,
@@ -624,9 +624,9 @@
       "gain_24h": null,
       "rate_per_hour": 600000000,
       "projection_basis": "1h",
-      "projected_points": 88367624110,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 19
+      "projected_points": 88317026777,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 22
     },
     {
       "rank": 45,
@@ -638,23 +638,23 @@
       "gain_24h": null,
       "rate_per_hour": 604000000,
       "projection_basis": "1h",
-      "projected_points": 88675503489,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 18
+      "projected_points": 88624568840,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 21
     },
     {
       "rank": 46,
       "clan_name": "SVSP",
       "points": 16631002624,
-      "gain_5m": 40000000,
+      "gain_5m": 0,
       "gain_1h": 45000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 45000000,
       "projection_basis": "1h",
-      "projected_points": 21977341874,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 65
+      "projected_points": 21973547074,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 68
     },
     {
       "rank": 47,
@@ -667,22 +667,22 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 16542050362,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 76
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 79
     },
     {
       "rank": 48,
       "clan_name": "CITC",
-      "points": 16482753375,
-      "gain_5m": 0,
-      "gain_1h": 60000000,
+      "points": 16513302598,
+      "gain_5m": 30549223,
+      "gain_1h": 90549223,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 60000000,
+      "rate_per_hour": 90549223,
       "projection_basis": "1h",
-      "projected_points": 23611205708,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 60
+      "projected_points": 27263597016,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 56
     },
     {
       "rank": 49,
@@ -694,9 +694,9 @@
       "gain_24h": null,
       "rate_per_hour": 110549223,
       "projection_basis": "1h",
-      "projected_points": 29530647354,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 50
+      "projected_points": 29521324861,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 55
     },
     {
       "rank": 50,
@@ -708,8 +708,8 @@
       "gain_24h": null,
       "rate_per_hour": 1060050000,
       "projection_basis": "1h",
-      "projected_points": 141667332599,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 141577939761,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 10
     },
     {
@@ -722,9 +722,9 @@
       "gain_24h": null,
       "rate_per_hour": 40750000,
       "projection_basis": "1h",
-      "projected_points": 20501435206,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 66
+      "projected_points": 20497998804,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 72
     },
     {
       "rank": 52,
@@ -737,50 +737,50 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 15298699000,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 81
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 84
     },
     {
       "rank": 53,
       "clan_name": "PsAG",
-      "points": 14814355869,
-      "gain_5m": 22000000,
-      "gain_1h": 151999990,
+      "points": 14864355869,
+      "gain_5m": 50000000,
+      "gain_1h": 201999990,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 151999990,
+      "rate_per_hour": 201999990,
       "projection_basis": "1h",
-      "projected_points": 32873100592,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 43
+      "projected_points": 38846443102,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 42
     },
     {
       "rank": 54,
       "clan_name": "A0S",
-      "points": 14772863940,
-      "gain_5m": 0,
-      "gain_1h": 40000000,
+      "points": 14787863940,
+      "gain_5m": 15000000,
+      "gain_1h": 55000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 40000000,
+      "rate_per_hour": 55000000,
       "projection_basis": "1h",
-      "projected_points": 19525165496,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 21317640490,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 70
     },
     {
       "rank": 55,
       "clan_name": "L1GO",
       "points": 14406047470,
-      "gain_5m": 80000000,
+      "gain_5m": 0,
       "gain_1h": 200250000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 200250000,
       "projection_basis": "1h",
-      "projected_points": 38197257133,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 36
+      "projected_points": 38180370273,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 44
     },
     {
       "rank": 56,
@@ -792,23 +792,23 @@
       "gain_24h": null,
       "rate_per_hour": 1678000000,
       "projection_basis": "1h",
-      "projected_points": 213687050256,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 5
+      "projected_points": 213545546380,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 6
     },
     {
       "rank": 57,
       "clan_name": "Aifo",
-      "points": 14005835740,
-      "gain_5m": 0,
-      "gain_1h": 675000000,
+      "points": 14115835740,
+      "gain_5m": 110000000,
+      "gain_1h": 785000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 675000000,
+      "rate_per_hour": 785000000,
       "projection_basis": "1h",
-      "projected_points": 94200924490,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 16
+      "projected_points": 107313555590,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 14
     },
     {
       "rank": 58,
@@ -820,9 +820,9 @@
       "gain_24h": null,
       "rate_per_hour": 90000000,
       "projection_basis": "1h",
-      "projected_points": 24682840155,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 56
+      "projected_points": 24675250555,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 61
     },
     {
       "rank": 59,
@@ -834,8 +834,8 @@
       "gain_24h": null,
       "rate_per_hour": 1204350000,
       "projection_basis": "1h",
-      "projected_points": 156965126637,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 156863565140,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 9
     },
     {
@@ -848,23 +848,23 @@
       "gain_24h": null,
       "rate_per_hour": 20000000,
       "projection_basis": "1h",
-      "projected_points": 15931462879,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 78
+      "projected_points": 15929776301,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 81
     },
     {
       "rank": 61,
       "clan_name": "Tai",
-      "points": 13528350000,
-      "gain_5m": 0,
-      "gain_1h": 30000000,
+      "points": 13534000000,
+      "gain_5m": 5650000,
+      "gain_1h": 35650000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 30000000,
+      "rate_per_hour": 35650000,
       "projection_basis": "1h",
-      "projected_points": 17092576167,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 75
+      "projected_points": 17766482437,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 76
     },
     {
       "rank": 62,
@@ -876,9 +876,9 @@
       "gain_24h": null,
       "rate_per_hour": 90511655,
       "projection_basis": "1h",
-      "projected_points": 23949640281,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 59
+      "projected_points": 23942007534,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 64
     },
     {
       "rank": 63,
@@ -890,37 +890,37 @@
       "gain_24h": null,
       "rate_per_hour": 272000000,
       "projection_basis": "1h",
-      "projected_points": 45487016586,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 29
+      "projected_points": 45464079128,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 34
     },
     {
       "rank": 64,
       "clan_name": "Gaea",
       "points": 12754405943,
-      "gain_5m": 5000000,
+      "gain_5m": 0,
       "gain_1h": 5000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 5000000,
       "projection_basis": "1h",
-      "projected_points": 13348443637,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 85
+      "projected_points": 13348021993,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 88
     },
     {
       "rank": 65,
       "clan_name": "FMLY",
-      "points": 12672763930,
-      "gain_5m": 0,
-      "gain_1h": 510015000,
+      "points": 12672820420,
+      "gain_5m": 56490,
+      "gain_1h": 510071490,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 510015000,
+      "rate_per_hour": 510071490,
       "projection_basis": "1h",
-      "projected_points": 73266390876,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 23
+      "projected_points": 73230145042,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 26
     },
     {
       "rank": 66,
@@ -932,9 +932,9 @@
       "gain_24h": null,
       "rate_per_hour": 49000000,
       "projection_basis": "1h",
-      "projected_points": 18296690173,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 71
+      "projected_points": 18292558057,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 75
     },
     {
       "rank": 67,
@@ -946,37 +946,37 @@
       "gain_24h": null,
       "rate_per_hour": 162000000,
       "projection_basis": "1h",
-      "projected_points": 31625219386,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 45
+      "projected_points": 31611558106,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 51
     },
     {
       "rank": 68,
       "clan_name": "LdER",
-      "points": 12278862000,
-      "gain_5m": 0,
-      "gain_1h": 66045334,
+      "points": 12288862000,
+      "gain_5m": 10000000,
+      "gain_1h": 76045334,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 66045334,
+      "rate_per_hour": 76045334,
       "projection_basis": "1h",
-      "projected_points": 20125545588,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 69
+      "projected_points": 21317208158,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 71
     },
     {
       "rank": 69,
       "clan_name": "dewp",
-      "points": 12265695792,
-      "gain_5m": 0,
-      "gain_1h": 0,
+      "points": 12271695792,
+      "gain_5m": 6000000,
+      "gain_1h": 6000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 0,
+      "rate_per_hour": 6000000,
       "projection_basis": "1h",
-      "projected_points": 12265695792,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 88
+      "projected_points": 12984035052,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 90
     },
     {
       "rank": 70,
@@ -988,9 +988,9 @@
       "gain_24h": null,
       "rate_per_hour": 119000000,
       "projection_basis": "1h",
-      "projected_points": 26186364491,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 54
+      "projected_points": 26176329353,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 60
     },
     {
       "rank": 71,
@@ -1002,12 +1002,26 @@
       "gain_24h": null,
       "rate_per_hour": 10000000,
       "projection_basis": "1h",
-      "projected_points": 13123626666,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 86
+      "projected_points": 13122783377,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 89
     },
     {
       "rank": 72,
+      "clan_name": "OzTM",
+      "points": 11748046942,
+      "gain_5m": 28350000,
+      "gain_1h": 450000000,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 450000000,
+      "projection_basis": "1h",
+      "projected_points": 65173491442,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 29
+    },
+    {
+      "rank": 73,
       "clan_name": "K0ZI",
       "points": 11719773310,
       "gain_5m": 0,
@@ -1016,65 +1030,51 @@
       "gain_24h": null,
       "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 15878037171,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 79
-    },
-    {
-      "rank": 73,
-      "clan_name": "OzTM",
-      "points": 11719696942,
-      "gain_5m": 20650000,
-      "gain_1h": 421650000,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 421650000,
-      "projection_basis": "1h",
-      "projected_points": 61814895715,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 26
+      "projected_points": 15875085660,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 82
     },
     {
       "rank": 74,
       "clan_name": "Taux",
       "points": 11207121330,
-      "gain_5m": 950000000,
+      "gain_5m": 0,
       "gain_1h": 1010000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 1010000000,
       "projection_basis": "1h",
-      "projected_points": 131202735608,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 131117563430,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 11
     },
     {
       "rank": 75,
       "clan_name": "J200",
-      "points": 11102803843,
-      "gain_5m": 300000,
-      "gain_1h": 226250000,
+      "points": 11118103843,
+      "gain_5m": 15300000,
+      "gain_1h": 241550000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 226250000,
+      "rate_per_hour": 241550000,
       "projection_basis": "1h",
-      "projected_points": 37983009517,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 37
+      "projected_points": 39795695219,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 40
     },
     {
       "rank": 76,
       "clan_name": "_hot",
-      "points": 11052026648,
-      "gain_5m": 0,
-      "gain_1h": 13500000,
+      "points": 11092026648,
+      "gain_5m": 40000000,
+      "gain_1h": 53500000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 13500000,
+      "rate_per_hour": 53500000,
       "projection_basis": "1h",
-      "projected_points": 12655928423,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 87
+      "projected_points": 17443718383,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 78
     },
     {
       "rank": 77,
@@ -1086,9 +1086,9 @@
       "gain_24h": null,
       "rate_per_hour": 10250000,
       "projection_basis": "1h",
-      "projected_points": 12101827274,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 89
+      "projected_points": 12100962903,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 91
     },
     {
       "rank": 78,
@@ -1101,8 +1101,8 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 10853787134,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 90
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 92
     },
     {
       "rank": 79,
@@ -1114,9 +1114,9 @@
       "gain_24h": null,
       "rate_per_hour": 40999000,
       "projection_basis": "1h",
-      "projected_points": 15692760897,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 80
+      "projected_points": 15689303497,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 83
     },
     {
       "rank": 80,
@@ -1128,12 +1128,26 @@
       "gain_24h": null,
       "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 14951815638,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 83
+      "projected_points": 14948864127,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 86
     },
     {
       "rank": 81,
+      "clan_name": "CVTZ",
+      "points": 10675258997,
+      "gain_5m": 400000000,
+      "gain_1h": 400000000,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 400000000,
+      "projection_basis": "1h",
+      "projected_points": 58164542997,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 32
+    },
+    {
+      "rank": 82,
       "clan_name": "OLLY",
       "points": 10500255720,
       "gain_5m": 0,
@@ -1142,12 +1156,12 @@
       "gain_24h": null,
       "rate_per_hour": 50777,
       "projection_basis": "1h",
-      "projected_points": 10506288410,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 93
+      "projected_points": 10506284128,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 94
     },
     {
-      "rank": 82,
+      "rank": 83,
       "clan_name": "GCEM",
       "points": 10468973908,
       "gain_5m": 0,
@@ -1156,12 +1170,12 @@
       "gain_24h": null,
       "rate_per_hour": 99650000,
       "projection_basis": "1h",
-      "projected_points": 22308145158,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 63
+      "projected_points": 22299741785,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 67
     },
     {
-      "rank": 83,
+      "rank": 84,
       "clan_name": "W2VY",
       "points": 10399141416,
       "gain_5m": 0,
@@ -1170,12 +1184,12 @@
       "gain_24h": null,
       "rate_per_hour": 38738345,
       "projection_basis": "1h",
-      "projected_points": 15001548846,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 82
+      "projected_points": 14998282084,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 85
     },
     {
-      "rank": 84,
+      "rank": 85,
       "clan_name": "XREX",
       "points": 10342987070,
       "gain_5m": 0,
@@ -1184,23 +1198,9 @@
       "gain_24h": null,
       "rate_per_hour": 380000000,
       "projection_basis": "1h",
-      "projected_points": 55489851848,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 28
-    },
-    {
-      "rank": 85,
-      "clan_name": "CVTZ",
-      "points": 10275258997,
-      "gain_5m": 0,
-      "gain_1h": 0,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 0,
-      "projection_basis": "1h",
-      "projected_points": 10275258997,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 94
+      "projected_points": 55457806870,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 33
     },
     {
       "rank": 86,
@@ -1212,23 +1212,23 @@
       "gain_24h": null,
       "rate_per_hour": 730000000,
       "projection_basis": "1h",
-      "projected_points": 96705254198,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 14
+      "projected_points": 96643694109,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 18
     },
     {
       "rank": 87,
       "clan_name": "AX0K",
       "points": 9913938062,
-      "gain_5m": 530000000,
+      "gain_5m": 0,
       "gain_1h": 550000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 550000000,
       "projection_basis": "1h",
-      "projected_points": 75258084451,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 21
+      "projected_points": 75211703562,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 24
     },
     {
       "rank": 88,
@@ -1240,9 +1240,9 @@
       "gain_24h": null,
       "rate_per_hour": 5651666,
       "projection_basis": "1h",
-      "projected_points": 10506677194,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 92
+      "projected_points": 10506200595,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 95
     },
     {
       "rank": 89,
@@ -1254,9 +1254,9 @@
       "gain_24h": null,
       "rate_per_hour": 7000000,
       "projection_basis": "1h",
-      "projected_points": 10517140010,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 91
+      "projected_points": 10516549708,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 93
     },
     {
       "rank": 90,
@@ -1268,9 +1268,9 @@
       "gain_24h": null,
       "rate_per_hour": 590000000,
       "projection_basis": "1h",
-      "projected_points": 79727545944,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 20
+      "projected_points": 79677791900,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 23
     },
     {
       "rank": 91,
@@ -1282,9 +1282,9 @@
       "gain_24h": null,
       "rate_per_hour": 450000000,
       "projection_basis": "1h",
-      "projected_points": 63036886975,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 24
+      "projected_points": 62998938975,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 30
     },
     {
       "rank": 92,
@@ -1296,12 +1296,26 @@
       "gain_24h": null,
       "rate_per_hour": 215000000,
       "projection_basis": "1h",
-      "projected_points": 34986248152,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 40
+      "projected_points": 34968117441,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 46
     },
     {
       "rank": 93,
+      "clan_name": "RMBC",
+      "points": 9380118817,
+      "gain_5m": 69000000,
+      "gain_1h": 76000000,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 76000000,
+      "projection_basis": "1h",
+      "projected_points": 18403082777,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 74
+    },
+    {
+      "rank": 94,
       "clan_name": "ILDK",
       "points": 9377500418,
       "gain_5m": 0,
@@ -1310,23 +1324,9 @@
       "gain_24h": null,
       "rate_per_hour": 194000000,
       "projection_basis": "1h",
-      "projected_points": 32426162962,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 44
-    },
-    {
-      "rank": 94,
-      "clan_name": "RMBC",
-      "points": 9311118817,
-      "gain_5m": 5000000,
-      "gain_1h": 7000000,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 7000000,
-      "projection_basis": "1h",
-      "projected_points": 10142771589,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 95
+      "projected_points": 32409803158,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 49
     },
     {
       "rank": 95,
@@ -1338,9 +1338,9 @@
       "gain_24h": null,
       "rate_per_hour": 56000000,
       "projection_basis": "1h",
-      "projected_points": 15960272178,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 77
+      "projected_points": 15955549760,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 80
     },
     {
       "rank": 96,
@@ -1352,23 +1352,23 @@
       "gain_24h": null,
       "rate_per_hour": 30,
       "projection_basis": "1h",
-      "projected_points": 9263436074,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "projected_points": 9263436072,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 96
     },
     {
       "rank": 97,
       "clan_name": "ROYL",
       "points": 9248006986,
-      "gain_5m": 34000000,
+      "gain_5m": 0,
       "gain_1h": 44000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 44000000,
       "projection_basis": "1h",
-      "projected_points": 14475538697,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
-      "projected_rank": 84
+      "projected_points": 14471828226,
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
+      "projected_rank": 87
     },
     {
       "rank": 98,
@@ -1381,7 +1381,7 @@
       "rate_per_hour": 0,
       "projection_basis": "none",
       "projected_points": 8980609447,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 97
     },
     {
@@ -1395,21 +1395,21 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 8797119666,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 98
     },
     {
       "rank": 100,
       "clan_name": "l0ok",
       "points": 8731024109,
-      "gain_5m": null,
+      "gain_5m": 0,
       "gain_1h": null,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 0,
       "projection_basis": "none",
       "projected_points": 8731024109,
-      "fetched_at": "2026-05-11T15:11:32.86+00:00",
+      "fetched_at": "2026-05-11T15:16:36.444+00:00",
       "projected_rank": 99
     }
   ]
