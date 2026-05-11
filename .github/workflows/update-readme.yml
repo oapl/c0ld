@@ -22,7 +22,7 @@ permissions:
 jobs:
   update-leaderboard:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Debug trigger info
@@ -135,13 +135,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add README.md Data/ assets/avatars/ index.html clans.html players.html profile.html scripts/ ingest.js .github/workflows/update-readme.yml
+          for i in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
 
-          if git diff --cached --quiet; then
-            echo "No README, Data, avatar, page, script, or workflow changes to commit."
-            exit 0
-          fi
+            git add README.md Data/ assets/avatars/ index.html clans.html players.html profile.html scripts/ ingest.js .github/workflows/update-readme.yml
 
-          git commit -m "Update leaderboard"
-          git pull --rebase origin main
-          git push origin main
+            if git diff --cached --quiet; then
+              echo "No README, Data, avatar, page, script, or workflow changes to commit."
+              exit 0
+            fi
+
+            git commit -m "Update leaderboard" || true
+
+            if git push origin HEAD:main; then
+              echo "Push succeeded."
+              exit 0
+            fi
+
+            echo "Push failed, retrying..."
+            sleep 5
+          done
+
+          echo "Failed to push after retries."
+          exit 1
