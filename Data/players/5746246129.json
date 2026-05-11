@@ -7,11 +7,39 @@
   ],
   "avatar_url": "assets/avatars/5746246129.png",
   "profile_url": "https://www.roblox.com/users/5746246129/profile",
-  "total_battles": 2,
-  "latest_seen": "2026-05-11T13:51:38.704Z",
-  "latest_rank": 18,
-  "latest_points": 10383,
+  "total_battles": 3,
+  "latest_seen": "2026-05-11T14:23:36.089Z",
+  "latest_rank": 73,
+  "latest_points": 650000,
   "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "AngelBattle2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-11T14:23:36.089Z",
+      "first_seen": "2026-05-11T14:23:36.089Z",
+      "first_active_date": "2026-05-11T14:23:36.089Z",
+      "last_seen": "2026-05-11T14:23:36.089Z",
+      "starting_rank": 73,
+      "last_rank": 73,
+      "end_rank": 73,
+      "best_rank": 73,
+      "worst_rank": 73,
+      "starting_points": 650000,
+      "ending_points": 650000,
+      "max_points": 650000,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T14:23:36.089Z",
+          "rank": 73,
+          "points": 650000
+        }
+      ]
+    },
     {
       "battle": "StarryBattle",
       "display_name": "Starry Battle",

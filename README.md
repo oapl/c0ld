@@ -14,19 +14,19 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | Darwinaknox | 0 | N/A |
-| 2 | EndOfAnEra007 | 0 | N/A |
-| 3 | SupaAnTz | 0 | N/A |
-| 4 | LawnMp3 | 0 | N/A |
-| 5 | dragonballx1412 | 0 | N/A |
-| 6 | sebastjan35 | 0 | N/A |
-| 7 | jupiter0477 | 0 | N/A |
-| 8 | Sprintbooter | 0 | N/A |
-| 9 | johnr622 | 0 | N/A |
-| 10 | MrChicken66666 | 0 | N/A |
+| 1 | johnr622 | 1B | N/A |
+| 2 | littledraiken | 1B | N/A |
+| 3 | LeRatRuse666 | 1B | N/A |
+| 4 | sebastjan35 | 750M | N/A |
+| 5 | jupiter0477 | 750M | N/A |
+| 6 | joshuacd2006 | 750M | N/A |
+| 7 | mavilure | 750M | N/A |
+| 8 | mecduqgtryhard | 750M | N/A |
+| 9 | Ewan_314 | 750M | N/A |
+| 10 | Fallen_Angel1989 | 750M | N/A |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-11 14:03:09 UTC
+2026-05-11 14:23:36 UTC
 <!-- END_UPDATED -->
