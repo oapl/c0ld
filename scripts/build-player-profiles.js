@@ -5,8 +5,8 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
 const CLAN_NAME = process.env.CLAN_NAME || "NONG";
-const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "StarryBattle";
-const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Starry Battle";
+const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
+const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Angel Battle 2026";
 const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || null;
 
 const CURRENT_NONG_TABLE =
@@ -22,9 +22,11 @@ const AVATAR_DIR = path.join(process.cwd(), "assets", "avatars");
 const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
+const ROBLOX_USERNAME_BATCH_SIZE = 100;
+const ROBLOX_THUMB_BATCH_SIZE = 100;
 
-if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
-if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
+if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+if (!SUPABASE_KEY) throw new Error("Missing SUPABASE_SERVICE_KEY");
 
 function defaultNongTableFromBattleName(battleName) {
   const clean = String(battleName || "")
@@ -59,6 +61,12 @@ function normalizeName(value) {
     .replace(/[^a-z0-9_]/g, "");
 }
 
+function slugFromUsername(username) {
+  return String(username || "unknown")
+    .replace(/[^0-9a-zA-Z_-]/g, "_")
+    .slice(0, 120);
+}
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -80,6 +88,14 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
@@ -97,12 +113,7 @@ async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      throw new Error(`${filePath} must contain a JSON array.`);
-    }
-
-    return parsed;
+    return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -114,11 +125,9 @@ function getCaseInsensitiveValue(row, candidates) {
   const lowerMap = new Map(keys.map(k => [String(k).toLowerCase(), k]));
 
   for (const candidate of candidates) {
-    const exact = lowerMap.get(String(candidate).toLowerCase());
-
-    if (exact !== undefined) {
-      const value = row[exact];
-
+    const actual = lowerMap.get(String(candidate).toLowerCase());
+    if (actual !== undefined) {
+      const value = row[actual];
       if (value !== null && value !== undefined && value !== "") {
         return value;
       }
@@ -129,38 +138,26 @@ function getCaseInsensitiveValue(row, candidates) {
 }
 
 function getCaseInsensitiveColumnName(columns, candidates) {
-  const lowerMap = new Map(columns.map(k => [String(k).toLowerCase(), k]));
-
+  const lowerMap = new Map(columns.map(c => [String(c).toLowerCase(), c]));
   for (const candidate of candidates) {
-    const exact = lowerMap.get(String(candidate).toLowerCase());
-    if (exact !== undefined) return exact;
+    const actual = lowerMap.get(String(candidate).toLowerCase());
+    if (actual !== undefined) return actual;
   }
-
   return null;
-}
-
-function slugFromUsername(username) {
-  return String(username || "unknown")
-    .replace(/[^0-9a-zA-Z_-]/g, "_")
-    .slice(0, 80);
 }
 
 function cleanManualBattle(record) {
   return {
     battle: stringOrNull(record.battle || record.display_name),
     display_name: stringOrNull(record.display_name || record.battle),
-
     api_battle_key: stringOrNull(record.api_battle_key),
     nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
     clan_results_table: stringOrNull(record.clan_results_table),
-
     first_snapshot: safeIso(record.first_snapshot),
     last_snapshot: safeIso(record.last_snapshot),
-
     total_snapshots: numberOrNull(record.total_snapshots),
     total_rows: numberOrNull(record.total_rows),
     unique_players: numberOrNull(record.unique_players),
-
     placement: record.placement ?? null,
     update_number: record.update_number ?? null,
     update_url: stringOrNull(record.update_url)
@@ -168,10 +165,7 @@ function cleanManualBattle(record) {
 }
 
 function normalizeTableRow(row, battleConfig, tableName) {
-  const fallbackTimestamp =
-    battleConfig.last_snapshot ||
-    battleConfig.first_snapshot ||
-    null;
+  const fallbackTimestamp = battleConfig.last_snapshot || battleConfig.first_snapshot || null;
 
   const timestamp =
     getCaseInsensitiveValue(row, [
@@ -185,78 +179,62 @@ function normalizeTableRow(row, battleConfig, tableName) {
       "date"
     ]) || fallbackTimestamp;
 
-  const username =
-    getCaseInsensitiveValue(row, [
-      "username",
-      "user_name",
-      "member",
-      "member_name",
-      "player",
-      "player_name",
-      "name",
-      "roblox_username"
-    ]);
+  const username = getCaseInsensitiveValue(row, [
+    "username",
+    "user_name",
+    "member",
+    "member_name",
+    "player",
+    "player_name",
+    "name",
+    "roblox_username"
+  ]);
 
-  const points =
-    getCaseInsensitiveValue(row, [
-      "total_points",
-      "points",
-      "score",
-      "total",
-      "value"
-    ]);
+  const points = getCaseInsensitiveValue(row, [
+    "total_points",
+    "points",
+    "score",
+    "total",
+    "value"
+  ]);
 
-  const userId =
-    getCaseInsensitiveValue(row, [
-      "user_id",
-      "userid",
-      "userId",
-      "UserID",
-      "roblox_user_id",
-      "robloxId",
-      "roblox_id"
-    ]);
+  const userId = getCaseInsensitiveValue(row, [
+    "user_id",
+    "userid",
+    "userId",
+    "UserID",
+    "roblox_user_id",
+    "roblox_id",
+    "robloxId"
+  ]);
 
-  const rank =
-    getCaseInsensitiveValue(row, [
-      "rank",
-      "placement",
-      "position"
-    ]);
+  const rank = getCaseInsensitiveValue(row, [
+    "rank",
+    "placement",
+    "position"
+  ]);
 
-  const avatarUrl =
-    getCaseInsensitiveValue(row, [
-      "avatar_url",
-      "avatarUrl"
-    ]);
+  const avatarUrl = getCaseInsensitiveValue(row, [
+    "avatar_url",
+    "avatarUrl"
+  ]);
 
-  const profileKey =
-    getCaseInsensitiveValue(row, [
-      "profile_key",
-      "profileKey"
-    ]);
+  const profileKey = getCaseInsensitiveValue(row, [
+    "profile_key",
+    "profileKey"
+  ]);
 
-  const normalized = {
-    fetched_at: safeIso(timestamp),
+  return {
+    fetched_at: safeIso(timestamp) || new Date(0).toISOString(),
     rank: numberOrNull(rank),
     username: stringOrNull(username),
-    total_points: numberOrNull(points),
+    total_points: numberOrNull(points) ?? 0,
     user_id: numberOrNull(userId),
     avatar_url: stringOrNull(avatarUrl),
     profile_key: stringOrNull(profileKey),
     _source_table: tableName,
     _battle: battleConfig.battle
   };
-
-  if (!normalized.fetched_at) {
-    normalized.fetched_at = fallbackTimestamp || new Date(0).toISOString();
-  }
-
-  if (normalized.total_points === null) {
-    normalized.total_points = 0;
-  }
-
-  return normalized;
 }
 
 async function probeTableColumns(tableName) {
@@ -276,10 +254,7 @@ async function probeTableColumns(tableName) {
   const rows = await res.json();
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    return {
-      columns: [],
-      sample: null
-    };
+    return { columns: [], sample: null };
   }
 
   return {
@@ -325,7 +300,6 @@ async function buildBattleConfigs() {
   }
 
   const deduped = new Map();
-
   for (const battle of tableBacked) {
     deduped.set(normalizeKey(battle.battle), battle);
   }
@@ -349,22 +323,21 @@ async function buildBattleConfigs() {
     return String(a.display_name || a.battle).localeCompare(String(b.display_name || b.battle));
   });
 
-  return {
-    configs,
-    currentProfileBattle:
-      configs.find(b =>
-        normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
-        normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
-        normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
-      ) || {
-        battle: CURRENT_BATTLE_NAME,
-        display_name: CURRENT_BATTLE_DISPLAY_NAME,
-        api_battle_key: CURRENT_BATTLE_NAME,
-        table: CURRENT_NONG_TABLE,
-        nong_results_table: CURRENT_NONG_TABLE,
-        clan_results_table: null
-      }
-  };
+  const currentProfileBattle =
+    configs.find(b =>
+      normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
+      normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
+    ) || {
+      battle: CURRENT_BATTLE_NAME,
+      display_name: CURRENT_BATTLE_DISPLAY_NAME,
+      api_battle_key: CURRENT_BATTLE_NAME,
+      table: CURRENT_NONG_TABLE,
+      nong_results_table: CURRENT_NONG_TABLE,
+      clan_results_table: null
+    };
+
+  return { configs, currentProfileBattle };
 }
 
 async function fetchAllRows(tableName, battleConfig) {
@@ -428,12 +401,10 @@ async function fetchAllRows(tableName, battleConfig) {
 
     const ar = Number(a.rank || 999999);
     const br = Number(b.rank || 999999);
-
     if (ar !== br) return ar - br;
 
     const bp = Number(b.total_points || 0);
     const ap = Number(a.total_points || 0);
-
     if (bp !== ap) return bp - ap;
 
     return String(a.username || "").localeCompare(String(b.username || ""));
@@ -442,30 +413,134 @@ async function fetchAllRows(tableName, battleConfig) {
   return normalizedRows;
 }
 
-async function fetchCurrentLeaderboard() {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/leaderboard_snapshots`);
-  url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
-  url.searchParams.set("order", "fetched_at.desc");
-  url.searchParams.set("limit", "5000");
+async function resolveUserIdsByUsername(usernames) {
+  const map = new Map();
+  const unique = [...new Set(usernames.map(u => String(u || "").trim()).filter(Boolean))];
 
-  const res = await fetch(url.toString(), {
-    headers: sbHeaders({ Prefer: "return=representation" })
-  });
+  for (const batch of chunkArray(unique, ROBLOX_USERNAME_BATCH_SIZE)) {
+    const res = await fetch("https://users.roblox.com/v1/usernames/users", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "NONG-Leaderboard-Username-Resolver"
+      },
+      body: JSON.stringify({
+        usernames: batch,
+        excludeBannedUsers: false
+      })
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase fetch failed for leaderboard_snapshots (${res.status}): ${text}`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Roblox username lookup failed (${res.status}): ${text}`);
+    }
+
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+
+    for (const item of data) {
+      const requestedUsername = String(item?.requestedUsername || item?.name || "").trim();
+      const userId = Number(item?.id);
+
+      if (requestedUsername && Number.isFinite(userId)) {
+        map.set(normalizeName(requestedUsername), userId);
+      }
+    }
+
+    await sleep(200);
   }
 
-  const rows = await res.json();
+  return map;
+}
 
-  if (!rows.length) return [];
+async function fetchAvatarHeadshots(userIds) {
+  const result = new Map();
+  const ids = [...new Set(userIds.filter(Boolean).map(Number))];
 
-  const latestTimestamp = rows[0].fetched_at;
+  for (const batch of chunkArray(ids, ROBLOX_THUMB_BATCH_SIZE)) {
+    const url = new URL("https://thumbnails.roblox.com/v1/users/avatar-headshot");
+    url.searchParams.set("userIds", batch.join(","));
+    url.searchParams.set("size", "150x150");
+    url.searchParams.set("format", "Png");
+    url.searchParams.set("isCircular", "false");
 
-  return rows
-    .filter(row => row.fetched_at === latestTimestamp)
-    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "NONG-Leaderboard-Profiles"
+        }
+      });
+
+      if (!res.ok) {
+        await sleep(200);
+        continue;
+      }
+
+      const json = await res.json();
+      const data = Array.isArray(json?.data) ? json.data : [];
+
+      for (const item of data) {
+        const targetId = Number(item?.targetId);
+        const imageUrl = String(item?.imageUrl || "").trim();
+        const state = String(item?.state || "").trim();
+
+        if (Number.isFinite(targetId) && imageUrl && state === "Completed") {
+          result.set(targetId, imageUrl);
+        }
+      }
+    } catch {
+    }
+
+    await sleep(200);
+  }
+
+  return result;
+}
+
+async function downloadAvatarToCache(userId, imageUrl) {
+  if (!userId || !imageUrl) return null;
+
+  await ensureDir(AVATAR_DIR);
+
+  const fileName = `${userId}.png`;
+  const filePath = path.join(AVATAR_DIR, fileName);
+  const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
+
+  if (await fileExists(filePath)) {
+    return publicPath;
+  }
+
+  try {
+    const res = await fetch(imageUrl, {
+      headers: { "User-Agent": "NONG-Leaderboard-Avatar-Cache" }
+    });
+
+    if (!res.ok) return imageUrl;
+
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!bytes.length) return imageUrl;
+
+    await fs.writeFile(filePath, bytes);
+    return publicPath;
+  } catch {
+    return imageUrl;
+  }
+}
+
+async function cacheAvatarMap(avatarMap) {
+  await ensureDir(AVATAR_DIR);
+
+  const cached = new Map();
+
+  for (const [userId, imageUrl] of avatarMap.entries()) {
+    const localPath = await downloadAvatarToCache(userId, imageUrl);
+    cached.set(Number(userId), localPath || imageUrl);
+    await sleep(50);
+  }
+
+  return cached;
 }
 
 function groupRowsByTimestamp(rows) {
@@ -546,7 +621,6 @@ function addGainFieldsToCurrent(currentRows, archiveRows) {
 
     for (const win of gainWindows) {
       const oldPoints = oldPointMaps[win.key].get(key);
-
       out[win.key] =
         oldPoints === undefined
           ? null
@@ -555,210 +629,6 @@ function addGainFieldsToCurrent(currentRows, archiveRows) {
 
     return out;
   });
-}
-
-async function fetchAvatarHeadshots(userIds) {
-  const result = new Map();
-  const ids = [...new Set(userIds.filter(Boolean).map(Number))];
-
-  for (let i = 0; i < ids.length; i += 100) {
-    const batch = ids.slice(i, i + 100);
-
-    const url = new URL("https://thumbnails.roblox.com/v1/users/avatar-headshot");
-    url.searchParams.set("userIds", batch.join(","));
-    url.searchParams.set("size", "150x150");
-    url.searchParams.set("format", "Png");
-    url.searchParams.set("isCircular", "false");
-
-    try {
-      const res = await fetch(url.toString(), {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "NONG-Leaderboard-Profiles"
-        }
-      });
-
-      const text = await res.text();
-
-      if (!res.ok) {
-        continue;
-      }
-
-      const json = JSON.parse(text);
-
-      for (const item of json.data || []) {
-        if (item.targetId && item.imageUrl) {
-          result.set(Number(item.targetId), item.imageUrl);
-        }
-      }
-    } catch {
-    }
-
-    await sleep(250);
-  }
-
-  return result;
-}
-
-async function downloadAvatarToCache(userId, imageUrl) {
-  if (!userId || !imageUrl) return null;
-
-  await ensureDir(AVATAR_DIR);
-
-  const fileName = `${userId}.png`;
-  const filePath = path.join(AVATAR_DIR, fileName);
-  const publicPath = `${AVATAR_PUBLIC_PATH}/${fileName}`;
-
-  if (await fileExists(filePath)) {
-    return publicPath;
-  }
-
-  try {
-    const res = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "NONG-Leaderboard-Avatar-Cache"
-      }
-    });
-
-    if (!res.ok) {
-      return imageUrl;
-    }
-
-    const bytes = Buffer.from(await res.arrayBuffer());
-
-    if (!bytes.length) {
-      return imageUrl;
-    }
-
-    await fs.writeFile(filePath, bytes);
-    return publicPath;
-  } catch {
-    return imageUrl;
-  }
-}
-
-async function cacheAvatarMap(avatarMap) {
-  await ensureDir(AVATAR_DIR);
-
-  const cached = new Map();
-
-  for (const [userId, imageUrl] of avatarMap.entries()) {
-    const localPath = await downloadAvatarToCache(userId, imageUrl);
-    cached.set(Number(userId), localPath || imageUrl);
-    await sleep(75);
-  }
-
-  return cached;
-}
-
-function buildBattleSummary(battleConfig, rows) {
-  if (!rows.length) {
-    return {
-      battle: battleConfig.battle,
-      display_name: battleConfig.display_name,
-
-      first_snapshot: battleConfig.first_snapshot ?? null,
-      last_snapshot: battleConfig.last_snapshot ?? null,
-
-      total_snapshots: battleConfig.total_snapshots ?? 0,
-      total_rows: battleConfig.total_rows ?? 0,
-      unique_players: battleConfig.unique_players ?? 0,
-
-      placement: battleConfig.placement ?? null,
-      update_number: battleConfig.update_number ?? null,
-      update_url: battleConfig.update_url ?? null,
-
-      api_battle_key: battleConfig.api_battle_key ?? null,
-      nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
-      clan_results_table: battleConfig.clan_results_table ?? null
-    };
-  }
-
-  const snapshotTimes = new Set(rows.map(r => r.fetched_at));
-  const playerKeys = new Set(rows.map(r => r._canonical_identity));
-
-  return {
-    battle: battleConfig.battle,
-    display_name: battleConfig.display_name,
-
-    first_snapshot: safeIso(rows[0].fetched_at),
-    last_snapshot: safeIso(rows[rows.length - 1].fetched_at),
-
-    total_snapshots: snapshotTimes.size,
-    total_rows: rows.length,
-    unique_players: playerKeys.size,
-
-    placement: battleConfig.placement ?? null,
-    update_number: battleConfig.update_number ?? null,
-    update_url: battleConfig.update_url ?? null,
-
-    api_battle_key: battleConfig.api_battle_key ?? null,
-    nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
-    clan_results_table: battleConfig.clan_results_table ?? null
-  };
-}
-
-function summarizePlayerBattle(battleConfig, allBattleRows, playerRows) {
-  const sorted = [...playerRows].sort((a, b) => {
-    const at = new Date(a.fetched_at).getTime();
-    const bt = new Date(b.fetched_at).getTime();
-
-    if (at !== bt) return at - bt;
-    return Number(a.rank || 0) - Number(b.rank || 0);
-  });
-
-  const battleStart = allBattleRows.length ? safeIso(allBattleRows[0].fetched_at) : null;
-  const battleEnd = allBattleRows.length ? safeIso(allBattleRows[allBattleRows.length - 1].fetched_at) : null;
-
-  const nonZeroRows = sorted.filter(row => Number(row.total_points || 0) > 0);
-  const firstActive = nonZeroRows[0] || sorted[0];
-
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-
-  const ranks = sorted.map(r => numberOrNull(r.rank)).filter(n => n !== null);
-  const points = sorted.map(r => numberOrNull(r.total_points)).filter(n => n !== null);
-
-  const startingPoints = numberOrNull(first.total_points);
-  const endingPoints = numberOrNull(last.total_points);
-
-  const series = sorted.map(row => ({
-    t: safeIso(row.fetched_at),
-    rank: numberOrNull(row.rank),
-    points: numberOrNull(row.total_points)
-  }));
-
-  return {
-    battle: battleConfig.battle,
-    display_name: battleConfig.display_name,
-
-    battle_first_snapshot: battleStart,
-    battle_last_snapshot: battleEnd,
-
-    first_seen: safeIso(first.fetched_at),
-    first_active_date: firstActive ? safeIso(firstActive.fetched_at) : null,
-    last_seen: safeIso(last.fetched_at),
-
-    starting_rank: numberOrNull(first.rank),
-    last_rank: numberOrNull(last.rank),
-    end_rank: numberOrNull(last.rank),
-    best_rank: ranks.length ? Math.min(...ranks) : null,
-    worst_rank: ranks.length ? Math.max(...ranks) : null,
-
-    starting_points: startingPoints,
-    ending_points: endingPoints,
-    max_points: points.length ? Math.max(...points) : null,
-    gained_points:
-      startingPoints !== null && endingPoints !== null
-        ? endingPoints - startingPoints
-        : null,
-
-    snapshot_count: sorted.length,
-    present_at_final_snapshot: true,
-    note: null,
-
-    series
-  };
 }
 
 function canonicalProfileKey(record) {
@@ -830,7 +700,7 @@ function buildCanonicalPlayers(allRows) {
       group.avatar_url = row.avatar_url;
     }
 
-    if (!group.canonical_key.match(/^\d+$/) && userIdStr) {
+    if (!/^\d+$/.test(group.canonical_key) && userIdStr) {
       const oldKey = group.canonical_key;
       const newKey = userIdStr;
 
@@ -843,6 +713,7 @@ function buildCanonicalPlayers(allRows) {
         for (const [k, v] of usernameToCanonical.entries()) {
           if (v === oldKey) usernameToCanonical.set(k, newKey);
         }
+
         for (const [k, v] of userIdToCanonical.entries()) {
           if (v === oldKey) userIdToCanonical.set(k, newKey);
         }
@@ -853,6 +724,99 @@ function buildCanonicalPlayers(allRows) {
   }
 
   return [...groups.values()];
+}
+
+function buildBattleSummary(battleConfig, rows) {
+  if (!rows.length) {
+    return {
+      battle: battleConfig.battle,
+      display_name: battleConfig.display_name,
+      first_snapshot: battleConfig.first_snapshot ?? null,
+      last_snapshot: battleConfig.last_snapshot ?? null,
+      total_snapshots: battleConfig.total_snapshots ?? 0,
+      total_rows: battleConfig.total_rows ?? 0,
+      unique_players: battleConfig.unique_players ?? 0,
+      placement: battleConfig.placement ?? null,
+      update_number: battleConfig.update_number ?? null,
+      update_url: battleConfig.update_url ?? null,
+      api_battle_key: battleConfig.api_battle_key ?? null,
+      nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+      clan_results_table: battleConfig.clan_results_table ?? null
+    };
+  }
+
+  const snapshotTimes = new Set(rows.map(r => r.fetched_at));
+  const playerKeys = new Set(rows.map(r => r._canonical_identity));
+
+  return {
+    battle: battleConfig.battle,
+    display_name: battleConfig.display_name,
+    first_snapshot: safeIso(rows[0].fetched_at),
+    last_snapshot: safeIso(rows[rows.length - 1].fetched_at),
+    total_snapshots: snapshotTimes.size,
+    total_rows: rows.length,
+    unique_players: playerKeys.size,
+    placement: battleConfig.placement ?? null,
+    update_number: battleConfig.update_number ?? null,
+    update_url: battleConfig.update_url ?? null,
+    api_battle_key: battleConfig.api_battle_key ?? null,
+    nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+    clan_results_table: battleConfig.clan_results_table ?? null
+  };
+}
+
+function summarizePlayerBattle(battleConfig, allBattleRows, playerRows) {
+  const sorted = [...playerRows].sort((a, b) => {
+    const at = new Date(a.fetched_at).getTime();
+    const bt = new Date(b.fetched_at).getTime();
+    if (at !== bt) return at - bt;
+    return Number(a.rank || 0) - Number(b.rank || 0);
+  });
+
+  const battleStart = allBattleRows.length ? safeIso(allBattleRows[0].fetched_at) : null;
+  const battleEnd = allBattleRows.length ? safeIso(allBattleRows[allBattleRows.length - 1].fetched_at) : null;
+
+  const nonZeroRows = sorted.filter(row => Number(row.total_points || 0) > 0);
+  const firstActive = nonZeroRows[0] || sorted[0];
+
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+
+  const ranks = sorted.map(r => numberOrNull(r.rank)).filter(n => n !== null);
+  const points = sorted.map(r => numberOrNull(r.total_points)).filter(n => n !== null);
+
+  const startingPoints = numberOrNull(first.total_points);
+  const endingPoints = numberOrNull(last.total_points);
+
+  return {
+    battle: battleConfig.battle,
+    display_name: battleConfig.display_name,
+    battle_first_snapshot: battleStart,
+    battle_last_snapshot: battleEnd,
+    first_seen: safeIso(first.fetched_at),
+    first_active_date: firstActive ? safeIso(firstActive.fetched_at) : null,
+    last_seen: safeIso(last.fetched_at),
+    starting_rank: numberOrNull(first.rank),
+    last_rank: numberOrNull(last.rank),
+    end_rank: numberOrNull(last.rank),
+    best_rank: ranks.length ? Math.min(...ranks) : null,
+    worst_rank: ranks.length ? Math.max(...ranks) : null,
+    starting_points: startingPoints,
+    ending_points: endingPoints,
+    max_points: points.length ? Math.max(...points) : null,
+    gained_points:
+      startingPoints !== null && endingPoints !== null
+        ? endingPoints - startingPoints
+        : null,
+    snapshot_count: sorted.length,
+    present_at_final_snapshot: true,
+    note: null,
+    series: sorted.map(row => ({
+      t: safeIso(row.fetched_at),
+      rank: numberOrNull(row.rank),
+      points: numberOrNull(row.total_points)
+    }))
+  };
 }
 
 async function main() {
@@ -871,6 +835,32 @@ async function main() {
   }
 
   const allArchiveRows = configs.flatMap(cfg => battleRowsMap.get(normalizeKey(cfg.battle)) || []);
+
+  const missingUsernames = allArchiveRows
+    .filter(row => !row.user_id && row.username)
+    .map(row => row.username);
+
+  const usernameToUserId = await resolveUserIdsByUsername(missingUsernames);
+
+  for (const row of allArchiveRows) {
+    if (!row.user_id && row.username) {
+      const resolved = usernameToUserId.get(normalizeName(row.username));
+      if (Number.isFinite(resolved)) {
+        row.user_id = resolved;
+      }
+    }
+  }
+
+  const avatarUserIds = [...new Set(allArchiveRows.map(r => r.user_id).filter(Boolean))];
+  const avatarUrlMap = await fetchAvatarHeadshots(avatarUserIds);
+  const cachedAvatarMap = await cacheAvatarMap(avatarUrlMap);
+
+  for (const row of allArchiveRows) {
+    if (!row.avatar_url && row.user_id) {
+      row.avatar_url = cachedAvatarMap.get(Number(row.user_id)) || null;
+    }
+  }
+
   const canonicalPlayers = buildCanonicalPlayers(allArchiveRows);
 
   const currentRowsRaw = await fetchCurrentLeaderboard();
@@ -890,31 +880,22 @@ async function main() {
       if (match) canonical = match.canonical_key;
     }
 
+    const avatarUrl =
+      row.user_id ? cachedAvatarMap.get(Number(row.user_id)) || null : null;
+
     return {
       fetched_at: safeIso(row.fetched_at),
       rank: numberOrNull(row.rank),
       username: stringOrNull(row.username),
       total_points: numberOrNull(row.total_points),
       user_id: numberOrNull(row.user_id),
-      avatar_url: null,
+      avatar_url: avatarUrl,
       profile_key: canonical || canonicalProfileKey(row),
       _canonical_identity: canonical || canonicalProfileKey(row)
     };
   });
 
   const currentRowsWithGains = addGainFieldsToCurrent(currentRowsCanonical, allArchiveRows);
-
-  const userIdsForAvatars = [
-    ...new Set(
-      canonicalPlayers
-        .map(p => p.user_id)
-        .concat(currentRowsWithGains.map(r => r.user_id))
-        .filter(Boolean)
-    )
-  ];
-
-  const avatarUrlMap = await fetchAvatarHeadshots(userIdsForAvatars);
-  const cachedAvatarMap = await cacheAvatarMap(avatarUrlMap);
 
   const playerIndex = [];
   const playersJson = [];
@@ -934,7 +915,7 @@ async function main() {
 
     const avatarUrl =
       group.avatar_url ||
-      (userId ? cachedAvatarMap.get(userId) : null) ||
+      (userId ? cachedAvatarMap.get(Number(userId)) : null) ||
       null;
 
     const byBattle = new Map();
@@ -966,16 +947,15 @@ async function main() {
 
     const profile = {
       profile_key: profileKey,
+      aliases: [...group.aliases].sort(),
       username,
       user_id: userId,
       avatar_url: avatarUrl,
       profile_url: userId ? `https://www.roblox.com/users/${userId}/profile` : null,
-
       total_battles: battles.length,
       latest_rank: latestBattle?.end_rank ?? latestBattle?.last_rank ?? null,
       latest_points: latestBattle?.ending_points ?? null,
       latest_seen: latestBattle?.last_seen ?? null,
-
       battles
     };
 
@@ -1007,34 +987,25 @@ async function main() {
     });
   }
 
-  currentData = {
+  const currentData = {
     generated_at: new Date().toISOString(),
     battle: currentProfileBattle.battle,
     display_name: currentProfileBattle.display_name,
     battle_end_iso: CURRENT_BATTLE_END_ISO,
     clan_name: CLAN_NAME,
-    rows: currentRowsWithGains.map(row => {
-      const profile = canonicalPlayers.find(p => p.canonical_key === row.profile_key);
-      const avatarUrl =
-        row.avatar_url ||
-        (row.user_id ? cachedAvatarMap.get(row.user_id) : null) ||
-        profile?.avatar_url ||
-        null;
-
-      return {
-        fetched_at: row.fetched_at,
-        rank: row.rank,
-        username: row.username,
-        total_points: row.total_points,
-        user_id: row.user_id,
-        profile_key: row.profile_key,
-        avatar_url: avatarUrl,
-        gain_5m: row.gain_5m,
-        gain_1h: row.gain_1h,
-        gain_12h: row.gain_12h,
-        gain_24h: row.gain_24h
-      };
-    })
+    rows: currentRowsWithGains.map(row => ({
+      fetched_at: row.fetched_at,
+      rank: row.rank,
+      username: row.username,
+      total_points: row.total_points,
+      user_id: row.user_id,
+      profile_key: row.profile_key,
+      avatar_url: row.avatar_url,
+      gain_5m: row.gain_5m,
+      gain_1h: row.gain_1h,
+      gain_12h: row.gain_12h,
+      gain_24h: row.gain_24h
+    }))
   };
 
   await fs.writeFile(path.join(OUT_DIR, "current.json"), JSON.stringify(currentData, null, 2) + "\n", "utf8");
@@ -1042,8 +1013,6 @@ async function main() {
   await fs.writeFile(path.join(OUT_DIR, "player-index.json"), JSON.stringify(playerIndex, null, 2) + "\n", "utf8");
   await fs.writeFile(path.join(OUT_DIR, "battles.json"), JSON.stringify(battleSummaries, null, 2) + "\n", "utf8");
 }
-
-let currentData = null;
 
 main().catch(err => {
   console.error(err);

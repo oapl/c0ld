@@ -4,28 +4,14 @@ const path = require("path");
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-const CLAN_NAME = process.env.CLAN_NAME || "NONG";
-const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
-const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Angel Battle 2026";
-const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "";
-const CURRENT_BATTLE_HISTORY_TABLE = process.env.CURRENT_BATTLE_HISTORY_TABLE || "";
-
-const OUT_DIR = path.join(process.cwd(), "Data");
 const DATA_DIR = path.join(process.cwd(), "Data");
 const MANUAL_BATTLES_FILE = path.join(DATA_DIR, "manual-battles.json");
-const CLANS_CURRENT_FILE = path.join(OUT_DIR, "clans-current.json");
-const CURRENT_FILE = path.join(OUT_DIR, "current.json");
+const OUTPUT_FILE = path.join(DATA_DIR, "clans-history.json");
 
 const PAGE_SIZE = 1000;
 
-function sbHeaders(extra = {}) {
-  return {
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-    ...extra
-  };
-}
+if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
+if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
 
 function normalizeKey(value) {
   return String(value || "")
@@ -38,15 +24,30 @@ function clanKey(name) {
   return normalizeKey(name);
 }
 
-function toNumber(value) {
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeIso(value) {
+function stringOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
+}
+
+function dateOrNull(value) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+  return null;
 }
 
 function extractClanImageId(iconValue) {
@@ -65,77 +66,117 @@ async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) {
+      throw new Error(`${filePath} must contain a JSON array.`);
+    }
+    return parsed;
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
   }
 }
 
-async function resolveBattleMeta() {
-  const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
-  const targetKey = normalizeKey(CURRENT_BATTLE_NAME);
-
-  const match = manualBattles.find(item => {
-    return [
-      item?.battle,
-      item?.api_battle_key,
-      item?.display_name
-    ].some(value => normalizeKey(value) === targetKey);
-  });
-
-  return {
-    battle: match?.battle || CURRENT_BATTLE_NAME,
-    display_name: match?.display_name || CURRENT_BATTLE_DISPLAY_NAME,
-    battle_end_iso: CURRENT_BATTLE_END_ISO || null,
-    clan_results_table:
-      CURRENT_BATTLE_HISTORY_TABLE ||
-      match?.clan_results_table ||
-      `${CURRENT_BATTLE_NAME}Clans`
-  };
-}
-
-async function supabaseSelectAll(tableName, queryParams = {}) {
-  const all = [];
-  let offset = 0;
+async function supabaseSelectAll(tableName) {
+  const rows = [];
+  let from = 0;
+  let orderClause = "fetched_at.desc";
 
   while (true) {
-    const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}`);
-    url.searchParams.set("select", "*");
-    url.searchParams.set("limit", String(PAGE_SIZE));
-    url.searchParams.set("offset", String(offset));
+    const to = from + PAGE_SIZE - 1;
 
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, value);
+    let url =
+      `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
+      `?select=*` +
+      `&order=${encodeURIComponent(orderClause)}`;
+
+    let res = await fetch(url, {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        Range: `${from}-${to}`,
+        Prefer: "count=exact"
       }
-    }
-
-    const res = await fetch(url.toString(), {
-      headers: sbHeaders()
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Supabase fetch failed for ${tableName} (${res.status}): ${text}`);
+      const text = await res.text().catch(() => "");
+
+      if (res.status === 404 || text.includes("PGRST205")) {
+        console.warn(`Skipping missing historical clan table: ${tableName}`);
+        return null;
+      }
+
+      const missingFetchedAt =
+        res.status === 400 &&
+        text.toLowerCase().includes("fetched_at") &&
+        text.toLowerCase().includes("does not exist");
+
+      if (missingFetchedAt && orderClause === "fetched_at.desc") {
+        orderClause = "rank.asc.nullslast";
+        url =
+          `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
+          `?select=*` +
+          `&order=${encodeURIComponent(orderClause)}`;
+
+        res = await fetch(url, {
+          method: "GET",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            Range: `${from}-${to}`,
+            Prefer: "count=exact"
+          }
+        });
+
+        if (!res.ok) {
+          const retryText = await res.text().catch(() => "");
+          throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${retryText}`);
+        }
+      } else {
+        throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
+      }
     }
 
-    const rows = await res.json();
-    all.push(...rows);
+    const batch = await res.json();
 
-    if (rows.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
+    if (!Array.isArray(batch)) {
+      throw new Error(`Supabase response for ${tableName} was not an array.`);
+    }
+
+    rows.push(...batch);
+
+    if (batch.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
   }
 
-  return all;
+  return rows;
+}
+
+function normalizeClanRow(row) {
+  return {
+    fetched_at: dateOrNull(
+      firstNonEmpty(
+        row.fetched_at,
+        row.created_at,
+        row.snapshot_at,
+        row.updated_at,
+        row.inserted_at
+      )
+    ),
+    rank: numberOrNull(row.rank),
+    clan_name: stringOrNull(
+      firstNonEmpty(row.clan_name, row.clan, row.name, row.tag)
+    ),
+    points: numberOrNull(firstNonEmpty(row.points, row.total_points))
+  };
 }
 
 function groupRowsByTimestamp(rows) {
   const map = new Map();
 
   for (const row of rows) {
-    const ts = row.fetched_at;
-    if (!ts) continue;
+    const ts = row.fetched_at || "__no_timestamp__";
     if (!map.has(ts)) map.set(ts, []);
     map.get(ts).push(row);
   }
@@ -146,15 +187,31 @@ function groupRowsByTimestamp(rows) {
 function getLatestSnapshotRows(rows) {
   if (!rows.length) return [];
 
+  const timestamped = rows.filter(row => row.fetched_at);
+
+  if (!timestamped.length) {
+    return rows.slice().sort((a, b) => {
+      const ar = Number(a.rank ?? 999999);
+      const br = Number(b.rank ?? 999999);
+      if (ar !== br) return ar - br;
+
+      const ap = Number(a.points || 0);
+      const bp = Number(b.points || 0);
+      if (ap !== bp) return bp - ap;
+
+      return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+    });
+  }
+
   const latestMs = Math.max(
-    ...rows
+    ...timestamped
       .map(row => new Date(row.fetched_at).getTime())
       .filter(ms => !Number.isNaN(ms))
   );
 
   if (!Number.isFinite(latestMs)) return [];
 
-  return rows
+  return timestamped
     .filter(row => new Date(row.fetched_at).getTime() === latestMs)
     .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 }
@@ -164,6 +221,8 @@ function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
   let best = null;
 
   for (const [ts, batch] of grouped.entries()) {
+    if (ts === "__no_timestamp__") continue;
+
     const ms = new Date(ts).getTime();
     if (Number.isNaN(ms)) continue;
 
@@ -184,14 +243,13 @@ function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
 
 function buildPointMap(rows) {
   return new Map(
-    rows.map(row => [
-      clanKey(row.clan_name),
-      Number(row.points || 0)
-    ])
+    rows.map(row => [clanKey(row.clan_name), Number(row.points || 0)])
   );
 }
 
 function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
+  if (!Number.isFinite(latestMs)) return null;
+
   const targetMs = latestMs - hours * 60 * 60 * 1000;
   const oldRows = getNearestSnapshotRows(allRows, targetMs, toleranceMin);
   const oldMap = buildPointMap(oldRows);
@@ -199,32 +257,6 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
 
   if (oldPoints === undefined) return null;
   return Number(currentRow.points || 0) - oldPoints;
-}
-
-function chooseProjectionRate(currentRow, allRows, latestMs) {
-  const windows = [
-    { basis: "12h", hours: 12, toleranceMin: 45 },
-    { basis: "1h", hours: 1, toleranceMin: 15 },
-    { basis: "24h", hours: 24, toleranceMin: 90 }
-  ];
-
-  for (const win of windows) {
-    const gain = getGain(currentRow, allRows, latestMs, win.hours, win.toleranceMin);
-
-    if (gain === null) continue;
-
-    return {
-      basis: win.basis,
-      gain,
-      rate_per_hour: gain / win.hours
-    };
-  }
-
-  return {
-    basis: "none",
-    gain: 0,
-    rate_per_hour: 0
-  };
 }
 
 async function fetchClanIconMap(clanNames) {
@@ -247,6 +279,7 @@ async function fetchClanIconMap(clanNames) {
 
       const json = await res.json();
       const iconId = extractClanImageId(json?.data?.Icon || json?.data?.icon);
+
       map.set(clanKey(clanName), {
         icon_id: iconId || null,
         icon_url: buildClanIconUrl(iconId)
@@ -259,164 +292,131 @@ async function fetchClanIconMap(clanNames) {
   return map;
 }
 
-function calculateRows(snapshotRows, battleEndIso, iconMap) {
+function sortRows(rows) {
+  rows.sort((a, b) => {
+    const ar = Number(a.rank);
+    const br = Number(b.rank);
+
+    if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) {
+      return ar - br;
+    }
+
+    const ap = Number(a.points || 0);
+    const bp = Number(b.points || 0);
+    if (ap !== bp) return bp - ap;
+
+    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+  });
+
+  return rows;
+}
+
+function calculateBattleRows(snapshotRows, iconMap) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
   if (!latestRows.length) {
     return {
-      latestRows: [],
-      rows: [],
-      nong: null,
-      generatedFromSnapshot: null,
-      hoursRemaining: null
+      snapshot_at: null,
+      rows: []
     };
   }
 
   const latestMs = Math.max(
     ...latestRows
-      .map(row => new Date(row.fetched_at).getTime())
+      .map(row => row.fetched_at ? new Date(row.fetched_at).getTime() : NaN)
       .filter(ms => !Number.isNaN(ms))
   );
 
-  const battleEndMs = new Date(battleEndIso || "").getTime();
-
-  const hoursRemaining =
-    Number.isNaN(battleEndMs) || Number.isNaN(latestMs)
-      ? 0
-      : Math.max(0, (battleEndMs - latestMs) / (60 * 60 * 1000));
+  const hasHistoricalTimestamps = Number.isFinite(latestMs);
 
   const projectedRows = latestRows.map(row => {
-    const rate = chooseProjectionRate(row, snapshotRows, latestMs);
-    const points = Number(row.points || 0);
-    const projectedPoints = points + rate.rate_per_hour * hoursRemaining;
     const icon = iconMap.get(clanKey(row.clan_name)) || { icon_id: null, icon_url: null };
 
     return {
-      rank: toNumber(row.rank),
+      rank: numberOrNull(row.rank),
       clan_name: row.clan_name,
-      points,
-      gain_5m: getGain(row, snapshotRows, latestMs, 5 / 60, 4),
-      gain_1h: getGain(row, snapshotRows, latestMs, 1, 15),
-      gain_12h: getGain(row, snapshotRows, latestMs, 12, 45),
-      gain_24h: getGain(row, snapshotRows, latestMs, 24, 90),
-      rate_per_hour: rate.rate_per_hour,
-      projection_basis: rate.basis,
-      projected_points: Math.round(projectedPoints),
+      points: numberOrNull(row.points),
+      gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
+      gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
+      gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
+      gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null,
       projected_rank: null,
-      fetched_at: row.fetched_at,
       icon_id: icon.icon_id,
       icon_url: icon.icon_url
     };
   });
 
-  const projectedSorted = [...projectedRows].sort((a, b) => {
-    if (b.projected_points !== a.projected_points) {
-      return b.projected_points - a.projected_points;
-    }
-
-    return String(a.clan_name).localeCompare(String(b.clan_name));
-  });
-
-  const projectedRankMap = new Map();
-  projectedSorted.forEach((row, index) => {
-    projectedRankMap.set(clanKey(row.clan_name), index + 1);
-  });
-
-  const finalRows = projectedRows
-    .map(row => ({
-      ...row,
-      projected_rank: projectedRankMap.get(clanKey(row.clan_name)) || null
-    }))
-    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
-
-  const nong = finalRows.find(row => clanKey(row.clan_name) === clanKey(CLAN_NAME)) || null;
+  const rows = sortRows(projectedRows);
 
   return {
-    latestRows,
-    rows: finalRows,
-    nong,
-    generatedFromSnapshot: safeIso(latestRows[0]?.fetched_at),
-    hoursRemaining: Number(hoursRemaining.toFixed(3))
+    snapshot_at: latestRows[0]?.fetched_at || null,
+    rows
   };
-}
-
-async function patchCurrentJson(clanOutput) {
-  let current = {};
-
-  try {
-    const raw = await fs.readFile(CURRENT_FILE, "utf8");
-    current = JSON.parse(raw);
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    current = {};
-  }
-
-  const patched = {
-    ...current,
-    clan_name: clanOutput.clan_name,
-    battle: clanOutput.battle,
-    display_name: clanOutput.display_name,
-    battle_end_iso: clanOutput.battle_end_iso,
-    clan_rank: clanOutput.clan_rank,
-    clan_points: clanOutput.clan_points,
-    clan_rank_source: "clans-current.json",
-    clan_rank_matched_name: clanOutput.clan_name,
-    clan_rank_snapshot_at: clanOutput.snapshot_at,
-    projected_rank: clanOutput.projected_rank,
-    projected_points: clanOutput.projected_points,
-    projection_basis: clanOutput.projection_basis,
-    hours_remaining: clanOutput.hours_remaining
-  };
-
-  await fs.writeFile(
-    CURRENT_FILE,
-    JSON.stringify(patched, null, 2) + "\n",
-    "utf8"
-  );
 }
 
 async function main() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY.");
+  const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
+
+  const declared = manualBattles
+    .filter(battle => battle.battle && battle.display_name && battle.clan_results_table)
+    .map(battle => ({
+      battle: String(battle.battle),
+      display_name: String(battle.display_name),
+      source_table: String(battle.clan_results_table),
+      update_number: battle.update_number ?? null,
+      last_snapshot: battle.last_snapshot ?? null,
+      snapshot_at: battle.snapshot_at ?? null,
+      generated_at: battle.generated_at ?? null
+    }));
+
+  const deduped = new Map();
+  for (const item of declared) {
+    deduped.set(normalizeKey(item.battle), item);
   }
 
-  await fs.mkdir(OUT_DIR, { recursive: true });
+  const output = [];
 
-  const meta = await resolveBattleMeta();
+  for (const item of deduped.values()) {
+    console.log(`Reading historical clan table: ${item.source_table} -> ${item.battle}`);
 
-  const historyRows = await supabaseSelectAll(meta.clan_results_table, {
-    order: "fetched_at.desc"
+    const rawRows = await supabaseSelectAll(item.source_table);
+    if (rawRows === null) continue;
+
+    const normalizedRows = rawRows
+      .map(normalizeClanRow)
+      .filter(row => row.clan_name && row.points !== null);
+
+    const latestRows = getLatestSnapshotRows(normalizedRows);
+    const iconMap = await fetchClanIconMap(latestRows.map(row => row.clan_name));
+    const calculated = calculateBattleRows(normalizedRows, iconMap);
+
+    output.push({
+      battle: item.battle,
+      display_name: item.display_name,
+      source_table: item.source_table,
+      update_number: item.update_number,
+      last_snapshot: item.last_snapshot,
+      generated_at: new Date().toISOString(),
+      snapshot_at: calculated.snapshot_at,
+      rows: calculated.rows
+    });
+  }
+
+  output.sort((a, b) => {
+    const au = Number(a.update_number);
+    const bu = Number(b.update_number);
+
+    if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
+      return bu - au;
+    }
+
+    const ad = new Date(a.last_snapshot || a.snapshot_at || 0).getTime() || 0;
+    const bd = new Date(b.last_snapshot || b.snapshot_at || 0).getTime() || 0;
+    return bd - ad;
   });
 
-  const latestRows = getLatestSnapshotRows(historyRows);
-  const iconMap = await fetchClanIconMap(latestRows.map(row => row.clan_name));
-  const calculated = calculateRows(historyRows, meta.battle_end_iso, iconMap);
-
-  const output = {
-    generated_at: new Date().toISOString(),
-    snapshot_at: calculated.generatedFromSnapshot,
-    battle: meta.battle,
-    display_name: meta.display_name,
-    battle_end_iso: meta.battle_end_iso,
-    clan_name: CLAN_NAME,
-
-    clan_rank: calculated.nong?.rank ?? null,
-    clan_points: calculated.nong?.points ?? null,
-    projected_rank: calculated.nong?.projected_rank ?? null,
-    projected_points: calculated.nong?.projected_points ?? null,
-    projection_basis: calculated.nong?.projection_basis ?? null,
-    hours_remaining: calculated.hoursRemaining,
-
-    rows: calculated.rows
-  };
-
-  await fs.writeFile(
-    CLANS_CURRENT_FILE,
-    JSON.stringify(output, null, 2) + "\n",
-    "utf8"
-  );
-
-  await patchCurrentJson(output);
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(OUTPUT_FILE, JSON.stringify(output, null, 2) + "\n", "utf8");
 }
 
 main().catch(err => {
