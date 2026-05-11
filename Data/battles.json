@@ -3,16 +3,16 @@
     "battle": "AngelBattle2026",
     "display_name": "Angel Battle 2026",
     "first_snapshot": "2026-05-11T14:23:36.089Z",
-    "last_snapshot": "2026-05-11T16:46:25.808Z",
-    "total_snapshots": 30,
-    "total_rows": 2220,
+    "last_snapshot": "2026-05-11T17:01:23.328Z",
+    "total_snapshots": 33,
+    "total_rows": 2442,
     "unique_players": 74,
     "placement": "TBD",
     "update_number": 78,
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-78",
     "api_battle_key": "AngelBattle2026",
     "nong_results_table": "AngelBattle2026NONG",
-    "clan_results_table": "AngelBattle2026Clan"
+    "clan_results_table": "AngelBattle2026Clans"
   },
   {
     "battle": "StarryBattle",
@@ -27,7 +27,7 @@
     "update_url": "https://www.biggames.io/post/pet-simulator-99-update-76",
     "api_battle_key": "StarryBattle",
     "nong_results_table": "StarryNONG",
-    "clan_results_table": "StarryClan"
+    "clan_results_table": null
   },
   {
     "battle": "Spring2026",

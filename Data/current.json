@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-11T16:47:02.227Z",
+  "generated_at": "2026-05-11T17:02:10.277Z",
   "battle": "AngelBattle2026",
   "api_battle_key": "AngelBattle2026",
   "display_name": "AngelBattle2026",
@@ -9,14 +9,14 @@
   "clan_points": 13970523310,
   "clan_rank_source": "clans-current.json",
   "clan_rank_matched_name": "NONG",
-  "clan_rank_snapshot_at": "2026-05-11T16:46:30.260Z",
-  "projected_rank": 18,
-  "projected_points": 100640773663,
-  "projection_basis": "1h",
-  "hours_remaining": 117.225,
+  "clan_rank_snapshot_at": "2026-05-11T17:01:27.227Z",
+  "projected_rank": 61,
+  "projected_points": 13970523310,
+  "projection_basis": "none",
+  "hours_remaining": 116.976,
   "rows": [
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 1,
       "username": "johnr622",
       "total_points": 1000000000,
@@ -29,7 +29,7 @@
       "avatar_url": "assets/avatars/671239684.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 2,
       "username": "littledraiken",
       "total_points": 1000000000,
@@ -42,7 +42,7 @@
       "avatar_url": "assets/avatars/610979543.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 3,
       "username": "LeRatRuse666",
       "total_points": 1000000000,
@@ -55,7 +55,7 @@
       "avatar_url": "assets/avatars/3071323005.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 4,
       "username": "sebastjan35",
       "total_points": 750000000,
@@ -68,7 +68,7 @@
       "avatar_url": "assets/avatars/844720150.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 5,
       "username": "jupiter0477",
       "total_points": 750000000,
@@ -81,7 +81,7 @@
       "avatar_url": "assets/avatars/1299086053.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 6,
       "username": "joshuacd2006",
       "total_points": 750000000,
@@ -94,7 +94,7 @@
       "avatar_url": "assets/avatars/381111505.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 7,
       "username": "mavilure",
       "total_points": 750000000,
@@ -107,7 +107,7 @@
       "avatar_url": "assets/avatars/1178078831.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 8,
       "username": "wqmike",
       "total_points": 750000000,
@@ -120,7 +120,7 @@
       "avatar_url": "assets/avatars/1281614396.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 9,
       "username": "mecduqgtryhard",
       "total_points": 750000000,
@@ -133,7 +133,7 @@
       "avatar_url": "assets/avatars/4455619288.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 10,
       "username": "Ewan_314",
       "total_points": 750000000,
@@ -146,7 +146,7 @@
       "avatar_url": "assets/avatars/2489885181.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 11,
       "username": "Fallen_Angel1989",
       "total_points": 750000000,
@@ -159,7 +159,7 @@
       "avatar_url": "assets/avatars/7796671551.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 12,
       "username": "SupaAnTz",
       "total_points": 600000000,
@@ -172,7 +172,7 @@
       "avatar_url": "assets/avatars/3399221091.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 13,
       "username": "Sprintbooter",
       "total_points": 600000000,
@@ -185,7 +185,7 @@
       "avatar_url": "assets/avatars/2598850443.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 14,
       "username": "ManapuaMan8O8",
       "total_points": 600000000,
@@ -198,7 +198,7 @@
       "avatar_url": "assets/avatars/5475802198.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 15,
       "username": "banan123123123",
       "total_points": 500000000,
@@ -211,7 +211,7 @@
       "avatar_url": "assets/avatars/33928536.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 16,
       "username": "LawnMp3",
       "total_points": 150000000,
@@ -224,7 +224,7 @@
       "avatar_url": "assets/avatars/2341656429.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 17,
       "username": "dragonballx1412",
       "total_points": 150000000,
@@ -237,7 +237,7 @@
       "avatar_url": "assets/avatars/1462748729.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 18,
       "username": "MrChicken66666",
       "total_points": 150000000,
@@ -250,7 +250,7 @@
       "avatar_url": "assets/avatars/1534184237.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 19,
       "username": "Elsa1000_11",
       "total_points": 150000000,
@@ -263,7 +263,7 @@
       "avatar_url": "assets/avatars/1759425897.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 20,
       "username": "testbeeswS",
       "total_points": 150000000,
@@ -276,7 +276,7 @@
       "avatar_url": "assets/avatars/2463883764.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 21,
       "username": "Hiitzjust",
       "total_points": 150000000,
@@ -289,7 +289,7 @@
       "avatar_url": "assets/avatars/3010290250.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 22,
       "username": "Alasha_26",
       "total_points": 150000000,
@@ -302,7 +302,7 @@
       "avatar_url": "assets/avatars/1630439357.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 23,
       "username": "OfficalMrLucky",
       "total_points": 150000000,
@@ -315,7 +315,7 @@
       "avatar_url": "assets/avatars/233885212.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 24,
       "username": "itankidddd",
       "total_points": 120000000,
@@ -328,7 +328,7 @@
       "avatar_url": "assets/avatars/3254310724.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 25,
       "username": "Rocky_0310",
       "total_points": 120000000,
@@ -341,7 +341,7 @@
       "avatar_url": "assets/avatars/2347861539.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 26,
       "username": "TealPlatypus767",
       "total_points": 90000000,
@@ -354,7 +354,7 @@
       "avatar_url": "assets/avatars/5742465610.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 27,
       "username": "mybanana367",
       "total_points": 90000000,
@@ -367,7 +367,7 @@
       "avatar_url": "assets/avatars/3753977683.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 28,
       "username": "OliviaSisseBelby",
       "total_points": 90000000,
@@ -380,7 +380,7 @@
       "avatar_url": "assets/avatars/371610241.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 29,
       "username": "FixingWind",
       "total_points": 90000000,
@@ -393,7 +393,7 @@
       "avatar_url": "assets/avatars/412452515.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 30,
       "username": "EndOfAnEra007",
       "total_points": 50000000,
@@ -406,7 +406,7 @@
       "avatar_url": "assets/avatars/3302444862.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 31,
       "username": "TealPlatypus747",
       "total_points": 50000000,
@@ -419,7 +419,7 @@
       "avatar_url": "assets/avatars/5317753904.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 32,
       "username": "Pay2Lose02",
       "total_points": 50000000,
@@ -432,7 +432,7 @@
       "avatar_url": "assets/avatars/6132975232.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 33,
       "username": "mybananafarm1",
       "total_points": 50000000,
@@ -445,7 +445,7 @@
       "avatar_url": "assets/avatars/5145664688.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 34,
       "username": "mybananafarm2",
       "total_points": 50000000,
@@ -458,7 +458,7 @@
       "avatar_url": "assets/avatars/5145682484.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 35,
       "username": "sarahr26",
       "total_points": 50000000,
@@ -471,7 +471,7 @@
       "avatar_url": "assets/avatars/411587057.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 36,
       "username": "Supergameplayjd",
       "total_points": 50000000,
@@ -484,7 +484,7 @@
       "avatar_url": "assets/avatars/3812245011.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 37,
       "username": "Mandalorian477",
       "total_points": 50000000,
@@ -497,7 +497,7 @@
       "avatar_url": "assets/avatars/3285393152.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 38,
       "username": "helloimyoura2",
       "total_points": 50000000,
@@ -510,7 +510,7 @@
       "avatar_url": "assets/avatars/1824345931.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 39,
       "username": "Hellomakeme1234",
       "total_points": 50000000,
@@ -523,7 +523,7 @@
       "avatar_url": "assets/avatars/3674455973.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 40,
       "username": "SloLol4",
       "total_points": 50000000,
@@ -536,7 +536,7 @@
       "avatar_url": "assets/avatars/3205138115.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 41,
       "username": "joshcd2006",
       "total_points": 50000000,
@@ -549,7 +549,7 @@
       "avatar_url": "assets/avatars/719395494.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 42,
       "username": "ArcticGalaxy159",
       "total_points": 40000000,
@@ -562,7 +562,7 @@
       "avatar_url": "assets/avatars/5739780190.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 43,
       "username": "Panthers_1995",
       "total_points": 30000000,
@@ -575,7 +575,7 @@
       "avatar_url": "assets/avatars/5746935453.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 44,
       "username": "Baddie_true1223",
       "total_points": 30000000,
@@ -588,7 +588,7 @@
       "avatar_url": "assets/avatars/2866508217.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 45,
       "username": "Bader2007hero",
       "total_points": 18000000,
@@ -601,7 +601,7 @@
       "avatar_url": "assets/avatars/1686892886.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 46,
       "username": "gbotgameralt",
       "total_points": 18000000,
@@ -614,7 +614,7 @@
       "avatar_url": "assets/avatars/10172414985.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 47,
       "username": "Ilikecheesepuffs26",
       "total_points": 15000000,
@@ -627,7 +627,7 @@
       "avatar_url": "assets/avatars/5605744293.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 48,
       "username": "DiscoGuy86",
       "total_points": 15000000,
@@ -640,7 +640,7 @@
       "avatar_url": "assets/avatars/7349191010.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 49,
       "username": "WhereIsPerry20",
       "total_points": 10000000,
@@ -653,7 +653,7 @@
       "avatar_url": "assets/avatars/5749961520.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 50,
       "username": "ArcticGalaxy189",
       "total_points": 10000000,
@@ -666,7 +666,7 @@
       "avatar_url": "assets/avatars/5740310828.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 51,
       "username": "mrbeasyt1",
       "total_points": 10000000,
@@ -679,7 +679,7 @@
       "avatar_url": "assets/avatars/1574007210.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 52,
       "username": "DoReMiyoFa",
       "total_points": 10000000,
@@ -692,7 +692,7 @@
       "avatar_url": "assets/avatars/7767962435.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 53,
       "username": "Pay2Lose0",
       "total_points": 9750000,
@@ -705,7 +705,7 @@
       "avatar_url": "assets/avatars/3424299777.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 54,
       "username": "WhereIsPerry0",
       "total_points": 6000000,
@@ -718,7 +718,7 @@
       "avatar_url": "assets/avatars/5395148535.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 55,
       "username": "AgentP_10928",
       "total_points": 6000000,
@@ -731,7 +731,7 @@
       "avatar_url": "assets/avatars/5747257442.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 56,
       "username": "TealPlatypus757",
       "total_points": 6000000,
@@ -744,7 +744,7 @@
       "avatar_url": "assets/avatars/5742408445.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 57,
       "username": "WhereIsPerry10",
       "total_points": 6000000,
@@ -757,7 +757,7 @@
       "avatar_url": "assets/avatars/5749844896.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 58,
       "username": "Darwinaknox",
       "total_points": 5250000,
@@ -770,7 +770,7 @@
       "avatar_url": "assets/avatars/2286082684.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 59,
       "username": "ArcticGalaxy14",
       "total_points": 5250000,
@@ -783,7 +783,7 @@
       "avatar_url": "assets/avatars/5349160911.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 60,
       "username": "AgentP_2928",
       "total_points": 3000000,
@@ -796,7 +796,7 @@
       "avatar_url": "assets/avatars/5746073588.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 61,
       "username": "Odierulz01",
       "total_points": 1950000,
@@ -809,7 +809,7 @@
       "avatar_url": "assets/avatars/5736974936.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 62,
       "username": "ArcticGalaxy199",
       "total_points": 1950000,
@@ -822,7 +822,7 @@
       "avatar_url": "assets/avatars/5740627123.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 63,
       "username": "ArcticGalaxy209",
       "total_points": 1950000,
@@ -835,7 +835,7 @@
       "avatar_url": "assets/avatars/5740665068.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 64,
       "username": "AgentP_1928",
       "total_points": 1511655,
@@ -848,7 +848,7 @@
       "avatar_url": "assets/avatars/5745852697.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 65,
       "username": "AgentP_8928",
       "total_points": 1511655,
@@ -861,7 +861,7 @@
       "avatar_url": "assets/avatars/5746891823.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 66,
       "username": "Doobydoobydoo_bah",
       "total_points": 1050000,
@@ -874,7 +874,7 @@
       "avatar_url": "assets/avatars/7311843702.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 67,
       "username": "TealPlatypus777",
       "total_points": 1050000,
@@ -887,7 +887,7 @@
       "avatar_url": "assets/avatars/5742594228.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 68,
       "username": "PartyCorgi_70",
       "total_points": 1000000,
@@ -900,7 +900,7 @@
       "avatar_url": "assets/avatars/7649276875.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 69,
       "username": "ArcticGalaxy219",
       "total_points": 1000000,
@@ -913,7 +913,7 @@
       "avatar_url": "assets/avatars/5740701737.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 70,
       "username": "TealPlatypus787",
       "total_points": 1000000,
@@ -926,7 +926,7 @@
       "avatar_url": "assets/avatars/5743015743.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 71,
       "username": "AgentP_4928",
       "total_points": 1000000,
@@ -939,7 +939,7 @@
       "avatar_url": "assets/avatars/5746424404.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 72,
       "username": "tycoonmasterou",
       "total_points": 1000000,
@@ -952,7 +952,7 @@
       "avatar_url": "assets/avatars/455361347.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 73,
       "username": "ArcticGalaxy149",
       "total_points": 650000,
@@ -965,7 +965,7 @@
       "avatar_url": "assets/avatars/1991450795.png"
     },
     {
-      "fetched_at": "2026-05-11T16:46:25.808+00:00",
+      "fetched_at": "2026-05-11T17:01:23.328+00:00",
       "rank": 74,
       "username": "Agentp_3928",
       "total_points": 650000,
