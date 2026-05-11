@@ -1,0 +1,44 @@
+{
+  "profile_key": "xtwinsiewitx",
+  "user_id": null,
+  "username": "xtwinsiewitx",
+  "usernames_seen": [
+    "xtwinsiewitx"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 18,
+  "latest_points": 820450,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 18,
+      "last_rank": 18,
+      "end_rank": 18,
+      "best_rank": 18,
+      "worst_rank": 18,
+      "starting_points": 820450,
+      "ending_points": 820450,
+      "max_points": 820450,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 18,
+          "points": 820450
+        }
+      ]
+    }
+  ]
+}

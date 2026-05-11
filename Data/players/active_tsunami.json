@@ -1,0 +1,44 @@
+{
+  "profile_key": "active_tsunami",
+  "user_id": null,
+  "username": "active_tsunami",
+  "usernames_seen": [
+    "active_tsunami"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 27,
+  "latest_points": 760190,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 27,
+      "last_rank": 27,
+      "end_rank": 27,
+      "best_rank": 27,
+      "worst_rank": 27,
+      "starting_points": 760190,
+      "ending_points": 760190,
+      "max_points": 760190,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 27,
+          "points": 760190
+        }
+      ]
+    }
+  ]
+}

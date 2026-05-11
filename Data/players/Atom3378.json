@@ -1,0 +1,44 @@
+{
+  "profile_key": "Atom3378",
+  "user_id": null,
+  "username": "Atom3378",
+  "usernames_seen": [
+    "Atom3378"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 52,
+  "latest_points": 625670,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 52,
+      "last_rank": 52,
+      "end_rank": 52,
+      "best_rank": 52,
+      "worst_rank": 52,
+      "starting_points": 625670,
+      "ending_points": 625670,
+      "max_points": 625670,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 52,
+          "points": 625670
+        }
+      ]
+    }
+  ]
+}

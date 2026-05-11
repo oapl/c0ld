@@ -1,0 +1,44 @@
+{
+  "profile_key": "Dr_P00PBuT",
+  "user_id": null,
+  "username": "Dr_P00PBuT",
+  "usernames_seen": [
+    "Dr_P00PBuT"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 63,
+  "latest_points": 566300,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 63,
+      "last_rank": 63,
+      "end_rank": 63,
+      "best_rank": 63,
+      "worst_rank": 63,
+      "starting_points": 566300,
+      "ending_points": 566300,
+      "max_points": 566300,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 63,
+          "points": 566300
+        }
+      ]
+    }
+  ]
+}

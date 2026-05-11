@@ -1,0 +1,44 @@
+{
+  "profile_key": "0_0cox",
+  "user_id": null,
+  "username": "0_0cox",
+  "usernames_seen": [
+    "0_0cox"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 67,
+  "latest_points": 517510,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 67,
+      "last_rank": 67,
+      "end_rank": 67,
+      "best_rank": 67,
+      "worst_rank": 67,
+      "starting_points": 517510,
+      "ending_points": 517510,
+      "max_points": 517510,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 67,
+          "points": 517510
+        }
+      ]
+    }
+  ]
+}

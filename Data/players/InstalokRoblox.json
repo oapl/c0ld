@@ -1,0 +1,44 @@
+{
+  "profile_key": "InstalokRoblox",
+  "user_id": null,
+  "username": "InstalokRoblox",
+  "usernames_seen": [
+    "InstalokRoblox"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 61,
+  "latest_points": 572700,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 61,
+      "last_rank": 61,
+      "end_rank": 61,
+      "best_rank": 61,
+      "worst_rank": 61,
+      "starting_points": 572700,
+      "ending_points": 572700,
+      "max_points": 572700,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 61,
+          "points": 572700
+        }
+      ]
+    }
+  ]
+}

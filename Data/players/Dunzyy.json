@@ -1,0 +1,44 @@
+{
+  "profile_key": "Dunzyy",
+  "user_id": null,
+  "username": "Dunzyy",
+  "usernames_seen": [
+    "Dunzyy"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 22,
+  "latest_points": 804520,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 22,
+      "last_rank": 22,
+      "end_rank": 22,
+      "best_rank": 22,
+      "worst_rank": 22,
+      "starting_points": 804520,
+      "ending_points": 804520,
+      "max_points": 804520,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 22,
+          "points": 804520
+        }
+      ]
+    }
+  ]
+}

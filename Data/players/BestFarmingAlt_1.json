@@ -1,0 +1,44 @@
+{
+  "profile_key": "BestFarmingAlt_1",
+  "user_id": null,
+  "username": "BestFarmingAlt_1",
+  "usernames_seen": [
+    "BestFarmingAlt_1"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 9,
+  "latest_points": 882160,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 9,
+      "last_rank": 9,
+      "end_rank": 9,
+      "best_rank": 9,
+      "worst_rank": 9,
+      "starting_points": 882160,
+      "ending_points": 882160,
+      "max_points": 882160,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 9,
+          "points": 882160
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "profile_key": "haoyanh152",
+  "user_id": null,
+  "username": "haoyanh152",
+  "usernames_seen": [
+    "haoyanh152"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 6,
+  "latest_points": 907890,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 6,
+      "last_rank": 6,
+      "end_rank": 6,
+      "best_rank": 6,
+      "worst_rank": 6,
+      "starting_points": 907890,
+      "ending_points": 907890,
+      "max_points": 907890,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 6,
+          "points": 907890
+        }
+      ]
+    }
+  ]
+}

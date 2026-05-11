@@ -1,0 +1,44 @@
+{
+  "profile_key": "nalguhiem",
+  "user_id": null,
+  "username": "nalguhiem",
+  "usernames_seen": [
+    "nalguhiem"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 72,
+  "latest_points": 436170,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 72,
+      "last_rank": 72,
+      "end_rank": 72,
+      "best_rank": 72,
+      "worst_rank": 72,
+      "starting_points": 436170,
+      "ending_points": 436170,
+      "max_points": 436170,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 72,
+          "points": 436170
+        }
+      ]
+    }
+  ]
+}

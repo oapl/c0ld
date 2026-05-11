@@ -1,0 +1,44 @@
+{
+  "profile_key": "JFoley26",
+  "user_id": null,
+  "username": "JFoley26",
+  "usernames_seen": [
+    "JFoley26"
+  ],
+  "avatar_url": null,
+  "profile_url": null,
+  "total_battles": 1,
+  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "latest_rank": 42,
+  "latest_points": 691820,
+  "battles": [
+    {
+      "battle": "Safety Battle",
+      "display_name": "Safety Battle",
+      "battle_first_snapshot": "2026-05-11T18:00:00.000Z",
+      "battle_last_snapshot": "2026-05-11T18:00:00.000Z",
+      "first_seen": "2026-05-11T18:00:00.000Z",
+      "first_active_date": "2026-05-11T18:00:00.000Z",
+      "last_seen": "2026-05-11T18:00:00.000Z",
+      "starting_rank": 42,
+      "last_rank": 42,
+      "end_rank": 42,
+      "best_rank": 42,
+      "worst_rank": 42,
+      "starting_points": 691820,
+      "ending_points": 691820,
+      "max_points": 691820,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T18:00:00.000Z",
+          "rank": 42,
+          "points": 691820
+        }
+      ]
+    }
+  ]
+}
