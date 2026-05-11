@@ -6,6 +6,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
 const DATA_DIR = path.join(process.cwd(), "Data");
 const MANUAL_BATTLES_FILE = path.join(DATA_DIR, "manual-battles.json");
+const PLAYER_INDEX_FILE = path.join(DATA_DIR, "player-index.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "nong-history.json");
 
 const PAGE_SIZE = 1000;
@@ -18,6 +19,14 @@ function normalizeKey(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9_]/g, "");
 }
 
 function numberOrNull(value) {
@@ -46,6 +55,24 @@ async function readJsonArray(filePath) {
     if (err.code === "ENOENT") return [];
     throw err;
   }
+}
+
+function buildPlayerMaps(playerIndex) {
+  const byUserId = new Map();
+  const byProfileKey = new Map();
+  const byUsername = new Map();
+
+  for (const p of playerIndex || []) {
+    const userId = String(p.user_id || "").trim();
+    const profileKey = String(p.profile_key || "").trim();
+    const usernameKey = normalizeName(p.username);
+
+    if (userId) byUserId.set(userId, p);
+    if (profileKey) byProfileKey.set(profileKey, p);
+    if (usernameKey) byUsername.set(usernameKey, p);
+  }
+
+  return { byUserId, byProfileKey, byUsername };
 }
 
 async function supabaseSelectAll(tableName) {
@@ -204,7 +231,7 @@ function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
 function buildPointMap(rows) {
   return new Map(
     rows.map(row => [
-      String(row.username || "").toLowerCase(),
+      normalizeName(row.username),
       Number(row.total_points || 0)
     ])
   );
@@ -216,14 +243,14 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   const targetMs = latestMs - hours * 60 * 60 * 1000;
   const oldRows = getNearestSnapshotRows(allRows, targetMs, toleranceMin);
   const oldMap = buildPointMap(oldRows);
-  const oldPoints = oldMap.get(String(currentRow.username || "").toLowerCase());
+  const oldPoints = oldMap.get(normalizeName(currentRow.username));
 
   if (oldPoints === undefined) return null;
 
   return Number(currentRow.total_points || 0) - oldPoints;
 }
 
-function calculateBattleRows(snapshotRows) {
+function calculateBattleRows(snapshotRows, playerMaps) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
   if (!latestRows.length) {
@@ -241,17 +268,34 @@ function calculateBattleRows(snapshotRows) {
 
   const hasHistoricalTimestamps = Number.isFinite(latestMs);
 
-  const rows = latestRows.map(row => ({
-    rank: numberOrNull(row.rank),
-    username: row.username,
-    total_points: numberOrNull(row.total_points),
-    user_id: numberOrNull(row.user_id),
-    fetched_at: row.fetched_at,
-    gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
-    gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
-    gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
-    gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null
-  })).sort((a, b) => {
+  const rows = latestRows.map(row => {
+    const userId = String(row.user_id || "").trim();
+    const usernameKey = normalizeName(row.username);
+
+    let match = null;
+
+    if (userId && playerMaps.byUserId.has(userId)) {
+      match = playerMaps.byUserId.get(userId);
+    }
+
+    if (!match && usernameKey && playerMaps.byUsername.has(usernameKey)) {
+      match = playerMaps.byUsername.get(usernameKey);
+    }
+
+    return {
+      rank: numberOrNull(row.rank),
+      username: row.username,
+      total_points: numberOrNull(row.total_points),
+      user_id: numberOrNull(row.user_id),
+      profile_key: match?.profile_key || row.user_id || row.username,
+      avatar_url: match?.avatar_url || null,
+      fetched_at: row.fetched_at,
+      gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
+      gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
+      gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
+      gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null
+    };
+  }).sort((a, b) => {
     const ar = Number(a.rank ?? 999999);
     const br = Number(b.rank ?? 999999);
     if (ar !== br) return ar - br;
@@ -267,6 +311,8 @@ function calculateBattleRows(snapshotRows) {
 
 async function main() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
+  const playerIndex = await readJsonArray(PLAYER_INDEX_FILE);
+  const playerMaps = buildPlayerMaps(playerIndex);
 
   const declared = manualBattles
     .filter(battle => battle.battle && battle.display_name && battle.nong_results_table)
@@ -298,7 +344,7 @@ async function main() {
       .map(normalizePlayerRow)
       .filter(row => row.username && row.total_points !== null);
 
-    const calculated = calculateBattleRows(normalizedRows);
+    const calculated = calculateBattleRows(normalizedRows, playerMaps);
 
     output.push({
       battle: item.battle,
