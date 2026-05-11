@@ -1,30 +1,32 @@
 {
-  "generated_at": "2026-05-11T22:37:31.966Z",
-  "snapshot_at": "2026-05-11T22:36:24.264Z",
+  "generated_at": "2026-05-11T22:42:31.966Z",
+  "snapshot_at": "2026-05-11T22:41:22.889Z",
   "battle": "AngelBattle2026",
   "display_name": "Angel Battle 2026",
   "battle_end_iso": "2026-05-16T14:00:00Z",
   "clan_name": "NONG",
   "clan_rank": 65,
-  "clan_points": 14489211655,
-  "projected_rank": 25,
-  "projected_points": 53142672875,
+  "clan_points": 14519211655,
+  "projected_rank": 27,
+  "projected_points": 52142095966,
   "projection_basis": "1h",
-  "hours_remaining": 111.393,
+  "hours_remaining": 111.31,
   "rows": [
     {
       "rank": 1,
       "clan_name": "UN0",
-      "points": 54132690319,
-      "gain_5m": -34998818,
-      "gain_1h": 439995150,
+      "points": 54363354137,
+      "gain_5m": 230663818,
+      "gain_1h": 680658500,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 439995150,
+      "rate_per_hour": 680658500,
       "projection_basis": "1h",
-      "projected_points": 103145184462,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 5
+      "projected_points": 130127661831,
+      "projected_rank": 3,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976561960",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976561960"
     },
     {
       "rank": 2,
@@ -37,8 +39,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 45338000000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 27
+      "projected_rank": 29,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "126265328107529",
+      "icon_url": "https://ps99.biggamesapi.io/image/126265328107529"
     },
     {
       "rank": 3,
@@ -50,93 +54,107 @@
       "gain_24h": null,
       "rate_per_hour": 750000000,
       "projection_basis": "1h",
-      "projected_points": 127192464162,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 4
+      "projected_points": 127130250620,
+      "projected_rank": 4,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17699945644",
+      "icon_url": "https://ps99.biggamesapi.io/image/17699945644"
     },
     {
       "rank": 4,
       "clan_name": "SOPU",
-      "points": 43128331637,
-      "gain_5m": -34994430,
-      "gain_1h": -6983334,
+      "points": 43188510637,
+      "gain_5m": 60179000,
+      "gain_1h": 53195166,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": -6983334,
+      "rate_per_hour": 53195166,
       "projection_basis": "1h",
-      "projected_points": 42350435297,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 29
+      "projected_points": 49109680981,
+      "projected_rank": 28,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "92415264775072",
+      "icon_url": "https://ps99.biggamesapi.io/image/92415264775072"
     },
     {
       "rank": 5,
       "clan_name": "RFIL",
-      "points": 42796111856,
-      "gain_5m": 1000000,
-      "gain_1h": 386000000,
+      "points": 42801111856,
+      "gain_5m": 5000000,
+      "gain_1h": 391000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 386000000,
+      "rate_per_hour": 391000000,
       "projection_basis": "1h",
-      "projected_points": 85793910216,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 14
+      "projected_points": 86323442523,
+      "projected_rank": 13,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17726113306",
+      "icon_url": "https://ps99.biggamesapi.io/image/17726113306"
     },
     {
       "rank": 6,
       "clan_name": "K0i2",
       "points": 40420197690,
       "gain_5m": 0,
-      "gain_1h": 509988000,
+      "gain_1h": -90012000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 509988000,
+      "rate_per_hour": -90012000,
       "projection_basis": "1h",
-      "projected_points": 97229423571,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 9
+      "projected_points": 30400934191,
+      "projected_rank": 37,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "71484515080466",
+      "icon_url": "https://ps99.biggamesapi.io/image/71484515080466"
     },
     {
       "rank": 7,
-      "clan_name": "BOSS",
-      "points": 37950954734,
-      "gain_5m": 18752354,
-      "gain_1h": 907107500,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 907107500,
-      "projection_basis": "1h",
-      "projected_points": 138996616329,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 2
-    },
-    {
-      "rank": 8,
       "clan_name": "H8M3",
       "points": 37932395866,
       "gain_5m": 0,
-      "gain_1h": 811000000,
+      "gain_1h": 760999500,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 811000000,
+      "rate_per_hour": 760999500,
       "projection_basis": "1h",
-      "projected_points": 128272329726,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 3
+      "projected_points": 122639485064,
+      "projected_rank": 5,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "73085003413860",
+      "icon_url": "https://ps99.biggamesapi.io/image/73085003413860"
+    },
+    {
+      "rank": 8,
+      "clan_name": "BOSS",
+      "points": 37858954734,
+      "gain_5m": -92000000,
+      "gain_1h": 730157500,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 730157500,
+      "projection_basis": "1h",
+      "projected_points": 119133011394,
+      "projected_rank": 6,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "780357292",
+      "icon_url": "https://ps99.biggamesapi.io/image/780357292"
     },
     {
       "rank": 9,
       "clan_name": "VPT0",
       "points": 36753096582,
-      "gain_5m": 3000,
-      "gain_1h": 159003000,
+      "gain_5m": 0,
+      "gain_1h": 150003000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 159003000,
+      "rate_per_hour": 150003000,
       "projection_basis": "1h",
-      "projected_points": 54464959102,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 24
+      "projected_points": 53449976805,
+      "projected_rank": 25,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "120697515308209",
+      "icon_url": "https://ps99.biggamesapi.io/image/120697515308209"
     },
     {
       "rank": 10,
@@ -149,22 +167,26 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 34227500000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 34
+      "projected_rank": 34,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "109972738096345",
+      "icon_url": "https://ps99.biggamesapi.io/image/109972738096345"
     },
     {
       "rank": 11,
       "clan_name": "0RBI",
       "points": 34150015000,
       "gain_5m": 0,
-      "gain_1h": -419985000,
+      "gain_1h": -239985000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": -419985000,
+      "rate_per_hour": -239985000,
       "projection_basis": "1h",
-      "projected_points": -12633483301,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 99
+      "projected_points": 7437210588,
+      "projected_rank": 97,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17754999667",
+      "icon_url": "https://ps99.biggamesapi.io/image/17754999667"
     },
     {
       "rank": 12,
@@ -176,9 +198,11 @@
       "gain_24h": null,
       "rate_per_hour": 50000000,
       "projection_basis": "1h",
-      "projected_points": 39149662999,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 33
+      "projected_points": 39145515430,
+      "projected_rank": 32,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "113393687287274",
+      "icon_url": "https://ps99.biggamesapi.io/image/113393687287274"
     },
     {
       "rank": 13,
@@ -190,23 +214,27 @@
       "gain_24h": null,
       "rate_per_hour": 250000000,
       "projection_basis": "1h",
-      "projected_points": 60760307886,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 22
+      "projected_points": 60739570039,
+      "projected_rank": 22,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17451171044",
+      "icon_url": "https://ps99.biggamesapi.io/image/17451171044"
     },
     {
       "rank": 14,
       "clan_name": "minx",
-      "points": 31958000000,
-      "gain_5m": 0,
-      "gain_1h": 72000000,
+      "points": 32108000000,
+      "gain_5m": 150000000,
+      "gain_1h": 222000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 72000000,
+      "rate_per_hour": 222000000,
       "projection_basis": "1h",
-      "projected_points": 39978314720,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 32
+      "projected_points": 56818888512,
+      "projected_rank": 24,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "72089661585233",
+      "icon_url": "https://ps99.biggamesapi.io/image/72089661585233"
     },
     {
       "rank": 15,
@@ -218,9 +246,11 @@
       "gain_24h": null,
       "rate_per_hour": 250000000,
       "projection_basis": "1h",
-      "projected_points": 57396314581,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 23
+      "projected_points": 57375576734,
+      "projected_rank": 23,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "88078779103855",
+      "icon_url": "https://ps99.biggamesapi.io/image/88078779103855"
     },
     {
       "rank": 16,
@@ -233,8 +263,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 29335000000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 40
+      "projected_rank": 39,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14968181287",
+      "icon_url": "https://ps99.biggamesapi.io/image/14968181287"
     },
     {
       "rank": 17,
@@ -246,9 +278,11 @@
       "gain_24h": null,
       "rate_per_hour": 220000000,
       "projection_basis": "1h",
-      "projected_points": 52334267200,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 26
+      "projected_points": 52316017894,
+      "projected_rank": 26,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "13959016084",
+      "icon_url": "https://ps99.biggamesapi.io/image/13959016084"
     },
     {
       "rank": 18,
@@ -260,9 +294,11 @@
       "gain_24h": null,
       "rate_per_hour": 660000000,
       "projection_basis": "1h",
-      "projected_points": 101269439912,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 7
+      "projected_points": 101214691995,
+      "projected_rank": 8,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "72994420964310",
+      "icon_url": "https://ps99.biggamesapi.io/image/72994420964310"
     },
     {
       "rank": 19,
@@ -275,36 +311,42 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 27550000000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 43
+      "projected_rank": 42,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "120878685131776",
+      "icon_url": "https://ps99.biggamesapi.io/image/120878685131776"
     },
     {
       "rank": 20,
       "clan_name": "XB0X",
       "points": 26858390557,
       "gain_5m": 0,
-      "gain_1h": 130000000,
+      "gain_1h": 70000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 130000000,
+      "rate_per_hour": 70000000,
       "projection_basis": "1h",
-      "projected_points": 41339514357,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 31
+      "projected_points": 34650112160,
+      "projected_rank": 33,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "18628542197",
+      "icon_url": "https://ps99.biggamesapi.io/image/18628542197"
     },
     {
       "rank": 21,
       "clan_name": "st1z",
       "points": 26833990998,
-      "gain_5m": 700000000,
-      "gain_1h": 1820000000,
+      "gain_5m": 0,
+      "gain_1h": 1812000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 1820000000,
+      "rate_per_hour": 1812000000,
       "projection_basis": "1h",
-      "projected_points": 229569724198,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 1
+      "projected_points": 228528270201,
+      "projected_rank": 1,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "98055466967420",
+      "icon_url": "https://ps99.biggamesapi.io/image/98055466967420"
     },
     {
       "rank": 22,
@@ -317,8 +359,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 26813420040,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 47
+      "projected_rank": 47,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "83554197992155",
+      "icon_url": "https://ps99.biggamesapi.io/image/83554197992155"
     },
     {
       "rank": 23,
@@ -330,9 +374,11 @@
       "gain_24h": null,
       "rate_per_hour": 3000000,
       "projection_basis": "1h",
-      "projected_points": 27142179780,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 46
+      "projected_points": 27141930926,
+      "projected_rank": 46,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "102383475126602",
+      "icon_url": "https://ps99.biggamesapi.io/image/102383475126602"
     },
     {
       "rank": 24,
@@ -345,8 +391,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 25182315168,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 48
+      "projected_rank": 48,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "101365627356896",
+      "icon_url": "https://ps99.biggamesapi.io/image/101365627356896"
     },
     {
       "rank": 25,
@@ -358,23 +406,27 @@
       "gain_24h": null,
       "rate_per_hour": 48050000,
       "projection_basis": "1h",
-      "projected_points": 30151930795,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 37
+      "projected_points": 30147944981,
+      "projected_rank": 38,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "70471430511357",
+      "icon_url": "https://ps99.biggamesapi.io/image/70471430511357"
     },
     {
       "rank": 26,
       "clan_name": "RY0",
-      "points": 24383000000,
-      "gain_5m": 0,
-      "gain_1h": 50000000,
+      "points": 24368000000,
+      "gain_5m": -15000000,
+      "gain_1h": 35000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 50000000,
+      "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 29952663000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 38
+      "projected_points": 28263860801,
+      "projected_rank": 41,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "87111620300699",
+      "icon_url": "https://ps99.biggamesapi.io/image/87111620300699"
     },
     {
       "rank": 27,
@@ -387,8 +439,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 23541835426,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 51
+      "projected_rank": 51,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17816225280",
+      "icon_url": "https://ps99.biggamesapi.io/image/17816225280"
     },
     {
       "rank": 28,
@@ -400,9 +454,11 @@
       "gain_24h": null,
       "rate_per_hour": 708000000,
       "projection_basis": "1h",
-      "projected_points": 101899632986,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 6
+      "projected_points": 101840903403,
+      "projected_rank": 7,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976477787",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976477787"
     },
     {
       "rank": 29,
@@ -414,9 +470,11 @@
       "gain_24h": null,
       "rate_per_hour": 40000000,
       "projection_basis": "1h",
-      "projected_points": 27269730400,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 45
+      "projected_points": 27266412344,
+      "projected_rank": 45,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "81168438607249",
+      "icon_url": "https://ps99.biggamesapi.io/image/81168438607249"
     },
     {
       "rank": 30,
@@ -428,9 +486,11 @@
       "gain_24h": null,
       "rate_per_hour": 660000000,
       "projection_basis": "1h",
-      "projected_points": 96332302600,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 10
+      "projected_points": 96277554683,
+      "projected_rank": 9,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14968190224",
+      "icon_url": "https://ps99.biggamesapi.io/image/14968190224"
     },
     {
       "rank": 31,
@@ -443,8 +503,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 22185958791,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 54
+      "projected_rank": 55,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "78740922586430",
+      "icon_url": "https://ps99.biggamesapi.io/image/78740922586430"
     },
     {
       "rank": 32,
@@ -457,8 +519,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 21921000000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 55
+      "projected_rank": 56,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "110437643729151",
+      "icon_url": "https://ps99.biggamesapi.io/image/110437643729151"
     },
     {
       "rank": 33,
@@ -470,9 +534,11 @@
       "gain_24h": null,
       "rate_per_hour": 190000000,
       "projection_basis": "1h",
-      "projected_points": 42887469399,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 28
+      "projected_points": 42871708635,
+      "projected_rank": 30,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "130477208017125",
+      "icon_url": "https://ps99.biggamesapi.io/image/130477208017125"
     },
     {
       "rank": 34,
@@ -485,22 +551,26 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 21458561655,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 58
+      "projected_rank": 58,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "84966719571717",
+      "icon_url": "https://ps99.biggamesapi.io/image/84966719571717"
     },
     {
       "rank": 35,
       "clan_name": "BEZE",
       "points": 21298650000,
       "gain_5m": 0,
-      "gain_1h": 4000000,
+      "gain_1h": 0,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 4000000,
+      "rate_per_hour": 0,
       "projection_basis": "1h",
-      "projected_points": 21744223040,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 56
+      "projected_points": 21298650000,
+      "projected_rank": 59,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "136513196401436",
+      "icon_url": "https://ps99.biggamesapi.io/image/136513196401436"
     },
     {
       "rank": 36,
@@ -513,50 +583,58 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 21182500000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 59
+      "projected_rank": 61,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "15804006339",
+      "icon_url": "https://ps99.biggamesapi.io/image/15804006339"
     },
     {
       "rank": 37,
-      "clan_name": "KRR",
-      "points": 20908676412,
-      "gain_5m": 0,
-      "gain_1h": 15650000,
+      "clan_name": "DGSL",
+      "points": 20910000167,
+      "gain_5m": 60000000,
+      "gain_1h": -439950500,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 15650000,
+      "rate_per_hour": -439950500,
       "projection_basis": "1h",
-      "projected_points": 22651980931,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 52
+      "projected_points": -28061025762,
+      "projected_rank": 99,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "87374767968193",
+      "icon_url": "https://ps99.biggamesapi.io/image/87374767968193"
     },
     {
       "rank": 38,
-      "clan_name": "DGSL",
-      "points": 20850000167,
+      "clan_name": "KRR",
+      "points": 20908676412,
       "gain_5m": 0,
-      "gain_1h": -499950000,
+      "gain_1h": 15000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": -499950000,
+      "rate_per_hour": 15000000,
       "projection_basis": "1h",
-      "projected_points": -34841060170,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 100
+      "projected_points": 22578331041,
+      "projected_rank": 54,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14968209544",
+      "icon_url": "https://ps99.biggamesapi.io/image/14968209544"
     },
     {
       "rank": 39,
       "clan_name": "HSTL",
       "points": 20497845069,
-      "gain_5m": 15000000,
+      "gain_5m": 0,
       "gain_1h": 75000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 75000000,
       "projection_basis": "1h",
-      "projected_points": 28852339569,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 41
+      "projected_points": 28846118215,
+      "projected_rank": 40,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "15260478604",
+      "icon_url": "https://ps99.biggamesapi.io/image/15260478604"
     },
     {
       "rank": 40,
@@ -568,9 +646,11 @@
       "gain_24h": null,
       "rate_per_hour": 100000000,
       "projection_basis": "1h",
-      "projected_points": 31636351236,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 36
+      "projected_points": 31628056097,
+      "projected_rank": 36,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "125156159989126",
+      "icon_url": "https://ps99.biggamesapi.io/image/125156159989126"
     },
     {
       "rank": 41,
@@ -582,9 +662,11 @@
       "gain_24h": null,
       "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 24312764100,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 49
+      "projected_points": 24309860801,
+      "projected_rank": 49,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "82853003655188",
+      "icon_url": "https://ps99.biggamesapi.io/image/82853003655188"
     },
     {
       "rank": 42,
@@ -596,9 +678,11 @@
       "gain_24h": null,
       "rate_per_hour": 604000000,
       "projection_basis": "1h",
-      "projected_points": 87678880040,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 13
+      "projected_points": 87628777401,
+      "projected_rank": 12,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "113664151927440",
+      "icon_url": "https://ps99.biggamesapi.io/image/113664151927440"
     },
     {
       "rank": 43,
@@ -611,8 +695,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 20290000000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 63
+      "projected_rank": 65,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "91957308999063",
+      "icon_url": "https://ps99.biggamesapi.io/image/91957308999063"
     },
     {
       "rank": 44,
@@ -625,36 +711,42 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 20287311655,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 64
+      "projected_rank": 66,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17898773263",
+      "icon_url": "https://ps99.biggamesapi.io/image/17898773263"
     },
     {
       "rank": 45,
       "clan_name": "DV_",
       "points": 20177000000,
-      "gain_5m": 5000000,
+      "gain_5m": 0,
       "gain_1h": 118000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 118000000,
       "projection_basis": "1h",
-      "projected_points": 33321404680,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 35
+      "projected_points": 33311616416,
+      "projected_rank": 35,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "15787252747",
+      "icon_url": "https://ps99.biggamesapi.io/image/15787252747"
     },
     {
       "rank": 46,
       "clan_name": "BYRD",
-      "points": 18813459318,
-      "gain_5m": 0,
-      "gain_1h": 714000000,
+      "points": 19448459318,
+      "gain_5m": 635000000,
+      "gain_1h": 1349000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 714000000,
+      "rate_per_hour": 1349000000,
       "projection_basis": "1h",
-      "projected_points": 98348246958,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 8
+      "projected_points": 169606065634,
+      "projected_rank": 2,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "91783466043611",
+      "icon_url": "https://ps99.biggamesapi.io/image/91783466043611"
     },
     {
       "rank": 47,
@@ -667,36 +759,42 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 18703100777,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 67
+      "projected_rank": 68,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "125153000445486",
+      "icon_url": "https://ps99.biggamesapi.io/image/125153000445486"
     },
     {
       "rank": 48,
-      "clan_name": "SVSP",
-      "points": 18563002624,
-      "gain_5m": 0,
-      "gain_1h": 0,
+      "clan_name": "Loku",
+      "points": 18337916243,
+      "gain_5m": 40000000,
+      "gain_1h": 40000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 0,
+      "rate_per_hour": 40000000,
       "projection_basis": "1h",
-      "projected_points": 18563002624,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 68
+      "projected_points": 22790328587,
+      "projected_rank": 52,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "119939471362645",
+      "icon_url": "https://ps99.biggamesapi.io/image/119939471362645"
     },
     {
       "rank": 49,
-      "clan_name": "Loku",
-      "points": 18297916243,
-      "gain_5m": 0,
-      "gain_1h": 0,
+      "clan_name": "SVSP",
+      "points": 17813002624,
+      "gain_5m": -750000000,
+      "gain_1h": -750000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 0,
+      "rate_per_hour": -750000000,
       "projection_basis": "1h",
-      "projected_points": 18297916243,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 69
+      "projected_points": -65669728834,
+      "projected_rank": 100,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "90493409933283",
+      "icon_url": "https://ps99.biggamesapi.io/image/90493409933283"
     },
     {
       "rank": 50,
@@ -708,9 +806,11 @@
       "gain_24h": null,
       "rate_per_hour": 60000000,
       "projection_basis": "1h",
-      "projected_points": 24115595600,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 50
+      "projected_points": 24110618517,
+      "projected_rank": 50,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "91703535167558",
+      "icon_url": "https://ps99.biggamesapi.io/image/91703535167558"
     },
     {
       "rank": 51,
@@ -722,37 +822,43 @@
       "gain_24h": null,
       "rate_per_hour": 40000000,
       "projection_basis": "1h",
-      "projected_points": 21734758396,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 57
+      "projected_points": 21731440340,
+      "projected_rank": 57,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976478543",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976478543"
     },
     {
       "rank": 52,
       "clan_name": "PsAG",
-      "points": 17271675213,
-      "gain_5m": 0,
-      "gain_1h": 4000000,
+      "points": 17273675213,
+      "gain_5m": 2000000,
+      "gain_1h": 6000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 4000000,
+      "rate_per_hour": 6000000,
       "projection_basis": "1h",
-      "projected_points": 17717248253,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 70
+      "projected_points": 17941537065,
+      "projected_rank": 70,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "89553420509245",
+      "icon_url": "https://ps99.biggamesapi.io/image/89553420509245"
     },
     {
       "rank": 53,
       "clan_name": "CITC",
       "points": 17100652598,
-      "gain_5m": 120000000,
+      "gain_5m": 0,
       "gain_1h": 220000000,
       "gain_12h": null,
       "gain_24h": null,
       "rate_per_hour": 220000000,
       "projection_basis": "1h",
-      "projected_points": 41607169798,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 30
+      "projected_points": 41588920492,
+      "projected_rank": 31,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "75006508593763",
+      "icon_url": "https://ps99.biggamesapi.io/image/75006508593763"
     },
     {
       "rank": 54,
@@ -765,8 +871,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 16637649000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 71
+      "projected_rank": 71,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "71770415779713",
+      "icon_url": "https://ps99.biggamesapi.io/image/71770415779713"
     },
     {
       "rank": 55,
@@ -778,9 +886,11 @@
       "gain_24h": null,
       "rate_per_hour": 100000000,
       "projection_basis": "1h",
-      "projected_points": 27487439940,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 44
+      "projected_points": 27479144801,
+      "projected_rank": 44,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "130449558073904",
+      "icon_url": "https://ps99.biggamesapi.io/image/130449558073904"
     },
     {
       "rank": 56,
@@ -792,23 +902,27 @@
       "gain_24h": null,
       "rate_per_hour": 34000000,
       "projection_basis": "1h",
-      "projected_points": 20078882495,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 66
+      "projected_points": 20076062148,
+      "projected_rank": 67,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976517430",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976517430"
     },
     {
       "rank": 57,
       "clan_name": "Winr",
-      "points": 15784667176,
-      "gain_5m": 0,
-      "gain_1h": 660000000,
+      "points": 15790017176,
+      "gain_5m": 5350000,
+      "gain_1h": 665350000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 660000000,
+      "rate_per_hour": 665350000,
       "projection_basis": "1h",
-      "projected_points": 89304218776,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 11
+      "projected_points": 89850331010,
+      "projected_rank": 10,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17899512034",
+      "icon_url": "https://ps99.biggamesapi.io/image/17899512034"
     },
     {
       "rank": 58,
@@ -820,23 +934,27 @@
       "gain_24h": null,
       "rate_per_hour": 600000000,
       "projection_basis": "1h",
-      "projected_points": 82578003470,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 15
+      "projected_points": 82528232637,
+      "projected_rank": 15,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "108242566130350",
+      "icon_url": "https://ps99.biggamesapi.io/image/108242566130350"
     },
     {
       "rank": 59,
       "clan_name": "Aifo",
-      "points": 15180135740,
-      "gain_5m": 0,
-      "gain_1h": 45000000,
+      "points": 15189135740,
+      "gain_5m": 9000000,
+      "gain_1h": 54000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 45000000,
+      "rate_per_hour": 54000000,
       "projection_basis": "1h",
-      "projected_points": 20192832440,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 65
+      "projected_points": 21199892405,
+      "projected_rank": 60,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "139739047750274",
+      "icon_url": "https://ps99.biggamesapi.io/image/139739047750274"
     },
     {
       "rank": 60,
@@ -849,8 +967,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 15165755943,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 77
+      "projected_rank": 75,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976669980",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976669980"
     },
     {
       "rank": 61,
@@ -863,8 +983,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 14803400000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 78
+      "projected_rank": 77,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "119020521576033",
+      "icon_url": "https://ps99.biggamesapi.io/image/119020521576033"
     },
     {
       "rank": 62,
@@ -876,9 +998,11 @@
       "gain_24h": null,
       "rate_per_hour": 600000000,
       "projection_basis": "1h",
-      "projected_points": 81574002942,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 16
+      "projected_points": 81524232109,
+      "projected_rank": 16,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "15551651096",
+      "icon_url": "https://ps99.biggamesapi.io/image/15551651096"
     },
     {
       "rank": 63,
@@ -890,9 +1014,11 @@
       "gain_24h": null,
       "rate_per_hour": 10000000,
       "projection_basis": "1h",
-      "projected_points": 15814748608,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 74
+      "projected_points": 15813919094,
+      "projected_rank": 72,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "105530359434784",
+      "icon_url": "https://ps99.biggamesapi.io/image/105530359434784"
     },
     {
       "rank": 64,
@@ -904,23 +1030,27 @@
       "gain_24h": null,
       "rate_per_hour": 511331655,
       "projection_basis": "1h",
-      "projected_points": 71646361647,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 20
+      "projected_points": 71603945976,
+      "projected_rank": 20,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "112734538958840",
+      "icon_url": "https://ps99.biggamesapi.io/image/112734538958840"
     },
     {
       "rank": 65,
       "clan_name": "NONG",
-      "points": 14489211655,
-      "gain_5m": 0,
-      "gain_1h": 347000000,
+      "points": 14519211655,
+      "gain_5m": 30000000,
+      "gain_1h": 338000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 347000000,
+      "rate_per_hour": 338000000,
       "projection_basis": "1h",
-      "projected_points": 53142672875,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 25
+      "projected_points": 52142095966,
+      "projected_rank": 27,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976510684",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976510684"
     },
     {
       "rank": 66,
@@ -932,9 +1062,11 @@
       "gain_24h": null,
       "rate_per_hour": 60000000,
       "projection_basis": "1h",
-      "projected_points": 20998627245,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 60
+      "projected_points": 20993650162,
+      "projected_rank": 62,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "118496950981403",
+      "icon_url": "https://ps99.biggamesapi.io/image/118496950981403"
     },
     {
       "rank": 67,
@@ -946,26 +1078,46 @@
       "gain_24h": null,
       "rate_per_hour": 540000000,
       "projection_basis": "1h",
-      "projected_points": 74370360400,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 19
+      "projected_points": 74325566650,
+      "projected_rank": 19,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17763034593",
+      "icon_url": "https://ps99.biggamesapi.io/image/17763034593"
     },
     {
       "rank": 68,
-      "clan_name": "LXCC",
-      "points": 13808870446,
-      "gain_5m": 0,
-      "gain_1h": 140000000,
+      "clan_name": "MCWV",
+      "points": 14006498054,
+      "gain_5m": 600000000,
+      "gain_1h": 622000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 140000000,
+      "rate_per_hour": 622000000,
       "projection_basis": "1h",
-      "projected_points": 29403926846,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 39
+      "projected_points": 83241510010,
+      "projected_rank": 14,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14968302642",
+      "icon_url": "https://ps99.biggamesapi.io/image/14968302642"
     },
     {
       "rank": 69,
+      "clan_name": "LXCC",
+      "points": 13808870446,
+      "gain_5m": 0,
+      "gain_1h": 40000000,
+      "gain_12h": null,
+      "gain_24h": null,
+      "rate_per_hour": 40000000,
+      "projection_basis": "1h",
+      "projected_points": 18261282790,
+      "projected_rank": 69,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "117201295475525",
+      "icon_url": "https://ps99.biggamesapi.io/image/117201295475525"
+    },
+    {
+      "rank": 70,
       "clan_name": "NREG",
       "points": 13781951277,
       "gain_5m": 0,
@@ -974,12 +1126,14 @@
       "gain_24h": null,
       "rate_per_hour": 60000000,
       "projection_basis": "1h",
-      "projected_points": 20465546877,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 61
+      "projected_points": 20460569794,
+      "projected_rank": 63,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "139947362298229",
+      "icon_url": "https://ps99.biggamesapi.io/image/139947362298229"
     },
     {
-      "rank": 70,
+      "rank": 71,
       "clan_name": "FNXX",
       "points": 13622037134,
       "gain_5m": 0,
@@ -988,12 +1142,14 @@
       "gain_24h": null,
       "rate_per_hour": 607000000,
       "projection_basis": "1h",
-      "projected_points": 81237745954,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 17
+      "projected_points": 81187394461,
+      "projected_rank": 17,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "119535829024668",
+      "icon_url": "https://ps99.biggamesapi.io/image/119535829024668"
     },
     {
-      "rank": 71,
+      "rank": 72,
       "clan_name": "dewp",
       "points": 13478945792,
       "gain_5m": 0,
@@ -1002,12 +1158,14 @@
       "gain_24h": null,
       "rate_per_hour": 450000000,
       "projection_basis": "1h",
-      "projected_points": 63605912792,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 21
+      "projected_points": 63568584667,
+      "projected_rank": 21,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "72934276815665",
+      "icon_url": "https://ps99.biggamesapi.io/image/72934276815665"
     },
     {
-      "rank": 72,
+      "rank": 73,
       "clan_name": "GCEM",
       "points": 13449473908,
       "gain_5m": 0,
@@ -1016,23 +1174,11 @@
       "gain_24h": null,
       "rate_per_hour": 600000000,
       "projection_basis": "1h",
-      "projected_points": 80285429908,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 18
-    },
-    {
-      "rank": 73,
-      "clan_name": "MCWV",
-      "points": 13406498054,
-      "gain_5m": 0,
-      "gain_1h": 22000000,
-      "gain_12h": null,
-      "gain_24h": null,
-      "rate_per_hour": 22000000,
-      "projection_basis": "1h",
-      "projected_points": 15857149774,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 73
+      "projected_points": 80235659075,
+      "projected_rank": 18,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "124810799884570",
+      "icon_url": "https://ps99.biggamesapi.io/image/124810799884570"
     },
     {
       "rank": 74,
@@ -1044,9 +1190,11 @@
       "gain_24h": null,
       "rate_per_hour": 1050000,
       "projection_basis": "1h",
-      "projected_points": 13466362955,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 81
+      "projected_points": 13466275856,
+      "projected_rank": 80,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "100754715998524",
+      "icon_url": "https://ps99.biggamesapi.io/image/100754715998524"
     },
     {
       "rank": 75,
@@ -1058,9 +1206,11 @@
       "gain_24h": null,
       "rate_per_hour": 680000000,
       "projection_basis": "1h",
-      "projected_points": 88814066800,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 12
+      "projected_points": 88757659856,
+      "projected_rank": 11,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "117175979105511",
+      "icon_url": "https://ps99.biggamesapi.io/image/117175979105511"
     },
     {
       "rank": 76,
@@ -1072,37 +1222,43 @@
       "gain_24h": null,
       "rate_per_hour": 8000000,
       "projection_basis": "1h",
-      "projected_points": 13213146080,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 83
+      "projected_points": 13212482469,
+      "projected_rank": 82,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14968240950",
+      "icon_url": "https://ps99.biggamesapi.io/image/14968240950"
     },
     {
       "rank": 77,
       "clan_name": "_hot",
       "points": 12173538303,
       "gain_5m": 0,
-      "gain_1h": 4000000,
+      "gain_1h": 0,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 4000000,
+      "rate_per_hour": 0,
       "projection_basis": "1h",
-      "projected_points": 12619111343,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 86
+      "projected_points": 12173538303,
+      "projected_rank": 84,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "102248900354771",
+      "icon_url": "https://ps99.biggamesapi.io/image/102248900354771"
     },
     {
       "rank": 78,
       "clan_name": "TLGZ",
       "points": 12153000000,
       "gain_5m": 0,
-      "gain_1h": 31000000,
+      "gain_1h": 30988000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 31000000,
+      "rate_per_hour": 30988000,
       "projection_basis": "1h",
-      "projected_points": 15606191060,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 76
+      "projected_points": 15602283843,
+      "projected_rank": 74,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17702494274",
+      "icon_url": "https://ps99.biggamesapi.io/image/17702494274"
     },
     {
       "rank": 79,
@@ -1114,9 +1270,11 @@
       "gain_24h": null,
       "rate_per_hour": 7500,
       "projection_basis": "1h",
-      "projected_points": 11899101946,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 88
+      "projected_points": 11899101324,
+      "projected_rank": 86,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "107904532988732",
+      "icon_url": "https://ps99.biggamesapi.io/image/107904532988732"
     },
     {
       "rank": 80,
@@ -1128,9 +1286,11 @@
       "gain_24h": null,
       "rate_per_hour": 140645334,
       "projection_basis": "1h",
-      "projected_points": 27560519312,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 42
+      "projected_points": 27548852586,
+      "projected_rank": 43,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "15260481050",
+      "icon_url": "https://ps99.biggamesapi.io/image/15260481050"
     },
     {
       "rank": 81,
@@ -1143,8 +1303,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 11871677291,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 89
+      "projected_rank": 87,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976439240",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976439240"
     },
     {
       "rank": 82,
@@ -1156,9 +1318,11 @@
       "gain_24h": null,
       "rate_per_hour": 35000000,
       "projection_basis": "1h",
-      "projected_points": 15628750100,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 75
+      "projected_points": 15625846801,
+      "projected_rank": 73,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976421410",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976421410"
     },
     {
       "rank": 83,
@@ -1170,23 +1334,27 @@
       "gain_24h": null,
       "rate_per_hour": 17250000,
       "projection_basis": "1h",
-      "projected_points": 13552985512,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 80
+      "projected_points": 13551554601,
+      "projected_rank": 79,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "132114670591966",
+      "icon_url": "https://ps99.biggamesapi.io/image/132114670591966"
     },
     {
       "rank": 84,
       "clan_name": "1PNX",
-      "points": 11581750000,
-      "gain_5m": 0,
-      "gain_1h": 10000000,
+      "points": 11601750000,
+      "gain_5m": 20000000,
+      "gain_1h": 30000000,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 10000000,
+      "rate_per_hour": 30000000,
       "projection_basis": "1h",
-      "projected_points": 12695682600,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 85
+      "projected_points": 14941059258,
+      "projected_rank": 76,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "73421752471114",
+      "icon_url": "https://ps99.biggamesapi.io/image/73421752471114"
     },
     {
       "rank": 85,
@@ -1199,8 +1367,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 11547477000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 90
+      "projected_rank": 88,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "111152588696387",
+      "icon_url": "https://ps99.biggamesapi.io/image/111152588696387"
     },
     {
       "rank": 86,
@@ -1212,9 +1382,11 @@
       "gain_24h": null,
       "rate_per_hour": -149650000,
       "projection_basis": "1h",
-      "projected_points": -5296556589,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 98
+      "projected_points": -5284142914,
+      "projected_rank": 98,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "75781825351199",
+      "icon_url": "https://ps99.biggamesapi.io/image/75781825351199"
     },
     {
       "rank": 87,
@@ -1226,9 +1398,11 @@
       "gain_24h": null,
       "rate_per_hour": 20000000,
       "projection_basis": "1h",
-      "projected_points": 13344369043,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 82
+      "projected_points": 13342710015,
+      "projected_rank": 81,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "106057127763243",
+      "icon_url": "https://ps99.biggamesapi.io/image/106057127763243"
     },
     {
       "rank": 88,
@@ -1241,8 +1415,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 11105050000,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 91
+      "projected_rank": 89,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "17871676539",
+      "icon_url": "https://ps99.biggamesapi.io/image/17871676539"
     },
     {
       "rank": 89,
@@ -1254,9 +1430,11 @@
       "gain_24h": null,
       "rate_per_hour": 84488345,
       "projection_basis": "1h",
-      "projected_points": 20371511137,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 62
+      "projected_points": 20364502711,
+      "projected_rank": 64,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "138487235160650",
+      "icon_url": "https://ps99.biggamesapi.io/image/138487235160650"
     },
     {
       "rank": 90,
@@ -1268,9 +1446,11 @@
       "gain_24h": null,
       "rate_per_hour": 20000000,
       "projection_basis": "1h",
-      "projected_points": 13135616009,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 84
+      "projected_points": 13133956981,
+      "projected_rank": 83,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976485216",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976485216"
     },
     {
       "rank": 91,
@@ -1282,23 +1462,27 @@
       "gain_24h": null,
       "rate_per_hour": 1038000,
       "projection_basis": "1h",
-      "projected_points": 10992495460,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 92
+      "projected_points": 10992409356,
+      "projected_rank": 90,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "105262780521905",
+      "icon_url": "https://ps99.biggamesapi.io/image/105262780521905"
     },
     {
       "rank": 92,
       "clan_name": "ILDK",
       "points": 10868100418,
       "gain_5m": 0,
-      "gain_1h": 45000000,
+      "gain_1h": 0,
       "gain_12h": null,
       "gain_24h": null,
-      "rate_per_hour": 45000000,
+      "rate_per_hour": 0,
       "projection_basis": "1h",
-      "projected_points": 15880797118,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 72
+      "projected_points": 10868100418,
+      "projected_rank": 91,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "14976604955",
+      "icon_url": "https://ps99.biggamesapi.io/image/14976604955"
     },
     {
       "rank": 93,
@@ -1311,8 +1495,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 10482886293,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 94
+      "projected_rank": 93,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "76964445719986",
+      "icon_url": "https://ps99.biggamesapi.io/image/76964445719986"
     },
     {
       "rank": 94,
@@ -1324,9 +1510,11 @@
       "gain_24h": null,
       "rate_per_hour": 34000000,
       "projection_basis": "1h",
-      "projected_points": 14238837938,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 79
+      "projected_points": 14236017591,
+      "projected_rank": 78,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "89123589386811",
+      "icon_url": "https://ps99.biggamesapi.io/image/89123589386811"
     },
     {
       "rank": 95,
@@ -1339,8 +1527,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 10400570991,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 95
+      "projected_rank": 94,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "83057790201311",
+      "icon_url": "https://ps99.biggamesapi.io/image/83057790201311"
     },
     {
       "rank": 96,
@@ -1352,9 +1542,11 @@
       "gain_24h": null,
       "rate_per_hour": 110000000,
       "projection_basis": "1h",
-      "projected_points": 22613868047,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 53
+      "projected_points": 22604743394,
+      "projected_rank": 53,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "75656763636710",
+      "icon_url": "https://ps99.biggamesapi.io/image/75656763636710"
     },
     {
       "rank": 97,
@@ -1366,9 +1558,11 @@
       "gain_24h": null,
       "rate_per_hour": 5000000,
       "projection_basis": "1h",
-      "projected_points": 10815828702,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 93
+      "projected_points": 10815413945,
+      "projected_rank": 92,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "88210686711970",
+      "icon_url": "https://ps99.biggamesapi.io/image/88210686711970"
     },
     {
       "rank": 98,
@@ -1381,8 +1575,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 10034431318,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 96
+      "projected_rank": 95,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "126308125049326",
+      "icon_url": "https://ps99.biggamesapi.io/image/126308125049326"
     },
     {
       "rank": 99,
@@ -1395,8 +1591,10 @@
       "rate_per_hour": 0,
       "projection_basis": "1h",
       "projected_points": 9949575986,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 97
+      "projected_rank": 96,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "80514236177751",
+      "icon_url": "https://ps99.biggamesapi.io/image/80514236177751"
     },
     {
       "rank": 100,
@@ -1408,9 +1606,11 @@
       "gain_24h": null,
       "rate_per_hour": 20000000,
       "projection_basis": "1h",
-      "projected_points": 12165256386,
-      "fetched_at": "2026-05-11T22:36:24.264+00:00",
-      "projected_rank": 87
+      "projected_points": 12163597358,
+      "projected_rank": 85,
+      "fetched_at": "2026-05-11T22:41:22.889+00:00",
+      "icon_id": "130279567455193",
+      "icon_url": "https://ps99.biggamesapi.io/image/130279567455193"
     }
   ]
 }
