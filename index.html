@@ -531,6 +531,15 @@
 
   <script>
     const AUTO_REFRESH_MS = 60 * 1000;
+    const DEFAULT_AVATAR_SVG =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+          <rect width="150" height="150" rx="16" fill="#21262d"/>
+          <circle cx="75" cy="58" r="26" fill="#6e7681"/>
+          <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
+        </svg>
+      `);
 
     let currentData = null;
     let clanData = null;
@@ -642,6 +651,32 @@
     function parseDateValue(v) {
       const t = new Date(v).getTime();
       return Number.isNaN(t) ? null : t;
+    }
+
+    function getRobloxHeadshotUrl(userId) {
+      const id = String(userId || "").trim();
+      if (!id) return DEFAULT_AVATAR_SVG;
+
+      return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(id)}&width=150&height=150&format=png`;
+    }
+
+    function getAvatarFallbackUrl(row) {
+      const userId = String(row.user_id || "").trim();
+
+      if (userId) {
+        return getRobloxHeadshotUrl(userId);
+      }
+
+      return DEFAULT_AVATAR_SVG;
+    }
+
+    function buildAvatarImg(row) {
+      const primary = escapeHtml(getAvatar(row));
+      const fallback1 = escapeHtml(getAvatarFallbackUrl(row));
+      const fallback2 = escapeHtml(DEFAULT_AVATAR_SVG);
+
+      return `<img class="avatar" src="${primary}" alt="" loading="lazy"
+        onerror="if(this.dataset.fallback!=='1'){this.dataset.fallback='1';this.src='${fallback1}';}else{this.onerror=null;this.src='${fallback2}';}">`;
     }
 
     function rebuildPlayerIndexMaps() {
@@ -812,10 +847,10 @@
       }
 
       if (userId) {
-        return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(userId)}&width=150&height=150&format=png`;
+        return getRobloxHeadshotUrl(userId);
       }
 
-      return "assets/embed-spacer.png";
+      return DEFAULT_AVATAR_SVG;
     }
 
     function getProfileKey(row) {
@@ -1047,7 +1082,7 @@
           <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
           <td>
             <a class="player-cell" href="${profileUrl}">
-              <img class="avatar" src="${getAvatar(row)}" alt="">
+              ${buildAvatarImg(row)}
               <div>
                 <div class="player-name">${escapeHtml(row.username ?? "Unknown")}</div>
               </div>
