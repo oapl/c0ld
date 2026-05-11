@@ -1,22 +1,3 @@
-// scripts/build-clan-leaderboard.js
-// Builds Data/clans-current.json for the CURRENT battle.
-//
-// Important behavior:
-//   - clan_rank_snapshots is treated as current-only
-//   - gains/projection are computed from the current battle's historical clan table
-//   - the historical clan table is resolved from Data/manual-battles.json
-//
-// Required env:
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_KEY
-//
-// Optional env:
-//   CLAN_NAME = NONG
-//   CURRENT_BATTLE_NAME = AngelBattle2026
-//   CURRENT_BATTLE_DISPLAY_NAME = Angel Battle 2026
-//   CURRENT_BATTLE_END_ISO = 2026-05-03T18:00:00Z
-//   CURRENT_BATTLE_HISTORY_TABLE = AngelBattle2026Clans
-
 const fs = require("fs/promises");
 const path = require("path");
 
@@ -68,6 +49,18 @@ function safeIso(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function extractClanImageId(iconValue) {
+  return String(iconValue || "")
+    .trim()
+    .replace(/^rbxassetid:\/\//i, "")
+    .replace(/^rbxasset:\/\//i, "")
+    .trim();
+}
+
+function buildClanIconUrl(iconId) {
+  return iconId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(iconId)}` : null;
+}
+
 async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
@@ -108,8 +101,7 @@ async function supabaseSelectAll(tableName, queryParams = {}) {
 
   while (true) {
     const url = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}`);
-
-    url.searchParams.set("select", "fetched_at,battle,rank,clan_name,points");
+    url.searchParams.set("select", "*");
     url.searchParams.set("limit", String(PAGE_SIZE));
     url.searchParams.set("offset", String(offset));
 
@@ -206,7 +198,6 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   const oldPoints = oldMap.get(clanKey(currentRow.clan_name));
 
   if (oldPoints === undefined) return null;
-
   return Number(currentRow.points || 0) - oldPoints;
 }
 
@@ -236,7 +227,39 @@ function chooseProjectionRate(currentRow, allRows, latestMs) {
   };
 }
 
-function calculateRows(snapshotRows, battleEndIso) {
+async function fetchClanIconMap(clanNames) {
+  const map = new Map();
+  const unique = [...new Set(clanNames.filter(Boolean))];
+
+  for (const clanName of unique) {
+    try {
+      const res = await fetch(`https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clanName)}`, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "NONG-Leaderboard-Clan-Icons"
+        }
+      });
+
+      if (!res.ok) {
+        map.set(clanKey(clanName), { icon_id: null, icon_url: null });
+        continue;
+      }
+
+      const json = await res.json();
+      const iconId = extractClanImageId(json?.data?.Icon || json?.data?.icon);
+      map.set(clanKey(clanName), {
+        icon_id: iconId || null,
+        icon_url: buildClanIconUrl(iconId)
+      });
+    } catch {
+      map.set(clanKey(clanName), { icon_id: null, icon_url: null });
+    }
+  }
+
+  return map;
+}
+
+function calculateRows(snapshotRows, battleEndIso, iconMap) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
   if (!latestRows.length) {
@@ -266,6 +289,7 @@ function calculateRows(snapshotRows, battleEndIso) {
     const rate = chooseProjectionRate(row, snapshotRows, latestMs);
     const points = Number(row.points || 0);
     const projectedPoints = points + rate.rate_per_hour * hoursRemaining;
+    const icon = iconMap.get(clanKey(row.clan_name)) || { icon_id: null, icon_url: null };
 
     return {
       rank: toNumber(row.rank),
@@ -278,7 +302,10 @@ function calculateRows(snapshotRows, battleEndIso) {
       rate_per_hour: rate.rate_per_hour,
       projection_basis: rate.basis,
       projected_points: Math.round(projectedPoints),
-      fetched_at: row.fetched_at
+      projected_rank: null,
+      fetched_at: row.fetched_at,
+      icon_id: icon.icon_id,
+      icon_url: icon.icon_url
     };
   });
 
@@ -346,8 +373,6 @@ async function patchCurrentJson(clanOutput) {
     JSON.stringify(patched, null, 2) + "\n",
     "utf8"
   );
-
-  console.log("Patched Data/current.json with clan projection source of truth.");
 }
 
 async function main() {
@@ -359,15 +384,13 @@ async function main() {
 
   const meta = await resolveBattleMeta();
 
-  console.log(`CLAN_NAME=${CLAN_NAME}`);
-  console.log(`CURRENT_BATTLE_NAME=${meta.battle}`);
-  console.log(`CURRENT_BATTLE_HISTORY_TABLE=${meta.clan_results_table}`);
-
   const historyRows = await supabaseSelectAll(meta.clan_results_table, {
     order: "fetched_at.desc"
   });
 
-  const calculated = calculateRows(historyRows, meta.battle_end_iso);
+  const latestRows = getLatestSnapshotRows(historyRows);
+  const iconMap = await fetchClanIconMap(latestRows.map(row => row.clan_name));
+  const calculated = calculateRows(historyRows, meta.battle_end_iso, iconMap);
 
   const output = {
     generated_at: new Date().toISOString(),
@@ -394,11 +417,6 @@ async function main() {
   );
 
   await patchCurrentJson(output);
-
-  console.log("Wrote Data/clans-current.json.");
-  console.log(`Clan rows written: ${calculated.rows.length}`);
-  console.log(`${CLAN_NAME} current rank: ${output.clan_rank}`);
-  console.log(`${CLAN_NAME} projected rank: ${output.projected_rank}`);
 }
 
 main().catch(err => {
