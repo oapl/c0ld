@@ -501,6 +501,11 @@
       return `${days}d ${hours}h ${minutes}m ${seconds}s`;
     }
 
+    function parseDateValue(v) {
+      const t = new Date(v).getTime();
+      return Number.isNaN(t) ? null : t;
+    }
+
     function startCountdown(endValue) {
       const el = document.getElementById("battle-countdown");
 
@@ -545,6 +550,38 @@
       history.replaceState({}, "", url.toString());
     }
 
+    function sortBattlesNewestFirst(list) {
+      return list.slice().sort((a, b) => {
+        const au = Number(a.update_number);
+        const bu = Number(b.update_number);
+
+        if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
+          return bu - au;
+        }
+
+        if (Number.isFinite(au) && !Number.isFinite(bu)) return -1;
+        if (!Number.isFinite(au) && Number.isFinite(bu)) return 1;
+
+        const ad =
+          parseDateValue(a.last_snapshot) ||
+          parseDateValue(a.snapshot_at) ||
+          parseDateValue(a.generated_at) ||
+          0;
+
+        const bd =
+          parseDateValue(b.last_snapshot) ||
+          parseDateValue(b.snapshot_at) ||
+          parseDateValue(b.generated_at) ||
+          0;
+
+        if (ad !== bd) return bd - ad;
+
+        return String(a.display_name || a.battle || "").localeCompare(
+          String(b.display_name || b.battle || "")
+        );
+      });
+    }
+
     function getCurrentRows() {
       if (!currentData || !Array.isArray(currentData.rows)) return [];
 
@@ -571,13 +608,13 @@
 
       return battle.rows.map(row => ({
         rank: row.rank,
-        clan_name: cleanClanName(row.clan || row.clan_name || row.name || row.tag),
+        clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
         points: row.points ?? row.total_points,
-        gain_5m: null,
-        gain_1h: null,
-        gain_12h: null,
-        gain_24h: null,
-        projected_rank: null
+        gain_5m: row.gain_5m ?? null,
+        gain_1h: row.gain_1h ?? null,
+        gain_12h: row.gain_12h ?? null,
+        gain_24h: row.gain_24h ?? null,
+        projected_rank: row.projected_rank ?? null
       }));
     }
 
@@ -608,30 +645,39 @@
     function renderBattleOptions() {
       const select = document.getElementById("battle-select");
 
+      const filteredHistory = sortBattlesNewestFirst(
+        (historyData || []).filter(item =>
+          item &&
+          item.battle &&
+          (item.source_table || item.clan_results_table) &&
+          Array.isArray(item.rows) &&
+          item.rows.length > 0
+        )
+      );
+
       const options = [
         {
           value: "current",
           label: "Current Clan Battle"
-        }
-      ];
-
-      for (const item of historyData) {
-        if (!item.battle) continue;
-
-        options.push({
+        },
+        ...filteredHistory.map(item => ({
           value: item.battle,
           label: item.display_name || item.battle
-        });
-      }
+        }))
+      ];
 
-      const exists = options.some(option => normalizeKey(option.value) === normalizeKey(selectedBattle));
+      const exists = options.some(
+        option => normalizeKey(option.value) === normalizeKey(selectedBattle)
+      );
 
       if (!exists) {
         selectedBattle = "current";
       }
 
       select.innerHTML = options.map(option => `
-        <option value="${htmlEscape(option.value)}" ${normalizeKey(option.value) === normalizeKey(selectedBattle) ? "selected" : ""}>
+        <option value="${htmlEscape(option.value)}" ${
+          normalizeKey(option.value) === normalizeKey(selectedBattle) ? "selected" : ""
+        }>
           ${htmlEscape(option.label)}
         </option>
       `).join("");
