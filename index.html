@@ -675,31 +675,27 @@
       return "—";
     }
 
-function calculateHistoryStats() {
-  const totalBattles = battles.length;
+    function calculateHistoryStats() {
+      const totalBattles = battles.length;
 
-  const numericPlacements = battles
-    .map(getNumericPlacement)
-    .filter(value => value !== null);
+      const numericPlacements = battles
+        .map(getNumericPlacement)
+        .filter(value => value !== null);
 
-  const participated = numericPlacements.length;
+      const participated = numericPlacements.length;
 
-  // Mutually exclusive buckets:
-  // Top 10  = placements 1-10
-  // Top 30  = placements 11-30
-  // Top 100 = placements 31-100
-  const top10 = numericPlacements.filter(value => value >= 1 && value <= 10).length;
-  const top30 = numericPlacements.filter(value => value >= 11 && value <= 30).length;
-  const top100 = numericPlacements.filter(value => value >= 31 && value <= 100).length;
+      const top10 = numericPlacements.filter(value => value >= 1 && value <= 10).length;
+      const top30 = numericPlacements.filter(value => value >= 11 && value <= 30).length;
+      const top100 = numericPlacements.filter(value => value >= 31 && value <= 100).length;
 
-  return {
-    totalBattles,
-    participated,
-    top10,
-    top30,
-    top100
-  };
-}
+      return {
+        totalBattles,
+        participated,
+        top10,
+        top30,
+        top100
+      };
+    }
 
     function renderHistoryStats() {
       const stats = calculateHistoryStats();
@@ -800,7 +796,6 @@ function calculateHistoryStats() {
             const profile = await res.json();
             profileCache.set(p.profile_key, profile);
           } catch {
-            // Skip failed profile load.
           }
         })
       );
@@ -1010,9 +1005,7 @@ function calculateHistoryStats() {
       }
     }
 
-    function renderHistory() {
-      renderHistoryStats();
-
+    function renderHistoryTable() {
       const tbody = document.getElementById("history-body");
       const visible = getVisibleHistory();
 
@@ -1022,29 +1015,87 @@ function calculateHistoryStats() {
         tbody.innerHTML = `
           <tr>
             <td colspan="5" style="text-align:center;padding:32px;color:#8b949e;">
-              No history records found.
+              No clan history found.
             </td>
           </tr>
         `;
         return;
       }
 
-      for (const b of visible) {
+      for (const battle of visible) {
         const tr = document.createElement("tr");
 
         tr.innerHTML = `
-          <td>${fmtUpdateLink(b)}</td>
-          <td>${fmtBattleHistoryLink(b)}</td>
-          <td>${escapeHtml(fmtPlacement(b))}</td>
-          <td>${fmtDate(b.first_snapshot)}</td>
-          <td>${fmtDate(b.last_snapshot)}</td>
+          <td>${fmtUpdateLink(battle)}</td>
+          <td>${fmtBattleHistoryLink(battle)}</td>
+          <td>${escapeHtml(fmtPlacement(battle))}</td>
+          <td>${escapeHtml(fmtDate(battle.first_snapshot))}</td>
+          <td>${escapeHtml(fmtDate(battle.last_snapshot))}</td>
         `;
 
         tbody.appendChild(tr);
       }
     }
 
-    function startCountdown() {
+    function renderBattleOptions() {
+      const select = document.getElementById("battle-select");
+
+      const filteredBattles = sortBattlesForDropdown(
+        (battles || []).filter(battle =>
+          battle &&
+          battle.battle &&
+          battle.nong_results_table
+        )
+      );
+
+      const options = [
+        { value: "current", label: "Current Clan Battle" },
+        ...filteredBattles.map(battle => ({
+          value: battle.battle,
+          label: battle.display_name || battle.battle
+        }))
+      ];
+
+      const exists = options.some(
+        option => normalizeKey(option.value) === normalizeKey(activeBattle)
+      );
+
+      if (!exists) {
+        activeBattle = "current";
+      }
+
+      select.innerHTML = options.map(option => `
+        <option value="${escapeHtml(option.value)}" ${
+          normalizeKey(option.value) === normalizeKey(activeBattle) ? "selected" : ""
+        }>
+          ${escapeHtml(option.label)}
+        </option>
+      `).join("");
+    }
+
+    function renderAll() {
+      renderCards();
+      renderBattleOptions();
+      renderLeaderboard();
+      renderHistoryStats();
+      renderHistoryTable();
+    }
+
+    function updateView() {
+      const leaderboardView = document.getElementById("view-leaderboard");
+      const historyView = document.getElementById("view-history");
+      const leaderboardBtn = document.getElementById("tab-btn-leaderboard");
+      const historyBtn = document.getElementById("tab-btn-history");
+
+      const showHistory = window.location.hash === "#history";
+
+      leaderboardView.classList.toggle("hidden", showHistory);
+      historyView.classList.toggle("hidden", !showHistory);
+      leaderboardBtn.classList.toggle("active", !showHistory);
+      historyBtn.classList.toggle("active", showHistory);
+    }
+
+    function startCountdown(endValue) {
       const el = document.getElementById("countdown-value");
 
       if (countdownTimer) {
@@ -1052,165 +1103,154 @@ function calculateHistoryStats() {
         countdownTimer = null;
       }
 
+      if (!endValue) {
+        el.textContent = "—";
+        return;
+      }
+
+      const end = new Date(endValue);
+      if (Number.isNaN(end.getTime())) {
+        el.textContent = "—";
+        return;
+      }
+
       function tick() {
-        const endIso = getBattleEndIso();
-
-        if (!endIso) {
-          el.textContent = "—";
-          return;
-        }
-
-        const end = new Date(endIso).getTime();
-
-        if (Number.isNaN(end)) {
-          el.textContent = "—";
-          return;
-        }
-
-        el.textContent = fmtCountdown(end - Date.now());
+        el.textContent = fmtCountdown(end.getTime() - Date.now());
       }
 
       tick();
       countdownTimer = setInterval(tick, 1000);
     }
 
-    function setActiveTab(which) {
-      const btnLeaderboard = document.getElementById("tab-btn-leaderboard");
-      const btnHistory = document.getElementById("tab-btn-history");
-      const viewLeaderboard = document.getElementById("view-leaderboard");
-      const viewHistory = document.getElementById("view-history");
-
-      if (which === "history") {
-        btnLeaderboard.classList.remove("active");
-        btnHistory.classList.add("active");
-        viewLeaderboard.classList.add("hidden");
-        viewHistory.classList.remove("hidden");
-      } else {
-        btnHistory.classList.remove("active");
-        btnLeaderboard.classList.add("active");
-        viewHistory.classList.add("hidden");
-        viewLeaderboard.classList.remove("hidden");
+    async function applyBattleSelection() {
+      if (activeBattle === "current") {
+        clanData = currentData;
+        currentRows = normalizeCurrentRows(currentData?.rows || []);
+        startCountdown(getBattleEndIso());
+        renderAll();
+        return;
       }
+
+      const selected = battles.find(b => normalizeKey(b.battle) === normalizeKey(activeBattle));
+
+      if (!selected || !selected.nong_results_table) {
+        activeBattle = "current";
+        clanData = currentData;
+        currentRows = normalizeCurrentRows(currentData?.rows || []);
+        startCountdown(getBattleEndIso());
+        renderAll();
+        return;
+      }
+
+      currentRows = await buildHistoricalRows(selected.battle);
+
+      clanData = {
+        battle: selected.battle,
+        display_name: selected.display_name || selected.battle,
+        battle_end_iso: null,
+        clan_rank: getNumericPlacement(selected),
+        projected_rank: null,
+        snapshot_at: selected.last_snapshot || null
+      };
+
+      startCountdown(null);
+      renderAll();
     }
 
-    function populateBattleDropdown() {
-      const select = document.getElementById("battle-select");
-      select.innerHTML = "";
+    async function loadData() {
+      if (isLoading) return;
+      isLoading = true;
 
-      const currentBattleName = currentData?.battle || null;
-      const currentDisplayName = currentData?.display_name || "Current Clan Battle";
-      const seen = new Set();
+      const status = document.getElementById("status");
 
-      const currentOpt = document.createElement("option");
-      currentOpt.value = "current";
-      currentOpt.textContent = currentDisplayName;
-      select.appendChild(currentOpt);
+      try {
+        const cacheBust = Date.now();
 
-      seen.add("current");
-      if (currentBattleName) seen.add(normalizeKey(currentBattleName));
-      if (currentDisplayName) seen.add(normalizeKey(currentDisplayName));
+        const [currentRes, battlesRes, playersRes] = await Promise.all([
+          fetch(`Data/current.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" })
+        ]);
 
-      const sortedBattles = sortBattlesForDropdown(battles);
-
-      for (const battle of sortedBattles) {
-        const battleKey = normalizeKey(battle.battle);
-        const displayKey = normalizeKey(battle.display_name || battle.battle);
-
-        if (seen.has(battleKey) || seen.has(displayKey)) {
-          continue;
+        if (!currentRes.ok) {
+          throw new Error(`Could not load Data/current.json. HTTP ${currentRes.status}`);
         }
 
-        const opt = document.createElement("option");
-        opt.value = battle.battle;
-        opt.textContent = battle.display_name || battle.battle;
-        select.appendChild(opt);
+        currentData = await currentRes.json();
 
-        seen.add(battleKey);
-        seen.add(displayKey);
-      }
+        if (!currentData || !Array.isArray(currentData.rows)) {
+          throw new Error("Data/current.json does not contain a rows array.");
+        }
 
-      const optionValues = [...select.options].map(option => option.value);
+        battles = battlesRes.ok ? await battlesRes.json() : [];
+        if (!Array.isArray(battles)) battles = [];
 
-      if (!optionValues.includes(activeBattle)) {
-        activeBattle = "current";
-      }
+        playerIndex = playersRes.ok ? await playersRes.json() : [];
+        if (!Array.isArray(playerIndex)) playerIndex = [];
 
-      select.value = activeBattle;
-    }
+        if (!activeBattle) {
+          activeBattle = "current";
+        }
 
-    async function handleBattleChange() {
-      const value = document.getElementById("battle-select").value;
-      activeBattle = value;
+        await applyBattleSelection();
 
-      if (value === "current") {
-        currentRows = normalizeCurrentRows(currentData.rows || []);
-      } else {
-        currentRows = await buildHistoricalRows(value);
-      }
-
-      sortKey = "rank";
-      sortAsc = true;
-
-      renderCards();
-      renderLeaderboard();
-    }
-
-    function applyHashRoute() {
-      if (window.location.hash === "#history") {
-        setActiveTab("history");
-      } else {
-        setActiveTab("leaderboard");
-      }
-    }
-
-    function readInitialBattleFromUrl() {
-      const params = new URLSearchParams(window.location.search);
-      const battle = params.get("battle");
-
-      if (battle) {
-        activeBattle = battle;
+        status.style.display = "none";
+        status.className = "";
+        status.textContent = "";
+      } catch (error) {
+        console.error(error);
+        status.style.display = "block";
+        status.className = "error";
+        status.textContent = error.message || String(error);
+      } finally {
+        isLoading = false;
       }
     }
 
     function wireEvents() {
-      document.getElementById("search").addEventListener("input", renderLeaderboard);
-      document.getElementById("refresh").addEventListener("click", () => loadData());
+      document.getElementById("refresh").addEventListener("click", () => {
+        loadData();
+      });
 
-      document.getElementById("battle-select").addEventListener("change", () => {
-        handleBattleChange();
+      document.getElementById("search").addEventListener("input", () => {
+        renderLeaderboard();
+      });
+
+      document.getElementById("battle-select").addEventListener("change", async (event) => {
+        activeBattle = event.target.value;
+        await applyBattleSelection();
       });
 
       document.getElementById("tab-btn-leaderboard").addEventListener("click", () => {
-        history.pushState("", document.title, window.location.pathname + window.location.search);
-        setActiveTab("leaderboard");
+        window.location.hash = "";
+        updateView();
       });
 
       document.getElementById("tab-btn-history").addEventListener("click", () => {
-        history.pushState("", document.title, window.location.pathname + window.location.search + "#history");
-        setActiveTab("history");
-        renderHistory();
+        window.location.hash = "history";
+        updateView();
       });
 
-      window.addEventListener("hashchange", applyHashRoute);
+      window.addEventListener("hashchange", updateView);
 
-      document.querySelectorAll("[data-sort]").forEach(th => {
+      document.querySelectorAll("th[data-sort]").forEach(th => {
         th.addEventListener("click", () => {
-          const key = th.getAttribute("data-sort");
+          const key = th.dataset.sort;
 
           if (sortKey === key) {
             sortAsc = !sortAsc;
           } else {
             sortKey = key;
-            sortAsc = key === "rank" || key === "username";
+            sortAsc = key === "username";
           }
 
           renderLeaderboard();
         });
       });
 
-      document.querySelectorAll("[data-history-sort]").forEach(th => {
+      document.querySelectorAll("th[data-history-sort]").forEach(th => {
         th.addEventListener("click", () => {
-          const key = th.getAttribute("data-history-sort");
+          const key = th.dataset.historySort;
 
           if (historySortKey === key) {
             historySortAsc = !historySortAsc;
@@ -1219,94 +1259,35 @@ function calculateHistoryStats() {
             historySortAsc = key === "display_name";
           }
 
-          renderHistory();
+          renderHistoryTable();
         });
       });
     }
 
-    function showError(message) {
-      const status = document.getElementById("status");
-      status.className = "error";
-      status.style.display = "block";
-      status.innerHTML = escapeHtml(message);
-    }
+    async function init() {
+      wireEvents();
+      updateView();
 
-    function clearError() {
-      const status = document.getElementById("status");
-      status.className = "";
-      status.style.display = "none";
-      status.innerHTML = "";
-    }
-
-    async function fetchJson(path, fallback = null) {
-      try {
-        const res = await fetch(`${path}?v=${Date.now()}`);
-
-        if (!res.ok) {
-          if (fallback !== null) return fallback;
-          throw new Error(`${path} returned HTTP ${res.status}`);
+      if (window.location.search) {
+        const params = new URLSearchParams(window.location.search);
+        const battle = params.get("battle");
+        if (battle) {
+          activeBattle = battle;
         }
-
-        return await res.json();
-      } catch (err) {
-        if (fallback !== null) return fallback;
-        throw err;
       }
-    }
 
-    async function loadData() {
-      if (isLoading) return;
-      isLoading = true;
+      await loadData();
 
-      try {
-        clearError();
-
-        const [current, clans, battleList, players] = await Promise.all([
-          fetchJson("Data/current.json"),
-          fetchJson("Data/clans-current.json", null),
-          fetchJson("Data/battles.json", []),
-          fetchJson("Data/players.json", [])
-        ]);
-
-        currentData = current;
-        clanData = clans;
-        battles = Array.isArray(battleList) ? battleList : [];
-        playerIndex = Array.isArray(players) ? players : [];
-
-        currentRows = normalizeCurrentRows(currentData.rows || []);
-
-        populateBattleDropdown();
-        await handleBattleChange();
-
-        renderCards();
-        renderLeaderboard();
-        renderHistory();
-        startCountdown();
-        applyHashRoute();
-      } catch (err) {
-        console.error(err);
-        showError(`Failed to load leaderboard data: ${err.message}`);
-      } finally {
-        isLoading = false;
-      }
-    }
-
-    function startAutoRefresh() {
       if (refreshTimer) {
         clearInterval(refreshTimer);
       }
 
       refreshTimer = setInterval(() => {
-        if (activeBattle === "current") {
-          loadData();
-        }
+        loadData();
       }, AUTO_REFRESH_MS);
     }
 
-    readInitialBattleFromUrl();
-    wireEvents();
-    loadData();
-    startAutoRefresh();
+    init();
   </script>
 </body>
 </html>
