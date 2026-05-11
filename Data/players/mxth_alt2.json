@@ -1,0 +1,41 @@
+{
+  "profile_key": "7028549369",
+  "username": "mxth_alt2",
+  "user_id": 7028549369,
+  "avatar_url": "assets/avatars/7028549369.png",
+  "profile_url": "https://www.roblox.com/users/7028549369/profile",
+  "total_battles": 1,
+  "latest_rank": 74,
+  "latest_points": 100777,
+  "latest_seen": "2026-05-11T22:56:15.653Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-11T22:56:15.653Z",
+      "first_seen": "2026-05-11T22:56:15.653Z",
+      "first_active_date": "2026-05-11T22:56:15.653Z",
+      "last_seen": "2026-05-11T22:56:15.653Z",
+      "starting_rank": 74,
+      "last_rank": 74,
+      "end_rank": 74,
+      "best_rank": 74,
+      "worst_rank": 74,
+      "starting_points": 100777,
+      "ending_points": 100777,
+      "max_points": 100777,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-11T22:56:15.653Z",
+          "rank": 74,
+          "points": 100777
+        }
+      ]
+    }
+  ]
+}
