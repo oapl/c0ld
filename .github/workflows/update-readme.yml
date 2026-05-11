@@ -72,6 +72,7 @@ jobs:
         env:
           CLAN_NAME: ${{ vars.CLAN_NAME }}
           CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
+          CURRENT_BATTLE_HISTORY_TABLE: ${{ vars.CURRENT_BATTLE_HISTORY_TABLE }}
           CLAN_RANK_TOP_N: ${{ vars.CLAN_RANK_TOP_N }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -91,6 +92,12 @@ jobs:
       - name: Merge manual battle history
         run: node scripts/merge-manual-battles.js
 
+      - name: Build historical NONG leaderboard data
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/build-nong-history.js
+
       - name: Build historical clan leaderboard data
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -103,6 +110,7 @@ jobs:
           CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
           CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
           CURRENT_BATTLE_END_ISO: ${{ vars.CURRENT_BATTLE_END_ISO }}
+          CURRENT_BATTLE_HISTORY_TABLE: ${{ vars.CURRENT_BATTLE_HISTORY_TABLE }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/build-clan-leaderboard.js
@@ -113,6 +121,14 @@ jobs:
           find assets/avatars -maxdepth 1 -type f | sort | head -50 || true
           echo "Avatar file count:"
           find assets/avatars -maxdepth 1 -type f | wc -l || true
+
+      - name: Show generated Data files
+        run: |
+          echo "Generated Data files:"
+          find Data -maxdepth 1 -type f | sort || true
+          echo ""
+          echo "Preview nong-history.json:"
+          head -100 Data/nong-history.json || true
 
       - name: Commit and push if changed
         run: |
