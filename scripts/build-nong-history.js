@@ -10,6 +10,7 @@ const PLAYER_INDEX_FILE = path.join(DATA_DIR, "player-index.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "nong-history.json");
 
 const PAGE_SIZE = 1000;
+const ROBLOX_USERNAME_BATCH_SIZE = 100;
 const ROBLOX_THUMB_BATCH_SIZE = 100;
 
 if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
@@ -261,6 +262,44 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   return Number(currentRow.total_points || 0) - oldPoints;
 }
 
+async function resolveUserIdsByUsername(usernames) {
+  const map = new Map();
+  const uniqueNames = [...new Set((usernames || []).map(v => String(v || "").trim()).filter(Boolean))];
+
+  for (const batch of chunkArray(uniqueNames, ROBLOX_USERNAME_BATCH_SIZE)) {
+    const res = await fetch("https://users.roblox.com/v1/usernames/users", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "NONG-Leaderboard-Username-Resolver"
+      },
+      body: JSON.stringify({
+        usernames: batch,
+        excludeBannedUsers: false
+      })
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Roblox username lookup failed (${res.status}): ${text}`);
+    }
+
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+
+    for (const item of data) {
+      const requestedName = String(item?.requestedUsername || item?.name || "").trim();
+      const resolvedId = Number(item?.id);
+      if (requestedName && Number.isFinite(resolvedId)) {
+        map.set(normalizeName(requestedName), resolvedId);
+      }
+    }
+  }
+
+  return map;
+}
+
 async function fetchRobloxHeadshots(userIds) {
   const map = new Map();
   const uniqueIds = [...new Set((userIds || []).map(v => String(v || "").trim()).filter(Boolean))];
@@ -299,6 +338,53 @@ async function fetchRobloxHeadshots(userIds) {
   return map;
 }
 
+async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
+  const missingUsernameLookups = rows
+    .filter(row => !row.user_id && row.username)
+    .map(row => row.username);
+
+  const usernameToUserId = await resolveUserIdsByUsername(missingUsernameLookups);
+
+  for (const row of rows) {
+    if (!row.user_id && row.username) {
+      const resolvedId = usernameToUserId.get(normalizeName(row.username));
+      if (Number.isFinite(resolvedId)) {
+        row.user_id = resolvedId;
+      }
+    }
+  }
+
+  const userIdsToThumb = rows
+    .map(row => String(row.user_id || "").trim())
+    .filter(Boolean);
+
+  const thumbMap = await fetchRobloxHeadshots(userIdsToThumb);
+
+  for (const row of rows) {
+    const userId = String(row.user_id || "").trim();
+    const usernameKey = normalizeName(row.username);
+
+    let match = null;
+
+    if (userId && playerMaps.byUserId.has(userId)) {
+      match = playerMaps.byUserId.get(userId);
+    }
+
+    if (!match && row.profile_key && playerMaps.byProfileKey.has(String(row.profile_key))) {
+      match = playerMaps.byProfileKey.get(String(row.profile_key));
+    }
+
+    if (!match && usernameKey && playerMaps.byUsername.has(usernameKey)) {
+      match = playerMaps.byUsername.get(usernameKey);
+    }
+
+    row.profile_key = match?.profile_key || row.profile_key || row.user_id || row.username;
+    row.avatar_url = row.avatar_url || match?.avatar_url || (userId ? thumbMap.get(userId) || null : null);
+  }
+
+  return rows;
+}
+
 async function calculateBattleRows(snapshotRows, playerMaps) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
@@ -316,46 +402,21 @@ async function calculateBattleRows(snapshotRows, playerMaps) {
   );
 
   const hasHistoricalTimestamps = Number.isFinite(latestMs);
+  await enrichRowsWithRobloxIdentity(latestRows, playerMaps);
 
-  const unresolvedUserIds = latestRows
-    .map(row => String(row.user_id || "").trim())
-    .filter(Boolean);
-
-  const thumbnailMap = await fetchRobloxHeadshots(unresolvedUserIds);
-
-  const rows = latestRows.map(row => {
-    const userId = String(row.user_id || "").trim();
-    const usernameKey = normalizeName(row.username);
-
-    let match = null;
-
-    if (userId && playerMaps.byUserId.has(userId)) {
-      match = playerMaps.byUserId.get(userId);
-    }
-
-    if (!match && usernameKey && playerMaps.byUsername.has(usernameKey)) {
-      match = playerMaps.byUsername.get(usernameKey);
-    }
-
-    const avatarUrl =
-      row.avatar_url ||
-      match?.avatar_url ||
-      (userId ? thumbnailMap.get(userId) || null : null);
-
-    return {
-      rank: numberOrNull(row.rank),
-      username: row.username,
-      total_points: numberOrNull(row.total_points),
-      user_id: numberOrNull(row.user_id),
-      profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
-      avatar_url: avatarUrl,
-      fetched_at: row.fetched_at,
-      gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
-      gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
-      gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
-      gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null
-    };
-  }).sort((a, b) => {
+  const rows = latestRows.map(row => ({
+    rank: numberOrNull(row.rank),
+    username: row.username,
+    total_points: numberOrNull(row.total_points),
+    user_id: numberOrNull(row.user_id),
+    profile_key: row.profile_key || row.user_id || row.username,
+    avatar_url: row.avatar_url || null,
+    fetched_at: row.fetched_at,
+    gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
+    gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
+    gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
+    gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null
+  })).sort((a, b) => {
     const ar = Number(a.rank ?? 999999);
     const br = Number(b.rank ?? 999999);
     if (ar !== br) return ar - br;
