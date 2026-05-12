@@ -9,28 +9,28 @@
   "avatar_url": "assets/avatars/5349160911.png",
   "profile_url": "https://www.roblox.com/users/5349160911/profile",
   "total_battles": 3,
-  "latest_rank": 55,
+  "latest_rank": 56,
   "latest_points": 15000000,
-  "latest_seen": "2026-05-12T12:40:44.317Z",
+  "latest_seen": "2026-05-12T12:45:42.528Z",
   "battles": [
     {
       "battle": "AngelBattle2026",
       "display_name": "Angel Battle 2026",
       "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
-      "battle_last_snapshot": "2026-05-12T12:40:44.317Z",
+      "battle_last_snapshot": "2026-05-12T12:45:42.528Z",
       "first_seen": "2026-05-11T14:23:36.089Z",
       "first_active_date": "2026-05-11T14:23:36.089Z",
-      "last_seen": "2026-05-12T12:40:44.317Z",
+      "last_seen": "2026-05-12T12:45:42.528Z",
       "starting_rank": 57,
-      "last_rank": 55,
-      "end_rank": 55,
+      "last_rank": 56,
+      "end_rank": 56,
       "best_rank": 49,
       "worst_rank": 59,
       "starting_points": 5250000,
       "ending_points": 15000000,
       "max_points": 15000000,
       "gained_points": 9750000,
-      "snapshot_count": 275,
+      "snapshot_count": 276,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -1407,6 +1407,11 @@
         {
           "t": "2026-05-12T12:40:44.317Z",
           "rank": 55,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T12:45:42.528Z",
+          "rank": 56,
           "points": 15000000
         }
       ]
