@@ -124,9 +124,14 @@
 
     .toolbar {
       margin-bottom: 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 12px;
+      align-items: center;
     }
 
-    input {
+    input,
+    select {
       width: 100%;
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -138,7 +143,8 @@
       transition: background 0.15s ease, border-color 0.15s ease;
     }
 
-    input:focus {
+    input:focus,
+    select:focus {
       border-color: var(--link);
       background: var(--hover);
     }
@@ -297,6 +303,10 @@
       .pager {
         justify-content: flex-start;
       }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -328,6 +338,10 @@
   <main>
     <div class="toolbar">
       <input id="search" placeholder="Search players..." autocomplete="off" />
+      <select id="sort-by">
+        <option value="rank">Sort by Rank</option>
+        <option value="battles">Sort by # of Battles</option>
+      </select>
     </div>
 
     <section class="section">
@@ -491,6 +505,63 @@
              currentKeys.has(String(p.username || "").toLowerCase());
     }
 
+    function getSortMode() {
+      return document.getElementById("sort-by").value;
+    }
+
+    function compareByRank(a, b) {
+      const ar = Number(a.latest_rank);
+      const br = Number(b.latest_rank);
+
+      const aHas = Number.isFinite(ar);
+      const bHas = Number.isFinite(br);
+
+      if (aHas && bHas && ar !== br) return ar - br;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+
+      const ad = new Date(a.latest_seen || 0).getTime();
+      const bd = new Date(b.latest_seen || 0).getTime();
+
+      if (!Number.isNaN(ad) && !Number.isNaN(bd) && ad !== bd) {
+        return bd - ad;
+      }
+
+      return String(a.username || "").localeCompare(String(b.username || ""));
+    }
+
+    function compareByBattles(a, b) {
+      const ab = Number(a.total_battles || 0);
+      const bb = Number(b.total_battles || 0);
+
+      if (bb !== ab) return bb - ab;
+
+      const ar = Number(a.latest_rank);
+      const br = Number(b.latest_rank);
+
+      const aHas = Number.isFinite(ar);
+      const bHas = Number.isFinite(br);
+
+      if (aHas && bHas && ar !== br) return ar - br;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+
+      return String(a.username || "").localeCompare(String(b.username || ""));
+    }
+
+    function sortPlayers(list) {
+      const mode = getSortMode();
+      const out = list.slice();
+
+      if (mode === "battles") {
+        out.sort(compareByBattles);
+      } else {
+        out.sort(compareByRank);
+      }
+
+      return out;
+    }
+
     function makeCard(p, groupType) {
       const link = document.createElement("a");
       link.href = getProfileLink(p);
@@ -520,7 +591,8 @@
       if (groupType === "previous") {
         meta.innerHTML =
           `Last Active: ${fmtDate(p.latest_seen)}<br>` +
-          `Battles: ${p.total_battles ?? "N/A"}`;
+          `Battles: ${p.total_battles ?? "N/A"}<br>` +
+          `Latest Rank: ${p.latest_rank ?? "N/A"}`;
       } else {
         meta.innerHTML =
           `Latest Rank: ${p.latest_rank ?? "N/A"}<br>` +
@@ -563,22 +635,13 @@
         );
       }
 
-      const current = visible
-        .filter(isCurrentPlayer)
-        .sort((a, b) => Number(a.latest_rank || 999999) - Number(b.latest_rank || 999999));
+      const current = sortPlayers(
+        visible.filter(isCurrentPlayer)
+      );
 
-      const previous = visible
-        .filter(p => !isCurrentPlayer(p))
-        .sort((a, b) => {
-          const ad = new Date(a.latest_seen || 0).getTime();
-          const bd = new Date(b.latest_seen || 0).getTime();
-
-          if (!Number.isNaN(ad) && !Number.isNaN(bd) && ad !== bd) {
-            return bd - ad;
-          }
-
-          return String(a.username || "").localeCompare(String(b.username || ""));
-        });
+      const previous = sortPlayers(
+        visible.filter(p => !isCurrentPlayer(p))
+      );
 
       return { current, previous };
     }
@@ -743,6 +806,11 @@
         render();
 
         document.getElementById("search").addEventListener("input", () => {
+          previousPage = 1;
+          render();
+        });
+
+        document.getElementById("sort-by").addEventListener("change", () => {
           previousPage = 1;
           render();
         });
