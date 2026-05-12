@@ -1,0 +1,45 @@
+{
+  "profile_key": "321198413",
+  "aliases": [
+    "321198413",
+    "NilsPlays"
+  ],
+  "username": "NilsPlays",
+  "user_id": 321198413,
+  "avatar_url": "assets/avatars/321198413.png",
+  "profile_url": "https://www.roblox.com/users/321198413/profile",
+  "total_battles": 1,
+  "latest_rank": 74,
+  "latest_points": 1511655,
+  "latest_seen": "2026-05-12T12:50:50.496Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-12T12:50:50.496Z",
+      "first_seen": "2026-05-12T12:50:50.496Z",
+      "first_active_date": "2026-05-12T12:50:50.496Z",
+      "last_seen": "2026-05-12T12:50:50.496Z",
+      "starting_rank": 74,
+      "last_rank": 74,
+      "end_rank": 74,
+      "best_rank": 74,
+      "worst_rank": 74,
+      "starting_points": 1511655,
+      "ending_points": 1511655,
+      "max_points": 1511655,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-12T12:50:50.496Z",
+          "rank": 74,
+          "points": 1511655
+        }
+      ]
+    }
+  ]
+}
