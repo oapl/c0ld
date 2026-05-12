@@ -1,0 +1,1195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Live Clan Lookup</title>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --ok: #3fb950;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: none;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .github-btn {
+      display: inline-block;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .github-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .search-panel,
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input,
+    button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    input {
+      min-width: 260px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:hover,
+    input:focus {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .search-help {
+      padding: 0 16px 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .status {
+      margin-bottom: 18px;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: none;
+    }
+
+    .status.info {
+      display: block;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .status.error {
+      display: block;
+      border: 1px solid var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .clan-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .clan-icon {
+      width: 54px;
+      height: 54px;
+      border-radius: 12px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .clan-meta h2 {
+      margin: 0 0 4px;
+      font-size: 24px;
+    }
+
+    .clan-meta div {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toolbar {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th:hover {
+      color: var(--text);
+    }
+
+    tbody tr:hover {
+      background: rgba(255,255,255,0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .rank {
+      font-weight: 700;
+      width: 80px;
+    }
+
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .player-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .player-name {
+      font-weight: 700;
+    }
+
+    .player-sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 22px 16px;
+    }
+
+    .ok-note {
+      color: var(--ok);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1050px) {
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 24px;
+      }
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .controls,
+      .toolbar {
+        width: 100%;
+      }
+
+      .controls input,
+      .controls button,
+      .toolbar input {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Live Clan Lookup</h1>
+        <div class="subtitle">Pet Simulator 99 · Current battle only · No stored history</div>
+      </div>
+
+      <a
+        class="github-btn"
+        href="https://github.com/OpalApocalypse/NONG_Leaderboard"
+        target="_blank"
+        rel="noopener"
+      >GitHub</a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">NONG Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="players.html">Player Profiles</a>
+      <a class="menu-btn" href="index.html#history">Clan History</a>
+      <a class="menu-btn active" href="live-clan.html">Live Clan Lookup</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status info">Enter a clan tag and search.</div>
+
+    <section class="search-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Lookup current clan</h2>
+
+        <div class="controls">
+          <input id="clan-input" type="text" placeholder="Enter clan name, e.g. NONG" autocomplete="off" />
+          <button id="lookup-btn" type="button">Lookup</button>
+          <button id="refresh-btn" type="button" disabled>Refresh</button>
+        </div>
+      </div>
+
+      <div class="search-help">
+        This page only uses live API data. It does not write or save anything. The current clan battle endpoint identifies the active battle, the clan endpoint provides current clan details and members, and the paginated clans endpoint is used to estimate the clan’s live rank. API responses are cached for about 60 seconds, so repeated refreshes may briefly show the same values. :contentReference[oaicite:1]{index=1}
+      </div>
+    </section>
+
+    <section class="cards">
+      <div class="card">
+        <div class="label">Clan</div>
+        <div class="value" id="card-clan">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Current Battle</div>
+        <div class="value" id="card-battle">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Current Clan Rank</div>
+        <div class="value" id="card-rank">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Current Battle Points</div>
+        <div class="value" id="card-points">—</div>
+      </div>
+    </section>
+
+    <section class="cards">
+      <div class="card">
+        <div class="label">Member Count</div>
+        <div class="value" id="card-members">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Owner User ID</div>
+        <div class="value" id="card-owner">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Guild Level</div>
+        <div class="value" id="card-level">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Last Pulled</div>
+        <div class="value" id="card-pulled">—</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="clan-head">
+        <img id="clan-icon" class="clan-icon" alt="" />
+        <div class="clan-meta">
+          <h2 id="clan-title">No clan loaded</h2>
+          <div id="clan-subtitle">Search for a clan to see current battle members.</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="ok-note" id="rank-note"></div>
+        <input id="member-search" type="text" placeholder="Search members..." />
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="rank">Rank</th>
+              <th data-sort="username">Player</th>
+              <th data-sort="role">Role</th>
+              <th data-sort="points" class="numeric">Current Battle Points</th>
+              <th data-sort="join">Join Date</th>
+              <th data-sort="userId" class="numeric">User ID</th>
+            </tr>
+          </thead>
+          <tbody id="members-body">
+            <tr>
+              <td colspan="6" class="empty-state">No clan loaded.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const PS99_BASE = "https://ps99.biggamesapi.io";
+    const DEFAULT_CLAN_ICON =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="12" fill="#21262d"/>
+          <path d="M20 44V24l12-6 12 6v20l-12 6-12-6z" fill="#6e7681"/>
+        </svg>
+      `);
+
+    const DEFAULT_AVATAR =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+          <rect width="150" height="150" rx="16" fill="#21262d"/>
+          <circle cx="75" cy="58" r="26" fill="#6e7681"/>
+          <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
+        </svg>
+      `);
+
+    const CLANS_PAGE_SIZE = 100;
+    const MAX_RANK_SCAN_PAGES = 50;
+
+    let currentClanData = null;
+    let currentMembers = [];
+    let currentBattleMeta = null;
+    let currentSortKey = "rank";
+    let currentSortAsc = true;
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function normalizeKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function fmtShortNumber(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      const n = Number(value);
+      if (Number.isNaN(n)) return "—";
+
+      const abs = Math.abs(n);
+      if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
+      if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
+      if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
+      if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
+
+      return n.toLocaleString("en-US");
+    }
+
+    function fmtDate(value) {
+      if (!value) return "—";
+      const d = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "—";
+      const d = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+    }
+
+    function setStatus(text, kind = "info") {
+      const el = document.getElementById("status");
+      el.className = `status ${kind}`;
+      el.textContent = text;
+    }
+
+    function setCardsEmpty() {
+      document.getElementById("card-clan").textContent = "—";
+      document.getElementById("card-battle").textContent = "—";
+      document.getElementById("card-rank").textContent = "—";
+      document.getElementById("card-points").textContent = "—";
+      document.getElementById("card-members").textContent = "—";
+      document.getElementById("card-owner").textContent = "—";
+      document.getElementById("card-level").textContent = "—";
+      document.getElementById("card-pulled").textContent = "—";
+      document.getElementById("clan-title").textContent = "No clan loaded";
+      document.getElementById("clan-subtitle").textContent = "Search for a clan to see current battle members.";
+      document.getElementById("rank-note").textContent = "";
+      document.getElementById("clan-icon").src = DEFAULT_CLAN_ICON;
+    }
+
+    function mapClanRole(permissionLevel, ownerId, userId) {
+      if (Number(userId) === Number(ownerId)) return "Leader";
+
+      const level = Number(permissionLevel);
+      if (level === 90) return "Officer";
+      if (level === 50) return "Member";
+      if (level === 100) return "Leader";
+      if (!Number.isNaN(level) && level > 0) return `Unknown (${level})`;
+
+      return "";
+    }
+
+    function getBattleAliases(activeBattle) {
+      const base = [
+        activeBattle?.configName,
+        activeBattle?.data?.configName,
+        activeBattle?._id,
+        activeBattle?.data?._id
+      ].filter(Boolean);
+
+      const out = new Set();
+
+      for (const item of base) {
+        const value = String(item).trim();
+        if (!value) continue;
+        out.add(value);
+        out.add(value.replace(/\s+/g, ""));
+      }
+
+      return [...out];
+    }
+
+    function normalizeBattleName(value) {
+      return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
+    function battleNodeMatchesAliases(node, aliases) {
+      if (!node || typeof node !== "object") return false;
+
+      const normalizedAliases = aliases.map(normalizeBattleName).filter(Boolean);
+
+      const fields = [
+        node.BattleID,
+        node._id,
+        node.Title,
+        node.Name,
+        node.configName
+      ];
+
+      return fields.some(field => normalizedAliases.includes(normalizeBattleName(field)));
+    }
+
+    function findBattleByAliases(obj, aliases) {
+      if (!obj || typeof obj !== "object") return null;
+
+      if (battleNodeMatchesAliases(obj, aliases)) {
+        return obj;
+      }
+
+      const normalizedAliases = aliases.map(normalizeBattleName).filter(Boolean);
+
+      for (const key in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+        const value = obj[key];
+
+        if (value && typeof value === "object") {
+          if (Array.isArray(value.PointContributions) && normalizedAliases.includes(normalizeBattleName(key))) {
+            return value;
+          }
+
+          const found = findBattleByAliases(value, aliases);
+          if (found) return found;
+        }
+      }
+
+      return null;
+    }
+
+    function getSpecificBattleData(clan, activeBattle) {
+      const pointMap = {};
+      let totalPoints = 0;
+
+      const aliases = getBattleAliases(activeBattle);
+      let battleNode = null;
+
+      if (clan && clan.Battles && typeof clan.Battles === "object") {
+        for (const alias of aliases) {
+          if (clan.Battles[alias]) {
+            battleNode = clan.Battles[alias];
+            break;
+          }
+        }
+      }
+
+      if (!battleNode) {
+        battleNode = findBattleByAliases(clan, aliases);
+      }
+
+      if (!battleNode) {
+        return {
+          pointMap,
+          totalPoints,
+          battleId: activeBattle?.configName || "Unknown"
+        };
+      }
+
+      const rows = Array.isArray(battleNode.PointContributions)
+        ? battleNode.PointContributions
+        : [];
+
+      for (const row of rows) {
+        const userId = String(row.UserID || "").trim();
+        const points = Number(row.Points || 0);
+
+        if (userId) {
+          pointMap[userId] = points;
+        }
+      }
+
+      totalPoints = Number(battleNode.Points || 0);
+
+      return {
+        pointMap,
+        totalPoints,
+        battleId:
+          battleNode.BattleID ||
+          battleNode._id ||
+          battleNode.Title ||
+          battleNode.Name ||
+          battleNode.configName ||
+          activeBattle?.configName ||
+          "Unknown"
+      };
+    }
+
+    async function fetchActiveBattle() {
+      const res = await fetch(`${PS99_BASE}/api/activeClanBattle`, { cache: "no-store" });
+
+      if (!res.ok) {
+        throw new Error(`Active clan battle request failed (${res.status}).`);
+      }
+
+      const json = await res.json();
+      if (!json || !json.data) {
+        throw new Error("Active clan battle response was missing data.");
+      }
+
+      return json.data;
+    }
+
+    async function fetchClan(clanName) {
+      const res = await fetch(`${PS99_BASE}/api/clan/${encodeURIComponent(clanName)}`, {
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        throw new Error(`Clan lookup failed for "${clanName}" (${res.status}).`);
+      }
+
+      const json = await res.json();
+      if (!json || !json.data) {
+        throw new Error(`Clan "${clanName}" was not found.`);
+      }
+
+      return json.data;
+    }
+
+    async function findClanRank(clanName) {
+      const target = normalizeKey(clanName);
+
+      for (let page = 1; page <= MAX_RANK_SCAN_PAGES; page++) {
+        const res = await fetch(
+          `${PS99_BASE}/api/clans?page=${page}&pageSize=${CLANS_PAGE_SIZE}&sort=Points&sortOrder=desc`,
+          { cache: "no-store" }
+        );
+
+        if (!res.ok) {
+          throw new Error(`Live clans ranking request failed on page ${page} (${res.status}).`);
+        }
+
+        const json = await res.json();
+        const data = Array.isArray(json?.data) ? json.data : [];
+
+        if (!data.length) break;
+
+        for (let i = 0; i < data.length; i++) {
+          const clan = data[i];
+          if (normalizeKey(clan?.Name) === target) {
+            return {
+              rank: (page - 1) * CLANS_PAGE_SIZE + i + 1,
+              scannedPages: page,
+              scannedRows: (page - 1) * CLANS_PAGE_SIZE + data.length,
+              points: Number(clan?.Points || 0)
+            };
+          }
+        }
+
+        if (data.length < CLANS_PAGE_SIZE) break;
+      }
+
+      return {
+        rank: null,
+        scannedPages: MAX_RANK_SCAN_PAGES,
+        scannedRows: MAX_RANK_SCAN_PAGES * CLANS_PAGE_SIZE,
+        points: null
+      };
+    }
+
+    async function fetchRobloxUsersByIds(userIds) {
+      const uniqueIds = [...new Set(userIds.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0))];
+      if (!uniqueIds.length) return new Map();
+
+      const out = new Map();
+
+      for (let i = 0; i < uniqueIds.length; i += 100) {
+        const batch = uniqueIds.slice(i, i + 100);
+
+        const res = await fetch("https://users.roblox.com/v1/users", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            userIds: batch
+          })
+        });
+
+        if (!res.ok) continue;
+
+        const json = await res.json();
+        const data = Array.isArray(json?.data) ? json.data : [];
+
+        for (const item of data) {
+          const id = Number(item?.id);
+          if (!Number.isFinite(id)) continue;
+
+          out.set(String(id), {
+            username: item?.name || item?.username || "",
+            displayName: item?.displayName || item?.name || ""
+          });
+        }
+      }
+
+      return out;
+    }
+
+    async function fetchAvatarMap(userIds) {
+      const uniqueIds = [...new Set(userIds.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0))];
+      if (!uniqueIds.length) return new Map();
+
+      const out = new Map();
+
+      for (let i = 0; i < uniqueIds.length; i += 100) {
+        const batch = uniqueIds.slice(i, i + 100);
+
+        const url =
+          "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
+          `?userIds=${encodeURIComponent(batch.join(","))}` +
+          "&size=150x150&format=Png&isCircular=false";
+
+        const res = await fetch(url, {
+          headers: {
+            "Accept": "application/json"
+          }
+        });
+
+        if (!res.ok) continue;
+
+        const json = await res.json();
+        const data = Array.isArray(json?.data) ? json.data : [];
+
+        for (const item of data) {
+          const id = Number(item?.targetId);
+          const imageUrl = String(item?.imageUrl || "").trim();
+          const state = String(item?.state || "").trim();
+
+          if (Number.isFinite(id) && imageUrl && state === "Completed") {
+            out.set(String(id), imageUrl);
+          }
+        }
+      }
+
+      return out;
+    }
+
+    function buildMemberRows(clan, battleData, userMap, avatarMap) {
+      const members = Array.isArray(clan?.Members) ? clan.Members.slice() : [];
+      const ownerId = Number(clan?.Owner || 0);
+
+      if (ownerId > 0 && !members.some(m => Number(m?.UserID) === ownerId)) {
+        members.unshift({
+          UserID: ownerId,
+          PermissionLevel: 100,
+          JoinTime: ""
+        });
+      }
+
+      const rows = members.map(member => {
+        const userId = Number(member?.UserID || 0);
+        const userInfo = userMap.get(String(userId)) || {
+          username: String(userId || ""),
+          displayName: String(userId || "")
+        };
+
+        const joinDate = member?.JoinTime
+          ? new Date(Number(member.JoinTime) * 1000)
+          : null;
+
+        return {
+          rank: null,
+          username: userInfo.username || String(userId || ""),
+          displayName: userInfo.displayName || userInfo.username || String(userId || ""),
+          userId: userId || null,
+          avatarUrl: avatarMap.get(String(userId)) || DEFAULT_AVATAR,
+          role: mapClanRole(member?.PermissionLevel, ownerId, userId),
+          points: Number(battleData.pointMap[String(userId)] || 0),
+          joinDate: joinDate && !Number.isNaN(joinDate.getTime()) ? joinDate : null
+        };
+      });
+
+      rows.sort((a, b) => {
+        const diff = Number(b.points || 0) - Number(a.points || 0);
+        if (diff !== 0) return diff;
+
+        return String(a.username || "").localeCompare(String(b.username || ""));
+      });
+
+      rows.forEach((row, index) => {
+        row.rank = index + 1;
+      });
+
+      return rows;
+    }
+
+    function renderCards(clan, activeBattle, battleData, rankData) {
+      document.getElementById("card-clan").textContent = clan?.Name || "—";
+      document.getElementById("card-battle").textContent =
+        activeBattle?.configName || activeBattle?.data?.configName || battleData?.battleId || "—";
+      document.getElementById("card-rank").textContent =
+        rankData?.rank ? `#${rankData.rank.toLocaleString("en-US")}` : `>${rankData?.scannedRows || 0}`;
+      document.getElementById("card-points").textContent = fmtShortNumber(battleData?.totalPoints || 0);
+      document.getElementById("card-members").textContent = String(
+        Array.isArray(clan?.Members) ? clan.Members.length : 0
+      );
+      document.getElementById("card-owner").textContent = clan?.Owner ? String(clan.Owner) : "—";
+      document.getElementById("card-level").textContent = String(clan?.GuildLevel || "—");
+      document.getElementById("card-pulled").textContent = fmtDateTime(new Date());
+    }
+
+    function renderHeader(clan) {
+      const iconId = String(clan?.Icon || "").replace(/^rbxassetid:\/\//i, "").trim();
+      const iconUrl = iconId ? `${PS99_BASE}/image/${encodeURIComponent(iconId)}` : DEFAULT_CLAN_ICON;
+
+      document.getElementById("clan-icon").src = iconUrl || DEFAULT_CLAN_ICON;
+      document.getElementById("clan-title").textContent = clan?.Name || "Unknown clan";
+
+      const parts = [];
+      if (clan?.Desc) parts.push(clan.Desc);
+      if (clan?.CountryCode) parts.push(`Country: ${clan.CountryCode}`);
+      if (clan?.Members) parts.push(`Members: ${clan.Members.length}`);
+
+      document.getElementById("clan-subtitle").textContent = parts.join(" • ") || "No extra clan details available.";
+    }
+
+    function renderRankNote(rankData) {
+      const el = document.getElementById("rank-note");
+
+      if (!rankData) {
+        el.textContent = "";
+        return;
+      }
+
+      if (rankData.rank) {
+        el.textContent = `Rank found after scanning ${rankData.scannedPages} live page(s).`;
+      } else {
+        el.textContent = `Clan rank was not found within the first ${rankData.scannedRows.toLocaleString("en-US")} live rows scanned.`;
+      }
+    }
+
+    function getVisibleRows() {
+      const q = document.getElementById("member-search").value.trim().toLowerCase();
+      let rows = currentMembers.slice();
+
+      if (q) {
+        rows = rows.filter(row =>
+          String(row.username || "").toLowerCase().includes(q) ||
+          String(row.displayName || "").toLowerCase().includes(q) ||
+          String(row.role || "").toLowerCase().includes(q) ||
+          String(row.userId || "").includes(q)
+        );
+      }
+
+      rows.sort((a, b) => {
+        const av = a[currentSortKey];
+        const bv = b[currentSortKey];
+
+        if (currentSortKey === "join") {
+          const at = a.joinDate ? a.joinDate.getTime() : 0;
+          const bt = b.joinDate ? b.joinDate.getTime() : 0;
+          return currentSortAsc ? at - bt : bt - at;
+        }
+
+        const an = Number(av);
+        const bn = Number(bv);
+
+        let result;
+        if (!Number.isNaN(an) && !Number.isNaN(bn)) {
+          result = an - bn;
+        } else {
+          result = String(av || "").localeCompare(String(bv || ""));
+        }
+
+        return currentSortAsc ? result : -result;
+      });
+
+      return rows;
+    }
+
+    function renderMembers() {
+      const tbody = document.getElementById("members-body");
+      const rows = getVisibleRows();
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No members found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(row => `
+        <tr>
+          <td class="rank">#${htmlEscape(row.rank)}</td>
+          <td>
+            <div class="player-cell">
+              <img class="avatar" src="${htmlEscape(row.avatarUrl || DEFAULT_AVATAR)}" alt="" loading="lazy"
+                onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+              <div>
+                <div class="player-name">${htmlEscape(row.username)}</div>
+                <div class="player-sub">${htmlEscape(row.displayName || "")}</div>
+              </div>
+            </div>
+          </td>
+          <td>${htmlEscape(row.role || "—")}</td>
+          <td class="numeric">${fmtShortNumber(row.points)}</td>
+          <td>${row.joinDate ? htmlEscape(fmtDate(row.joinDate)) : "—"}</td>
+          <td class="numeric">${row.userId ? htmlEscape(String(row.userId)) : "—"}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function lookupClan(clanName) {
+      const clean = String(clanName || "").trim();
+      if (!clean) {
+        setStatus("Enter a clan name first.", "error");
+        return;
+      }
+
+      const lookupBtn = document.getElementById("lookup-btn");
+      const refreshBtn = document.getElementById("refresh-btn");
+
+      lookupBtn.disabled = true;
+      refreshBtn.disabled = true;
+      setStatus(`Looking up ${clean}...`, "info");
+
+      try {
+        const [activeBattle, clan, rankData] = await Promise.all([
+          fetchActiveBattle(),
+          fetchClan(clean),
+          findClanRank(clean)
+        ]);
+
+        const battleData = getSpecificBattleData(clan, activeBattle);
+        const userIds = (Array.isArray(clan?.Members) ? clan.Members : [])
+          .map(m => Number(m?.UserID || 0))
+          .filter(v => Number.isFinite(v) && v > 0);
+
+        if (clan?.Owner && !userIds.includes(Number(clan.Owner))) {
+          userIds.push(Number(clan.Owner));
+        }
+
+        const [userMap, avatarMap] = await Promise.all([
+          fetchRobloxUsersByIds(userIds),
+          fetchAvatarMap(userIds)
+        ]);
+
+        currentClanData = clan;
+        currentBattleMeta = activeBattle;
+        currentMembers = buildMemberRows(clan, battleData, userMap, avatarMap);
+
+        renderCards(clan, activeBattle, battleData, rankData);
+        renderHeader(clan);
+        renderRankNote(rankData);
+        renderMembers();
+
+        refreshBtn.disabled = false;
+        setStatus(`Loaded live data for ${clan?.Name || clean}.`, "info");
+      } catch (err) {
+        console.error(err);
+        currentClanData = null;
+        currentBattleMeta = null;
+        currentMembers = [];
+        setCardsEmpty();
+        renderMembers();
+        setStatus(err?.message || String(err), "error");
+      } finally {
+        lookupBtn.disabled = false;
+      }
+    }
+
+    function wireEvents() {
+      document.getElementById("lookup-btn").addEventListener("click", () => {
+        lookupClan(document.getElementById("clan-input").value);
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        if (!currentClanData?.Name) return;
+        lookupClan(currentClanData.Name);
+      });
+
+      document.getElementById("clan-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+          lookupClan(document.getElementById("clan-input").value);
+        }
+      });
+
+      document.getElementById("member-search").addEventListener("input", () => {
+        renderMembers();
+      });
+
+      document.querySelectorAll("th[data-sort]").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.dataset.sort;
+
+          if (currentSortKey === key) {
+            currentSortAsc = !currentSortAsc;
+          } else {
+            currentSortKey = key;
+            currentSortAsc = key === "username";
+          }
+
+          renderMembers();
+        });
+      });
+    }
+
+    function init() {
+      setCardsEmpty();
+      wireEvents();
+
+      const params = new URLSearchParams(window.location.search);
+      const clan = params.get("clan");
+      if (clan) {
+        document.getElementById("clan-input").value = clan;
+        lookupClan(clan);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
