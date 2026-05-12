@@ -413,6 +413,34 @@ async function fetchAllRows(tableName, battleConfig) {
   return normalizedRows;
 }
 
+async function fetchCurrentLeaderboard() {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/leaderboard_snapshots`);
+  url.searchParams.set("select", "fetched_at,rank,username,total_points,user_id");
+  url.searchParams.set("order", "fetched_at.desc");
+  url.searchParams.set("limit", "5000");
+
+  const res = await fetch(url.toString(), {
+    headers: sbHeaders({ Prefer: "return=representation" })
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase fetch failed for leaderboard_snapshots (${res.status}): ${text}`);
+  }
+
+  const rows = await res.json();
+
+  if (!Array.isArray(rows) || !rows.length) {
+    return [];
+  }
+
+  const latestTimestamp = rows[0].fetched_at;
+
+  return rows
+    .filter(row => row.fetched_at === latestTimestamp)
+    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
+}
+
 async function resolveUserIdsByUsername(usernames) {
   const map = new Map();
   const unique = [...new Set(usernames.map(u => String(u || "").trim()).filter(Boolean))];
