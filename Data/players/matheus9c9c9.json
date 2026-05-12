@@ -1,0 +1,125 @@
+{
+  "profile_key": "1109081511",
+  "aliases": [
+    "1109081511",
+    "matheus9c9c9"
+  ],
+  "username": "matheus9c9c9",
+  "user_id": 1109081511,
+  "avatar_url": "assets/avatars/1109081511.png",
+  "profile_url": "https://www.roblox.com/users/1109081511/profile",
+  "total_battles": 1,
+  "latest_rank": 56,
+  "latest_points": 15000000,
+  "latest_seen": "2026-05-12T01:46:21.147Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-12T01:46:21.147Z",
+      "first_seen": "2026-05-12T00:26:21.304Z",
+      "first_active_date": "2026-05-12T00:26:21.304Z",
+      "last_seen": "2026-05-12T01:46:21.147Z",
+      "starting_rank": 60,
+      "last_rank": 56,
+      "end_rank": 56,
+      "best_rank": 56,
+      "worst_rank": 60,
+      "starting_points": 10000000,
+      "ending_points": 15000000,
+      "max_points": 15000000,
+      "gained_points": 5000000,
+      "snapshot_count": 17,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-12T00:26:21.304Z",
+          "rank": 60,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-12T00:31:21.283Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T00:36:22.298Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T00:41:25.173Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T00:46:18.765Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T00:51:23.682Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T00:56:20.682Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:01:23.253Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:06:22.838Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:11:21.433Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:16:27.097Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:21:18.443Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:26:17.301Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:31:17.287Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:36:20.760Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:41:19.665Z",
+          "rank": 56,
+          "points": 15000000
+        },
+        {
+          "t": "2026-05-12T01:46:21.147Z",
+          "rank": 56,
+          "points": 15000000
+        }
+      ]
+    }
+  ]
+}

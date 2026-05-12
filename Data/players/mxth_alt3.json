@@ -1,0 +1,90 @@
+{
+  "profile_key": "7030171512",
+  "aliases": [
+    "7030171512",
+    "mxth_alt3"
+  ],
+  "username": "mxth_alt3",
+  "user_id": 7030171512,
+  "avatar_url": "assets/avatars/7030171512.png",
+  "profile_url": "https://www.roblox.com/users/7030171512/profile",
+  "total_battles": 1,
+  "latest_rank": 61,
+  "latest_points": 10000000,
+  "latest_seen": "2026-05-12T01:46:21.147Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-12T01:46:21.147Z",
+      "first_seen": "2026-05-12T01:01:23.253Z",
+      "first_active_date": "2026-05-12T01:01:23.253Z",
+      "last_seen": "2026-05-12T01:46:21.147Z",
+      "starting_rank": 73,
+      "last_rank": 61,
+      "end_rank": 61,
+      "best_rank": 61,
+      "worst_rank": 73,
+      "starting_points": 1000000,
+      "ending_points": 10000000,
+      "max_points": 10000000,
+      "gained_points": 9000000,
+      "snapshot_count": 10,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-12T01:01:23.253Z",
+          "rank": 73,
+          "points": 1000000
+        },
+        {
+          "t": "2026-05-12T01:06:22.838Z",
+          "rank": 68,
+          "points": 3000000
+        },
+        {
+          "t": "2026-05-12T01:11:21.433Z",
+          "rank": 67,
+          "points": 6000000
+        },
+        {
+          "t": "2026-05-12T01:16:27.097Z",
+          "rank": 67,
+          "points": 6000000
+        },
+        {
+          "t": "2026-05-12T01:21:18.443Z",
+          "rank": 67,
+          "points": 6000000
+        },
+        {
+          "t": "2026-05-12T01:26:17.301Z",
+          "rank": 67,
+          "points": 6000000
+        },
+        {
+          "t": "2026-05-12T01:31:17.287Z",
+          "rank": 61,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-12T01:36:20.760Z",
+          "rank": 61,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-12T01:41:19.665Z",
+          "rank": 61,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-12T01:46:21.147Z",
+          "rank": 61,
+          "points": 10000000
+        }
+      ]
+    }
+  ]
+}

@@ -22,11 +22,11 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 | 6 | joshuacd2006 | 750M | 0 |
 | 7 | mavilure | 750M | 0 |
 | 8 | wqmike | 750M | 0 |
-| 9 | ManapuaMan8O8 | 750M | 150M |
+| 9 | ManapuaMan8O8 | 750M | 0 |
 | 10 | mecduqgtryhard | 750M | 0 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-11 23:01:22 UTC
+2026-05-12 01:46:21 UTC
 <!-- END_UPDATED -->
