@@ -5,17 +5,17 @@
     "source_table": "AngelBattle2026Clans",
     "update_number": 78,
     "last_snapshot": null,
-    "generated_at": "2026-05-12T12:53:13.549Z",
-    "snapshot_at": "2026-05-12T12:50:54.462Z",
+    "generated_at": "2026-05-12T12:58:08.605Z",
+    "snapshot_at": "2026-05-12T12:55:58.432Z",
     "rows": [
       {
         "rank": 1,
         "clan_name": "UN0",
         "points": 57606345685,
         "gain_5m": 0,
-        "gain_1h": 90000000,
-        "gain_12h": 3042906548,
-        "gain_24h": null,
+        "gain_1h": 89999520,
+        "gain_12h": 3042894548,
+        "gain_24h": 4511851453,
         "projected_rank": null,
         "icon_id": "14976561960",
         "icon_url": "https://ps99.biggamesapi.io/image/14976561960"
@@ -24,10 +24,10 @@
         "rank": 2,
         "clan_name": "SOPU",
         "points": 49365313971,
-        "gain_5m": -150000000,
-        "gain_1h": 0,
-        "gain_12h": 4571642500,
-        "gain_24h": null,
+        "gain_5m": 0,
+        "gain_1h": 147000000,
+        "gain_12h": 4571650000,
+        "gain_24h": 8888496077,
         "projected_rank": null,
         "icon_id": "92415264775072",
         "icon_url": "https://ps99.biggamesapi.io/image/92415264775072"
@@ -35,11 +35,11 @@
       {
         "rank": 3,
         "clan_name": "C0LD",
-        "points": 47920000000,
-        "gain_5m": -90000000,
-        "gain_1h": 0,
-        "gain_12h": 1540000000,
-        "gain_24h": null,
+        "points": 48010000000,
+        "gain_5m": 90000000,
+        "gain_1h": 90000000,
+        "gain_12h": 1630000000,
+        "gain_24h": 7732000000,
         "projected_rank": null,
         "icon_id": "126265328107529",
         "icon_url": "https://ps99.biggamesapi.io/image/126265328107529"
@@ -47,11 +47,11 @@
       {
         "rank": 4,
         "clan_name": "RFIL",
-        "points": 47887971949,
-        "gain_5m": -8999500,
-        "gain_1h": -135003698,
-        "gain_12h": 4527755998,
-        "gain_24h": null,
+        "points": 47962971949,
+        "gain_5m": 75000000,
+        "gain_1h": -75003666,
+        "gain_12h": 4602755998,
+        "gain_24h": 9819508357,
         "projected_rank": null,
         "icon_id": "17726113306",
         "icon_url": "https://ps99.biggamesapi.io/image/17726113306"
@@ -63,7 +63,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 450000000,
-        "gain_24h": null,
+        "gain_24h": 7310250000,
         "projected_rank": null,
         "icon_id": "17699945644",
         "icon_url": "https://ps99.biggamesapi.io/image/17699945644"
@@ -72,10 +72,10 @@
         "rank": 6,
         "clan_name": "K0i2",
         "points": 43815547690,
-        "gain_5m": 349000,
+        "gain_5m": 0,
         "gain_1h": 15350000,
-        "gain_12h": 965350000,
-        "gain_24h": null,
+        "gain_12h": 815349968,
+        "gain_24h": 8337350000,
         "projected_rank": null,
         "icon_id": "71484515080466",
         "icon_url": "https://ps99.biggamesapi.io/image/71484515080466"
@@ -86,8 +86,8 @@
         "points": 41749099378,
         "gain_5m": 0,
         "gain_1h": 150000000,
-        "gain_12h": 2999152144,
-        "gain_24h": null,
+        "gain_12h": 2869902144,
+        "gain_24h": 6244902144,
         "projected_rank": null,
         "icon_id": "780357292",
         "icon_url": "https://ps99.biggamesapi.io/image/780357292"
@@ -95,11 +95,11 @@
       {
         "rank": 8,
         "clan_name": "H8M3",
-        "points": 40113450644,
-        "gain_5m": 0,
-        "gain_1h": 45097140,
-        "gain_12h": 1722054778,
-        "gain_24h": null,
+        "points": 40113450676,
+        "gain_5m": 32,
+        "gain_1h": 45097172,
+        "gain_12h": 1593974106,
+        "gain_24h": 8294053514,
         "projected_rank": null,
         "icon_id": "73085003413860",
         "icon_url": "https://ps99.biggamesapi.io/image/73085003413860"
@@ -107,11 +107,11 @@
       {
         "rank": 9,
         "clan_name": "VPT0",
-        "points": 37945105582,
-        "gain_5m": 7334,
-        "gain_1h": -149988000,
-        "gain_12h": -7988000,
-        "gain_24h": null,
+        "points": 37951093582,
+        "gain_5m": 5988000,
+        "gain_1h": -144000000,
+        "gain_12h": -2000000,
+        "gain_24h": 7026963668,
         "projected_rank": null,
         "icon_id": "120697515308209",
         "icon_url": "https://ps99.biggamesapi.io/image/120697515308209"
@@ -121,9 +121,9 @@
         "clan_name": "GANG",
         "points": 37306000000,
         "gain_5m": 0,
-        "gain_1h": 600000000,
+        "gain_1h": 599930010,
         "gain_12h": 2298250000,
-        "gain_24h": null,
+        "gain_24h": 7630419977,
         "projected_rank": null,
         "icon_id": "109972738096345",
         "icon_url": "https://ps99.biggamesapi.io/image/109972738096345"
@@ -135,7 +135,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2474918010,
-        "gain_24h": null,
+        "gain_24h": 5865000000,
         "projected_rank": null,
         "icon_id": "17754999667",
         "icon_url": "https://ps99.biggamesapi.io/image/17754999667"
@@ -144,10 +144,10 @@
         "rank": 12,
         "clan_name": "3zEZ",
         "points": 36090000000,
-        "gain_5m": -10000000,
-        "gain_1h": -10000000,
+        "gain_5m": 0,
+        "gain_1h": -1000,
         "gain_12h": 2674000001,
-        "gain_24h": null,
+        "gain_24h": 3382000001,
         "projected_rank": null,
         "icon_id": "113393687287274",
         "icon_url": "https://ps99.biggamesapi.io/image/113393687287274"
@@ -159,7 +159,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1783755781,
-        "gain_24h": null,
+        "gain_24h": 6290186121,
         "projected_rank": null,
         "icon_id": "17451171044",
         "icon_url": "https://ps99.biggamesapi.io/image/17451171044"
@@ -171,7 +171,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 852000000,
-        "gain_24h": null,
+        "gain_24h": 6737000000,
         "projected_rank": null,
         "icon_id": "72089661585233",
         "icon_url": "https://ps99.biggamesapi.io/image/72089661585233"
@@ -183,7 +183,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2490000000,
-        "gain_24h": null,
+        "gain_24h": 5310000000,
         "projected_rank": null,
         "icon_id": "14968181287",
         "icon_url": "https://ps99.biggamesapi.io/image/14968181287"
@@ -195,7 +195,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2247000419,
-        "gain_24h": null,
+        "gain_24h": 4059907007,
         "projected_rank": null,
         "icon_id": "88078779103855",
         "icon_url": "https://ps99.biggamesapi.io/image/88078779103855"
@@ -205,9 +205,9 @@
         "clan_name": "KOHV",
         "points": 30809805188,
         "gain_5m": 0,
-        "gain_1h": 213985000,
+        "gain_1h": 179985000,
         "gain_12h": 3059916876,
-        "gain_24h": null,
+        "gain_24h": 7294405221,
         "projected_rank": null,
         "icon_id": "72994420964310",
         "icon_url": "https://ps99.biggamesapi.io/image/72994420964310"
@@ -219,7 +219,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 837809633,
-        "gain_24h": null,
+        "gain_24h": 5215101267,
         "projected_rank": null,
         "icon_id": "18628542197",
         "icon_url": "https://ps99.biggamesapi.io/image/18628542197"
@@ -231,7 +231,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 980000000,
-        "gain_24h": null,
+        "gain_24h": 4585050000,
         "projected_rank": null,
         "icon_id": "13959016084",
         "icon_url": "https://ps99.biggamesapi.io/image/13959016084"
@@ -243,7 +243,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1170000000,
-        "gain_24h": null,
+        "gain_24h": 3690000000,
         "projected_rank": null,
         "icon_id": "120878685131776",
         "icon_url": "https://ps99.biggamesapi.io/image/120878685131776"
@@ -254,8 +254,8 @@
         "points": 28566144774,
         "gain_5m": 0,
         "gain_1h": -50000000,
-        "gain_12h": 711724734,
-        "gain_24h": null,
+        "gain_12h": 561724734,
+        "gain_24h": 4246724734,
         "projected_rank": null,
         "icon_id": "83554197992155",
         "icon_url": "https://ps99.biggamesapi.io/image/83554197992155"
@@ -267,7 +267,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1464249223,
-        "gain_24h": null,
+        "gain_24h": 5460833803,
         "projected_rank": null,
         "icon_id": "101365627356896",
         "icon_url": "https://ps99.biggamesapi.io/image/101365627356896"
@@ -279,7 +279,7 @@
         "gain_5m": 0,
         "gain_1h": 9000000,
         "gain_12h": 349250000,
-        "gain_24h": null,
+        "gain_24h": 5014250000,
         "projected_rank": null,
         "icon_id": "98055466967420",
         "icon_url": "https://ps99.biggamesapi.io/image/98055466967420"
@@ -287,11 +287,11 @@
       {
         "rank": 24,
         "clan_name": "RY0",
-        "points": 27215250000,
-        "gain_5m": 15250000,
-        "gain_1h": -9750000,
-        "gain_12h": 1455250000,
-        "gain_24h": null,
+        "points": 27216000000,
+        "gain_5m": 750000,
+        "gain_1h": -6000000,
+        "gain_12h": 1456000000,
+        "gain_24h": 6392000000,
         "projected_rank": null,
         "icon_id": "87111620300699",
         "icon_url": "https://ps99.biggamesapi.io/image/87111620300699"
@@ -299,11 +299,11 @@
       {
         "rank": 25,
         "clan_name": "S7PY",
-        "points": 27196000000,
-        "gain_5m": 10000000,
-        "gain_1h": 28000000,
-        "gain_12h": 238000000,
-        "gain_24h": null,
+        "points": 27178000000,
+        "gain_5m": -18000000,
+        "gain_1h": 10000000,
+        "gain_12h": 220000000,
+        "gain_24h": 5253000000,
         "projected_rank": null,
         "icon_id": "102383475126602",
         "icon_url": "https://ps99.biggamesapi.io/image/102383475126602"
@@ -315,7 +315,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1270918112,
-        "gain_24h": null,
+        "gain_24h": 2342834968,
         "projected_rank": null,
         "icon_id": "70471430511357",
         "icon_url": "https://ps99.biggamesapi.io/image/70471430511357"
@@ -327,7 +327,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1610000000,
-        "gain_24h": null,
+        "gain_24h": 4777000000,
         "projected_rank": null,
         "icon_id": "14976477787",
         "icon_url": "https://ps99.biggamesapi.io/image/14976477787"
@@ -339,7 +339,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 848000000,
-        "gain_24h": null,
+        "gain_24h": 4597998500,
         "projected_rank": null,
         "icon_id": "78740922586430",
         "icon_url": "https://ps99.biggamesapi.io/image/78740922586430"
@@ -350,8 +350,8 @@
         "points": 24451835426,
         "gain_5m": 0,
         "gain_1h": 0,
-        "gain_12h": 250000000,
-        "gain_24h": null,
+        "gain_12h": 190000000,
+        "gain_24h": 3205000000,
         "projected_rank": null,
         "icon_id": "17816225280",
         "icon_url": "https://ps99.biggamesapi.io/image/17816225280"
@@ -363,7 +363,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 931973588,
-        "gain_24h": null,
+        "gain_24h": 4315323588,
         "projected_rank": null,
         "icon_id": "14968209544",
         "icon_url": "https://ps99.biggamesapi.io/image/14968209544"
@@ -375,7 +375,7 @@
         "gain_5m": 0,
         "gain_1h": 8000000,
         "gain_12h": 222000000,
-        "gain_24h": null,
+        "gain_24h": 1727000000,
         "projected_rank": null,
         "icon_id": "81168438607249",
         "icon_url": "https://ps99.biggamesapi.io/image/81168438607249"
@@ -387,7 +387,7 @@
         "gain_5m": 0,
         "gain_1h": 60000000,
         "gain_12h": 1060000000,
-        "gain_24h": null,
+        "gain_24h": 4570949223,
         "projected_rank": null,
         "icon_id": "84966719571717",
         "icon_url": "https://ps99.biggamesapi.io/image/84966719571717"
@@ -399,7 +399,7 @@
         "gain_5m": 0,
         "gain_1h": 15949000,
         "gain_12h": 200949000,
-        "gain_24h": null,
+        "gain_24h": 5109848223,
         "projected_rank": null,
         "icon_id": "14968190224",
         "icon_url": "https://ps99.biggamesapi.io/image/14968190224"
@@ -407,11 +407,11 @@
       {
         "rank": 34,
         "clan_name": "_MGW",
-        "points": 23514000000,
-        "gain_5m": 0,
-        "gain_1h": 110000000,
-        "gain_12h": 1593000000,
-        "gain_24h": null,
+        "points": 23574000000,
+        "gain_5m": 60000000,
+        "gain_1h": 170000000,
+        "gain_12h": 1653000000,
+        "gain_24h": 4378000000,
         "projected_rank": null,
         "icon_id": "110437643729151",
         "icon_url": "https://ps99.biggamesapi.io/image/110437643729151"
@@ -423,7 +423,7 @@
         "gain_5m": 0,
         "gain_1h": 60000000,
         "gain_12h": 545000000,
-        "gain_24h": null,
+        "gain_24h": 4027250000,
         "projected_rank": null,
         "icon_id": "130477208017125",
         "icon_url": "https://ps99.biggamesapi.io/image/130477208017125"
@@ -431,11 +431,11 @@
       {
         "rank": 36,
         "clan_name": "BEZE",
-        "points": 22624000000,
-        "gain_5m": 80999500,
-        "gain_1h": 81000000,
-        "gain_12h": 1325350000,
-        "gain_24h": null,
+        "points": 22768000000,
+        "gain_5m": 144000000,
+        "gain_1h": 225000000,
+        "gain_12h": 1469350000,
+        "gain_24h": 5229000000,
         "projected_rank": null,
         "icon_id": "136513196401436",
         "icon_url": "https://ps99.biggamesapi.io/image/136513196401436"
@@ -447,7 +447,7 @@
         "gain_5m": 0,
         "gain_1h": 985000000,
         "gain_12h": 1330750000,
-        "gain_24h": null,
+        "gain_24h": 4560000000,
         "projected_rank": null,
         "icon_id": "15804006339",
         "icon_url": "https://ps99.biggamesapi.io/image/15804006339"
@@ -457,9 +457,9 @@
         "clan_name": "HSTL",
         "points": 22350445069,
         "gain_5m": 0,
-        "gain_1h": 60000000,
-        "gain_12h": 1675250000,
-        "gain_24h": null,
+        "gain_1h": 0,
+        "gain_12h": 1672250000,
+        "gain_24h": 3007300000,
         "projected_rank": null,
         "icon_id": "15260478604",
         "icon_url": "https://ps99.biggamesapi.io/image/15260478604"
@@ -471,7 +471,7 @@
         "gain_5m": 0,
         "gain_1h": 20000000,
         "gain_12h": 1041000000,
-        "gain_24h": null,
+        "gain_24h": 3406000000,
         "projected_rank": null,
         "icon_id": "125156159989126",
         "icon_url": "https://ps99.biggamesapi.io/image/125156159989126"
@@ -483,7 +483,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1692000000,
-        "gain_24h": null,
+        "gain_24h": 5794250000,
         "projected_rank": null,
         "icon_id": "82853003655188",
         "icon_url": "https://ps99.biggamesapi.io/image/82853003655188"
@@ -495,7 +495,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1632000000,
-        "gain_24h": null,
+        "gain_24h": 4913000000,
         "projected_rank": null,
         "icon_id": "91783466043611",
         "icon_url": "https://ps99.biggamesapi.io/image/91783466043611"
@@ -507,7 +507,7 @@
         "gain_5m": 0,
         "gain_1h": 60000000,
         "gain_12h": 1119350000,
-        "gain_24h": null,
+        "gain_24h": 3119511301,
         "projected_rank": null,
         "icon_id": "87374767968193",
         "icon_url": "https://ps99.biggamesapi.io/image/87374767968193"
@@ -519,7 +519,7 @@
         "gain_5m": 0,
         "gain_1h": 40000000,
         "gain_12h": 1563000000,
-        "gain_24h": null,
+        "gain_24h": 5242949638,
         "projected_rank": null,
         "icon_id": "15787252747",
         "icon_url": "https://ps99.biggamesapi.io/image/15787252747"
@@ -531,7 +531,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 160000000,
-        "gain_24h": null,
+        "gain_24h": 2789000000,
         "projected_rank": null,
         "icon_id": "91957308999063",
         "icon_url": "https://ps99.biggamesapi.io/image/91957308999063"
@@ -539,11 +539,11 @@
       {
         "rank": 45,
         "clan_name": "JJ07",
-        "points": 20944311655,
-        "gain_5m": 0,
-        "gain_1h": 450000000,
-        "gain_12h": 582000000,
-        "gain_24h": null,
+        "points": 21544311655,
+        "gain_5m": 600000000,
+        "gain_1h": 600000000,
+        "gain_12h": 1182000000,
+        "gain_24h": 3648854345,
         "projected_rank": null,
         "icon_id": "17898773263",
         "icon_url": "https://ps99.biggamesapi.io/image/17898773263"
@@ -555,7 +555,7 @@
         "gain_5m": 0,
         "gain_1h": 5000000,
         "gain_12h": 2705000000,
-        "gain_24h": null,
+        "gain_24h": 5036750000,
         "projected_rank": null,
         "icon_id": "14976478543",
         "icon_url": "https://ps99.biggamesapi.io/image/14976478543"
@@ -567,7 +567,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 40000000,
-        "gain_24h": null,
+        "gain_24h": 5777250000,
         "projected_rank": null,
         "icon_id": "113664151927440",
         "icon_url": "https://ps99.biggamesapi.io/image/113664151927440"
@@ -579,7 +579,7 @@
         "gain_5m": 0,
         "gain_1h": 500000000,
         "gain_12h": 1212000000,
-        "gain_24h": null,
+        "gain_24h": 3432000000,
         "projected_rank": null,
         "icon_id": "125153000445486",
         "icon_url": "https://ps99.biggamesapi.io/image/125153000445486"
@@ -591,7 +591,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1368000000,
-        "gain_24h": null,
+        "gain_24h": 3419899223,
         "projected_rank": null,
         "icon_id": "119939471362645",
         "icon_url": "https://ps99.biggamesapi.io/image/119939471362645"
@@ -603,7 +603,7 @@
         "gain_5m": 0,
         "gain_1h": 1140000000,
         "gain_12h": 2246000000,
-        "gain_24h": null,
+        "gain_24h": 7028000000,
         "projected_rank": null,
         "icon_id": "91703535167558",
         "icon_url": "https://ps99.biggamesapi.io/image/91703535167558"
@@ -615,7 +615,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1720000000,
-        "gain_24h": null,
+        "gain_24h": 2947000000,
         "projected_rank": null,
         "icon_id": "90493409933283",
         "icon_url": "https://ps99.biggamesapi.io/image/90493409933283"
@@ -627,7 +627,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2215350000,
-        "gain_24h": null,
+        "gain_24h": 2893249223,
         "projected_rank": null,
         "icon_id": "75006508593763",
         "icon_url": "https://ps99.biggamesapi.io/image/75006508593763"
@@ -639,7 +639,7 @@
         "gain_5m": 0,
         "gain_1h": 600000000,
         "gain_12h": 2175000000,
-        "gain_24h": null,
+        "gain_24h": 4450206050,
         "projected_rank": null,
         "icon_id": "130449558073904",
         "icon_url": "https://ps99.biggamesapi.io/image/130449558073904"
@@ -651,7 +651,7 @@
         "gain_5m": 0,
         "gain_1h": 30000000,
         "gain_12h": 1628000000,
-        "gain_24h": null,
+        "gain_24h": 4323319334,
         "projected_rank": null,
         "icon_id": "89553420509245",
         "icon_url": "https://ps99.biggamesapi.io/image/89553420509245"
@@ -659,11 +659,11 @@
       {
         "rank": 55,
         "clan_name": "Aifo",
-        "points": 18674035740,
-        "gain_5m": 0,
-        "gain_1h": 0,
-        "gain_12h": 3380000000,
-        "gain_24h": null,
+        "points": 18714035740,
+        "gain_5m": 40000000,
+        "gain_1h": 40000000,
+        "gain_12h": 3420000000,
+        "gain_24h": 5383200000,
         "projected_rank": null,
         "icon_id": "139739047750274",
         "icon_url": "https://ps99.biggamesapi.io/image/139739047750274"
@@ -675,7 +675,7 @@
         "gain_5m": 0,
         "gain_1h": -10000000,
         "gain_12h": 1250000000,
-        "gain_24h": null,
+        "gain_24h": 3876838345,
         "projected_rank": null,
         "icon_id": "14976517430",
         "icon_url": "https://ps99.biggamesapi.io/image/14976517430"
@@ -687,7 +687,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 588350000,
-        "gain_24h": null,
+        "gain_24h": 1932300000,
         "projected_rank": null,
         "icon_id": "71770415779713",
         "icon_url": "https://ps99.biggamesapi.io/image/71770415779713"
@@ -699,7 +699,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2057050000,
-        "gain_24h": null,
+        "gain_24h": 4702701070,
         "projected_rank": null,
         "icon_id": "119020521576033",
         "icon_url": "https://ps99.biggamesapi.io/image/119020521576033"
@@ -711,7 +711,7 @@
         "gain_5m": 0,
         "gain_1h": 900000000,
         "gain_12h": 1539050000,
-        "gain_24h": null,
+        "gain_24h": 3955400000,
         "projected_rank": null,
         "icon_id": "14976669980",
         "icon_url": "https://ps99.biggamesapi.io/image/14976669980"
@@ -723,7 +723,7 @@
         "gain_5m": 0,
         "gain_1h": 40000000,
         "gain_12h": 709069990,
-        "gain_24h": null,
+        "gain_24h": 2405319990,
         "projected_rank": null,
         "icon_id": "108242566130350",
         "icon_url": "https://ps99.biggamesapi.io/image/108242566130350"
@@ -734,8 +734,8 @@
         "points": 16357901277,
         "gain_5m": 0,
         "gain_1h": 110000000,
-        "gain_12h": 2465000000,
-        "gain_24h": null,
+        "gain_12h": 1865000000,
+        "gain_24h": 4432350000,
         "projected_rank": null,
         "icon_id": "139947362298229",
         "icon_url": "https://ps99.biggamesapi.io/image/139947362298229"
@@ -747,7 +747,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 472903277,
-        "gain_24h": null,
+        "gain_24h": 3613003277,
         "projected_rank": null,
         "icon_id": "17899512034",
         "icon_url": "https://ps99.biggamesapi.io/image/17899512034"
@@ -755,11 +755,11 @@
       {
         "rank": 63,
         "clan_name": "OzTM",
-        "points": 16210046942,
-        "gain_5m": 0,
-        "gain_1h": -18000000,
-        "gain_12h": 872000000,
-        "gain_24h": null,
+        "points": 16219797474,
+        "gain_5m": 9750532,
+        "gain_1h": 9750532,
+        "gain_12h": 881750532,
+        "gain_24h": 4921750532,
         "projected_rank": null,
         "icon_id": "15551651096",
         "icon_url": "https://ps99.biggamesapi.io/image/15551651096"
@@ -768,10 +768,10 @@
         "rank": 64,
         "clan_name": "NONG",
         "points": 15978511655,
-        "gain_5m": 1511655,
+        "gain_5m": 0,
         "gain_1h": 41511655,
-        "gain_12h": 994300000,
-        "gain_24h": null,
+        "gain_12h": 996400000,
+        "gain_24h": 2872850000,
         "projected_rank": null,
         "icon_id": "14976510684",
         "icon_url": "https://ps99.biggamesapi.io/image/14976510684"
@@ -783,7 +783,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 815988000,
-        "gain_24h": null,
+        "gain_24h": 3017438000,
         "projected_rank": null,
         "icon_id": "105530359434784",
         "icon_url": "https://ps99.biggamesapi.io/image/105530359434784"
@@ -795,7 +795,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1614000000,
-        "gain_24h": null,
+        "gain_24h": 2408650000,
         "projected_rank": null,
         "icon_id": "17763034593",
         "icon_url": "https://ps99.biggamesapi.io/image/17763034593"
@@ -804,10 +804,10 @@
         "rank": 67,
         "clan_name": "LdER",
         "points": 15359461655,
-        "gain_5m": 80010,
-        "gain_1h": 32080010,
+        "gain_5m": 0,
+        "gain_1h": 80010,
         "gain_12h": 757430010,
-        "gain_24h": null,
+        "gain_24h": 3146644989,
         "projected_rank": null,
         "icon_id": "118496950981403",
         "icon_url": "https://ps99.biggamesapi.io/image/118496950981403"
@@ -819,7 +819,7 @@
         "gain_5m": 0,
         "gain_1h": 200000000,
         "gain_12h": 222488345,
-        "gain_24h": null,
+        "gain_24h": 2583829233,
         "projected_rank": null,
         "icon_id": "112734538958840",
         "icon_url": "https://ps99.biggamesapi.io/image/112734538958840"
@@ -831,7 +831,7 @@
         "gain_5m": 0,
         "gain_1h": 79223,
         "gain_12h": 75165000,
-        "gain_24h": null,
+        "gain_24h": 3913415000,
         "projected_rank": null,
         "icon_id": "119535829024668",
         "icon_url": "https://ps99.biggamesapi.io/image/119535829024668"
@@ -843,7 +843,7 @@
         "gain_5m": 0,
         "gain_1h": 4666,
         "gain_12h": 160004666,
-        "gain_24h": null,
+        "gain_24h": 1125563011,
         "projected_rank": null,
         "icon_id": "117201295475525",
         "icon_url": "https://ps99.biggamesapi.io/image/117201295475525"
@@ -855,7 +855,7 @@
         "gain_5m": 0,
         "gain_1h": 9350000,
         "gain_12h": 609050000,
-        "gain_24h": null,
+        "gain_24h": 2379149968,
         "projected_rank": null,
         "icon_id": "84149496576529",
         "icon_url": "https://ps99.biggamesapi.io/image/84149496576529"
@@ -867,7 +867,7 @@
         "gain_5m": 0,
         "gain_1h": 850000000,
         "gain_12h": 1473350000,
-        "gain_24h": null,
+        "gain_24h": 2855226690,
         "projected_rank": null,
         "icon_id": "117175979105511",
         "icon_url": "https://ps99.biggamesapi.io/image/117175979105511"
@@ -879,7 +879,7 @@
         "gain_5m": 0,
         "gain_1h": 4000000,
         "gain_12h": 698000000,
-        "gain_24h": null,
+        "gain_24h": 1951250000,
         "projected_rank": null,
         "icon_id": "72934276815665",
         "icon_url": "https://ps99.biggamesapi.io/image/72934276815665"
@@ -891,7 +891,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 96282976,
-        "gain_24h": null,
+        "gain_24h": 3776432976,
         "projected_rank": null,
         "icon_id": "124810799884570",
         "icon_url": "https://ps99.biggamesapi.io/image/124810799884570"
@@ -902,8 +902,8 @@
         "points": 14091050032,
         "gain_5m": 0,
         "gain_1h": 0,
-        "gain_12h": 700000000,
-        "gain_24h": null,
+        "gain_12h": 250000000,
+        "gain_24h": 2161782669,
         "projected_rank": null,
         "icon_id": "100754715998524",
         "icon_url": "https://ps99.biggamesapi.io/image/100754715998524"
@@ -915,7 +915,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 2030000000,
-        "gain_24h": null,
+        "gain_24h": 4535000000,
         "projected_rank": null,
         "icon_id": "14976439240",
         "icon_url": "https://ps99.biggamesapi.io/image/14976439240"
@@ -939,7 +939,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 914000000,
-        "gain_24h": null,
+        "gain_24h": 3854950000,
         "projected_rank": null,
         "icon_id": "17702494274",
         "icon_url": "https://ps99.biggamesapi.io/image/17702494274"
@@ -951,7 +951,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 1545000000,
-        "gain_24h": null,
+        "gain_24h": 2746973440,
         "projected_rank": null,
         "icon_id": "75781825351199",
         "icon_url": "https://ps99.biggamesapi.io/image/75781825351199"
@@ -959,11 +959,11 @@
       {
         "rank": 80,
         "clan_name": "W2VY",
-        "points": 12762050010,
-        "gain_5m": 14986002,
-        "gain_1h": 75000000,
-        "gain_12h": 1272000010,
-        "gain_24h": null,
+        "points": 12887050010,
+        "gain_5m": 125000000,
+        "gain_1h": 140000000,
+        "gain_12h": 1397000010,
+        "gain_24h": 2526646939,
         "projected_rank": null,
         "icon_id": "17871676539",
         "icon_url": "https://ps99.biggamesapi.io/image/17871676539"
@@ -971,11 +971,11 @@
       {
         "rank": 81,
         "clan_name": "TWDL",
-        "points": 12747751777,
-        "gain_5m": 0,
-        "gain_1h": 25000000,
-        "gain_12h": 1116300000,
-        "gain_24h": null,
+        "points": 12879751777,
+        "gain_5m": 132000000,
+        "gain_1h": 132000000,
+        "gain_12h": 1248300000,
+        "gain_24h": 2121200000,
         "projected_rank": null,
         "icon_id": "132114670591966",
         "icon_url": "https://ps99.biggamesapi.io/image/132114670591966"
@@ -983,11 +983,11 @@
       {
         "rank": 82,
         "clan_name": "BOSK",
-        "points": 12737187297,
-        "gain_5m": 0,
-        "gain_1h": 4050777,
+        "points": 12737388851,
+        "gain_5m": 201554,
+        "gain_1h": 4252331,
         "gain_12h": null,
-        "gain_24h": null,
+        "gain_24h": 4183535665,
         "projected_rank": null,
         "icon_id": "130279567455193",
         "icon_url": "https://ps99.biggamesapi.io/image/130279567455193"
@@ -999,7 +999,7 @@
         "gain_5m": 0,
         "gain_1h": 3000000,
         "gain_12h": 446000000,
-        "gain_24h": null,
+        "gain_24h": 1596011655,
         "projected_rank": null,
         "icon_id": "102248900354771",
         "icon_url": "https://ps99.biggamesapi.io/image/102248900354771"
@@ -1011,7 +1011,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 117949223,
-        "gain_24h": null,
+        "gain_24h": 2235949223,
         "projected_rank": null,
         "icon_id": "107904532988732",
         "icon_url": "https://ps99.biggamesapi.io/image/107904532988732"
@@ -1023,7 +1023,7 @@
         "gain_5m": 0,
         "gain_1h": 80000000,
         "gain_12h": 385988000,
-        "gain_24h": null,
+        "gain_24h": 1857360111,
         "projected_rank": null,
         "icon_id": "15260481050",
         "icon_url": "https://ps99.biggamesapi.io/image/15260481050"
@@ -1033,9 +1033,9 @@
         "clan_name": "Eg64",
         "points": 12259462000,
         "gain_5m": 0,
-        "gain_1h": 600000000,
+        "gain_1h": 0,
         "gain_12h": 638350000,
-        "gain_24h": null,
+        "gain_24h": 2429897000,
         "projected_rank": null,
         "icon_id": "111152588696387",
         "icon_url": "https://ps99.biggamesapi.io/image/111152588696387"
@@ -1045,9 +1045,9 @@
         "clan_name": "ELMC",
         "points": 12137716056,
         "gain_5m": 0,
-        "gain_1h": 9000000,
+        "gain_1h": 0,
         "gain_12h": 1137637101,
-        "gain_24h": null,
+        "gain_24h": 1356944446,
         "projected_rank": null,
         "icon_id": "138487235160650",
         "icon_url": "https://ps99.biggamesapi.io/image/138487235160650"
@@ -1059,7 +1059,7 @@
         "gain_5m": 0,
         "gain_1h": 60000000,
         "gain_12h": 393050000,
-        "gain_24h": null,
+        "gain_24h": 3081938000,
         "projected_rank": null,
         "icon_id": "14976421410",
         "icon_url": "https://ps99.biggamesapi.io/image/14976421410"
@@ -1083,7 +1083,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 895240482,
-        "gain_24h": null,
+        "gain_24h": 2075139705,
         "projected_rank": null,
         "icon_id": "76964445719986",
         "icon_url": "https://ps99.biggamesapi.io/image/76964445719986"
@@ -1095,7 +1095,7 @@
         "gain_5m": 0,
         "gain_1h": 0,
         "gain_12h": 244000000,
-        "gain_24h": null,
+        "gain_24h": 1121950000,
         "projected_rank": null,
         "icon_id": "73421752471114",
         "icon_url": "https://ps99.biggamesapi.io/image/73421752471114"
@@ -1107,7 +1107,7 @@
         "gain_5m": 0,
         "gain_1h": -30000000,
         "gain_12h": 170000000,
-        "gain_24h": null,
+        "gain_24h": 2682000000,
         "projected_rank": null,
         "icon_id": "14976485216",
         "icon_url": "https://ps99.biggamesapi.io/image/14976485216"
@@ -1119,7 +1119,7 @@
         "gain_5m": 0,
         "gain_1h": 40000000,
         "gain_12h": 582488345,
-        "gain_24h": null,
+        "gain_24h": 972438345,
         "projected_rank": null,
         "icon_id": "106057127763243",
         "icon_url": "https://ps99.biggamesapi.io/image/106057127763243"
@@ -1131,7 +1131,7 @@
         "gain_5m": 0,
         "gain_1h": 6000000,
         "gain_12h": 157636002,
-        "gain_24h": null,
+        "gain_24h": 2723895334,
         "projected_rank": null,
         "icon_id": "108245627799075",
         "icon_url": "https://ps99.biggamesapi.io/image/108245627799075"
@@ -1167,7 +1167,7 @@
         "gain_5m": 0,
         "gain_1h": 20000000,
         "gain_12h": 179649223,
-        "gain_24h": null,
+        "gain_24h": 1954249223,
         "projected_rank": null,
         "icon_id": "14976604955",
         "icon_url": "https://ps99.biggamesapi.io/image/14976604955"
@@ -1187,8 +1187,8 @@
       {
         "rank": 99,
         "clan_name": "DK",
-        "points": 10925758777,
-        "gain_5m": 8000,
+        "points": 10925833767,
+        "gain_5m": 74990,
         "gain_1h": null,
         "gain_12h": null,
         "gain_24h": null,
@@ -1203,7 +1203,7 @@
         "gain_5m": 0,
         "gain_1h": 4000000,
         "gain_12h": -115550777,
-        "gain_24h": null,
+        "gain_24h": 1461380417,
         "projected_rank": null,
         "icon_id": "105262780521905",
         "icon_url": "https://ps99.biggamesapi.io/image/105262780521905"
@@ -1216,7 +1216,7 @@
     "source_table": "StarryClans",
     "update_number": 76,
     "last_snapshot": "2026-05-02T12:00:00.524Z",
-    "generated_at": "2026-05-12T12:53:05.002Z",
+    "generated_at": "2026-05-12T12:57:57.930Z",
     "snapshot_at": "2026-05-02T15:11:17.136Z",
     "rows": [
       {
@@ -2427,7 +2427,7 @@
     "source_table": "PoisonTurtleClans",
     "update_number": 58,
     "last_snapshot": "2025-05-09T12:00:00.524Z",
-    "generated_at": "2026-05-12T12:52:46.814Z",
+    "generated_at": "2026-05-12T12:57:33.221Z",
     "snapshot_at": "2026-05-01T17:35:39.877Z",
     "rows": [
       {
