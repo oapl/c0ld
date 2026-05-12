@@ -12,8 +12,15 @@ const AVATAR_DIR = path.join(process.cwd(), "assets", "avatars");
 const AVATAR_PUBLIC_PATH = "assets/avatars";
 
 const PAGE_SIZE = 1000;
-const ROBLOX_USERNAME_BATCH_SIZE = 100;
-const ROBLOX_THUMB_BATCH_SIZE = 100;
+
+// Lower batch sizes = fewer Roblox 429s
+const ROBLOX_USERNAME_BATCH_SIZE = 25;
+const ROBLOX_THUMB_BATCH_SIZE = 50;
+
+// Retry tuning for Roblox APIs
+const ROBLOX_MAX_RETRIES = 6;
+const ROBLOX_BASE_DELAY_MS = 1500;
+const ROBLOX_JITTER_MS = 400;
 
 if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
 if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
@@ -58,6 +65,14 @@ function chunkArray(arr, size) {
   return out;
 }
 
+function jitter(max = ROBLOX_JITTER_MS) {
+  return Math.floor(Math.random() * max);
+}
+
+async function sleep(ms) {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
@@ -98,6 +113,74 @@ function buildPlayerMaps(playerIndex) {
   }
 
   return { byUserId, byProfileKey, byUsername };
+}
+
+function buildRobloxCaches(playerIndex) {
+  const usernameToUserId = new Map();
+  const userIdToAvatar = new Map();
+
+  for (const p of playerIndex || []) {
+    const usernameKey = normalizeName(p.username);
+    const userId = String(p.user_id || "").trim();
+    const avatarUrl = String(p.avatar_url || "").trim();
+
+    if (usernameKey && userId) {
+      usernameToUserId.set(usernameKey, Number(userId));
+    }
+
+    if (userId && avatarUrl) {
+      userIdToAvatar.set(userId, avatarUrl);
+    }
+  }
+
+  return { usernameToUserId, userIdToAvatar };
+}
+
+async function requestJsonWithRetry(url, options, label) {
+  let lastStatus = null;
+  let lastBody = "";
+
+  for (let attempt = 1; attempt <= ROBLOX_MAX_RETRIES; attempt++) {
+    let res;
+
+    try {
+      res = await fetch(url, options);
+    } catch (err) {
+      if (attempt === ROBLOX_MAX_RETRIES) {
+        throw new Error(`${label} network failure after retries: ${err.message}`);
+      }
+
+      const delay = ROBLOX_BASE_DELAY_MS * attempt + jitter();
+      console.warn(`${label} network error on attempt ${attempt}/${ROBLOX_MAX_RETRIES}. Retrying in ${delay}ms...`);
+      await sleep(delay);
+      continue;
+    }
+
+    if (res.ok) {
+      return await res.json();
+    }
+
+    const text = await res.text().catch(() => "");
+    lastStatus = res.status;
+    lastBody = text;
+
+    const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+
+    if (!retryable || attempt === ROBLOX_MAX_RETRIES) {
+      throw new Error(`${label} failed (${res.status}): ${text}`);
+    }
+
+    const retryAfterHeader = Number(res.headers.get("retry-after"));
+    const retryAfterMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+      ? retryAfterHeader * 1000
+      : 0;
+
+    const delay = Math.max(retryAfterMs, ROBLOX_BASE_DELAY_MS * attempt + jitter());
+    console.warn(`${label} hit ${res.status} on attempt ${attempt}/${ROBLOX_MAX_RETRIES}. Retrying in ${delay}ms...`);
+    await sleep(delay);
+  }
+
+  throw new Error(`${label} failed (${lastStatus}): ${lastBody}`);
 }
 
 async function supabaseSelectAll(tableName) {
@@ -276,78 +359,120 @@ function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   return Number(currentRow.total_points || 0) - oldPoints;
 }
 
-async function resolveUserIdsByUsername(usernames) {
+async function resolveUserIdsByUsername(usernames, usernameToUserIdCache) {
   const map = new Map();
-  const uniqueNames = [...new Set((usernames || []).map(v => String(v || "").trim()).filter(Boolean))];
 
-  for (const batch of chunkArray(uniqueNames, ROBLOX_USERNAME_BATCH_SIZE)) {
-    const res = await fetch("https://users.roblox.com/v1/usernames/users", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "User-Agent": "NONG-Leaderboard-Username-Resolver"
-      },
-      body: JSON.stringify({
-        usernames: batch,
-        excludeBannedUsers: false
-      })
-    });
+  const uniqueNames = [...new Set(
+    (usernames || [])
+      .map(v => String(v || "").trim())
+      .filter(Boolean)
+  )];
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Roblox username lookup failed (${res.status}): ${text}`);
+  const namesToLookup = uniqueNames.filter(name => {
+    const key = normalizeName(name);
+    return key && !usernameToUserIdCache.has(key);
+  });
+
+  for (const name of uniqueNames) {
+    const key = normalizeName(name);
+    if (key && usernameToUserIdCache.has(key)) {
+      map.set(key, usernameToUserIdCache.get(key));
     }
+  }
 
-    const json = await res.json();
-    const data = Array.isArray(json?.data) ? json.data : [];
+  for (const batch of chunkArray(namesToLookup, ROBLOX_USERNAME_BATCH_SIZE)) {
+    try {
+      const json = await requestJsonWithRetry(
+        "https://users.roblox.com/v1/usernames/users",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "User-Agent": "NONG-Leaderboard-Username-Resolver"
+          },
+          body: JSON.stringify({
+            usernames: batch,
+            excludeBannedUsers: false
+          })
+        },
+        "Roblox username lookup"
+      );
 
-    for (const item of data) {
-      const requestedName = String(item?.requestedUsername || item?.name || "").trim();
-      const resolvedId = Number(item?.id);
-      if (requestedName && Number.isFinite(resolvedId)) {
-        map.set(normalizeName(requestedName), resolvedId);
+      const data = Array.isArray(json?.data) ? json.data : [];
+
+      for (const item of data) {
+        const requestedName = String(item?.requestedUsername || item?.name || "").trim();
+        const resolvedId = Number(item?.id);
+
+        if (requestedName && Number.isFinite(resolvedId)) {
+          const key = normalizeName(requestedName);
+          usernameToUserIdCache.set(key, resolvedId);
+          map.set(key, resolvedId);
+        }
       }
+    } catch (err) {
+      console.warn(`Skipping Roblox username batch after retries: ${err.message}`);
     }
+
+    await sleep(500 + jitter());
   }
 
   return map;
 }
 
-async function fetchRobloxHeadshots(userIds) {
+async function fetchRobloxHeadshots(userIds, userIdToAvatarCache) {
   const map = new Map();
-  const uniqueIds = [...new Set((userIds || []).map(v => String(v || "").trim()).filter(Boolean))];
 
-  for (const batch of chunkArray(uniqueIds, ROBLOX_THUMB_BATCH_SIZE)) {
+  const uniqueIds = [...new Set(
+    (userIds || [])
+      .map(v => String(v || "").trim())
+      .filter(Boolean)
+  )];
+
+  const idsToLookup = uniqueIds.filter(id => !userIdToAvatarCache.has(id));
+
+  for (const id of uniqueIds) {
+    if (userIdToAvatarCache.has(id)) {
+      map.set(id, userIdToAvatarCache.get(id));
+    }
+  }
+
+  for (const batch of chunkArray(idsToLookup, ROBLOX_THUMB_BATCH_SIZE)) {
     const url =
       "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
       `?userIds=${encodeURIComponent(batch.join(","))}` +
       "&size=150x150&format=Png&isCircular=false";
 
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "NONG-Leaderboard-Avatar-Enrichment"
-      }
-    });
+    try {
+      const json = await requestJsonWithRetry(
+        url,
+        {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "NONG-Leaderboard-Avatar-Enrichment"
+          }
+        },
+        "Roblox thumbnail lookup"
+      );
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Roblox thumbnail lookup failed (${res.status}): ${text}`);
+      const data = Array.isArray(json?.data) ? json.data : [];
+
+      for (const item of data) {
+        const id = String(item?.targetId || "").trim();
+        const imageUrl = String(item?.imageUrl || "").trim();
+        const state = String(item?.state || "").trim();
+
+        if (id && imageUrl && state === "Completed") {
+          userIdToAvatarCache.set(id, imageUrl);
+          map.set(id, imageUrl);
+        }
+      }
+    } catch (err) {
+      console.warn(`Skipping Roblox thumbnail batch after retries: ${err.message}`);
     }
 
-    const json = await res.json();
-    const data = Array.isArray(json?.data) ? json.data : [];
-
-    for (const item of data) {
-      const id = String(item?.targetId || "").trim();
-      const imageUrl = String(item?.imageUrl || "").trim();
-      const state = String(item?.state || "").trim();
-
-      if (id && imageUrl && state === "Completed") {
-        map.set(id, imageUrl);
-      }
-    }
+    await sleep(500 + jitter());
   }
 
   return map;
@@ -392,19 +517,25 @@ async function cacheAvatarRows(rows) {
     const cacheKey = String(row.profile_key || row.user_id || row.username || "").trim();
     if (!cacheKey || !row.avatar_url) continue;
     row.avatar_url = await downloadAvatarToCache(cacheKey, row.avatar_url);
+    await sleep(50);
   }
 }
 
-async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
+async function enrichRowsWithRobloxIdentity(rows, playerMaps, robloxCaches) {
+  const { usernameToUserId, userIdToAvatar } = robloxCaches;
+
   const missingUsernameLookups = rows
     .filter(row => !row.user_id && row.username)
     .map(row => row.username);
 
-  const usernameToUserId = await resolveUserIdsByUsername(missingUsernameLookups);
+  const usernameToUserIdMap = await resolveUserIdsByUsername(
+    missingUsernameLookups,
+    usernameToUserId
+  );
 
   for (const row of rows) {
     if (!row.user_id && row.username) {
-      const resolvedId = usernameToUserId.get(normalizeName(row.username));
+      const resolvedId = usernameToUserIdMap.get(normalizeName(row.username));
       if (Number.isFinite(resolvedId)) {
         row.user_id = resolvedId;
       }
@@ -415,7 +546,7 @@ async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
     .map(row => String(row.user_id || "").trim())
     .filter(Boolean);
 
-  const thumbMap = await fetchRobloxHeadshots(userIdsToThumb);
+  const thumbMap = await fetchRobloxHeadshots(userIdsToThumb, userIdToAvatar);
 
   for (const row of rows) {
     const userId = String(row.user_id || "").trim();
@@ -435,15 +566,21 @@ async function enrichRowsWithRobloxIdentity(rows, playerMaps) {
       match = playerMaps.byUsername.get(usernameKey);
     }
 
-    row.profile_key = String(match?.profile_key || row.profile_key || row.user_id || row.username || "").trim();
-    row.avatar_url = row.avatar_url || match?.avatar_url || (userId ? thumbMap.get(userId) || null : null);
+    row.profile_key = String(
+      match?.profile_key || row.profile_key || row.user_id || row.username || ""
+    ).trim();
+
+    row.avatar_url =
+      row.avatar_url ||
+      match?.avatar_url ||
+      (userId ? thumbMap.get(userId) || userIdToAvatar.get(userId) || null : null);
   }
 
   await cacheAvatarRows(rows);
   return rows;
 }
 
-async function calculateBattleRows(snapshotRows, playerMaps) {
+async function calculateBattleRows(snapshotRows, playerMaps, robloxCaches) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
 
   if (!latestRows.length) {
@@ -460,7 +597,8 @@ async function calculateBattleRows(snapshotRows, playerMaps) {
   );
 
   const hasHistoricalTimestamps = Number.isFinite(latestMs);
-  await enrichRowsWithRobloxIdentity(latestRows, playerMaps);
+
+  await enrichRowsWithRobloxIdentity(latestRows, playerMaps, robloxCaches);
 
   const rows = latestRows.map(row => ({
     rank: numberOrNull(row.rank),
@@ -492,6 +630,7 @@ async function main() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
   const playerIndex = await readJsonArray(PLAYER_INDEX_FILE);
   const playerMaps = buildPlayerMaps(playerIndex);
+  const robloxCaches = buildRobloxCaches(playerIndex);
 
   const declared = manualBattles
     .filter(battle => battle.battle && battle.display_name && battle.nong_results_table)
@@ -520,7 +659,7 @@ async function main() {
       .map(normalizePlayerRow)
       .filter(row => row.username && row.total_points !== null);
 
-    const calculated = await calculateBattleRows(normalizedRows, playerMaps);
+    const calculated = await calculateBattleRows(normalizedRows, playerMaps, robloxCaches);
 
     output.push({
       battle: item.battle,
