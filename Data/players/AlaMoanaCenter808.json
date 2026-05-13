@@ -1,0 +1,45 @@
+{
+  "profile_key": "7766146878",
+  "aliases": [
+    "7766146878",
+    "AlaMoanaCenter808"
+  ],
+  "username": "AlaMoanaCenter808",
+  "user_id": 7766146878,
+  "avatar_url": "assets/avatars/7766146878.png",
+  "profile_url": "https://www.roblox.com/users/7766146878/profile",
+  "total_battles": 1,
+  "latest_rank": 68,
+  "latest_points": 0,
+  "latest_seen": "2026-05-13T00:35:43.038Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-13T00:35:43.038Z",
+      "first_seen": "2026-05-13T00:35:43.038Z",
+      "first_active_date": "2026-05-13T00:35:43.038Z",
+      "last_seen": "2026-05-13T00:35:43.038Z",
+      "starting_rank": 68,
+      "last_rank": 68,
+      "end_rank": 68,
+      "best_rank": 68,
+      "worst_rank": 68,
+      "starting_points": 0,
+      "ending_points": 0,
+      "max_points": 0,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-13T00:35:43.038Z",
+          "rank": 68,
+          "points": 0
+        }
+      ]
+    }
+  ]
+}
