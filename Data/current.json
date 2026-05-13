@@ -901,6 +901,19 @@
       "gain_1h": null,
       "gain_12h": null,
       "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-13T13:20:54.296Z",
+      "rank": 69,
+      "username": "EyeRockett",
+      "total_points": 10000000,
+      "user_id": 3261177309,
+      "profile_key": "3261177309",
+      "avatar_url": "assets/avatars/3261177309.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
     }
   ],
   "clan_rank": 60,
