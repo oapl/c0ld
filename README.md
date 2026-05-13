@@ -14,19 +14,19 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | johnr622 | 1B | 0 |
-| 2 | littledraiken | 1B | 0 |
-| 3 | LeRatRuse666 | 1B | 0 |
-| 4 | NattyLite808 | 1B | 0 |
-| 5 | sebastjan35 | 750M | 0 |
-| 6 | jupiter0477 | 750M | 0 |
-| 7 | joshuacd2006 | 750M | 0 |
-| 8 | mavilure | 750M | 0 |
-| 9 | wqmike | 750M | 0 |
-| 10 | ManapuaMan8O8 | 750M | 0 |
+| 1 | dragonballx1412 | 1B | 400M |
+| 2 | johnr622 | 1B | 0 |
+| 3 | littledraiken | 1B | 0 |
+| 4 | LeRatRuse666 | 1B | 0 |
+| 5 | NattyLite808 | 1B | 0 |
+| 6 | sebastjan35 | 750M | 0 |
+| 7 | jupiter0477 | 750M | 0 |
+| 8 | joshuacd2006 | 750M | 0 |
+| 9 | mavilure | 750M | 0 |
+| 10 | wqmike | 750M | 0 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-13 00:45:39 UTC
+2026-05-13 00:50:39 UTC
 <!-- END_UPDATED -->
