@@ -575,81 +575,142 @@
       `).join("");
     }
 
-    async function loadThresholds() {
-      const top = parseTopCount(document.getElementById("top-input").value);
-      const high = parseFlexibleNumber(document.getElementById("high-input").value);
-      const low = parseFlexibleNumber(document.getElementById("low-input").value);
+function getParsedInputs() {
+  const top = parseTopCount(document.getElementById("top-input").value);
+  const high = parseFlexibleNumber(document.getElementById("high-input").value);
+  const low = parseFlexibleNumber(document.getElementById("low-input").value);
 
-      if (!Number.isFinite(top)) {
-        setStatus("Top Clans Scanned must be a whole number between 1 and 25.", "error");
-        return;
+  if (!Number.isFinite(top)) {
+    throw new Error("Top Clans Scanned must be a whole number between 1 and 25.");
+  }
+
+  if (!Number.isFinite(high)) {
+    throw new Error("High Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+  }
+
+  if (!Number.isFinite(low)) {
+    throw new Error("Low Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+  }
+
+  return { top, high, low };
+}
+
+async function loadThresholds() {
+  let parsed;
+
+  try {
+    parsed = getParsedInputs();
+  } catch (err) {
+    setStatus(err?.message || String(err), "error");
+    return;
+  }
+
+  const { top, high, low } = parsed;
+
+  saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
+  normalizeInputDisplays();
+  setStatus("Loading top clan threshold counts...", "info");
+
+  try {
+    const url =
+      `${WORKER_URL}?mode=top-thresholds` +
+      `&top=${encodeURIComponent(top)}` +
+      `&high=${encodeURIComponent(high)}` +
+      `&low=${encodeURIComponent(low)}`;
+
+    const res = await fetch(url, { cache: "no-store" });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Worker request failed (${res.status}).`);
+    }
+
+    const payload = await res.json();
+
+    if (!payload?.ok) {
+      throw new Error(payload?.error || "Lookup failed.");
+    }
+
+    renderCards(payload);
+    renderTable(payload);
+    saveInputs(
+      String(payload.top || top),
+      formatCompactNumber(payload.highThreshold || high),
+      formatCompactNumber(payload.lowThreshold || low)
+    );
+    setStatus("", "info");
+  } catch (err) {
+    console.error(err);
+    setStatus(err?.message || String(err), "error");
+  }
+}
+
+async function postThresholds() {
+  let parsed;
+
+  try {
+    parsed = getParsedInputs();
+  } catch (err) {
+    setStatus(err?.message || String(err), "error");
+    return;
+  }
+
+  const { top, high, low } = parsed;
+  const postBtn = document.getElementById("post-btn");
+
+  postBtn.disabled = true;
+  saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
+  normalizeInputDisplays();
+  setStatus("Posting top clan thresholds to Discord...", "info");
+
+  try {
+    const url =
+      `${WORKER_URL}?mode=post-top-thresholds` +
+      `&top=${encodeURIComponent(top)}` +
+      `&high=${encodeURIComponent(high)}` +
+      `&low=${encodeURIComponent(low)}`;
+
+    const res = await fetch(url, { cache: "no-store" });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Worker request failed (${res.status}).`);
+    }
+
+    const payload = await res.json();
+
+    if (!payload?.ok) {
+      throw new Error(payload?.error || "Discord post failed.");
+    }
+
+    const messageId = payload?.discord_message_id ? ` Message ID: ${payload.discord_message_id}` : "";
+    setStatus(`Posted to Discord successfully.${messageId}`, "info");
+  } catch (err) {
+    console.error(err);
+    setStatus(err?.message || String(err), "error");
+  } finally {
+    postBtn.disabled = false;
+  }
+}
+
+function wireEvents() {
+  document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
+  document.getElementById("post-btn").addEventListener("click", postThresholds);
+
+  ["top-input", "high-input", "low-input"].forEach(id => {
+    const el = document.getElementById(id);
+
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        loadThresholds();
       }
+    });
 
-      if (!Number.isFinite(high)) {
-        setStatus("High Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.", "error");
-        return;
-      }
-
-      if (!Number.isFinite(low)) {
-        setStatus("Low Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.", "error");
-        return;
-      }
-
-      saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
+    el.addEventListener("blur", () => {
       normalizeInputDisplays();
-      setStatus("Loading top clan threshold counts...", "info");
-
-      try {
-        const url =
-          `${WORKER_URL}?mode=top-thresholds` +
-          `&top=${encodeURIComponent(top)}` +
-          `&high=${encodeURIComponent(high)}` +
-          `&low=${encodeURIComponent(low)}`;
-
-        const res = await fetch(url, { cache: "no-store" });
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Worker request failed (${res.status}).`);
-        }
-
-        const payload = await res.json();
-
-        if (!payload?.ok) {
-          throw new Error(payload?.error || "Lookup failed.");
-        }
-
-        renderCards(payload);
-        renderTable(payload);
-        saveInputs(
-          String(payload.top || top),
-          formatCompactNumber(payload.highThreshold || high),
-          formatCompactNumber(payload.lowThreshold || low)
-        );
-        setStatus("", "info");
-      } catch (err) {
-        console.error(err);
-        setStatus(err?.message || String(err), "error");
-      }
-    }
-
-    function wireEvents() {
-      document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
-
-      ["top-input", "high-input", "low-input"].forEach(id => {
-        const el = document.getElementById(id);
-
-        el.addEventListener("keydown", e => {
-          if (e.key === "Enter") {
-            loadThresholds();
-          }
-        });
-
-        el.addEventListener("blur", () => {
-          normalizeInputDisplays();
-        });
-      });
-    }
+    });
+  });
+}
 
     function init() {
       loadSavedInputs();
