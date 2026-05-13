@@ -121,6 +121,76 @@
       color: #ffb4ad;
     }
 
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .card-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 20px;
+      font-weight: 700;
+      outline: none;
+    }
+
+    .card-input:focus {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    .controls-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn:hover {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
     .section {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -142,62 +212,6 @@
     .section-title {
       margin: 0;
       font-size: 18px;
-    }
-
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    input, button {
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 10px 12px;
-      font-size: 14px;
-      outline: none;
-    }
-
-    input {
-      width: 140px;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px;
-      min-height: 92px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-
-    .label {
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 6px;
-    }
-
-    .value {
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.25;
-      word-break: break-word;
     }
 
     .table-wrap {
@@ -255,6 +269,13 @@
       padding: 20px 18px;
     }
 
+    .card-help {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+      line-height: 1.3;
+    }
+
     @media (max-width: 1050px) {
       .cards {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -266,8 +287,9 @@
       main { padding: 16px; }
       .title-wrap h1 { font-size: 24px; }
       .cards { grid-template-columns: 1fr; }
-      .controls { width: 100%; }
-      .controls input, .controls button { width: 100%; }
+      .controls-row { justify-content: stretch; }
+      .controls-row .btn { width: 100%; }
+      .card-input { font-size: 18px; }
       .menu-bar { justify-content: flex-start; }
     }
   </style>
@@ -277,7 +299,7 @@
     <div class="header-inner">
       <div class="title-wrap">
         <h1>Top Clan Thresholds</h1>
-        <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
+        <div class="subtitle">Top clans · current battle only · exact counts at chosen point values</div>
       </div>
 
       <a class="github-btn"
@@ -290,27 +312,14 @@
       <a class="menu-btn" href="index.html">NONG Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="players.html">Player Profiles</a>
-      <a class="menu-btn" href="index.html#history">NONG History</a>
+      <a class="menu-btn" href="index.html#history">Clan History</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn active" href="top-clan-thresholds.html">Top Clan Filter</a>
     </div>
   </header>
 
   <main>
-    <div id="status" class="status info">Ready.</div>
-
-    <section class="section">
-      <div class="section-header">
-        <h2 class="section-title">Threshold settings</h2>
-
-        <div class="controls">
-          <input id="top-input" type="number" min="1" max="25" value="10" />
-          <input id="high-input" type="number" min="1" value="1000000000" />
-          <input id="low-input" type="number" min="1" value="750000000" />
-          <button id="refresh-btn" type="button">Refresh</button>
-        </div>
-      </div>
-    </section>
+    <div id="status" class="status"></div>
 
     <section class="cards">
       <div class="card">
@@ -320,19 +329,26 @@
 
       <div class="card">
         <div class="label">Top Clans Scanned</div>
-        <div class="value" id="card-top">—</div>
+        <input id="top-input" class="card-input" type="text" value="10" />
+        <div class="card-help">Whole number, usually 10</div>
       </div>
 
       <div class="card">
         <div class="label">High Threshold</div>
-        <div class="value" id="card-high">—</div>
+        <input id="high-input" class="card-input" type="text" value="1B" />
+        <div class="card-help">Examples: 500K, 750M, 1B, 10,000,000</div>
       </div>
 
       <div class="card">
         <div class="label">Low Threshold</div>
-        <div class="value" id="card-low">—</div>
+        <input id="low-input" class="card-input" type="text" value="750M" />
+        <div class="card-help">Examples: 500K, 750M, 1B, 10,000,000</div>
       </div>
     </section>
+
+    <div class="controls-row">
+      <button id="refresh-btn" class="btn" type="button">Refresh</button>
+    </div>
 
     <section class="section">
       <div class="section-header">
@@ -342,7 +358,7 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr>
+            <tr id="table-head-row">
               <th>Rank</th>
               <th>Clan</th>
               <th class="numeric">Clan Points</th>
@@ -373,6 +389,12 @@
         </svg>
       `);
 
+    const STORAGE_KEYS = {
+      top: "ps99_top_clan_thresholds_top",
+      high: "ps99_top_clan_thresholds_high",
+      low: "ps99_top_clan_thresholds_low"
+    };
+
     function htmlEscape(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -381,49 +403,143 @@
         .replace(/"/g, "&quot;");
     }
 
+    function formatCompactNumber(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      const n = Number(value);
+      if (Number.isNaN(n)) return "—";
+
+      const abs = Math.abs(n);
+
+      if (abs >= 1e12) return stripZeros((n / 1e12).toFixed(2)) + "T";
+      if (abs >= 1e9) return stripZeros((n / 1e9).toFixed(2)) + "B";
+      if (abs >= 1e6) return stripZeros((n / 1e6).toFixed(2)) + "M";
+      if (abs >= 1e3) return stripZeros((n / 1e3).toFixed(2)) + "K";
+
+      return String(Math.round(n));
+    }
+
+    function stripZeros(value) {
+      return String(value).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+    }
+
     function fmtShortNumber(value) {
       if (value === null || value === undefined || value === "") return "—";
       const n = Number(value);
       if (Number.isNaN(n)) return "—";
 
       const abs = Math.abs(n);
-      if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
-      if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
-      if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
-      if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
+      if (abs >= 1e12) return stripZeros((n / 1e12).toFixed(2)) + "T";
+      if (abs >= 1e9) return stripZeros((n / 1e9).toFixed(2)) + "B";
+      if (abs >= 1e6) return stripZeros((n / 1e6).toFixed(2)) + "M";
+      if (abs >= 1e3) return stripZeros((n / 1e3).toFixed(2)) + "K";
+
       return n.toLocaleString("en-US");
     }
 
-    function setStatus(text, kind = "info") {
+    function setStatus(text = "", kind = "info") {
       const el = document.getElementById("status");
+
+      if (!text) {
+        el.className = "status";
+        el.textContent = "";
+        return;
+      }
+
       el.className = `status ${kind}`;
       el.textContent = text;
+    }
+
+    function parseFlexibleNumber(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return null;
+
+      const cleaned = raw.replace(/,/g, "").replace(/\s+/g, "").toUpperCase();
+      const match = cleaned.match(/^(\d+(?:\.\d+)?)([KMBT])?$/);
+
+      if (!match) return null;
+
+      const base = Number(match[1]);
+      if (!Number.isFinite(base)) return null;
+
+      const suffix = match[2] || "";
+      const multipliers = {
+        "": 1,
+        K: 1e3,
+        M: 1e6,
+        B: 1e9,
+        T: 1e12
+      };
+
+      const result = Math.round(base * (multipliers[suffix] || 1));
+      return Number.isFinite(result) ? result : null;
+    }
+
+    function parseTopCount(value) {
+      const n = parseFlexibleNumber(value);
+      if (!Number.isFinite(n)) return null;
+      return Math.min(Math.max(Math.round(n), 1), 25);
+    }
+
+    function saveInputs(top, high, low) {
+      localStorage.setItem(STORAGE_KEYS.top, String(top));
+      localStorage.setItem(STORAGE_KEYS.high, String(high));
+      localStorage.setItem(STORAGE_KEYS.low, String(low));
+    }
+
+    function loadSavedInputs() {
+      const top = localStorage.getItem(STORAGE_KEYS.top);
+      const high = localStorage.getItem(STORAGE_KEYS.high);
+      const low = localStorage.getItem(STORAGE_KEYS.low);
+
+      if (top) document.getElementById("top-input").value = top;
+      if (high) document.getElementById("high-input").value = high;
+      if (low) document.getElementById("low-input").value = low;
+    }
+
+    function normalizeInputDisplays() {
+      const topRaw = document.getElementById("top-input").value;
+      const highRaw = document.getElementById("high-input").value;
+      const lowRaw = document.getElementById("low-input").value;
+
+      const top = parseTopCount(topRaw);
+      const high = parseFlexibleNumber(highRaw);
+      const low = parseFlexibleNumber(lowRaw);
+
+      if (Number.isFinite(top)) {
+        document.getElementById("top-input").value = String(top);
+      }
+
+      if (Number.isFinite(high)) {
+        document.getElementById("high-input").value = formatCompactNumber(high);
+      }
+
+      if (Number.isFinite(low)) {
+        document.getElementById("low-input").value = formatCompactNumber(low);
+      }
     }
 
     function renderCards(payload) {
       document.getElementById("card-battle").textContent =
         payload?.activeBattle?.configName || "—";
-      document.getElementById("card-top").textContent =
-        String(payload?.rows?.length || 0);
-      document.getElementById("card-high").textContent =
-        fmtShortNumber(payload?.highThreshold || 0);
-      document.getElementById("card-low").textContent =
-        fmtShortNumber(payload?.lowThreshold || 0);
+
+      document.getElementById("top-input").value =
+        String(payload?.top || document.getElementById("top-input").value || "10");
+
+      document.getElementById("high-input").value =
+        formatCompactNumber(payload?.highThreshold || parseFlexibleNumber(document.getElementById("high-input").value) || 1000000000);
+
+      document.getElementById("low-input").value =
+        formatCompactNumber(payload?.lowThreshold || parseFlexibleNumber(document.getElementById("low-input").value) || 750000000);
     }
 
     function renderTable(payload) {
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
-        return;
-      }
+      const highLabel = formatCompactNumber(payload?.highThreshold || 0);
+      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
 
-      const highLabel = fmtShortNumber(payload.highThreshold || 0) + "+";
-      const lowLabel = fmtShortNumber(payload.lowThreshold || 0) + "+";
-
-      document.querySelector("thead tr").innerHTML = `
+      document.getElementById("table-head-row").innerHTML = `
         <th>Rank</th>
         <th>Clan</th>
         <th class="numeric">Clan Points</th>
@@ -432,6 +548,11 @@
         <th class="numeric">${htmlEscape(lowLabel)}</th>
         <th class="numeric">Members</th>
       `;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
+        return;
+      }
 
       tbody.innerHTML = rows.map(row => `
         <tr>
@@ -454,10 +575,27 @@
     }
 
     async function loadThresholds() {
-      const top = Number(document.getElementById("top-input").value || 10);
-      const high = Number(document.getElementById("high-input").value || 1000000000);
-      const low = Number(document.getElementById("low-input").value || 750000000);
+      const top = parseTopCount(document.getElementById("top-input").value);
+      const high = parseFlexibleNumber(document.getElementById("high-input").value);
+      const low = parseFlexibleNumber(document.getElementById("low-input").value);
 
+      if (!Number.isFinite(top)) {
+        setStatus("Top Clans Scanned must be a whole number between 1 and 25.", "error");
+        return;
+      }
+
+      if (!Number.isFinite(high)) {
+        setStatus("High Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.", "error");
+        return;
+      }
+
+      if (!Number.isFinite(low)) {
+        setStatus("Low Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.", "error");
+        return;
+      }
+
+      saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
+      normalizeInputDisplays();
       setStatus("Loading top clan threshold counts...", "info");
 
       try {
@@ -482,15 +620,44 @@
 
         renderCards(payload);
         renderTable(payload);
-        setStatus(`Loaded ${payload.rows.length} clans.`, "info");
+        saveInputs(
+          String(payload.top || top),
+          formatCompactNumber(payload.highThreshold || high),
+          formatCompactNumber(payload.lowThreshold || low)
+        );
+        setStatus("", "info");
       } catch (err) {
         console.error(err);
         setStatus(err?.message || String(err), "error");
       }
     }
 
-    document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
-    loadThresholds();
+    function wireEvents() {
+      document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
+
+      ["top-input", "high-input", "low-input"].forEach(id => {
+        const el = document.getElementById(id);
+
+        el.addEventListener("keydown", e => {
+          if (e.key === "Enter") {
+            loadThresholds();
+          }
+        });
+
+        el.addEventListener("blur", () => {
+          normalizeInputDisplays();
+        });
+      });
+    }
+
+    function init() {
+      loadSavedInputs();
+      normalizeInputDisplays();
+      wireEvents();
+      loadThresholds();
+    }
+
+    init();
   </script>
 </body>
 </html>
