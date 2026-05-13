@@ -1,0 +1,45 @@
+{
+  "profile_key": "5385917513",
+  "aliases": [
+    "5385917513",
+    "Ewan_317"
+  ],
+  "username": "Ewan_317",
+  "user_id": 5385917513,
+  "avatar_url": null,
+  "profile_url": "https://www.roblox.com/users/5385917513/profile",
+  "total_battles": 1,
+  "latest_rank": 73,
+  "latest_points": 1000,
+  "latest_seen": "2026-05-13T14:06:18.924Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-13T14:06:18.924Z",
+      "first_seen": "2026-05-13T14:06:18.924Z",
+      "first_active_date": "2026-05-13T14:06:18.924Z",
+      "last_seen": "2026-05-13T14:06:18.924Z",
+      "starting_rank": 73,
+      "last_rank": 73,
+      "end_rank": 73,
+      "best_rank": 73,
+      "worst_rank": 73,
+      "starting_points": 1000,
+      "ending_points": 1000,
+      "max_points": 1000,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-13T14:06:18.924Z",
+          "rank": 73,
+          "points": 1000
+        }
+      ]
+    }
+  ]
+}
