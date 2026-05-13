@@ -14,7 +14,7 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 <!-- START_LEADERBOARD -->
 | Rank | Member | Total Points | 60m Gain |
 |---:|---|---:|---:|
-| 1 | dragonballx1412 | 1B | 400M |
+| 1 | dragonballx1412 | 1B | 0 |
 | 2 | johnr622 | 1B | 0 |
 | 3 | littledraiken | 1B | 0 |
 | 4 | LeRatRuse666 | 1B | 0 |
@@ -28,5 +28,5 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-13 01:45:39 UTC
+2026-05-13 01:50:39 UTC
 <!-- END_UPDATED -->
