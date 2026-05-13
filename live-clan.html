@@ -446,7 +446,7 @@
       </div>
 
       <div class="search-help">
-        This page only uses live API data. It does not write or save anything. The current clan battle endpoint identifies the active battle, the clan endpoint provides current clan details and members, and the paginated clans endpoint is used to estimate the clan’s live rank. API responses are cached for about 60 seconds, so repeated refreshes may briefly show the same values. :contentReference[oaicite:1]{index=1}
+        This page only uses live API data through your Worker. It does not write or save anything.
       </div>
     </section>
 
@@ -531,7 +531,7 @@
   </main>
 
   <script>
-    const PS99_BASE = "https://ps99.biggamesapi.io";
+    const WORKER_URL = "YOUR-WORKER-URL-HERE";
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -551,14 +551,10 @@
         </svg>
       `);
 
-    const CLANS_PAGE_SIZE = 100;
-    const MAX_RANK_SCAN_PAGES = 50;
-
-    let currentClanData = null;
     let currentMembers = [];
-    let currentBattleMeta = null;
     let currentSortKey = "rank";
     let currentSortAsc = true;
+    let currentClanName = "";
 
     function htmlEscape(value) {
       return String(value ?? "")
@@ -566,13 +562,6 @@
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
-    }
-
-    function normalizeKey(value) {
-      return String(value || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "");
     }
 
     function fmtShortNumber(value) {
@@ -591,7 +580,7 @@
 
     function fmtDate(value) {
       if (!value) return "—";
-      const d = value instanceof Date ? value : new Date(value);
+      const d = new Date(value);
       if (Number.isNaN(d.getTime())) return "—";
 
       return d.toLocaleDateString(undefined, {
@@ -603,7 +592,7 @@
 
     function fmtDateTime(value) {
       if (!value) return "—";
-      const d = value instanceof Date ? value : new Date(value);
+      const d = new Date(value);
       if (Number.isNaN(d.getTime())) return "—";
 
       return d.toLocaleString(undefined, {
@@ -633,383 +622,43 @@
       document.getElementById("clan-icon").src = DEFAULT_CLAN_ICON;
     }
 
-    function mapClanRole(permissionLevel, ownerId, userId) {
-      if (Number(userId) === Number(ownerId)) return "Leader";
-
-      const level = Number(permissionLevel);
-      if (level === 90) return "Officer";
-      if (level === 50) return "Member";
-      if (level === 100) return "Leader";
-      if (!Number.isNaN(level) && level > 0) return `Unknown (${level})`;
-
-      return "";
-    }
-
-    function getBattleAliases(activeBattle) {
-      const base = [
-        activeBattle?.configName,
-        activeBattle?.data?.configName,
-        activeBattle?._id,
-        activeBattle?.data?._id
-      ].filter(Boolean);
-
-      const out = new Set();
-
-      for (const item of base) {
-        const value = String(item).trim();
-        if (!value) continue;
-        out.add(value);
-        out.add(value.replace(/\s+/g, ""));
-      }
-
-      return [...out];
-    }
-
-    function normalizeBattleName(value) {
-      return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    }
-
-    function battleNodeMatchesAliases(node, aliases) {
-      if (!node || typeof node !== "object") return false;
-
-      const normalizedAliases = aliases.map(normalizeBattleName).filter(Boolean);
-
-      const fields = [
-        node.BattleID,
-        node._id,
-        node.Title,
-        node.Name,
-        node.configName
-      ];
-
-      return fields.some(field => normalizedAliases.includes(normalizeBattleName(field)));
-    }
-
-    function findBattleByAliases(obj, aliases) {
-      if (!obj || typeof obj !== "object") return null;
-
-      if (battleNodeMatchesAliases(obj, aliases)) {
-        return obj;
-      }
-
-      const normalizedAliases = aliases.map(normalizeBattleName).filter(Boolean);
-
-      for (const key in obj) {
-        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-        const value = obj[key];
-
-        if (value && typeof value === "object") {
-          if (Array.isArray(value.PointContributions) && normalizedAliases.includes(normalizeBattleName(key))) {
-            return value;
-          }
-
-          const found = findBattleByAliases(value, aliases);
-          if (found) return found;
-        }
-      }
-
-      return null;
-    }
-
-    function getSpecificBattleData(clan, activeBattle) {
-      const pointMap = {};
-      let totalPoints = 0;
-
-      const aliases = getBattleAliases(activeBattle);
-      let battleNode = null;
-
-      if (clan && clan.Battles && typeof clan.Battles === "object") {
-        for (const alias of aliases) {
-          if (clan.Battles[alias]) {
-            battleNode = clan.Battles[alias];
-            break;
-          }
-        }
-      }
-
-      if (!battleNode) {
-        battleNode = findBattleByAliases(clan, aliases);
-      }
-
-      if (!battleNode) {
-        return {
-          pointMap,
-          totalPoints,
-          battleId: activeBattle?.configName || "Unknown"
-        };
-      }
-
-      const rows = Array.isArray(battleNode.PointContributions)
-        ? battleNode.PointContributions
-        : [];
-
-      for (const row of rows) {
-        const userId = String(row.UserID || "").trim();
-        const points = Number(row.Points || 0);
-
-        if (userId) {
-          pointMap[userId] = points;
-        }
-      }
-
-      totalPoints = Number(battleNode.Points || 0);
-
-      return {
-        pointMap,
-        totalPoints,
-        battleId:
-          battleNode.BattleID ||
-          battleNode._id ||
-          battleNode.Title ||
-          battleNode.Name ||
-          battleNode.configName ||
-          activeBattle?.configName ||
-          "Unknown"
-      };
-    }
-
-    async function fetchActiveBattle() {
-      const res = await fetch(`${PS99_BASE}/api/activeClanBattle`, { cache: "no-store" });
-
-      if (!res.ok) {
-        throw new Error(`Active clan battle request failed (${res.status}).`);
-      }
-
-      const json = await res.json();
-      if (!json || !json.data) {
-        throw new Error("Active clan battle response was missing data.");
-      }
-
-      return json.data;
-    }
-
-    async function fetchClan(clanName) {
-      const res = await fetch(`${PS99_BASE}/api/clan/${encodeURIComponent(clanName)}`, {
-        cache: "no-store"
-      });
-
-      if (!res.ok) {
-        throw new Error(`Clan lookup failed for "${clanName}" (${res.status}).`);
-      }
-
-      const json = await res.json();
-      if (!json || !json.data) {
-        throw new Error(`Clan "${clanName}" was not found.`);
-      }
-
-      return json.data;
-    }
-
-    async function findClanRank(clanName) {
-      const target = normalizeKey(clanName);
-
-      for (let page = 1; page <= MAX_RANK_SCAN_PAGES; page++) {
-        const res = await fetch(
-          `${PS99_BASE}/api/clans?page=${page}&pageSize=${CLANS_PAGE_SIZE}&sort=Points&sortOrder=desc`,
-          { cache: "no-store" }
-        );
-
-        if (!res.ok) {
-          throw new Error(`Live clans ranking request failed on page ${page} (${res.status}).`);
-        }
-
-        const json = await res.json();
-        const data = Array.isArray(json?.data) ? json.data : [];
-
-        if (!data.length) break;
-
-        for (let i = 0; i < data.length; i++) {
-          const clan = data[i];
-          if (normalizeKey(clan?.Name) === target) {
-            return {
-              rank: (page - 1) * CLANS_PAGE_SIZE + i + 1,
-              scannedPages: page,
-              scannedRows: (page - 1) * CLANS_PAGE_SIZE + data.length,
-              points: Number(clan?.Points || 0)
-            };
-          }
-        }
-
-        if (data.length < CLANS_PAGE_SIZE) break;
-      }
-
-      return {
-        rank: null,
-        scannedPages: MAX_RANK_SCAN_PAGES,
-        scannedRows: MAX_RANK_SCAN_PAGES * CLANS_PAGE_SIZE,
-        points: null
-      };
-    }
-
-    async function fetchRobloxUsersByIds(userIds) {
-      const uniqueIds = [...new Set(userIds.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0))];
-      if (!uniqueIds.length) return new Map();
-
-      const out = new Map();
-
-      for (let i = 0; i < uniqueIds.length; i += 100) {
-        const batch = uniqueIds.slice(i, i + 100);
-
-        const res = await fetch("https://users.roblox.com/v1/users", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          body: JSON.stringify({
-            userIds: batch
-          })
-        });
-
-        if (!res.ok) continue;
-
-        const json = await res.json();
-        const data = Array.isArray(json?.data) ? json.data : [];
-
-        for (const item of data) {
-          const id = Number(item?.id);
-          if (!Number.isFinite(id)) continue;
-
-          out.set(String(id), {
-            username: item?.name || item?.username || "",
-            displayName: item?.displayName || item?.name || ""
-          });
-        }
-      }
-
-      return out;
-    }
-
-    async function fetchAvatarMap(userIds) {
-      const uniqueIds = [...new Set(userIds.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0))];
-      if (!uniqueIds.length) return new Map();
-
-      const out = new Map();
-
-      for (let i = 0; i < uniqueIds.length; i += 100) {
-        const batch = uniqueIds.slice(i, i + 100);
-
-        const url =
-          "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
-          `?userIds=${encodeURIComponent(batch.join(","))}` +
-          "&size=150x150&format=Png&isCircular=false";
-
-        const res = await fetch(url, {
-          headers: {
-            "Accept": "application/json"
-          }
-        });
-
-        if (!res.ok) continue;
-
-        const json = await res.json();
-        const data = Array.isArray(json?.data) ? json.data : [];
-
-        for (const item of data) {
-          const id = Number(item?.targetId);
-          const imageUrl = String(item?.imageUrl || "").trim();
-          const state = String(item?.state || "").trim();
-
-          if (Number.isFinite(id) && imageUrl && state === "Completed") {
-            out.set(String(id), imageUrl);
-          }
-        }
-      }
-
-      return out;
-    }
-
-    function buildMemberRows(clan, battleData, userMap, avatarMap) {
-      const members = Array.isArray(clan?.Members) ? clan.Members.slice() : [];
-      const ownerId = Number(clan?.Owner || 0);
-
-      if (ownerId > 0 && !members.some(m => Number(m?.UserID) === ownerId)) {
-        members.unshift({
-          UserID: ownerId,
-          PermissionLevel: 100,
-          JoinTime: ""
-        });
-      }
-
-      const rows = members.map(member => {
-        const userId = Number(member?.UserID || 0);
-        const userInfo = userMap.get(String(userId)) || {
-          username: String(userId || ""),
-          displayName: String(userId || "")
-        };
-
-        const joinDate = member?.JoinTime
-          ? new Date(Number(member.JoinTime) * 1000)
-          : null;
-
-        return {
-          rank: null,
-          username: userInfo.username || String(userId || ""),
-          displayName: userInfo.displayName || userInfo.username || String(userId || ""),
-          userId: userId || null,
-          avatarUrl: avatarMap.get(String(userId)) || DEFAULT_AVATAR,
-          role: mapClanRole(member?.PermissionLevel, ownerId, userId),
-          points: Number(battleData.pointMap[String(userId)] || 0),
-          joinDate: joinDate && !Number.isNaN(joinDate.getTime()) ? joinDate : null
-        };
-      });
-
-      rows.sort((a, b) => {
-        const diff = Number(b.points || 0) - Number(a.points || 0);
-        if (diff !== 0) return diff;
-
-        return String(a.username || "").localeCompare(String(b.username || ""));
-      });
-
-      rows.forEach((row, index) => {
-        row.rank = index + 1;
-      });
-
-      return rows;
-    }
-
-    function renderCards(clan, activeBattle, battleData, rankData) {
-      document.getElementById("card-clan").textContent = clan?.Name || "—";
-      document.getElementById("card-battle").textContent =
-        activeBattle?.configName || activeBattle?.data?.configName || battleData?.battleId || "—";
+    function renderCards(payload) {
+      document.getElementById("card-clan").textContent = payload?.clan?.name || "—";
+      document.getElementById("card-battle").textContent = payload?.activeBattle?.configName || payload?.battle?.battleId || "—";
       document.getElementById("card-rank").textContent =
-        rankData?.rank ? `#${rankData.rank.toLocaleString("en-US")}` : `>${rankData?.scannedRows || 0}`;
-      document.getElementById("card-points").textContent = fmtShortNumber(battleData?.totalPoints || 0);
-      document.getElementById("card-members").textContent = String(
-        Array.isArray(clan?.Members) ? clan.Members.length : 0
-      );
-      document.getElementById("card-owner").textContent = clan?.Owner ? String(clan.Owner) : "—";
-      document.getElementById("card-level").textContent = String(clan?.GuildLevel || "—");
-      document.getElementById("card-pulled").textContent = fmtDateTime(new Date());
+        payload?.rank?.rank ? `#${Number(payload.rank.rank).toLocaleString("en-US")}` : `>${Number(payload?.rank?.scannedRows || 0).toLocaleString("en-US")}`;
+      document.getElementById("card-points").textContent = fmtShortNumber(payload?.battle?.totalPoints || 0);
+      document.getElementById("card-members").textContent = String(payload?.clan?.memberCount || 0);
+      document.getElementById("card-owner").textContent = payload?.clan?.owner ? String(payload.clan.owner) : "—";
+      document.getElementById("card-level").textContent = payload?.clan?.guildLevel ? String(payload.clan.guildLevel) : "—";
+      document.getElementById("card-pulled").textContent = fmtDateTime(payload?.pulledAt);
     }
 
-    function renderHeader(clan) {
-      const iconId = String(clan?.Icon || "").replace(/^rbxassetid:\/\//i, "").trim();
-      const iconUrl = iconId ? `${PS99_BASE}/image/${encodeURIComponent(iconId)}` : DEFAULT_CLAN_ICON;
-
-      document.getElementById("clan-icon").src = iconUrl || DEFAULT_CLAN_ICON;
-      document.getElementById("clan-title").textContent = clan?.Name || "Unknown clan";
+    function renderHeader(payload) {
+      document.getElementById("clan-icon").src = payload?.clan?.icon_url || DEFAULT_CLAN_ICON;
+      document.getElementById("clan-title").textContent = payload?.clan?.name || "Unknown clan";
 
       const parts = [];
-      if (clan?.Desc) parts.push(clan.Desc);
-      if (clan?.CountryCode) parts.push(`Country: ${clan.CountryCode}`);
-      if (clan?.Members) parts.push(`Members: ${clan.Members.length}`);
+      if (payload?.clan?.desc) parts.push(payload.clan.desc);
+      if (payload?.clan?.countryCode) parts.push(`Country: ${payload.clan.countryCode}`);
+      if (payload?.clan?.memberCount) parts.push(`Members: ${payload.clan.memberCount}`);
 
-      document.getElementById("clan-subtitle").textContent = parts.join(" • ") || "No extra clan details available.";
+      document.getElementById("clan-subtitle").textContent =
+        parts.join(" • ") || "No extra clan details available.";
     }
 
-    function renderRankNote(rankData) {
+    function renderRankNote(payload) {
       const el = document.getElementById("rank-note");
 
-      if (!rankData) {
+      if (!payload?.rank) {
         el.textContent = "";
         return;
       }
 
-      if (rankData.rank) {
-        el.textContent = `Rank found after scanning ${rankData.scannedPages} live page(s).`;
+      if (payload.rank.rank) {
+        el.textContent = `Rank found after scanning ${payload.rank.scannedPages} live page(s).`;
       } else {
-        el.textContent = `Clan rank was not found within the first ${rankData.scannedRows.toLocaleString("en-US")} live rows scanned.`;
+        el.textContent = `Clan rank was not found within the first ${Number(payload.rank.scannedRows || 0).toLocaleString("en-US")} live rows scanned.`;
       }
     }
 
@@ -1027,15 +676,14 @@
       }
 
       rows.sort((a, b) => {
-        const av = a[currentSortKey];
-        const bv = b[currentSortKey];
-
         if (currentSortKey === "join") {
-          const at = a.joinDate ? a.joinDate.getTime() : 0;
-          const bt = b.joinDate ? b.joinDate.getTime() : 0;
+          const at = a.joinDate ? new Date(a.joinDate).getTime() : 0;
+          const bt = b.joinDate ? new Date(b.joinDate).getTime() : 0;
           return currentSortAsc ? at - bt : bt - at;
         }
 
+        const av = a[currentSortKey];
+        const bv = b[currentSortKey];
         const an = Number(av);
         const bn = Number(bv);
 
@@ -1094,44 +742,38 @@
 
       lookupBtn.disabled = true;
       refreshBtn.disabled = true;
+
       setStatus(`Looking up ${clean}...`, "info");
 
       try {
-        const [activeBattle, clan, rankData] = await Promise.all([
-          fetchActiveBattle(),
-          fetchClan(clean),
-          findClanRank(clean)
-        ]);
+        const res = await fetch(`${WORKER_URL}?clan=${encodeURIComponent(clean)}`, {
+          cache: "no-store"
+        });
 
-        const battleData = getSpecificBattleData(clan, activeBattle);
-        const userIds = (Array.isArray(clan?.Members) ? clan.Members : [])
-          .map(m => Number(m?.UserID || 0))
-          .filter(v => Number.isFinite(v) && v > 0);
-
-        if (clan?.Owner && !userIds.includes(Number(clan.Owner))) {
-          userIds.push(Number(clan.Owner));
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Worker request failed (${res.status}).`);
         }
 
-        const [userMap, avatarMap] = await Promise.all([
-          fetchRobloxUsersByIds(userIds),
-          fetchAvatarMap(userIds)
-        ]);
+        const payload = await res.json();
 
-        currentClanData = clan;
-        currentBattleMeta = activeBattle;
-        currentMembers = buildMemberRows(clan, battleData, userMap, avatarMap);
+        if (!payload?.ok) {
+          throw new Error(payload?.error || "Lookup failed.");
+        }
 
-        renderCards(clan, activeBattle, battleData, rankData);
-        renderHeader(clan);
-        renderRankNote(rankData);
+        currentClanName = payload?.clan?.name || clean;
+        currentMembers = Array.isArray(payload?.members) ? payload.members : [];
+
+        renderCards(payload);
+        renderHeader(payload);
+        renderRankNote(payload);
         renderMembers();
 
         refreshBtn.disabled = false;
-        setStatus(`Loaded live data for ${clan?.Name || clean}.`, "info");
+        setStatus(`Loaded live data for ${currentClanName}.`, "info");
       } catch (err) {
         console.error(err);
-        currentClanData = null;
-        currentBattleMeta = null;
+        currentClanName = "";
         currentMembers = [];
         setCardsEmpty();
         renderMembers();
@@ -1147,8 +789,8 @@
       });
 
       document.getElementById("refresh-btn").addEventListener("click", () => {
-        if (!currentClanData?.Name) return;
-        lookupClan(currentClanData.Name);
+        if (!currentClanName) return;
+        lookupClan(currentClanName);
       });
 
       document.getElementById("clan-input").addEventListener("keydown", e => {
