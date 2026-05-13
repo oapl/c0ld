@@ -305,7 +305,7 @@
     <div class="header-inner">
       <div class="title-wrap">
         <h1>Top Clan Thresholds</h1>
-        <div class="subtitle">Top clans · current battle only · exact counts at chosen point values</div>
+        <div class="subtitle">Top clans · current battle only · 1B+ and 750M+ bucket counts</div>
       </div>
 
       <a class="github-btn"
@@ -340,15 +340,15 @@
       </div>
 
       <div class="card">
-        <div class="label">High Threshold</div>
+        <div class="label">1B+ Threshold</div>
         <input id="high-input" class="card-input" type="text" value="1B" />
         <div class="card-help">Examples: 500K, 750M, 1B, 10,000,000</div>
       </div>
 
       <div class="card">
-        <div class="label">Low Threshold</div>
+        <div class="label">750M+ Threshold</div>
         <input id="low-input" class="card-input" type="text" value="750M" />
-        <div class="card-help">Examples: 500K, 750M, 1B, 10,000,000</div>
+        <div class="card-help">This bucket excludes anyone already counted in 1B+</div>
       </div>
     </section>
 
@@ -371,8 +371,8 @@
               <th>Clan</th>
               <th class="numeric">Clan Points</th>
               <th class="numeric">Battle Points</th>
-              <th class="numeric">1B</th>
-              <th class="numeric">750M</th>
+              <th class="numeric">1B+</th>
+              <th class="numeric">750M+</th>
               <th class="numeric">Members</th>
             </tr>
           </thead>
@@ -544,8 +544,8 @@
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
-      const highLabel = formatCompactNumber(payload?.highThreshold || 0);
-      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
+      const highLabel = formatCompactNumber(payload?.highThreshold || 0) + "+";
+      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0) + "+";
 
       document.getElementById("table-head-row").innerHTML = `
         <th>Rank</th>
@@ -592,11 +592,15 @@
       }
 
       if (!Number.isFinite(high)) {
-        throw new Error("High Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+        throw new Error("1B+ Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
       }
 
       if (!Number.isFinite(low)) {
-        throw new Error("Low Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+        throw new Error("750M+ Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+      }
+
+      if (low >= high) {
+        throw new Error("750M+ Threshold must be lower than 1B+ Threshold.");
       }
 
       return { top, high, low };
