@@ -11,16 +11,16 @@
   "total_battles": 2,
   "latest_rank": 15,
   "latest_points": 750000000,
-  "latest_seen": "2026-05-13T04:55:37.700Z",
+  "latest_seen": "2026-05-13T05:00:42.312Z",
   "battles": [
     {
       "battle": "AngelBattle2026",
       "display_name": "Angel Battle 2026",
       "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
-      "battle_last_snapshot": "2026-05-13T04:55:37.700Z",
+      "battle_last_snapshot": "2026-05-13T05:00:42.312Z",
       "first_seen": "2026-05-11T14:23:36.089Z",
       "first_active_date": "2026-05-11T14:23:36.089Z",
-      "last_seen": "2026-05-13T04:55:37.700Z",
+      "last_seen": "2026-05-13T05:00:42.312Z",
       "starting_rank": 10,
       "last_rank": 15,
       "end_rank": 15,
@@ -30,7 +30,7 @@
       "ending_points": 750000000,
       "max_points": 750000000,
       "gained_points": 0,
-      "snapshot_count": 470,
+      "snapshot_count": 471,
       "present_at_final_snapshot": true,
       "note": null,
       "series": [
@@ -2381,6 +2381,11 @@
         },
         {
           "t": "2026-05-13T04:55:37.700Z",
+          "rank": 15,
+          "points": 750000000
+        },
+        {
+          "t": "2026-05-13T05:00:42.312Z",
           "rank": 15,
           "points": 750000000
         }
