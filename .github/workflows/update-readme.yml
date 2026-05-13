@@ -11,6 +11,18 @@ on:
         description: "Cloudflare trigger timestamp"
         required: false
         default: ""
+      rebuild_history:
+        description: "Rebuild historical/profile JSON from Supabase. Leave false for normal 5-minute updates."
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+  # Daily full rebuild. Adjust the time if desired.
+  schedule:
+    - cron: "15 10 * * *"
 
 concurrency:
   group: update-leaderboard
@@ -31,6 +43,7 @@ jobs:
           echo "actor=${{ github.actor }}"
           echo "source=${{ github.event.inputs.source }}"
           echo "triggered_at_utc=${{ github.event.inputs.triggered_at_utc }}"
+          echo "rebuild_history=${{ github.event.inputs.rebuild_history }}"
           echo "ref=${{ github.ref }}"
           echo "sha=${{ github.sha }}"
           echo "run_id=${{ github.run_id }}"
@@ -46,6 +59,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # -----------------------------
+      # Lightweight 5-minute/current update steps
+      # -----------------------------
 
       - name: Fetch, store and broadcast leaderboard
         env:
@@ -78,32 +95,6 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/ingest-clan-ranks.js
 
-      - name: Build player profile data
-        env:
-          CLAN_NAME: ${{ vars.CLAN_NAME }}
-          CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
-          CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
-          CURRENT_BATTLE_END_ISO: ${{ vars.CURRENT_BATTLE_END_ISO }}
-          CURRENT_NONG_TABLE: ${{ vars.CURRENT_NONG_TABLE }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: node scripts/build-player-profiles.js
-
-      - name: Merge manual battle history
-        run: node scripts/merge-manual-battles.js
-
-      - name: Build historical NONG leaderboard data
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: node scripts/build-nong-history.js
-
-      - name: Build historical clan leaderboard data
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: node scripts/build-clan-history.js
-
       - name: Build clan leaderboard data
         env:
           CLAN_NAME: ${{ vars.CLAN_NAME }}
@@ -115,7 +106,48 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/build-clan-leaderboard.js
 
+      # -----------------------------
+      # Heavy Supabase egress steps
+      # Only run manually with rebuild_history=true
+      # or once per day from the schedule.
+      # -----------------------------
+
+      - name: Build player profile data
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
+        env:
+          CLAN_NAME: ${{ vars.CLAN_NAME }}
+          CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
+          CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
+          CURRENT_BATTLE_END_ISO: ${{ vars.CURRENT_BATTLE_END_ISO }}
+          CURRENT_NONG_TABLE: ${{ vars.CURRENT_NONG_TABLE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/build-player-profiles.js
+
+      - name: Merge manual battle history
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
+        run: node scripts/merge-manual-battles.js
+
+      - name: Build historical NONG leaderboard data
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/build-nong-history.js
+
+      - name: Build historical clan leaderboard data
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/build-clan-history.js
+
+      # -----------------------------
+      # Debug output
+      # -----------------------------
+
       - name: Show generated avatar files
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
         run: |
           echo "Generated avatar files:"
           find assets/avatars -maxdepth 1 -type f | sort | head -50 || true
@@ -127,11 +159,15 @@ jobs:
           echo "Generated Data files:"
           find Data -maxdepth 1 -type f | sort || true
           echo ""
-          echo "Preview nong-history.json:"
-          head -100 Data/nong-history.json || true
+          echo "Preview current.json:"
+          head -120 Data/current.json || true
           echo ""
           echo "Preview clans-current.json:"
           head -120 Data/clans-current.json || true
+
+      # -----------------------------
+      # Commit changed generated files
+      # -----------------------------
 
       - name: Commit and push if changed
         run: |
