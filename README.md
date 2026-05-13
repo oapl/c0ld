@@ -17,7 +17,7 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 | 1 | johnr622 | 1B | 0 |
 | 2 | littledraiken | 1B | 0 |
 | 3 | LeRatRuse666 | 1B | 0 |
-| 4 | NattyLite808 | 1B | 970M |
+| 4 | NattyLite808 | 1B | 950M |
 | 5 | sebastjan35 | 750M | 0 |
 | 6 | jupiter0477 | 750M | 0 |
 | 7 | joshuacd2006 | 750M | 0 |
@@ -28,5 +28,5 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-13 00:10:42 UTC
+2026-05-13 00:15:46 UTC
 <!-- END_UPDATED -->
