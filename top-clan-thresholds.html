@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Top Clan Thresholds</title>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248,81,73,0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: none; }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .github-btn {
+      display: inline-block;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      white-space: nowrap;
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88,166,255,0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .status {
+      margin-bottom: 18px;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: none;
+    }
+
+    .status.info {
+      display: block;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .status.error {
+      display: block;
+      border: 1px solid var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .section-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input, button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    input {
+      width: 140px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    tbody tr:hover {
+      background: rgba(255,255,255,0.02);
+    }
+
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .clan-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .clan-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 20px 18px;
+    }
+
+    @media (max-width: 1050px) {
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 700px) {
+      header { padding: 14px 16px 10px; }
+      main { padding: 16px; }
+      .title-wrap h1 { font-size: 24px; }
+      .cards { grid-template-columns: 1fr; }
+      .controls { width: 100%; }
+      .controls input, .controls button { width: 100%; }
+      .menu-bar { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Top Clan Thresholds</h1>
+        <div class="subtitle">Top 10 clans · current battle only · live counts at 1B and 750M</div>
+      </div>
+
+      <a class="github-btn"
+         href="https://github.com/OpalApocalypse/NONG_Leaderboard"
+         target="_blank"
+         rel="noopener">GitHub</a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">NONG Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="players.html">Player Profiles</a>
+      <a class="menu-btn" href="index.html#history">Clan History</a>
+      <a class="menu-btn" href="live-clan.html">Live Clan Lookup</a>
+      <a class="menu-btn active" href="top-clan-thresholds.html">Top Clan Thresholds</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status info">Ready.</div>
+
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">Threshold settings</h2>
+
+        <div class="controls">
+          <input id="top-input" type="number" min="1" max="25" value="10" />
+          <input id="high-input" type="number" min="1" value="1000000000" />
+          <input id="low-input" type="number" min="1" value="750000000" />
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="cards">
+      <div class="card">
+        <div class="label">Current Battle</div>
+        <div class="value" id="card-battle">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Top Clans Scanned</div>
+        <div class="value" id="card-top">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">High Threshold</div>
+        <div class="value" id="card-high">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Low Threshold</div>
+        <div class="value" id="card-low">—</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">Top clan threshold counts</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Clan</th>
+              <th class="numeric">Clan Points</th>
+              <th class="numeric">Battle Points</th>
+              <th class="numeric">1B+</th>
+              <th class="numeric">750M+</th>
+              <th class="numeric">Members</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr>
+              <td colspan="7" class="empty-state">No data loaded yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const WORKER_URL = "https://ps99-live-clan.opal-dde.workers.dev/";
+    const DEFAULT_CLAN_ICON =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="12" fill="#21262d"/>
+          <path d="M20 44V24l12-6 12 6v20l-12 6-12-6z" fill="#6e7681"/>
+        </svg>
+      `);
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function fmtShortNumber(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      const n = Number(value);
+      if (Number.isNaN(n)) return "—";
+
+      const abs = Math.abs(n);
+      if (abs >= 1e12) return (n / 1e12).toFixed(2).replace(/\.00$/, "") + "T";
+      if (abs >= 1e9) return (n / 1e9).toFixed(2).replace(/\.00$/, "") + "B";
+      if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
+      if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.00$/, "") + "K";
+      return n.toLocaleString("en-US");
+    }
+
+    function setStatus(text, kind = "info") {
+      const el = document.getElementById("status");
+      el.className = `status ${kind}`;
+      el.textContent = text;
+    }
+
+    function renderCards(payload) {
+      document.getElementById("card-battle").textContent =
+        payload?.activeBattle?.configName || "—";
+      document.getElementById("card-top").textContent =
+        String(payload?.rows?.length || 0);
+      document.getElementById("card-high").textContent =
+        fmtShortNumber(payload?.highThreshold || 0);
+      document.getElementById("card-low").textContent =
+        fmtShortNumber(payload?.lowThreshold || 0);
+    }
+
+    function renderTable(payload) {
+      const tbody = document.getElementById("tbody");
+      const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
+        return;
+      }
+
+      const highLabel = fmtShortNumber(payload.highThreshold || 0) + "+";
+      const lowLabel = fmtShortNumber(payload.lowThreshold || 0) + "+";
+
+      document.querySelector("thead tr").innerHTML = `
+        <th>Rank</th>
+        <th>Clan</th>
+        <th class="numeric">Clan Points</th>
+        <th class="numeric">Battle Points</th>
+        <th class="numeric">${htmlEscape(highLabel)}</th>
+        <th class="numeric">${htmlEscape(lowLabel)}</th>
+        <th class="numeric">Members</th>
+      `;
+
+      tbody.innerHTML = rows.map(row => `
+        <tr>
+          <td>#${htmlEscape(row.rank)}</td>
+          <td>
+            <div class="clan-cell">
+              <img class="clan-icon" src="${htmlEscape(row.icon_url || DEFAULT_CLAN_ICON)}" alt=""
+                   loading="lazy"
+                   onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">
+              <span>${htmlEscape(row.clan_name)}</span>
+            </div>
+          </td>
+          <td class="numeric">${fmtShortNumber(row.clan_points)}</td>
+          <td class="numeric">${fmtShortNumber(row.battle_points)}</td>
+          <td class="numeric">${htmlEscape(row.high_count)}</td>
+          <td class="numeric">${htmlEscape(row.low_count)}</td>
+          <td class="numeric">${htmlEscape(row.member_count)}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadThresholds() {
+      const top = Number(document.getElementById("top-input").value || 10);
+      const high = Number(document.getElementById("high-input").value || 1000000000);
+      const low = Number(document.getElementById("low-input").value || 750000000);
+
+      setStatus("Loading top clan threshold counts...", "info");
+
+      try {
+        const url =
+          `${WORKER_URL}?mode=top-thresholds` +
+          `&top=${encodeURIComponent(top)}` +
+          `&high=${encodeURIComponent(high)}` +
+          `&low=${encodeURIComponent(low)}`;
+
+        const res = await fetch(url, { cache: "no-store" });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Worker request failed (${res.status}).`);
+        }
+
+        const payload = await res.json();
+
+        if (!payload?.ok) {
+          throw new Error(payload?.error || "Lookup failed.");
+        }
+
+        renderCards(payload);
+        renderTable(payload);
+        setStatus(`Loaded ${payload.rows.length} clans.`, "info");
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || String(err), "error");
+      }
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
+    loadThresholds();
+  </script>
+</body>
+</html>
