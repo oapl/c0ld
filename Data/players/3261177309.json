@@ -8,11 +8,39 @@
   "user_id": 3261177309,
   "avatar_url": "assets/avatars/3261177309.png",
   "profile_url": "https://www.roblox.com/users/3261177309/profile",
-  "total_battles": 2,
-  "latest_rank": 5,
-  "latest_points": 926540,
-  "latest_seen": "2026-05-11T18:00:00.000Z",
+  "total_battles": 3,
+  "latest_rank": 69,
+  "latest_points": 10000000,
+  "latest_seen": "2026-05-13T13:20:54.296Z",
   "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-13T13:20:54.296Z",
+      "first_seen": "2026-05-13T13:20:54.296Z",
+      "first_active_date": "2026-05-13T13:20:54.296Z",
+      "last_seen": "2026-05-13T13:20:54.296Z",
+      "starting_rank": 69,
+      "last_rank": 69,
+      "end_rank": 69,
+      "best_rank": 69,
+      "worst_rank": 69,
+      "starting_points": 10000000,
+      "ending_points": 10000000,
+      "max_points": 10000000,
+      "gained_points": 0,
+      "snapshot_count": 1,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-13T13:20:54.296Z",
+          "rank": 69,
+          "points": 10000000
+        }
+      ]
+    },
     {
       "battle": "Safety Battle",
       "display_name": "Safety Battle",
