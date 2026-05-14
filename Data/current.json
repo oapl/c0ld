@@ -972,9 +972,9 @@
   "clan_points": 19974000000,
   "clan_rank_source": "clans-current.json",
   "clan_rank_matched_name": "NONG",
-  "clan_rank_snapshot_at": "2026-05-14T02:35:44.599Z",
+  "clan_rank_snapshot_at": "2026-05-14T02:40:41.560Z",
   "projected_rank": 65,
-  "projected_points": 23523276914,
+  "projected_points": 23518312110,
   "projection_basis": "12h",
-  "hours_remaining": 59.404
+  "hours_remaining": 59.322
 }
