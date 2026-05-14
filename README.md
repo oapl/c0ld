@@ -18,7 +18,7 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 | 2 | johnr622 | 1B | 0 |
 | 3 | mavilure | 1B | 0 |
 | 4 | littledraiken | 1B | 0 |
-| 5 | FixingWind | 1B | 400M |
+| 5 | FixingWind | 1B | 0 |
 | 6 | LeRatRuse666 | 1B | 0 |
 | 7 | NattyLite808 | 1B | 0 |
 | 8 | sebastjan35 | 750M | 0 |
@@ -28,5 +28,5 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-14 12:25:41 UTC
+2026-05-14 12:30:41 UTC
 <!-- END_UPDATED -->
