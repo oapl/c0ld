@@ -968,13 +968,13 @@
       "gain_24h": null
     }
   ],
-  "clan_rank": 60,
-  "clan_points": 20761000000,
+  "clan_rank": 57,
+  "clan_points": 21161000000,
   "clan_rank_source": "clans-current.json",
   "clan_rank_matched_name": "NONG",
-  "clan_rank_snapshot_at": "2026-05-14T11:25:46.545Z",
-  "projected_rank": 51,
-  "projected_points": 25872066465,
+  "clan_rank_snapshot_at": "2026-05-14T11:30:57.323Z",
+  "projected_rank": 49,
+  "projected_points": 27946144081,
   "projection_basis": "12h",
-  "hours_remaining": 50.57
+  "hours_remaining": 50.484
 }
