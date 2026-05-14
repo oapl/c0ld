@@ -17,7 +17,7 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 | 1 | dragonballx1412 | 1B | 0 |
 | 2 | johnr622 | 1B | 0 |
 | 3 | mavilure | 1B | 0 |
-| 4 | ManapuaMan8O8 | 1B | 250M |
+| 4 | ManapuaMan8O8 | 1B | 0 |
 | 5 | littledraiken | 1B | 0 |
 | 6 | FixingWind | 1B | 0 |
 | 7 | LeRatRuse666 | 1B | 0 |
@@ -28,5 +28,5 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-14 22:15:33 UTC
+2026-05-14 22:20:32 UTC
 <!-- END_UPDATED -->
