@@ -16,7 +16,7 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 |---:|---|---:|---:|
 | 1 | dragonballx1412 | 1B | 0 |
 | 2 | johnr622 | 1B | 0 |
-| 3 | PartyCorgi_70 | 1B | 950M |
+| 3 | PartyCorgi_70 | 1B | 0 |
 | 4 | mavilure | 1B | 0 |
 | 5 | ManapuaMan8O8 | 1B | 0 |
 | 6 | littledraiken | 1B | 0 |
@@ -28,5 +28,5 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-15 04:10:32 UTC
+2026-05-15 04:15:41 UTC
 <!-- END_UPDATED -->
