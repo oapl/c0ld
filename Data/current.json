@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-05-14T11:05:21.821Z",
+  "generated_at": "2026-05-15T11:07:35.367Z",
   "battle": "AngelBattle2026",
   "display_name": "Angel Battle 2026",
   "battle_end_iso": "2026-05-16T14:00:00Z",
   "clan_name": "NONG",
   "rows": [
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
       "rank": 1,
       "username": "dragonballx1412",
       "total_points": 1000000000,
@@ -19,7 +19,7 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
       "rank": 2,
       "username": "johnr622",
       "total_points": 1000000000,
@@ -32,8 +32,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
       "rank": 3,
+      "username": "PartyCorgi_70",
+      "total_points": 1000000000,
+      "user_id": 7649276875,
+      "profile_key": "7649276875",
+      "avatar_url": null,
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 4,
       "username": "mavilure",
       "total_points": 1000000000,
       "user_id": 1178078831,
@@ -45,8 +58,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 4,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 5,
+      "username": "ManapuaMan8O8",
+      "total_points": 1000000000,
+      "user_id": 5475802198,
+      "profile_key": "5475802198",
+      "avatar_url": "assets/avatars/5475802198.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 6,
       "username": "littledraiken",
       "total_points": 1000000000,
       "user_id": 610979543,
@@ -58,8 +84,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 5,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 7,
+      "username": "FixingWind",
+      "total_points": 1000000000,
+      "user_id": 412452515,
+      "profile_key": "412452515",
+      "avatar_url": "assets/avatars/412452515.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 8,
       "username": "LeRatRuse666",
       "total_points": 1000000000,
       "user_id": 3071323005,
@@ -71,8 +110,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 6,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 9,
       "username": "NattyLite808",
       "total_points": 1000000000,
       "user_id": 4869527980,
@@ -84,8 +123,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 7,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 10,
       "username": "sebastjan35",
       "total_points": 750000000,
       "user_id": 844720150,
@@ -97,8 +136,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 8,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 11,
       "username": "jupiter0477",
       "total_points": 750000000,
       "user_id": 1299086053,
@@ -110,8 +149,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 9,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 12,
       "username": "Sprintbooter",
       "total_points": 750000000,
       "user_id": 2598850443,
@@ -123,8 +162,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 10,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 13,
       "username": "joshuacd2006",
       "total_points": 750000000,
       "user_id": 381111505,
@@ -136,8 +175,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 11,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 14,
       "username": "wqmike",
       "total_points": 750000000,
       "user_id": 1281614396,
@@ -149,21 +188,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 12,
-      "username": "ManapuaMan8O8",
-      "total_points": 750000000,
-      "user_id": 5475802198,
-      "profile_key": "5475802198",
-      "avatar_url": "assets/avatars/5475802198.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 13,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 15,
       "username": "mecduqgtryhard",
       "total_points": 750000000,
       "user_id": 4455619288,
@@ -175,8 +201,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 14,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 16,
       "username": "Ewan_314",
       "total_points": 750000000,
       "user_id": 2489885181,
@@ -188,8 +214,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 15,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 17,
       "username": "OfficalMrLucky",
       "total_points": 750000000,
       "user_id": 233885212,
@@ -201,8 +227,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 16,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 18,
       "username": "Fallen_Angel1989",
       "total_points": 750000000,
       "user_id": 7796671551,
@@ -214,8 +240,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 17,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 19,
       "username": "SupaAnTz",
       "total_points": 600000000,
       "user_id": 3399221091,
@@ -227,21 +253,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 18,
-      "username": "FixingWind",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 20,
+      "username": "Agentp_3928",
       "total_points": 600000000,
-      "user_id": 412452515,
-      "profile_key": "412452515",
-      "avatar_url": "assets/avatars/412452515.png",
+      "user_id": 5746246129,
+      "profile_key": "5746246129",
+      "avatar_url": null,
       "gain_5m": null,
       "gain_1h": null,
       "gain_12h": null,
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 19,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 21,
       "username": "banan123123123",
       "total_points": 600000000,
       "user_id": 33928536,
@@ -253,8 +279,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 20,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 22,
       "username": "KayMart808",
       "total_points": 500000000,
       "user_id": 4869521355,
@@ -266,8 +292,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 21,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 23,
       "username": "Darwinaknox",
       "total_points": 150000000,
       "user_id": 2286082684,
@@ -279,8 +305,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 22,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 24,
       "username": "EndOfAnEra007",
       "total_points": 150000000,
       "user_id": 3302444862,
@@ -292,8 +318,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 23,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 25,
       "username": "LawnMp3",
       "total_points": 150000000,
       "user_id": 2341656429,
@@ -305,8 +331,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 24,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 26,
       "username": "MrChicken66666",
       "total_points": 150000000,
       "user_id": 1534184237,
@@ -318,8 +344,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 25,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 27,
       "username": "Elsa1000_11",
       "total_points": 150000000,
       "user_id": 1759425897,
@@ -331,8 +357,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 26,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 28,
       "username": "TealPlatypus747",
       "total_points": 150000000,
       "user_id": 5317753904,
@@ -344,8 +370,73 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 27,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 29,
+      "username": "Ilikecheesepuffs26",
+      "total_points": 150000000,
+      "user_id": 5605744293,
+      "profile_key": "5605744293",
+      "avatar_url": "assets/avatars/5605744293.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 30,
+      "username": "ArcticGalaxy149",
+      "total_points": 150000000,
+      "user_id": 1991450795,
+      "profile_key": "1991450795",
+      "avatar_url": "assets/avatars/1991450795.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 31,
+      "username": "WhereIsPerry0",
+      "total_points": 150000000,
+      "user_id": 5395148535,
+      "profile_key": "5395148535",
+      "avatar_url": null,
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 32,
+      "username": "DiscoGuy86",
+      "total_points": 150000000,
+      "user_id": 7349191010,
+      "profile_key": "7349191010",
+      "avatar_url": null,
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 33,
+      "username": "TealPlatypus787",
+      "total_points": 150000000,
+      "user_id": 5743015743,
+      "profile_key": "5743015743",
+      "avatar_url": null,
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 34,
       "username": "testbeeswS",
       "total_points": 150000000,
       "user_id": 2463883764,
@@ -357,8 +448,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 28,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 35,
       "username": "Pay2Lose0",
       "total_points": 150000000,
       "user_id": 3424299777,
@@ -370,8 +461,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 29,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 36,
       "username": "Panthers_1995",
       "total_points": 150000000,
       "user_id": 5746935453,
@@ -383,8 +474,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 30,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 37,
       "username": "itankidddd",
       "total_points": 150000000,
       "user_id": 3254310724,
@@ -396,8 +487,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 31,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 38,
       "username": "mybanana367",
       "total_points": 150000000,
       "user_id": 3753977683,
@@ -409,8 +500,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 32,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 39,
       "username": "Hiitzjust",
       "total_points": 150000000,
       "user_id": 3010290250,
@@ -422,8 +513,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 33,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 40,
       "username": "Alasha_26",
       "total_points": 150000000,
       "user_id": 1630439357,
@@ -435,8 +526,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 34,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 41,
       "username": "Bader2007hero",
       "total_points": 150000000,
       "user_id": 1686892886,
@@ -448,8 +539,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 35,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 42,
       "username": "gbotgameralt",
       "total_points": 150000000,
       "user_id": 10172414985,
@@ -461,8 +552,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 36,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 43,
       "username": "joshcd2006",
       "total_points": 150000000,
       "user_id": 719395494,
@@ -474,8 +565,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 37,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 44,
       "username": "KahalaMall808",
       "total_points": 150000000,
       "user_id": 7766319689,
@@ -487,8 +578,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 38,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 45,
       "username": "NilsPlays",
       "total_points": 150000000,
       "user_id": 321198413,
@@ -500,8 +591,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 39,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 46,
       "username": "AlaMoanaCenter808",
       "total_points": 150000000,
       "user_id": 7766146878,
@@ -513,8 +604,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 40,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 47,
       "username": "EyeRockett",
       "total_points": 150000000,
       "user_id": 3261177309,
@@ -526,8 +617,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 41,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 48,
+      "username": "ArcticGalaxy14",
+      "total_points": 150000000,
+      "user_id": 5349160911,
+      "profile_key": "5349160911",
+      "avatar_url": null,
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 49,
       "username": "Rocky_0310",
       "total_points": 120000000,
       "user_id": 2347861539,
@@ -539,8 +643,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 42,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 50,
       "username": "Ewan_315",
       "total_points": 120000000,
       "user_id": 3847249307,
@@ -552,47 +656,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 43,
-      "username": "Ilikecheesepuffs26",
-      "total_points": 90000000,
-      "user_id": 5605744293,
-      "profile_key": "5605744293",
-      "avatar_url": "assets/avatars/5605744293.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 44,
-      "username": "WhereIsPerry0",
-      "total_points": 90000000,
-      "user_id": 5395148535,
-      "profile_key": "5395148535",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 45,
-      "username": "DiscoGuy86",
-      "total_points": 90000000,
-      "user_id": 7349191010,
-      "profile_key": "7349191010",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 46,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 51,
       "username": "TealPlatypus767",
       "total_points": 90000000,
       "user_id": 5742465610,
@@ -604,8 +669,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 47,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 52,
       "username": "Pay2Lose02",
       "total_points": 90000000,
       "user_id": 6132975232,
@@ -617,8 +682,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 48,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 53,
+      "username": "sarahr26",
+      "total_points": 90000000,
+      "user_id": 411587057,
+      "profile_key": "411587057",
+      "avatar_url": "assets/avatars/411587057.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 54,
       "username": "OliviaSisseBelby",
       "total_points": 90000000,
       "user_id": 371610241,
@@ -630,8 +708,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 49,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 55,
       "username": "Mandalorian477",
       "total_points": 90000000,
       "user_id": 3285393152,
@@ -643,8 +721,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 50,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 56,
       "username": "helloimyoura2",
       "total_points": 90000000,
       "user_id": 1824345931,
@@ -656,8 +734,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 51,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 57,
       "username": "Luckyalternative1",
       "total_points": 90000000,
       "user_id": 6095994753,
@@ -669,8 +747,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 52,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 58,
       "username": "DootsMagoots808",
       "total_points": 90000000,
       "user_id": 7750591387,
@@ -682,25 +760,12 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 53,
-      "username": "ArcticGalaxy149",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 59,
+      "username": "AgentP_8928",
       "total_points": 50000000,
-      "user_id": 1991450795,
-      "profile_key": "1991450795",
-      "avatar_url": "assets/avatars/1991450795.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 54,
-      "username": "Agentp_3928",
-      "total_points": 50000000,
-      "user_id": 5746246129,
-      "profile_key": "5746246129",
+      "user_id": 5746891823,
+      "profile_key": "5746891823",
       "avatar_url": null,
       "gain_5m": null,
       "gain_1h": null,
@@ -708,21 +773,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 55,
-      "username": "PartyCorgi_70",
-      "total_points": 50000000,
-      "user_id": 7649276875,
-      "profile_key": "7649276875",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 56,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 60,
       "username": "mybananafarm1",
       "total_points": 50000000,
       "user_id": 5145664688,
@@ -734,8 +786,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 57,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 61,
       "username": "mybananafarm2",
       "total_points": 50000000,
       "user_id": 5145682484,
@@ -747,21 +799,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 58,
-      "username": "sarahr26",
-      "total_points": 50000000,
-      "user_id": 411587057,
-      "profile_key": "411587057",
-      "avatar_url": "assets/avatars/411587057.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 59,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 62,
       "username": "Supergameplayjd",
       "total_points": 50000000,
       "user_id": 3812245011,
@@ -773,8 +812,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 60,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 63,
       "username": "Hellomakeme1234",
       "total_points": 50000000,
       "user_id": 3674455973,
@@ -786,8 +825,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 61,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 64,
       "username": "SloLol4",
       "total_points": 50000000,
       "user_id": 3205138115,
@@ -799,8 +838,21 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 62,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 65,
+      "username": "PandusiaMamusia",
+      "total_points": 50000000,
+      "user_id": 7877893478,
+      "profile_key": "7877893478",
+      "avatar_url": "assets/avatars/7877893478.png",
+      "gain_5m": null,
+      "gain_1h": null,
+      "gain_12h": null,
+      "gain_24h": null
+    },
+    {
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 66,
       "username": "Ewan_3142",
       "total_points": 50000000,
       "user_id": 7582928986,
@@ -812,8 +864,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 63,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 67,
       "username": "LuckyAltenative2",
       "total_points": 50000000,
       "user_id": 6095998763,
@@ -825,12 +877,12 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 64,
-      "username": "AgentP_8928",
-      "total_points": 40000000,
-      "user_id": 5746891823,
-      "profile_key": "5746891823",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 68,
+      "username": "TheRealBacon_6",
+      "total_points": 50000000,
+      "user_id": 1669581172,
+      "profile_key": "1669581172",
       "avatar_url": null,
       "gain_5m": null,
       "gain_1h": null,
@@ -838,8 +890,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 65,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 69,
       "username": "ArcticGalaxy159",
       "total_points": 40000000,
       "user_id": 5739780190,
@@ -851,34 +903,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 66,
-      "username": "TealPlatypus787",
-      "total_points": 40000000,
-      "user_id": 5743015743,
-      "profile_key": "5743015743",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 67,
-      "username": "PandusiaMamusia",
-      "total_points": 40000000,
-      "user_id": 7877893478,
-      "profile_key": "7877893478",
-      "avatar_url": "assets/avatars/7877893478.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 68,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 70,
       "username": "Baddie_true1223",
       "total_points": 30000000,
       "user_id": 2866508217,
@@ -890,8 +916,8 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 69,
+      "fetched_at": "2026-05-15T11:05:55.407Z",
+      "rank": 71,
       "username": "tycoonmasterou",
       "total_points": 18000000,
       "user_id": 455361347,
@@ -903,33 +929,7 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 70,
-      "username": "ArcticGalaxy14",
-      "total_points": 18000000,
-      "user_id": 5349160911,
-      "profile_key": "5349160911",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 71,
-      "username": "matheus9c9c9",
-      "total_points": 15000000,
-      "user_id": 1109081511,
-      "profile_key": "1109081511",
-      "avatar_url": "assets/avatars/1109081511.png",
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
       "rank": 72,
       "username": "mrbeasyt1",
       "total_points": 10000000,
@@ -942,7 +942,7 @@
       "gain_24h": null
     },
     {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
+      "fetched_at": "2026-05-15T11:05:55.407Z",
       "rank": 73,
       "username": "DoReMiyoFa",
       "total_points": 10000000,
@@ -953,28 +953,6 @@
       "gain_1h": null,
       "gain_12h": null,
       "gain_24h": null
-    },
-    {
-      "fetched_at": "2026-05-14T11:03:52.879Z",
-      "rank": 74,
-      "username": "mxth_alt3",
-      "total_points": 10000000,
-      "user_id": 7030171512,
-      "profile_key": "7030171512",
-      "avatar_url": null,
-      "gain_5m": null,
-      "gain_1h": null,
-      "gain_12h": null,
-      "gain_24h": null
     }
-  ],
-  "clan_rank": 56,
-  "clan_points": 23518000000,
-  "clan_rank_source": "clans-current.json",
-  "clan_rank_matched_name": "NONG",
-  "clan_rank_snapshot_at": "2026-05-15T11:01:34.273Z",
-  "projected_rank": 48,
-  "projected_points": 27676435872,
-  "projection_basis": "12h",
-  "hours_remaining": 26.974
+  ]
 }
