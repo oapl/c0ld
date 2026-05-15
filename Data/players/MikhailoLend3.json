@@ -1,0 +1,60 @@
+{
+  "profile_key": "3124250735",
+  "aliases": [
+    "3124250735",
+    "MikhailoLend3"
+  ],
+  "username": "MikhailoLend3",
+  "user_id": 3124250735,
+  "avatar_url": "assets/avatars/3124250735.png",
+  "profile_url": "https://www.roblox.com/users/3124250735/profile",
+  "total_battles": 1,
+  "latest_rank": 74,
+  "latest_points": 10000000,
+  "latest_seen": "2026-05-15T09:56:23.993Z",
+  "battles": [
+    {
+      "battle": "AngelBattle2026",
+      "display_name": "Angel Battle 2026",
+      "battle_first_snapshot": "2026-05-11T14:23:36.089Z",
+      "battle_last_snapshot": "2026-05-15T11:05:55.407Z",
+      "first_seen": "2026-05-15T09:41:36.277Z",
+      "first_active_date": "2026-05-15T09:41:36.277Z",
+      "last_seen": "2026-05-15T09:56:23.993Z",
+      "starting_rank": 74,
+      "last_rank": 74,
+      "end_rank": 74,
+      "best_rank": 74,
+      "worst_rank": 74,
+      "starting_points": 1000000,
+      "ending_points": 10000000,
+      "max_points": 10000000,
+      "gained_points": 9000000,
+      "snapshot_count": 4,
+      "present_at_final_snapshot": true,
+      "note": null,
+      "series": [
+        {
+          "t": "2026-05-15T09:41:36.277Z",
+          "rank": 74,
+          "points": 1000000
+        },
+        {
+          "t": "2026-05-15T09:46:31.673Z",
+          "rank": 74,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-15T09:51:31.317Z",
+          "rank": 74,
+          "points": 10000000
+        },
+        {
+          "t": "2026-05-15T09:56:23.993Z",
+          "rank": 74,
+          "points": 10000000
+        }
+      ]
+    }
+  ]
+}
