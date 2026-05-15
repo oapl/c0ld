@@ -16,17 +16,17 @@ _EXAMPLE: This little Top 10 updates at the same tempo as those._
 |---:|---|---:|---:|
 | 1 | dragonballx1412 | 1B | 0 |
 | 2 | johnr622 | 1B | 0 |
-| 3 | PartyCorgi_70 | 1B | 0 |
-| 4 | mavilure | 1B | 0 |
-| 5 | ManapuaMan8O8 | 1B | 0 |
-| 6 | littledraiken | 1B | 0 |
-| 7 | FixingWind | 1B | 0 |
-| 8 | LeRatRuse666 | 1B | 0 |
-| 9 | NattyLite808 | 1B | 0 |
-| 10 | sebastjan35 | 750M | 0 |
+| 3 | mavilure | 1B | 0 |
+| 4 | ManapuaMan8O8 | 1B | 0 |
+| 5 | littledraiken | 1B | 0 |
+| 6 | FixingWind | 1B | 0 |
+| 7 | LeRatRuse666 | 1B | 0 |
+| 8 | NattyLite808 | 1B | 0 |
+| 9 | sebastjan35 | 750M | 0 |
+| 10 | jupiter0477 | 750M | 0 |
 <!-- END_LEADERBOARD -->
 
 ## Last Updated
 <!-- START_UPDATED -->
-2026-05-15 16:01:30 UTC
+2026-05-15 16:06:27 UTC
 <!-- END_UPDATED -->
