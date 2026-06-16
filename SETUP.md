@@ -37,12 +37,29 @@ This creates the `StarryBattleArchive` table used as an append-only time-series 
 
 > ⚠️ **One-time migration required.** Run `003_repurpose_tables.sql` in the Supabase SQL Editor **before the next ingest run** after deploying these changes. If you skip this step, the ingest will fail because the `username` unique constraint on `leaderboard_snapshots` won't exist yet.
 
+5. Paste the contents of [`supabase/migrations/004_c0ld_clan_snapshots.sql`](supabase/migrations/004_c0ld_clan_snapshots.sql) and click **Run**.
+
+This creates the newer canonical table, `c0ld_clan_snapshots`, for all future c0ld clan API pulls. It does not delete or rewrite the earlier tables; it lets the Cloudflare clan API Worker start writing one consolidated table while the site is migrated over safely.
+
+6. Paste the contents of [`supabase/migrations/006_c0ld_current_and_battles.sql`](supabase/migrations/006_c0ld_current_and_battles.sql) and click **Run**.
+
+This creates `c0ld_clan_current` as a real current-only table and `c0ld_battle_runs` for tracking battle keys/metadata.
+
+7. Paste the contents of [`supabase/migrations/007_c0ld_clans_leaderboard.sql`](supabase/migrations/007_c0ld_clans_leaderboard.sql) and click **Run**.
+
+This creates the separate all-clans leaderboard tables, `c0ld_clans_snapshots` and `c0ld_clans_current`.
+
 ### Tables
 
 | Table | Role | Write pattern |
 |---|---|---|
 | `leaderboard_snapshots` | **Current state only.** Always reflects the most recent run. Safe for any external service to query for "what does the leaderboard look like right now". | UPSERT on `username` — never grows beyond clan size. |
 | `StarryBattleArchive` | **Append-only time-series.** All historical snapshots, retained for 14 days. Used internally for hourly-gain and other rate calculations. | INSERT a fresh batch every run; rows older than 14 days are pruned. |
+| `c0ld_clan_snapshots` | **Canonical c0ld API table.** All new c0ld member API pulls across battles. | INSERT a fresh batch every Worker run, grouped by `snapshot_id`. |
+| `c0ld_clan_current` | **Current c0ld members only.** Replaced every Worker pull. | DELETE old rows, INSERT the newest snapshot batch. |
+| `c0ld_battle_runs` | **Battle metadata.** Tracks each API `battle_key`, first/last seen, and latest snapshot. | UPSERT by `clan_name,battle_key`. |
+| `c0ld_clans_snapshots` | **All-clans leaderboard history.** Separate from member data. | INSERT a fresh all-clans batch every Worker run. |
+| `c0ld_clans_current` | **Current all-clans leaderboard only.** | DELETE old rows, INSERT newest all-clans batch. |
 
 ---
 

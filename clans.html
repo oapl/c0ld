@@ -436,6 +436,7 @@
   <script>
     const TARGET_CLAN = "c0ld";
     const AUTO_REFRESH_MS = 60 * 1000;
+    const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
 
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
@@ -777,25 +778,45 @@
       renderTable();
     }
 
+    async function fetchJsonWithFallback(primaryUrl, fallbackUrl, label) {
+      try {
+        const primary = await fetch(`${primaryUrl}${primaryUrl.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+          cache: "no-store"
+        });
+
+        if (primary.ok) {
+          return primary.json();
+        }
+      } catch {
+      }
+
+      const fallback = await fetch(fallbackUrl, { cache: "no-store" });
+      if (!fallback.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${fallback.status}`);
+      }
+
+      return fallback.json();
+    }
+
     async function loadData() {
       const tbody = document.getElementById("clans-tbody");
 
       try {
         const cacheBust = Date.now();
 
-        const [currentRes, historyRes] = await Promise.all([
-          fetch(`Data/clans-current.json?v=${cacheBust}`, { cache: "no-store" }),
+        const [currentJson, historyRes] = await Promise.all([
+          fetchJsonWithFallback(
+            CLANS_API_CURRENT_URL,
+            `Data/clans-current.json?v=${cacheBust}`,
+            "live clans leaderboard"
+          ),
           fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
-        if (!currentRes.ok) {
-          throw new Error(`Could not load Data/clans-current.json. HTTP ${currentRes.status}`);
-        }
-
-        currentData = await currentRes.json();
+        currentData = currentJson;
 
         if (!currentData || !Array.isArray(currentData.rows)) {
-          throw new Error("Data/clans-current.json does not contain a rows array.");
+          throw new Error("Live clans leaderboard does not contain a rows array.");
         }
 
         if (historyRes.ok) {

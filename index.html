@@ -477,6 +477,7 @@
 
   <script>
     const AUTO_REFRESH_MS = 60 * 1000;
+    const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -1201,6 +1202,26 @@
       await renderAll();
     }
 
+    async function fetchJsonWithFallback(primaryUrl, fallbackUrl, label) {
+      try {
+        const primary = await fetch(`${primaryUrl}${primaryUrl.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+          cache: "no-store"
+        });
+
+        if (primary.ok) {
+          return primary.json();
+        }
+      } catch {
+      }
+
+      const fallback = await fetch(fallbackUrl, { cache: "no-store" });
+      if (!fallback.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${fallback.status}`);
+      }
+
+      return fallback.json();
+    }
+
     async function loadData() {
       if (isLoading) return;
       isLoading = true;
@@ -1210,21 +1231,21 @@
       try {
         const cacheBust = Date.now();
 
-        const [currentRes, battlesRes, playersRes, c0ldHistoryRes] = await Promise.all([
-          fetch(`Data/current.json?v=${cacheBust}`, { cache: "no-store" }),
+        const [currentJson, battlesRes, playersRes, c0ldHistoryRes] = await Promise.all([
+          fetchJsonWithFallback(
+            MEMBER_API_CURRENT_URL,
+            `Data/current.json?v=${cacheBust}`,
+            "live c0ld leaderboard"
+          ),
           fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/c0ld-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
-        if (!currentRes.ok) {
-          throw new Error(`Could not load Data/current.json. HTTP ${currentRes.status}`);
-        }
-
-        currentData = await currentRes.json();
+        currentData = currentJson;
 
         if (!currentData || !Array.isArray(currentData.rows)) {
-          throw new Error("Data/current.json does not contain a rows array.");
+          throw new Error("Live c0ld leaderboard does not contain a rows array.");
         }
 
         battles = battlesRes.ok ? await battlesRes.json() : [];
