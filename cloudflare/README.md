@@ -181,3 +181,118 @@ Useful endpoints:
 | `/api/clans/ingest` | Manual protected all-clans ingest. `POST` only. |
 | `/api/clans/current` | Latest all-clans leaderboard from Supabase. |
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
+
+## WMSY hourly Discord board
+
+`wmsy-hourly-worker.js` is the Discord image board Worker that posts the
+hourly clan activity graphic. Defaults are still WMSY:
+
+| Variable | Default |
+|---|---|
+| `CLAN_NAME` | `WMSY` |
+| `RUNS_TABLE` | `wmsy_hourly_runs` |
+| `MEMBERS_TABLE` | `wmsy_hourly_members` |
+| `CLAN_ICON_URL` | Optional fallback icon URL. |
+
+Required secrets:
+
+| Secret | Purpose |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Webhook to post the generated PNG. |
+| `CF_ACCOUNT_ID` | Cloudflare account ID for Browser Rendering. |
+| `CF_API_TOKEN` | Cloudflare API token with Browser Rendering access. |
+| `SUPABASE_URL` | Supabase project URL. |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key. |
+
+The Roblox username lookup now retries failed batches, includes banned users in
+the lookup response, tries individual user lookups for missing IDs, and falls
+back to the previous Supabase username/display name before showing a raw user
+ID. `/debug` includes `usernameLookupMisses` and `previousUsernameFallbacks`
+inside `board.summary`.
+
+## Servers Worker
+
+`c0ld-servers-worker.js` stores approved server rows, pending submissions, and
+server audit events in Supabase.
+
+Run this Supabase migration first:
+
+```text
+supabase/migrations/008_c0ld_servers.sql
+```
+
+Then create/deploy a Worker such as:
+
+```text
+c0ld-servers
+```
+
+Paste in:
+
+```text
+cloudflare/c0ld-servers-worker.js
+```
+
+Required secrets:
+
+| Secret | Purpose |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL. |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key. |
+| `SESSION_SECRET` | Same exact value used by the `c0ldauth` Worker. Allows Discord-verified submissions. |
+| `SERVERS_ADMIN_TOKEN` | Separate long random string for approving/declining submissions. |
+
+Optional vars:
+
+| Variable | Purpose |
+|---|---|
+| `SITE_ORIGINS` | `https://oapl.github.io` |
+| `SERVER_SUBMISSION_WEBHOOK_URL` | Private review-channel webhook. Uploaded video files are posted there and the returned Discord attachment URL is stored with the submission. |
+
+Useful endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/servers` | Public approved server rows for `servers.html` and `server.html`. |
+| `POST /api/servers/submit` | Discord-session-protected submission endpoint. |
+| `GET /api/admin/submissions?status=pending` | Admin list of pending submissions. |
+| `POST /api/admin/submissions/{id}/approve` | Admin approval. Updates the matching server row when the share code already exists. |
+| `POST /api/admin/submissions/{id}/decline` | Admin decline. |
+| `POST /api/admin/servers/{server_number}/players` | Admin/player-source endpoint to report current players. Logs `possible_compromised_server` when players are present but none match C0LD or WMSY. |
+
+Example approval:
+
+```powershell
+$token = "YOUR_SERVERS_ADMIN_TOKEN"
+$worker = "https://c0ld-servers.opal-dde.workers.dev"
+
+Invoke-RestMethod "$worker/api/admin/submissions?status=pending" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post "$worker/api/admin/submissions/SUBMISSION_ID/approve" `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body '{"reviewed_by":"opal"}'
+```
+
+Roblox server share links do not, by themselves, expose a reliable current
+player list to the static page. The Worker has the storage and annotation path
+ready, but the live player list still needs a trusted reporter/source to call
+`/api/admin/servers/{server_number}/players`.
+
+## Live Clan Lookup Worker
+
+`live-clan-lookup-worker.js` is a replacement for the current live clan lookup
+Worker used by `live-clan.html`. It returns the same payload shape, but also
+stores the latest successful lookup in Supabase and falls back to that cache
+if the upstream API is temporarily unavailable.
+
+Run this Supabase migration:
+
+```text
+supabase/migrations/009_live_clan_lookup_cache.sql
+```
+
+Then paste `cloudflare/live-clan-lookup-worker.js` into the existing
+`ps99-live-clan` Worker, or deploy a new Worker and update `WORKER_URL` in
+`live-clan.html`.

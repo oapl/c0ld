@@ -1,0 +1,17 @@
+name = "c0ld-servers"
+main = "c0ld-servers-worker.js"
+compatibility_date = "2026-06-16"
+
+[vars]
+SITE_ORIGINS = "https://oapl.github.io"
+PUBLIC_CACHE_SECONDS = "20"
+
+# Optional. If set, submitted video files are posted to this private review
+# channel and the returned Discord attachment URL is stored with the submission.
+SERVER_SUBMISSION_WEBHOOK_URL = ""
+
+# Secrets to add in Cloudflare:
+# SUPABASE_URL
+# SUPABASE_SERVICE_KEY
+# SESSION_SECRET          # same value as the c0ldauth Worker
+# SERVERS_ADMIN_TOKEN     # separate long random string for approve/decline/report endpoints

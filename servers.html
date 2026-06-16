@@ -23,6 +23,8 @@
       --danger-bg: rgba(248, 81, 73, 0.12);
       --ok: #3fb950;
       --ok-bg: rgba(63, 185, 80, 0.12);
+      --warn: #d29922;
+      --warn-bg: rgba(210, 153, 34, 0.12);
     }
 
     html, body {
@@ -277,7 +279,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 780px;
+      min-width: 920px;
     }
 
     th,
@@ -340,6 +342,37 @@
     }
 
     .player-pill.empty {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .clan-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 88px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+
+    .clan-pill.trusted {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .clan-pill.mixed,
+    .clan-pill.unknown {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
+    .clan-pill.possible_compromise {
       border-color: var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
@@ -469,7 +502,6 @@
         <div class="panel-header">
           <h2 class="panel-title">Approved Servers</h2>
           <div class="panel-actions">
-            <button id="copy-discord-btn" type="button">Copy Discord List</button>
             <button id="refresh-btn" type="button">Refresh</button>
           </div>
         </div>
@@ -482,13 +514,14 @@
                 <th data-sort="location">Location</th>
                 <th data-sort="link">Link</th>
                 <th data-sort="players" class="numeric">Players</th>
+                <th data-sort="status">Status</th>
                 <th data-sort="updated_at">Updated</th>
                 <th>Video</th>
               </tr>
             </thead>
             <tbody id="servers-body">
               <tr>
-                <td colspan="6" class="empty-state">Loading servers...</td>
+                <td colspan="7" class="empty-state">Loading servers...</td>
               </tr>
             </tbody>
           </table>
@@ -499,9 +532,12 @@
 
   <script src="assets/protected-access.js"></script>
   <script>
-    const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev/auth/discord/callback";
+    const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev";
+    const SERVERS_API_BASE = "https://c0ld-servers.opal-dde.workers.dev";
     const PAGE_KEY = "servers";
-    const SERVERS_DATA_PATH = "/protected/servers";
+    const SERVERS_DATA_PATH = "/api/servers";
+    const SERVERS_SUBMIT_PATH = "/api/servers/submit";
+    const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
 
@@ -581,7 +617,8 @@
         username: String(player.username || player.name || player.displayName || "Unknown"),
         display_name: String(player.display_name || player.displayName || ""),
         user_id: player.user_id || player.userId || player.id || null,
-        avatar_url: String(player.avatar_url || player.avatarUrl || "")
+        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
+        clan: String(player.clan || "")
       }));
     }
 
@@ -621,6 +658,9 @@
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
+          clan_counts: row.clan_counts || {},
+          compromise_status: String(row.compromise_status || row.status || "unknown"),
+          players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
           video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
@@ -656,88 +696,32 @@
     }
 
     function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "—" : row.location;
+      return getPlayerCount(row) === 0 ? "—" : (row.location || "—");
     }
 
-    function locationEmoji(location) {
-      const key = String(location || "").trim().toUpperCase();
-      const map = {
-        NA: ":flag_us:",
-        NORTHAMERICA: ":flag_us:",
-        US: ":flag_us:",
-        USA: ":flag_us:",
-        UNITEDSTATES: ":flag_us:",
-        UNITED_STATES: ":flag_us:",
-        EU: ":flag_eu:",
-        EUROPE: ":flag_eu:",
-        AS: ":earth_asia:",
-        ASIA: ":earth_asia:",
-        SA: ":earth_americas:",
-        SOUTHAMERICA: ":earth_americas:",
-        OC: ":flag_au:",
-        OCEANIA: ":flag_au:",
-        AF: ":earth_africa:",
-        AFRICA: ":earth_africa:",
-        FR: ":flag_fr:",
-        FRA: ":flag_fr:",
-        FRANCE: ":flag_fr:",
-        UK: ":flag_gb:",
-        GB: ":flag_gb:",
-        CA: ":flag_ca:",
-        CANADA: ":flag_ca:",
-        BR: ":flag_br:",
-        BRAZIL: ":flag_br:",
-        AU: ":flag_au:",
-        AUSTRALIA: ":flag_au:",
-        SG: ":flag_sg:",
-        SINGAPORE: ":flag_sg:"
-      };
+    function clanStatusLabel(row) {
+      const status = String(row.compromise_status || "unknown");
+      const counts = row.clan_counts || {};
+      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
+      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
+      const other = Number(counts.other || counts.OTHER || 0);
 
-      return map[key.replace(/[^A-Z]/g, "")] || "";
+      if (status === "empty") return "Empty";
+      if (status === "possible_compromise") return "Review";
+      if (c0ld || wmsy || other) {
+        const parts = [];
+        if (c0ld) parts.push(`C0LD ${c0ld}`);
+        if (wmsy) parts.push(`WMSY ${wmsy}`);
+        if (other) parts.push(`Other ${other}`);
+        return parts.join(" · ");
+      }
+      return "Unknown";
     }
 
-    function discordEmoji(row) {
-      const players = getPlayerCount(row);
-      if (players === 0) return discordConfig.empty_emoji || EMPTY_SERVER_EMOJI;
-      return row.discord_emoji || locationEmoji(row.location);
-    }
-
-    function buildDiscordLine(row) {
-      const label = `[Server ${row.rank}]`;
-      const players = getPlayerCount(row);
-      const maxPlayers = getMaxPlayers(row);
-      const emoji = discordEmoji(row);
-
-      if (players === 0) {
-        return `${label} ${emoji} Members: 0/${maxPlayers}`;
-      }
-
-      const count = players === null ? `?/${maxPlayers}` : `${players}/${maxPlayers}`;
-      const prefix = `${label}${emoji ? ` ${emoji}` : ""}`;
-
-      if (players !== null && players >= maxPlayers) {
-        return `${prefix} ${count}`;
-      }
-
-      return `${prefix} Members: ${count}`;
-    }
-
-    async function copyDiscordList() {
-      const lines = getVisibleServers().map(buildDiscordLine);
-
-      if (!lines.length) {
-        setStatus("No approved servers to copy.", "error");
-        return;
-      }
-
-      const text = lines.join("\n");
-
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Discord list copied.", "ok");
-      } catch {
-        setStatus(text, "info");
-      }
+    function clanStatusClass(row) {
+      const status = String(row.compromise_status || "unknown");
+      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
+      return "unknown";
     }
 
     function fmtDateTime(value) {
@@ -757,6 +741,11 @@
       list.sort((a, b) => {
         let av = sortKey === "location" ? displayLocation(a) : a[sortKey];
         let bv = sortKey === "location" ? displayLocation(b) : b[sortKey];
+
+        if (sortKey === "status") {
+          av = clanStatusLabel(a);
+          bv = clanStatusLabel(b);
+        }
 
         if (sortKey === "updated_at") {
           av = new Date(av || 0).getTime() || 0;
@@ -784,7 +773,7 @@
       const rows = getVisibleServers();
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No approved servers yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No approved servers yet.</td></tr>`;
         return;
       }
 
@@ -801,6 +790,7 @@
             <td>${htmlEscape(displayLocation(row))}</td>
             <td class="link-cell"><a href="${htmlEscape(row.link)}" target="_blank" rel="noopener">${htmlEscape(row.link)}</a></td>
             <td class="numeric"><span class="${playerClass}">${fmtPlayers(row)}</span></td>
+            <td><span class="clan-pill ${htmlEscape(clanStatusClass(row))}">${htmlEscape(clanStatusLabel(row))}</span></td>
             <td>${htmlEscape(fmtDateTime(row.updated_at))}</td>
             <td>${video}</td>
           </tr>
@@ -812,7 +802,7 @@
       clearStatus();
 
       try {
-        const res = await C0LD_AUTH.fetch(PROTECTED_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
+        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
 
         if (!res.ok) {
           throw new Error(`Could not load servers. HTTP ${res.status}`);
@@ -823,9 +813,17 @@
         renderServers();
       } catch (err) {
         console.error(err);
-        servers = [];
-        renderServers();
-        setStatus(err?.message || String(err), "error");
+        try {
+          const fallback = await fetch(`${SERVERS_STATIC_FALLBACK}?v=${Date.now()}`, { cache: "no-store" });
+          const payload = await fallback.json();
+          servers = dedupeServers(parseRows(payload));
+          renderServers();
+          setStatus("Loaded the seeded server list. Deploy the c0ld Servers Worker to enable submissions and live updates.", "info");
+        } catch {
+          servers = [];
+          renderServers();
+          setStatus(err?.message || String(err), "error");
+        }
       }
     }
 
@@ -839,7 +837,7 @@
         const form = event.currentTarget;
         const data = new FormData(form);
 
-        const res = await C0LD_AUTH.fetch(PROTECTED_API_BASE, SERVERS_DATA_PATH, {
+        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, SERVERS_SUBMIT_PATH, {
           method: "POST",
           body: data
         });
@@ -850,7 +848,8 @@
         }
 
         form.reset();
-        setStatus("Submission sent for review.", "ok");
+        const payload = await res.json().catch(() => ({}));
+        setStatus(payload.message || "Submission sent for review.", "ok");
         await loadServers();
       } catch (err) {
         console.error(err);
@@ -863,7 +862,6 @@
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
       document.getElementById("refresh-btn").addEventListener("click", loadServers);
-      document.getElementById("copy-discord-btn").addEventListener("click", copyDiscordList);
 
       document.querySelectorAll("th[data-sort]").forEach(th => {
         th.addEventListener("click", () => {

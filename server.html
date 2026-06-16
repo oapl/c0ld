@@ -23,6 +23,8 @@
       --danger-bg: rgba(248, 81, 73, 0.12);
       --ok: #3fb950;
       --ok-bg: rgba(63, 185, 80, 0.12);
+      --warn: #d29922;
+      --warn-bg: rgba(210, 153, 34, 0.12);
     }
 
     html, body {
@@ -218,13 +220,6 @@
       margin: 12px 0 16px;
     }
 
-    .discord-line {
-      color: var(--muted);
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-
     .video-wrap {
       margin-top: 16px;
       border-top: 1px solid var(--border);
@@ -339,6 +334,31 @@
       text-align: center;
     }
 
+    .clan-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 70px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+
+    .clan-pill.c0ld,
+    .clan-pill.wmsy {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .clan-pill.other {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
     @media (max-width: 700px) {
       header {
         padding: 14px 16px 10px;
@@ -409,7 +429,6 @@
         <h2 id="server-title" class="panel-title">Server</h2>
         <div class="panel-actions">
           <a class="button-link" href="servers.html">Back</a>
-          <button id="copy-discord-btn" type="button">Copy Discord Line</button>
           <button id="refresh-btn" type="button">Refresh</button>
         </div>
       </div>
@@ -439,8 +458,6 @@
           <a id="video-link" class="button-link" href="#" target="_blank" rel="noopener" hidden>Pathing Video</a>
         </div>
 
-        <div id="discord-line" class="discord-line"></div>
-
         <div id="video-wrap" class="video-wrap" hidden>
           <video id="pathing-video" controls playsinline></video>
         </div>
@@ -459,11 +476,12 @@
               <th>Player</th>
               <th>Display Name</th>
               <th>User ID</th>
+              <th>Clan</th>
             </tr>
           </thead>
           <tbody id="players-body">
             <tr>
-              <td colspan="3" class="empty-state">No player list available.</td>
+              <td colspan="4" class="empty-state">No player list available.</td>
             </tr>
           </tbody>
         </table>
@@ -473,9 +491,11 @@
 
   <script src="assets/protected-access.js"></script>
   <script>
-    const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev/auth/discord/callback";
+    const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev";
+    const SERVERS_API_BASE = "https://c0ld-servers.opal-dde.workers.dev";
     const PAGE_KEY = "servers";
-    const SERVERS_DATA_PATH = "/protected/servers";
+    const SERVERS_DATA_PATH = "/api/servers";
+    const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
 
@@ -554,7 +574,8 @@
         username: String(player.username || player.name || player.displayName || "Unknown"),
         display_name: String(player.display_name || player.displayName || ""),
         user_id: player.user_id || player.userId || player.id || null,
-        avatar_url: String(player.avatar_url || player.avatarUrl || "")
+        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
+        clan: String(player.clan || "")
       }));
     }
 
@@ -582,6 +603,9 @@
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
+          clan_counts: row.clan_counts || {},
+          compromise_status: String(row.compromise_status || row.status || "unknown"),
+          players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
           video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
@@ -617,70 +641,7 @@
     }
 
     function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "-" : row.location;
-    }
-
-    function locationEmoji(location) {
-      const key = String(location || "").trim().toUpperCase();
-      const map = {
-        NA: ":flag_us:",
-        NORTHAMERICA: ":flag_us:",
-        US: ":flag_us:",
-        USA: ":flag_us:",
-        UNITEDSTATES: ":flag_us:",
-        UNITED_STATES: ":flag_us:",
-        EU: ":flag_eu:",
-        EUROPE: ":flag_eu:",
-        AS: ":earth_asia:",
-        ASIA: ":earth_asia:",
-        SA: ":earth_americas:",
-        SOUTHAMERICA: ":earth_americas:",
-        OC: ":flag_au:",
-        OCEANIA: ":flag_au:",
-        AF: ":earth_africa:",
-        AFRICA: ":earth_africa:",
-        FR: ":flag_fr:",
-        FRA: ":flag_fr:",
-        FRANCE: ":flag_fr:",
-        UK: ":flag_gb:",
-        GB: ":flag_gb:",
-        CA: ":flag_ca:",
-        CANADA: ":flag_ca:",
-        BR: ":flag_br:",
-        BRAZIL: ":flag_br:",
-        AU: ":flag_au:",
-        AUSTRALIA: ":flag_au:",
-        SG: ":flag_sg:",
-        SINGAPORE: ":flag_sg:"
-      };
-
-      return map[key.replace(/[^A-Z]/g, "")] || "";
-    }
-
-    function discordEmoji(row) {
-      const players = getPlayerCount(row);
-      if (players === 0) return discordConfig.empty_emoji || EMPTY_SERVER_EMOJI;
-      return row.discord_emoji || locationEmoji(row.location);
-    }
-
-    function buildDiscordLine(row) {
-      const label = `[Server ${row.rank}]`;
-      const players = getPlayerCount(row);
-      const maxPlayers = getMaxPlayers(row);
-      const emoji = discordEmoji(row);
-
-      if (players === 0) {
-        return `${label} ${emoji} Members: 0/${maxPlayers}`;
-      }
-
-      const count = players === null ? `?/${maxPlayers}` : `${players}/${maxPlayers}`;
-      const prefix = `${label}${emoji ? ` ${emoji}` : ""}`;
-
-      if (players !== null && players >= maxPlayers) {
-        return `${prefix} ${count}`;
-      }
-
-      return `${prefix} Members: ${count}`;
+      return getPlayerCount(row) === 0 ? "-" : (row.location || "-");
     }
 
     function fmtDateTime(value) {
@@ -732,12 +693,24 @@
       }
     }
 
+    function clanLabel(player) {
+      const clan = String(player.clan || "").trim().toUpperCase();
+      if (clan === "C0LD") return "C0LD";
+      if (clan === "WMSY") return "WMSY";
+      return "Other";
+    }
+
+    function clanClass(player) {
+      const clan = String(player.clan || "").trim().toLowerCase();
+      return clan === "c0ld" || clan === "wmsy" ? clan : "other";
+    }
+
     function renderPlayers(row) {
       const tbody = document.getElementById("players-body");
       const players = row.players_list || [];
 
       if (!players.length) {
-        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No player list available.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No player list available.</td></tr>`;
         return;
       }
 
@@ -746,6 +719,7 @@
           <td>${htmlEscape(player.username)}</td>
           <td>${htmlEscape(player.display_name || "-")}</td>
           <td>${htmlEscape(player.user_id || "-")}</td>
+          <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
         </tr>
       `).join("");
     }
@@ -761,7 +735,6 @@
       document.getElementById("server-location").textContent = displayLocation(row);
       document.getElementById("server-players").textContent = fmtPlayers(row);
       document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at);
-      document.getElementById("discord-line").textContent = buildDiscordLine(row);
 
       const joinLink = document.getElementById("join-link");
       joinLink.href = row.link;
@@ -791,26 +764,13 @@
       renderPlayers(row);
     }
 
-    async function copyDiscordLine() {
-      if (!activeServer) return;
-
-      const text = buildDiscordLine(activeServer);
-
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Discord line copied.", "ok");
-      } catch {
-        setStatus(text, "info");
-      }
-    }
-
     async function loadServers() {
       setStatus("Loading server...", "info");
       document.getElementById("detail-panel").hidden = true;
       document.getElementById("players-panel").hidden = true;
 
       try {
-        const res = await C0LD_AUTH.fetch(PROTECTED_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
+        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
 
         if (!res.ok) {
           throw new Error(`Could not load servers. HTTP ${res.status}`);
@@ -828,12 +788,26 @@
         renderServer(row);
       } catch (err) {
         console.error(err);
-        setStatus(err?.message || String(err), "error");
+        try {
+          const fallback = await fetch(`${SERVERS_STATIC_FALLBACK}?v=${Date.now()}`, { cache: "no-store" });
+          const payload = await fallback.json();
+          servers = dedupeServers(parseRows(payload));
+          const row = getRequestedServer();
+
+          if (!row) {
+            setStatus("Server not found.", "error");
+            return;
+          }
+
+          renderServer(row);
+          setStatus("Loaded the seeded server list. Deploy the c0ld Servers Worker to enable live updates.", "info");
+        } catch {
+          setStatus(err?.message || String(err), "error");
+        }
       }
     }
 
     document.getElementById("refresh-btn").addEventListener("click", loadServers);
-    document.getElementById("copy-discord-btn").addEventListener("click", copyDiscordLine);
 
     async function initPage() {
       const auth = await C0LD_AUTH.requireAccess({

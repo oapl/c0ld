@@ -1,0 +1,12 @@
+name = "ps99-live-clan"
+main = "live-clan-lookup-worker.js"
+compatibility_date = "2026-06-16"
+
+[vars]
+SITE_ORIGINS = "https://oapl.github.io"
+PUBLIC_CACHE_SECONDS = "20"
+DEFAULT_CLAN_NAME = "c0ld"
+
+# Secrets to add in Cloudflare:
+# SUPABASE_URL
+# SUPABASE_SERVICE_KEY
