@@ -52,7 +52,7 @@
       max-width: 1280px;
       margin: 0 auto;
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: flex-start;
       gap: 18px;
       flex-wrap: wrap;
@@ -69,7 +69,6 @@
       font-size: 13px;
     }
 
-    .github-btn,
     .button-link,
     button {
       display: inline-block;
@@ -84,11 +83,6 @@
       transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     }
 
-    .github-btn {
-      padding: 8px 13px;
-    }
-
-    .github-btn:hover,
     .button-link:hover,
     button:hover {
       background: var(--hover);
@@ -349,7 +343,6 @@
         <div class="subtitle">Pet Simulator 99 &middot; Clan battle dashboard</div>
       </div>
 
-      <a class="github-btn" href="https://github.com/oapl/c0ld" target="_blank" rel="noopener">GitHub</a>
     </div>
 
     <div class="menu-bar">
@@ -581,12 +574,21 @@
       const key = String(location || "").trim().toUpperCase();
       const map = {
         NA: ":flag_us:",
+        NORTHAMERICA: ":flag_us:",
         US: ":flag_us:",
         USA: ":flag_us:",
         UNITEDSTATES: ":flag_us:",
         UNITED_STATES: ":flag_us:",
         EU: ":flag_eu:",
         EUROPE: ":flag_eu:",
+        AS: ":earth_asia:",
+        ASIA: ":earth_asia:",
+        SA: ":earth_americas:",
+        SOUTHAMERICA: ":earth_americas:",
+        OC: ":flag_au:",
+        OCEANIA: ":flag_au:",
+        AF: ":earth_africa:",
+        AFRICA: ":earth_africa:",
         FR: ":flag_fr:",
         FRA: ":flag_fr:",
         FRANCE: ":flag_fr:",

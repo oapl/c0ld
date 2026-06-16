@@ -52,7 +52,7 @@
       max-width: 1280px;
       margin: 0 auto;
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: flex-start;
       gap: 18px;
       flex-wrap: wrap;
@@ -67,21 +67,6 @@
     .subtitle {
       color: var(--muted);
       font-size: 13px;
-    }
-
-    .github-btn {
-      display: inline-block;
-      padding: 8px 13px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-2);
-      white-space: nowrap;
-      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    }
-
-    .github-btn:hover {
-      background: var(--hover);
-      border-color: var(--link);
     }
 
     .menu-bar {
@@ -156,21 +141,33 @@
 
     .submission-form {
       display: grid;
-      grid-template-columns: minmax(120px, 0.6fr) minmax(240px, 1.5fr) minmax(220px, 1.2fr) auto;
-      gap: 10px;
+      grid-template-columns: minmax(150px, 0.75fr) minmax(260px, 1.35fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+      gap: 12px;
       padding: 16px;
-      align-items: center;
+      align-items: end;
     }
 
-    .upload-row {
-      grid-column: 1 / -1;
+    .field {
       display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .form-note {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 13px;
     }
 
     input,
+    select,
     button {
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -183,13 +180,24 @@
     }
 
     input:focus,
+    select:focus,
     button:hover {
       border-color: var(--link);
       background: var(--hover);
     }
 
+    select {
+      appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      padding-right: 32px;
+    }
+
     input[type="file"] {
-      max-width: 360px;
+      width: 100%;
+      min-height: 39px;
     }
 
     button {
@@ -323,7 +331,8 @@
       }
 
       .submission-form button,
-      .submission-form input {
+      .submission-form input,
+      .submission-form select {
         width: 100%;
       }
     }
@@ -356,7 +365,6 @@
         <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
       </div>
 
-      <a class="github-btn" href="https://github.com/oapl/c0ld" target="_blank" rel="noopener">GitHub</a>
     </div>
 
     <div class="menu-bar">
@@ -374,15 +382,36 @@
       </div>
 
       <form id="server-form" class="submission-form">
-        <input id="location-input" name="location" placeholder="Server Location (NA, EU, etc)" autocomplete="off" required />
-        <input id="server-link-input" name="server_link" placeholder="Server Link" autocomplete="off" required />
-        <input id="pathing-video-input" name="pathing_video" placeholder="Pathing Video" autocomplete="off" />
+        <div class="field">
+          <label for="location-input">Server Region</label>
+          <select id="location-input" name="location" required>
+            <option value="NA">North America</option>
+            <option value="EU">Europe</option>
+            <option value="AS">Asia</option>
+            <option value="SA">South America</option>
+            <option value="OC">Oceania</option>
+            <option value="AF">Africa</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="server-link-input">Server Link</label>
+          <input id="server-link-input" name="server_link" placeholder="https://..." autocomplete="off" required />
+        </div>
+
+        <div class="field">
+          <label for="video-upload-input">Pathing Video Upload</label>
+          <input id="video-upload-input" name="video_file" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" />
+        </div>
+
+        <div class="field">
+          <label for="pathing-video-input">Pathing Video URL</label>
+          <input id="pathing-video-input" name="pathing_video" placeholder="Optional video link" autocomplete="off" />
+        </div>
+
         <button id="submit-btn" type="submit">Submit</button>
 
-        <div class="upload-row">
-          <input id="video-upload-input" name="video_file" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" />
-          <span class="muted">Submissions are reviewed before appearing.</span>
-        </div>
+        <div class="form-note">Submissions are reviewed before appearing.</div>
       </form>
     </section>
 
@@ -583,12 +612,21 @@
       const key = String(location || "").trim().toUpperCase();
       const map = {
         NA: ":flag_us:",
+        NORTHAMERICA: ":flag_us:",
         US: ":flag_us:",
         USA: ":flag_us:",
         UNITEDSTATES: ":flag_us:",
         UNITED_STATES: ":flag_us:",
         EU: ":flag_eu:",
         EUROPE: ":flag_eu:",
+        AS: ":earth_asia:",
+        ASIA: ":earth_asia:",
+        SA: ":earth_americas:",
+        SOUTHAMERICA: ":earth_americas:",
+        OC: ":flag_au:",
+        OCEANIA: ":flag_au:",
+        AF: ":earth_africa:",
+        AFRICA: ":earth_africa:",
         FR: ":flag_fr:",
         FRA: ":flag_fr:",
         FRANCE: ":flag_fr:",
