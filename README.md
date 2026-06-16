@@ -1,10 +1,6 @@
 # c0ld_Leaderboard
 
-Leaderboard Page: https://opalapocalypse.github.io/c0ld_Leaderboard/
-
-<img width="449" height="378" alt="image" src="https://github.com/user-attachments/assets/76bb0823-d0c0-4e65-a329-3d6aece55ed7" />
-
-First and foremost, I'm **_tired_**.
+Leaderboard Page: https://opalapocalypse.github.io/c0ld/
 
 I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
 
