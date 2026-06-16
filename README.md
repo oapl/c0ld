@@ -1,8 +1,6 @@
 # c0ld_Leaderboard
 
-=======
 Leaderboard Page: https://oapl.github.io/c0ld/
->>>>>>> f5f22bc461a69dc5a92459411dd6ddbda3f9ac93
 
 I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
 
