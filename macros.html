@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Macros</title>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle,
+    .muted {
+      color: var(--muted);
+    }
+
+    .subtitle {
+      font-size: 13px;
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn,
+    .auth-button,
+    button {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .menu-btn {
+      padding: 7px 12px;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .menu-btn:hover,
+    .auth-button:hover,
+    button:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      color: var(--link);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .panel,
+    .status {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .panel[hidden],
+    .status[hidden],
+    .protected-content[hidden],
+    .auth-panel[hidden] {
+      display: none;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .auth-panel {
+      padding: 18px;
+    }
+
+    .auth-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .auth-button,
+    button {
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .status {
+      padding: 14px 16px;
+    }
+
+    .status.info {
+      color: var(--text);
+    }
+
+    .status.error {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .title-cell {
+      font-weight: 700;
+    }
+
+    .description-cell {
+      max-width: 520px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 28px 16px;
+      text-align: center;
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 24px;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Macros</h1>
+        <div class="subtitle">Pet Simulator 99 &middot; Clan battle dashboard</div>
+      </div>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
+      <a class="menu-btn active" href="macros.html">Macros</a>
+    </div>
+  </header>
+
+  <main>
+    <section id="auth-panel" class="panel auth-panel">
+      <h2 class="panel-title">Discord Access Required</h2>
+      <p id="auth-status" class="muted">Checking Discord access...</p>
+      <div class="auth-actions">
+        <a id="discord-login-btn" class="auth-button" href="#">Sign in with Discord</a>
+        <button id="discord-logout-btn" type="button">Clear Session</button>
+        <span id="discord-user" class="muted"></span>
+      </div>
+    </section>
+
+    <div id="protected-content" class="protected-content" hidden>
+      <div id="status" class="status info" hidden></div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Approved Macros</h2>
+          <div class="panel-actions">
+            <button id="refresh-btn" type="button">Refresh</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Macro</th>
+                <th>Description</th>
+                <th>Link</th>
+                <th>Video</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="macros-body">
+              <tr>
+                <td colspan="5" class="empty-state">Loading macros...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="assets/protected-access.js"></script>
+  <script>
+    const PROTECTED_API_BASE = "https://c0ld-auth.YOUR-SUBDOMAIN.workers.dev";
+    const PAGE_KEY = "macros";
+    const MACROS_DATA_PATH = "/protected/macros";
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setStatus(message, kind = "info") {
+      const el = document.getElementById("status");
+      el.hidden = false;
+      el.className = `status ${kind}`;
+      el.textContent = message;
+    }
+
+    function hideStatus() {
+      const el = document.getElementById("status");
+      el.hidden = true;
+      el.textContent = "";
+    }
+
+    function parseRows(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.rows)) return payload.rows;
+      if (Array.isArray(payload?.macros)) return payload.macros;
+      return [];
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "-";
+
+      return date.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+    }
+
+    function renderMacros(rows) {
+      const tbody = document.getElementById("macros-body");
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No approved macros yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(row => {
+        const link = row.link || row.url || "";
+        const video = row.video_url || row.video || "";
+
+        return `
+          <tr>
+            <td class="title-cell">${htmlEscape(row.title || row.name || "Macro")}</td>
+            <td class="description-cell">${htmlEscape(row.description || "-")}</td>
+            <td>${link ? `<a href="${htmlEscape(link)}" target="_blank" rel="noopener">Open</a>` : "-"}</td>
+            <td>${video ? `<a href="${htmlEscape(video)}" target="_blank" rel="noopener">Open</a>` : "-"}</td>
+            <td>${htmlEscape(fmtDateTime(row.updated_at || row.created_at))}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadMacros() {
+      hideStatus();
+
+      try {
+        const res = await C0LD_AUTH.fetch(PROTECTED_API_BASE, `${MACROS_DATA_PATH}?v=${Date.now()}`);
+
+        if (!res.ok) {
+          throw new Error(`Could not load macros. HTTP ${res.status}`);
+        }
+
+        renderMacros(parseRows(await res.json()));
+      } catch (err) {
+        console.error(err);
+        renderMacros([]);
+        setStatus(err?.message || String(err), "error");
+      }
+    }
+
+    async function initPage() {
+      document.getElementById("refresh-btn").addEventListener("click", loadMacros);
+
+      const auth = await C0LD_AUTH.requireAccess({
+        apiBase: PROTECTED_API_BASE,
+        page: PAGE_KEY,
+        panelId: "auth-panel",
+        contentId: "protected-content",
+        statusId: "auth-status",
+        loginId: "discord-login-btn",
+        logoutId: "discord-logout-btn",
+        userId: "discord-user"
+      });
+
+      if (auth.allowed) {
+        await loadMacros();
+      }
+    }
+
+    initPage();
+  </script>
+</body>
+</html>

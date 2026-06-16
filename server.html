@@ -264,6 +264,41 @@
       color: #ffb4ad;
     }
 
+    .auth-panel {
+      padding: 18px;
+    }
+
+    .auth-panel[hidden] {
+      display: none;
+    }
+
+    .auth-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .auth-button {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1;
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .auth-button:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      color: var(--link);
+    }
+
     .table-wrap {
       overflow-x: auto;
     }
@@ -350,11 +385,24 @@
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn active" href="servers.html">Servers</a>
+      <a class="menu-btn" href="macros.html">Macros</a>
     </div>
   </header>
 
   <main>
-    <div id="status" class="status info">Loading server...</div>
+    <section id="auth-panel" class="panel auth-panel">
+      <h2 class="panel-title">Discord Access Required</h2>
+      <p id="auth-status" class="muted">Checking Discord access...</p>
+      <div class="auth-actions">
+        <a id="discord-login-btn" class="auth-button" href="#">Sign in with Discord</a>
+        <button id="discord-logout-btn" type="button">Clear Session</button>
+        <span id="discord-user" class="muted"></span>
+      </div>
+    </section>
+
+    <div id="protected-content" hidden></div>
+
+    <div id="status" class="status info" hidden></div>
 
     <section id="detail-panel" class="panel" hidden>
       <div class="panel-header">
@@ -423,9 +471,11 @@
     </section>
   </main>
 
+  <script src="assets/protected-access.js"></script>
   <script>
-    const SERVERS_API_URL = "";
-    const FALLBACK_DATA_URL = "Data/servers.json";
+    const PROTECTED_API_BASE = "https://c0ld-auth.YOUR-SUBDOMAIN.workers.dev";
+    const PAGE_KEY = "servers";
+    const SERVERS_DATA_PATH = "/protected/servers";
     const DEFAULT_MAX_PLAYERS = 10;
     const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
 
@@ -760,10 +810,7 @@
       document.getElementById("players-panel").hidden = true;
 
       try {
-        const url = SERVERS_API_URL || FALLBACK_DATA_URL;
-        const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-          cache: "no-store"
-        });
+        const res = await C0LD_AUTH.fetch(PROTECTED_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
 
         if (!res.ok) {
           throw new Error(`Could not load servers. HTTP ${res.status}`);
@@ -787,7 +834,25 @@
 
     document.getElementById("refresh-btn").addEventListener("click", loadServers);
     document.getElementById("copy-discord-btn").addEventListener("click", copyDiscordLine);
-    loadServers();
+
+    async function initPage() {
+      const auth = await C0LD_AUTH.requireAccess({
+        apiBase: PROTECTED_API_BASE,
+        page: PAGE_KEY,
+        panelId: "auth-panel",
+        contentId: "protected-content",
+        statusId: "auth-status",
+        loginId: "discord-login-btn",
+        logoutId: "discord-logout-btn",
+        userId: "discord-user"
+      });
+
+      if (auth.allowed) {
+        await loadServers();
+      }
+    }
+
+    initPage();
   </script>
 </body>
 </html>

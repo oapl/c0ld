@@ -1,0 +1,44 @@
+name = "c0ld-auth"
+main = "discord-auth-worker.js"
+compatibility_date = "2026-06-16"
+
+[vars]
+DISCORD_CLIENT_ID = "YOUR_DISCORD_APPLICATION_CLIENT_ID"
+DISCORD_REDIRECT_URI = "https://c0ld-auth.YOUR-SUBDOMAIN.workers.dev/auth/discord/callback"
+DISCORD_GUILD_ID = "YOUR_C0LD_DISCORD_SERVER_ID"
+SITE_BASE_URL = "https://oapl.github.io/c0ld"
+SESSION_TTL_SECONDS = "43200"
+
+# Optional. If omitted, the Worker uses placeholder rows.
+# Use private storage or a private backend URL here for real protected data.
+SERVERS_DATA_URL = ""
+MACROS_DATA_URL = ""
+
+# Optional. Sends server submissions to a private Discord review channel.
+SERVER_SUBMISSION_WEBHOOK_URL = ""
+
+# Optional. If set, the Worker re-checks current Discord roles on each request.
+# Store this as a secret in production instead of in wrangler.toml.
+DISCORD_BOT_TOKEN = ""
+
+# Toggle page access rules here without editing frontend code.
+# mode values:
+# - none: public
+# - any: user must have at least one listed role
+# - all: user must have every listed role
+PAGE_ACCESS_JSON = '''
+{
+  "servers": {
+    "mode": "any",
+    "roles": ["1489032328855556096", "1501632370082840576"]
+  },
+  "macros": {
+    "mode": "any",
+    "roles": ["1489032328855556096", "1501632370082840576"]
+  }
+}
+'''
+
+# Set these with `wrangler secret put ...`
+# DISCORD_CLIENT_SECRET
+# SESSION_SECRET

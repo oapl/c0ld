@@ -1,2 +1,14 @@
-servers.html
+.github\workflows\deploy-pages.yml
+assets\protected-access.js
+cloudflare\discord-auth-worker.js
+cloudflare\wrangler.toml.example
+cloudflare\README.md
+clans.html
+index.html
+live-clan.html
+macros.html
+players.html
+profile.html
 server.html
+servers.html
+top-clan-thresholds.html
