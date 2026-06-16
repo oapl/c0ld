@@ -1,4 +1,4 @@
-# c0ld_Leaderboard
+# c0ld
 
 Leaderboard Page: https://oapl.github.io/c0ld/
 

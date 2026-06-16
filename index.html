@@ -8,15 +8,15 @@
   <meta property="og:title" content="c0ld Leaderboard" />
   <meta property="og:description" content="Pet Simulator 99 c0ld clan leaderboard, member stats, clan history, and battle projections." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://opalapocalypse.github.io/c0ld_Leaderboard/" />
-  <meta property="og:image" content="https://opalapocalypse.github.io/c0ld_Leaderboard/assets/preview.png" />
+  <meta property="og:url" content="https://oapl.github.io/c0ld/" />
+  <meta property="og:image" content="https://oapl.github.io/c0ld/assets/preview.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="c0ld Leaderboard" />
   <meta name="twitter:description" content="Pet Simulator 99 c0ld clan leaderboard, member stats, clan history, and battle projections." />
-  <meta name="twitter:image" content="https://opalapocalypse.github.io/c0ld_Leaderboard/assets/preview.png" />
+  <meta name="twitter:image" content="https://oapl.github.io/c0ld/assets/preview.png" />
 
   <style>
     *, *::before, *::after {
@@ -404,16 +404,14 @@
         <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
       </div>
 
-      <a class="github-btn" href="https://github.com/OpalApocalypse/c0ld_Leaderboard" target="_blank" rel="noopener">GitHub</a>
+      <a class="github-btn" href="https://github.com/oapl/c0ld" target="_blank" rel="noopener">GitHub</a>
     </div>
 
     <div class="menu-bar">
       <button class="menu-btn active" id="tab-btn-leaderboard" type="button">c0ld Leaderboard</button>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
-      <a class="menu-btn" href="players.html">Player Profiles</a>
-      <button class="menu-btn" id="tab-btn-history" type="button">c0ld History</button>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-      <a class="menu-btn" href="top-clan-thresholds.html">Top Clan Filter</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
     </div>
   </header>
 
@@ -474,53 +472,6 @@
       </div>
     </section>
 
-    <section id="view-history" class="panel hidden">
-      <div class="panel-header">
-        <h2 class="panel-title">Clan History</h2>
-      </div>
-
-      <div class="history-note">
-        <br>
-        c0ld was created on 2023-12-01 @ 20:31:08 UTC 👵
-      </div>
-
-      <div class="history-stats" id="history-stats">
-        <div class="history-stat">
-          <div class="history-stat-label">CB Participation</div>
-          <div class="history-stat-value" id="stat-participation">—</div>
-        </div>
-
-        <div class="history-stat">
-          <div class="history-stat-label">Top 10 Placements</div>
-          <div class="history-stat-value" id="stat-top-10">—</div>
-        </div>
-
-        <div class="history-stat">
-          <div class="history-stat-label">Top 30 Placements</div>
-          <div class="history-stat-value" id="stat-top-30">—</div>
-        </div>
-
-        <div class="history-stat">
-          <div class="history-stat-label">Top 100 Placements</div>
-          <div class="history-stat-value" id="stat-top-100">—</div>
-        </div>
-      </div>
-
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th data-history-sort="update_number">Update #</th>
-              <th data-history-sort="display_name">Battle</th>
-              <th data-history-sort="placement">Placement</th>
-              <th data-history-sort="first_snapshot">Start</th>
-              <th data-history-sort="last_snapshot">End</th>
-            </tr>
-          </thead>
-          <tbody id="history-body"></tbody>
-        </table>
-      </div>
-    </section>
   </main>
 
   <script>
@@ -774,6 +725,8 @@
     }
 
     function renderHistoryStats() {
+      if (!document.getElementById("stat-participation")) return;
+
       const stats = calculateHistoryStats();
 
       document.getElementById("stat-participation").textContent =
@@ -1090,6 +1043,8 @@
 
     function renderHistoryTable() {
       const tbody = document.getElementById("history-body");
+      if (!tbody) return;
+
       const visible = getVisibleHistory();
 
       tbody.innerHTML = "";
@@ -1169,14 +1124,14 @@
       const leaderboardView = document.getElementById("view-leaderboard");
       const historyView = document.getElementById("view-history");
       const leaderboardBtn = document.getElementById("tab-btn-leaderboard");
-      const historyBtn = document.getElementById("tab-btn-history");
 
-      const showHistory = window.location.hash === "#history";
+      if (window.location.hash) {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
 
-      leaderboardView.classList.toggle("hidden", showHistory);
-      historyView.classList.toggle("hidden", !showHistory);
-      leaderboardBtn.classList.toggle("active", !showHistory);
-      historyBtn.classList.toggle("active", showHistory);
+      leaderboardView.classList.remove("hidden");
+      if (historyView) historyView.classList.add("hidden");
+      leaderboardBtn.classList.add("active");
     }
 
     function startCountdown(endValue) {
@@ -1316,11 +1271,6 @@
 
       document.getElementById("tab-btn-leaderboard").addEventListener("click", () => {
         window.location.hash = "";
-        updateView();
-      });
-
-      document.getElementById("tab-btn-history").addEventListener("click", () => {
-        window.location.hash = "history";
         updateView();
       });
 

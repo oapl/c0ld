@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Servers</title>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --ok: #3fb950;
+      --ok-bg: rgba(63, 185, 80, 0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: none;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .github-btn {
+      display: inline-block;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .github-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .panel,
+    .status {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .submission-form {
+      display: grid;
+      grid-template-columns: minmax(120px, 0.6fr) minmax(240px, 1.5fr) minmax(220px, 1.2fr) auto;
+      gap: 10px;
+      padding: 16px;
+      align-items: center;
+    }
+
+    .upload-row {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input,
+    button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    input:focus,
+    button:hover {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    input[type="file"] {
+      max-width: 360px;
+    }
+
+    button {
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .status {
+      display: none;
+      padding: 14px 16px;
+    }
+
+    .status.info {
+      display: block;
+      color: var(--text);
+    }
+
+    .status.ok {
+      display: block;
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .status.error {
+      display: block;
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th:hover {
+      color: var(--text);
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .link-cell {
+      max-width: 430px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 28px 16px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .submission-form {
+        grid-template-columns: 1fr;
+      }
+
+      .submission-form button,
+      .submission-form input {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 24px;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Servers</h1>
+        <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
+      </div>
+
+      <a class="github-btn" href="https://github.com/oapl/c0ld" target="_blank" rel="noopener">GitHub</a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn active" href="servers.html">Servers</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Submit Server</h2>
+      </div>
+
+      <form id="server-form" class="submission-form">
+        <input id="location-input" name="location" placeholder="Server Location (NA, EU, etc)" autocomplete="off" required />
+        <input id="server-link-input" name="server_link" placeholder="Server Link" autocomplete="off" required />
+        <input id="pathing-video-input" name="pathing_video" placeholder="Pathing Video" autocomplete="off" />
+        <button id="submit-btn" type="submit">Submit</button>
+
+        <div class="upload-row">
+          <input id="video-upload-input" name="video_file" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" />
+          <span class="muted">Submissions are reviewed before appearing.</span>
+        </div>
+      </form>
+    </section>
+
+    <div id="status" class="status"></div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Approved Servers</h2>
+        <button id="refresh-btn" type="button">Refresh</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="location">Location</th>
+              <th data-sort="link">Link</th>
+              <th data-sort="players" class="numeric">Players</th>
+              <th data-sort="updated_at">Updated</th>
+              <th>Video</th>
+            </tr>
+          </thead>
+          <tbody id="servers-body">
+            <tr>
+              <td colspan="5" class="empty-state">Loading servers...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const SERVERS_API_URL = "";
+    const FALLBACK_DATA_URL = "Data/servers.json";
+
+    let servers = [];
+    let sortKey = "location";
+    let sortAsc = true;
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function normalizeLink(value) {
+      return String(value || "")
+        .trim()
+        .replace(/#.*$/, "")
+        .replace(/[?&]_=\d+$/, "")
+        .replace(/\/+$/, "")
+        .toLowerCase();
+    }
+
+    function setStatus(message, kind = "info") {
+      const el = document.getElementById("status");
+      el.className = `status ${kind}`;
+      el.textContent = message;
+    }
+
+    function clearStatus() {
+      const el = document.getElementById("status");
+      el.className = "status";
+      el.textContent = "";
+    }
+
+    function parseRows(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.rows)) return payload.rows;
+      if (Array.isArray(payload?.servers)) return payload.servers;
+      return [];
+    }
+
+    function dedupeServers(rows) {
+      const byLink = new Map();
+
+      for (const row of rows) {
+        const link = String(row.server_link || row.link || "").trim();
+        const key = normalizeLink(link);
+        if (!key) continue;
+
+        const normalized = {
+          location: String(row.location || row.region || "").trim() || "Unknown",
+          link,
+          players: Number.isFinite(Number(row.players)) ? Number(row.players) : null,
+          video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
+          updated_at: row.updated_at || row.submitted_at || row.created_at || null
+        };
+
+        const existing = byLink.get(key);
+        if (!existing) {
+          byLink.set(key, normalized);
+          continue;
+        }
+
+        const existingTime = new Date(existing.updated_at || 0).getTime() || 0;
+        const nextTime = new Date(normalized.updated_at || 0).getTime() || 0;
+        byLink.set(key, nextTime >= existingTime ? { ...existing, ...normalized } : existing);
+      }
+
+      return [...byLink.values()];
+    }
+
+    function fmtPlayers(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      const n = Number(value);
+      if (Number.isNaN(n)) return "—";
+      return n.toLocaleString("en-US");
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "—";
+
+      return date.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+    }
+
+    function getVisibleServers() {
+      const list = servers.slice();
+
+      list.sort((a, b) => {
+        let av = a[sortKey];
+        let bv = b[sortKey];
+
+        if (sortKey === "updated_at") {
+          av = new Date(av || 0).getTime() || 0;
+          bv = new Date(bv || 0).getTime() || 0;
+        }
+
+        const an = Number(av);
+        const bn = Number(bv);
+        let result;
+
+        if (!Number.isNaN(an) && !Number.isNaN(bn)) {
+          result = an - bn;
+        } else {
+          result = String(av || "").localeCompare(String(bv || ""));
+        }
+
+        return sortAsc ? result : -result;
+      });
+
+      return list;
+    }
+
+    function renderServers() {
+      const tbody = document.getElementById("servers-body");
+      const rows = getVisibleServers();
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No approved servers yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(row => {
+        const video = row.video_url
+          ? `<a href="${htmlEscape(row.video_url)}" target="_blank" rel="noopener">Open</a>`
+          : "—";
+
+        return `
+          <tr>
+            <td>${htmlEscape(row.location)}</td>
+            <td class="link-cell"><a href="${htmlEscape(row.link)}" target="_blank" rel="noopener">${htmlEscape(row.link)}</a></td>
+            <td class="numeric">${fmtPlayers(row.players)}</td>
+            <td>${htmlEscape(fmtDateTime(row.updated_at))}</td>
+            <td>${video}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadServers() {
+      clearStatus();
+
+      try {
+        const url = SERVERS_API_URL || FALLBACK_DATA_URL;
+        const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+          cache: "no-store"
+        });
+
+        if (!res.ok) {
+          throw new Error(`Could not load servers. HTTP ${res.status}`);
+        }
+
+        const payload = await res.json();
+        servers = dedupeServers(parseRows(payload));
+        renderServers();
+      } catch (err) {
+        console.error(err);
+        servers = [];
+        renderServers();
+        setStatus(err?.message || String(err), "error");
+      }
+    }
+
+    async function submitServer(event) {
+      event.preventDefault();
+
+      if (!SERVERS_API_URL) {
+        setStatus("Submission endpoint is not configured yet.", "error");
+        return;
+      }
+
+      const submitBtn = document.getElementById("submit-btn");
+      submitBtn.disabled = true;
+
+      try {
+        const form = event.currentTarget;
+        const data = new FormData(form);
+
+        const res = await fetch(SERVERS_API_URL, {
+          method: "POST",
+          body: data
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `Submission failed. HTTP ${res.status}`);
+        }
+
+        form.reset();
+        setStatus("Submission sent for review.", "ok");
+        await loadServers();
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || String(err), "error");
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    function wireEvents() {
+      document.getElementById("server-form").addEventListener("submit", submitServer);
+      document.getElementById("refresh-btn").addEventListener("click", loadServers);
+
+      document.querySelectorAll("th[data-sort]").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.dataset.sort;
+
+          if (sortKey === key) {
+            sortAsc = !sortAsc;
+          } else {
+            sortKey = key;
+            sortAsc = key !== "players" && key !== "updated_at";
+          }
+
+          renderServers();
+        });
+      });
+    }
+
+    wireEvents();
+    loadServers();
+  </script>
+</body>
+</html>

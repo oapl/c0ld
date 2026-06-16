@@ -309,7 +309,7 @@
       </div>
 
       <a class="github-btn"
-         href="https://github.com/OpalApocalypse/c0ld_Leaderboard"
+         href="https://github.com/oapl/c0ld"
          target="_blank"
          rel="noopener">GitHub</a>
     </div>
@@ -317,10 +317,8 @@
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
-      <a class="menu-btn" href="players.html">Player Profiles</a>
-      <a class="menu-btn" href="index.html#history">Clan History</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-      <a class="menu-btn active" href="top-clan-thresholds.html">Top Clan Filter</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
     </div>
   </header>
 
@@ -752,11 +750,16 @@
 
     function wireEvents() {
       document.getElementById("refresh-btn").addEventListener("click", loadThresholds);
-      document.getElementById("post-btn").addEventListener("click", postThresholds);
-      document.getElementById("post-image-btn").addEventListener("click", postThresholdImageBoard);
+
+      const postBtn = document.getElementById("post-btn");
+      if (postBtn) postBtn.addEventListener("click", postThresholds);
+
+      const postImageBtn = document.getElementById("post-image-btn");
+      if (postImageBtn) postImageBtn.addEventListener("click", postThresholdImageBoard);
 
       ["top-input", "high-input", "low-input"].forEach(id => {
         const el = document.getElementById(id);
+        if (!el) return;
 
         el.addEventListener("keydown", e => {
           if (e.key === "Enter") {

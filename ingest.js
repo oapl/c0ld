@@ -53,7 +53,7 @@ const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 const EMBED_COLOR = 0xf5a623;
 
 const SPACER_IMAGE_URL_BASE =
-  "https://raw.githubusercontent.com/OpalApocalypse/c0ld_Leaderboard/main/assets/embed-spacer.png";
+  "https://raw.githubusercontent.com/oapl/c0ld/main/assets/embed-spacer.png";
 
 const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
@@ -429,7 +429,7 @@ ${after}`;
 }
 
 function cleanupReadmePreamble(readme) {
-  const canonicalHeader = "# c0ld_Leaderboard";
+  const canonicalHeader = "# c0ld";
   const idx = readme.indexOf(canonicalHeader);
 
   if (idx > 0) {
