@@ -1,15 +1,5 @@
 # c0ld_Leaderboard
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-Leaderboard Page: https://opalapocalypse.github.io/c0ld_Leaderboard/
-=======
-Leaderboard Page: https://oapl.github.io/NONG_Leaderboard/
->>>>>>> 2e067be316b18c1111710a53182523c345d7b988
-
-<img width="449" height="378" alt="image" src="https://github.com/user-attachments/assets/76bb0823-d0c0-4e65-a329-3d6aece55ed7" />
-
-First and foremost, I'm **_tired_**.
 =======
 Leaderboard Page: https://oapl.github.io/c0ld/
 >>>>>>> f5f22bc461a69dc5a92459411dd6ddbda3f9ac93
