@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Server Details</title>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --ok: #3fb950;
+      --ok-bg: rgba(63, 185, 80, 0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: none;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .title-wrap h1 {
+      margin: 0 0 3px;
+      font-size: 27px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .github-btn,
+    .button-link,
+    button {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+      line-height: 1;
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .github-btn {
+      padding: 8px 13px;
+    }
+
+    .github-btn:hover,
+    .button-link:hover,
+    button:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      color: var(--link);
+    }
+
+    button {
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88, 166, 255, 0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .panel,
+    .status {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .panel[hidden],
+    .status[hidden] {
+      display: none;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .detail-body {
+      padding: 16px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px 18px;
+      margin-bottom: 16px;
+    }
+
+    .summary-item {
+      min-width: 0;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .summary-label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .summary-value {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 16px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .summary-value.muted {
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .server-link-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 12px 0 16px;
+    }
+
+    .discord-line {
+      color: var(--muted);
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .video-wrap {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+
+    .video-wrap[hidden] {
+      display: none;
+    }
+
+    video {
+      display: block;
+      width: min(100%, 860px);
+      max-height: 520px;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .status {
+      padding: 14px 16px;
+    }
+
+    .status.info {
+      color: var(--text);
+    }
+
+    .status.ok {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .status.error {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 620px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+      user-select: none;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 28px 16px;
+      text-align: center;
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 24px;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+
+      .panel-actions,
+      .server-link-row {
+        width: 100%;
+      }
+
+      .button-link,
+      button {
+        flex: 1 1 auto;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="title-wrap">
+        <h1>Server Details</h1>
+        <div class="subtitle">Pet Simulator 99 &middot; Clan battle dashboard</div>
+      </div>
+
+      <a class="github-btn" href="https://github.com/oapl/c0ld" target="_blank" rel="noopener">GitHub</a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn active" href="servers.html">Servers</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status info">Loading server...</div>
+
+    <section id="detail-panel" class="panel" hidden>
+      <div class="panel-header">
+        <h2 id="server-title" class="panel-title">Server</h2>
+        <div class="panel-actions">
+          <a class="button-link" href="servers.html">Back</a>
+          <button id="copy-discord-btn" type="button">Copy Discord Line</button>
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="detail-body">
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="summary-label">ID</span>
+            <span id="server-id" class="summary-value">-</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Location</span>
+            <span id="server-location" class="summary-value">-</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Players</span>
+            <span id="server-players" class="summary-value">-</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Updated</span>
+            <span id="server-updated" class="summary-value muted">-</span>
+          </div>
+        </div>
+
+        <div class="server-link-row">
+          <a id="join-link" class="button-link" href="#" target="_blank" rel="noopener">Open Server</a>
+          <a id="video-link" class="button-link" href="#" target="_blank" rel="noopener" hidden>Pathing Video</a>
+        </div>
+
+        <div id="discord-line" class="discord-line"></div>
+
+        <div id="video-wrap" class="video-wrap" hidden>
+          <video id="pathing-video" controls playsinline></video>
+        </div>
+      </div>
+    </section>
+
+    <section id="players-panel" class="panel" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">Players In Server</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Display Name</th>
+              <th>User ID</th>
+            </tr>
+          </thead>
+          <tbody id="players-body">
+            <tr>
+              <td colspan="3" class="empty-state">No player list available.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const SERVERS_API_URL = "";
+    const FALLBACK_DATA_URL = "Data/servers.json";
+    const DEFAULT_MAX_PLAYERS = 10;
+    const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
+
+    let servers = [];
+    let activeServer = null;
+    let discordConfig = {};
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function normalizeLink(value) {
+      return String(value || "")
+        .trim()
+        .replace(/#.*$/, "")
+        .replace(/[?&]_=\d+$/, "")
+        .replace(/\/+$/, "")
+        .toLowerCase();
+    }
+
+    function hashString(value) {
+      let hash = 2166136261;
+      const text = String(value || "");
+
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+      }
+
+      return (hash >>> 0).toString(36);
+    }
+
+    function stableServerId(row, link) {
+      const raw = String(row.id || row.server_id || row.key || "").trim();
+      if (raw) return raw;
+      return `srv-${hashString(normalizeLink(link))}`;
+    }
+
+    function toNumberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function getPlayerCount(row) {
+      return toNumberOrNull(
+        row.players ??
+        row.player_count ??
+        row.players_current ??
+        row.current_players ??
+        row.member_count ??
+        row.members_count
+      );
+    }
+
+    function getMaxPlayers(row) {
+      return toNumberOrNull(
+        row.max_players ??
+        row.players_max ??
+        row.player_capacity ??
+        row.capacity ??
+        discordConfig.default_max_players ??
+        DEFAULT_MAX_PLAYERS
+      ) || DEFAULT_MAX_PLAYERS;
+    }
+
+    function normalizePlayersList(row) {
+      const list = row.players_list || row.members || row.player_list || [];
+      if (!Array.isArray(list)) return [];
+
+      return list.map(player => ({
+        username: String(player.username || player.name || player.displayName || "Unknown"),
+        display_name: String(player.display_name || player.displayName || ""),
+        user_id: player.user_id || player.userId || player.id || null,
+        avatar_url: String(player.avatar_url || player.avatarUrl || "")
+      }));
+    }
+
+    function parseRows(payload) {
+      discordConfig = payload?.discord || {};
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.rows)) return payload.rows;
+      if (Array.isArray(payload?.servers)) return payload.servers;
+      return [];
+    }
+
+    function dedupeServers(rows) {
+      const byLink = new Map();
+
+      for (const row of rows) {
+        const link = String(row.server_link || row.link || "").trim();
+        const key = normalizeLink(link);
+        if (!key) continue;
+
+        const normalized = {
+          id: stableServerId(row, link),
+          rank: toNumberOrNull(row.rank ?? row.server_number),
+          location: String(row.location || row.region || "").trim() || "Unknown",
+          link,
+          players: getPlayerCount(row),
+          max_players: getMaxPlayers(row),
+          players_list: normalizePlayersList(row),
+          discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
+          video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
+          updated_at: row.updated_at || row.submitted_at || row.created_at || null
+        };
+
+        const existing = byLink.get(key);
+        if (!existing) {
+          byLink.set(key, normalized);
+          continue;
+        }
+
+        const existingTime = new Date(existing.updated_at || 0).getTime() || 0;
+        const nextTime = new Date(normalized.updated_at || 0).getTime() || 0;
+        byLink.set(key, nextTime >= existingTime ? {
+          ...existing,
+          ...normalized,
+          rank: normalized.rank ?? existing.rank,
+          players_list: normalized.players_list.length ? normalized.players_list : existing.players_list
+        } : existing);
+      }
+
+      return [...byLink.values()].map((row, index) => ({
+        ...row,
+        rank: Number(row.rank ?? index + 1)
+      })).sort((a, b) => a.rank - b.rank);
+    }
+
+    function fmtPlayers(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const current = players === null ? "-" : players.toLocaleString("en-US");
+      return `${current}/${maxPlayers.toLocaleString("en-US")}`;
+    }
+
+    function displayLocation(row) {
+      return getPlayerCount(row) === 0 ? "-" : row.location;
+    }
+
+    function locationEmoji(location) {
+      const key = String(location || "").trim().toUpperCase();
+      const map = {
+        NA: ":flag_us:",
+        US: ":flag_us:",
+        USA: ":flag_us:",
+        UNITEDSTATES: ":flag_us:",
+        UNITED_STATES: ":flag_us:",
+        EU: ":flag_eu:",
+        EUROPE: ":flag_eu:",
+        FR: ":flag_fr:",
+        FRA: ":flag_fr:",
+        FRANCE: ":flag_fr:",
+        UK: ":flag_gb:",
+        GB: ":flag_gb:",
+        CA: ":flag_ca:",
+        CANADA: ":flag_ca:",
+        BR: ":flag_br:",
+        BRAZIL: ":flag_br:",
+        AU: ":flag_au:",
+        AUSTRALIA: ":flag_au:",
+        SG: ":flag_sg:",
+        SINGAPORE: ":flag_sg:"
+      };
+
+      return map[key.replace(/[^A-Z]/g, "")] || "";
+    }
+
+    function discordEmoji(row) {
+      const players = getPlayerCount(row);
+      if (players === 0) return discordConfig.empty_emoji || EMPTY_SERVER_EMOJI;
+      return row.discord_emoji || locationEmoji(row.location);
+    }
+
+    function buildDiscordLine(row) {
+      const label = `[Server ${row.rank}]`;
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const emoji = discordEmoji(row);
+
+      if (players === 0) {
+        return `${label} ${emoji} Members: 0/${maxPlayers}`;
+      }
+
+      const count = players === null ? `?/${maxPlayers}` : `${players}/${maxPlayers}`;
+      const prefix = `${label}${emoji ? ` ${emoji}` : ""}`;
+
+      if (players !== null && players >= maxPlayers) {
+        return `${prefix} ${count}`;
+      }
+
+      return `${prefix} Members: ${count}`;
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "-";
+
+      return date.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+    }
+
+    function setStatus(message, kind = "info") {
+      const el = document.getElementById("status");
+      el.hidden = false;
+      el.className = `status ${kind}`;
+      el.textContent = message;
+    }
+
+    function hideStatus() {
+      const el = document.getElementById("status");
+      el.hidden = true;
+      el.textContent = "";
+    }
+
+    function getRequestedServer() {
+      const params = new URLSearchParams(window.location.search);
+      const id = String(params.get("id") || "").trim();
+      const rank = toNumberOrNull(params.get("rank") || params.get("server"));
+
+      if (id) {
+        return servers.find(row => row.id === id || String(row.rank) === id);
+      }
+
+      if (rank !== null) {
+        return servers.find(row => row.rank === rank);
+      }
+
+      return null;
+    }
+
+    function isPlayableVideoUrl(value) {
+      try {
+        const url = new URL(value, window.location.href);
+        return /\.(mp4|webm|mov|m4v|ogg)$/i.test(url.pathname);
+      } catch {
+        return false;
+      }
+    }
+
+    function renderPlayers(row) {
+      const tbody = document.getElementById("players-body");
+      const players = row.players_list || [];
+
+      if (!players.length) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No player list available.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = players.map(player => `
+        <tr>
+          <td>${htmlEscape(player.username)}</td>
+          <td>${htmlEscape(player.display_name || "-")}</td>
+          <td>${htmlEscape(player.user_id || "-")}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderServer(row) {
+      activeServer = row;
+      hideStatus();
+
+      document.getElementById("detail-panel").hidden = false;
+      document.getElementById("players-panel").hidden = false;
+      document.getElementById("server-title").textContent = `Server ${row.rank}`;
+      document.getElementById("server-id").textContent = `Server ${row.rank}`;
+      document.getElementById("server-location").textContent = displayLocation(row);
+      document.getElementById("server-players").textContent = fmtPlayers(row);
+      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at);
+      document.getElementById("discord-line").textContent = buildDiscordLine(row);
+
+      const joinLink = document.getElementById("join-link");
+      joinLink.href = row.link;
+
+      const videoLink = document.getElementById("video-link");
+      const videoWrap = document.getElementById("video-wrap");
+      const video = document.getElementById("pathing-video");
+
+      if (row.video_url) {
+        videoLink.hidden = false;
+        videoLink.href = row.video_url;
+
+        if (isPlayableVideoUrl(row.video_url)) {
+          video.src = row.video_url;
+          videoWrap.hidden = false;
+        } else {
+          video.removeAttribute("src");
+          videoWrap.hidden = true;
+        }
+      } else {
+        videoLink.hidden = true;
+        videoLink.removeAttribute("href");
+        video.removeAttribute("src");
+        videoWrap.hidden = true;
+      }
+
+      renderPlayers(row);
+    }
+
+    async function copyDiscordLine() {
+      if (!activeServer) return;
+
+      const text = buildDiscordLine(activeServer);
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Discord line copied.", "ok");
+      } catch {
+        setStatus(text, "info");
+      }
+    }
+
+    async function loadServers() {
+      setStatus("Loading server...", "info");
+      document.getElementById("detail-panel").hidden = true;
+      document.getElementById("players-panel").hidden = true;
+
+      try {
+        const url = SERVERS_API_URL || FALLBACK_DATA_URL;
+        const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+          cache: "no-store"
+        });
+
+        if (!res.ok) {
+          throw new Error(`Could not load servers. HTTP ${res.status}`);
+        }
+
+        const payload = await res.json();
+        servers = dedupeServers(parseRows(payload));
+        const row = getRequestedServer();
+
+        if (!row) {
+          setStatus("Server not found.", "error");
+          return;
+        }
+
+        renderServer(row);
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || String(err), "error");
+      }
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", loadServers);
+    document.getElementById("copy-discord-btn").addEventListener("click", copyDiscordLine);
+    loadServers();
+  </script>
+</body>
+</html>

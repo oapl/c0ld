@@ -147,6 +147,13 @@
       font-size: 18px;
     }
 
+    .panel-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     .submission-form {
       display: grid;
       grid-template-columns: minmax(120px, 0.6fr) minmax(240px, 1.5fr) minmax(220px, 1.2fr) auto;
@@ -263,6 +270,37 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .server-id {
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .server-id a {
+      color: var(--text);
+    }
+
+    .server-id a:hover {
+      color: var(--link);
+    }
+
+    .player-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 58px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-2);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .player-pill.empty {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
     .link-cell {
       max-width: 430px;
       overflow: hidden;
@@ -353,13 +391,17 @@
     <section class="panel">
       <div class="panel-header">
         <h2 class="panel-title">Approved Servers</h2>
-        <button id="refresh-btn" type="button">Refresh</button>
+        <div class="panel-actions">
+          <button id="copy-discord-btn" type="button">Copy Discord List</button>
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
       </div>
 
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th data-sort="rank">ID</th>
               <th data-sort="location">Location</th>
               <th data-sort="link">Link</th>
               <th data-sort="players" class="numeric">Players</th>
@@ -369,7 +411,7 @@
           </thead>
           <tbody id="servers-body">
             <tr>
-              <td colspan="5" class="empty-state">Loading servers...</td>
+              <td colspan="6" class="empty-state">Loading servers...</td>
             </tr>
           </tbody>
         </table>
@@ -380,10 +422,13 @@
   <script>
     const SERVERS_API_URL = "";
     const FALLBACK_DATA_URL = "Data/servers.json";
+    const DEFAULT_MAX_PLAYERS = 10;
+    const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
 
     let servers = [];
-    let sortKey = "location";
+    let sortKey = "rank";
     let sortAsc = true;
+    let discordConfig = {};
 
     function htmlEscape(value) {
       return String(value ?? "")
@@ -402,6 +447,64 @@
         .toLowerCase();
     }
 
+    function hashString(value) {
+      let hash = 2166136261;
+      const text = String(value || "");
+
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+      }
+
+      return (hash >>> 0).toString(36);
+    }
+
+    function stableServerId(row, link) {
+      const raw = String(row.id || row.server_id || row.key || "").trim();
+      if (raw) return raw;
+      return `srv-${hashString(normalizeLink(link))}`;
+    }
+
+    function toNumberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function getPlayerCount(row) {
+      return toNumberOrNull(
+        row.players ??
+        row.player_count ??
+        row.players_current ??
+        row.current_players ??
+        row.member_count ??
+        row.members_count
+      );
+    }
+
+    function getMaxPlayers(row) {
+      return toNumberOrNull(
+        row.max_players ??
+        row.players_max ??
+        row.player_capacity ??
+        row.capacity ??
+        discordConfig.default_max_players ??
+        DEFAULT_MAX_PLAYERS
+      ) || DEFAULT_MAX_PLAYERS;
+    }
+
+    function normalizePlayersList(row) {
+      const list = row.players_list || row.members || row.player_list || [];
+      if (!Array.isArray(list)) return [];
+
+      return list.map(player => ({
+        username: String(player.username || player.name || player.displayName || "Unknown"),
+        display_name: String(player.display_name || player.displayName || ""),
+        user_id: player.user_id || player.userId || player.id || null,
+        avatar_url: String(player.avatar_url || player.avatarUrl || "")
+      }));
+    }
+
     function setStatus(message, kind = "info") {
       const el = document.getElementById("status");
       el.className = `status ${kind}`;
@@ -415,6 +518,7 @@
     }
 
     function parseRows(payload) {
+      discordConfig = payload?.discord || {};
       if (Array.isArray(payload)) return payload;
       if (Array.isArray(payload?.rows)) return payload.rows;
       if (Array.isArray(payload?.servers)) return payload.servers;
@@ -430,9 +534,14 @@
         if (!key) continue;
 
         const normalized = {
+          id: stableServerId(row, link),
+          rank: toNumberOrNull(row.rank ?? row.server_number),
           location: String(row.location || row.region || "").trim() || "Unknown",
           link,
-          players: Number.isFinite(Number(row.players)) ? Number(row.players) : null,
+          players: getPlayerCount(row),
+          max_players: getMaxPlayers(row),
+          players_list: normalizePlayersList(row),
+          discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
           video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
         };
@@ -445,17 +554,101 @@
 
         const existingTime = new Date(existing.updated_at || 0).getTime() || 0;
         const nextTime = new Date(normalized.updated_at || 0).getTime() || 0;
-        byLink.set(key, nextTime >= existingTime ? { ...existing, ...normalized } : existing);
+        byLink.set(key, nextTime >= existingTime ? {
+          ...existing,
+          ...normalized,
+          rank: normalized.rank ?? existing.rank,
+          players_list: normalized.players_list.length ? normalized.players_list : existing.players_list
+        } : existing);
       }
 
-      return [...byLink.values()];
+      return [...byLink.values()].map((row, index) => ({
+        ...row,
+        rank: Number(row.rank ?? index + 1)
+      })).sort((a, b) => a.rank - b.rank);
     }
 
-    function fmtPlayers(value) {
-      if (value === null || value === undefined || value === "") return "—";
-      const n = Number(value);
-      if (Number.isNaN(n)) return "—";
-      return n.toLocaleString("en-US");
+    function fmtPlayers(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const current = players === null ? "—" : players.toLocaleString("en-US");
+      return `${current}/${maxPlayers.toLocaleString("en-US")}`;
+    }
+
+    function displayLocation(row) {
+      return getPlayerCount(row) === 0 ? "—" : row.location;
+    }
+
+    function locationEmoji(location) {
+      const key = String(location || "").trim().toUpperCase();
+      const map = {
+        NA: ":flag_us:",
+        US: ":flag_us:",
+        USA: ":flag_us:",
+        UNITEDSTATES: ":flag_us:",
+        UNITED_STATES: ":flag_us:",
+        EU: ":flag_eu:",
+        EUROPE: ":flag_eu:",
+        FR: ":flag_fr:",
+        FRA: ":flag_fr:",
+        FRANCE: ":flag_fr:",
+        UK: ":flag_gb:",
+        GB: ":flag_gb:",
+        CA: ":flag_ca:",
+        CANADA: ":flag_ca:",
+        BR: ":flag_br:",
+        BRAZIL: ":flag_br:",
+        AU: ":flag_au:",
+        AUSTRALIA: ":flag_au:",
+        SG: ":flag_sg:",
+        SINGAPORE: ":flag_sg:"
+      };
+
+      return map[key.replace(/[^A-Z]/g, "")] || "";
+    }
+
+    function discordEmoji(row) {
+      const players = getPlayerCount(row);
+      if (players === 0) return discordConfig.empty_emoji || EMPTY_SERVER_EMOJI;
+      return row.discord_emoji || locationEmoji(row.location);
+    }
+
+    function buildDiscordLine(row) {
+      const label = `[Server ${row.rank}]`;
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const emoji = discordEmoji(row);
+
+      if (players === 0) {
+        return `${label} ${emoji} Members: 0/${maxPlayers}`;
+      }
+
+      const count = players === null ? `?/${maxPlayers}` : `${players}/${maxPlayers}`;
+      const prefix = `${label}${emoji ? ` ${emoji}` : ""}`;
+
+      if (players !== null && players >= maxPlayers) {
+        return `${prefix} ${count}`;
+      }
+
+      return `${prefix} Members: ${count}`;
+    }
+
+    async function copyDiscordList() {
+      const lines = getVisibleServers().map(buildDiscordLine);
+
+      if (!lines.length) {
+        setStatus("No approved servers to copy.", "error");
+        return;
+      }
+
+      const text = lines.join("\n");
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Discord list copied.", "ok");
+      } catch {
+        setStatus(text, "info");
+      }
     }
 
     function fmtDateTime(value) {
@@ -473,8 +666,8 @@
       const list = servers.slice();
 
       list.sort((a, b) => {
-        let av = a[sortKey];
-        let bv = b[sortKey];
+        let av = sortKey === "location" ? displayLocation(a) : a[sortKey];
+        let bv = sortKey === "location" ? displayLocation(b) : b[sortKey];
 
         if (sortKey === "updated_at") {
           av = new Date(av || 0).getTime() || 0;
@@ -502,7 +695,7 @@
       const rows = getVisibleServers();
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No approved servers yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No approved servers yet.</td></tr>`;
         return;
       }
 
@@ -510,12 +703,15 @@
         const video = row.video_url
           ? `<a href="${htmlEscape(row.video_url)}" target="_blank" rel="noopener">Open</a>`
           : "—";
+        const players = getPlayerCount(row);
+        const playerClass = players === 0 ? "player-pill empty" : "player-pill";
 
         return `
           <tr>
-            <td>${htmlEscape(row.location)}</td>
+            <td class="server-id"><a href="server.html?id=${encodeURIComponent(row.id)}">Server ${htmlEscape(row.rank)}</a></td>
+            <td>${htmlEscape(displayLocation(row))}</td>
             <td class="link-cell"><a href="${htmlEscape(row.link)}" target="_blank" rel="noopener">${htmlEscape(row.link)}</a></td>
-            <td class="numeric">${fmtPlayers(row.players)}</td>
+            <td class="numeric"><span class="${playerClass}">${fmtPlayers(row)}</span></td>
             <td>${htmlEscape(fmtDateTime(row.updated_at))}</td>
             <td>${video}</td>
           </tr>
@@ -586,6 +782,7 @@
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
       document.getElementById("refresh-btn").addEventListener("click", loadServers);
+      document.getElementById("copy-discord-btn").addEventListener("click", copyDiscordList);
 
       document.querySelectorAll("th[data-sort]").forEach(th => {
         th.addEventListener("click", () => {
