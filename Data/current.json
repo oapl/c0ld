@@ -3,7 +3,7 @@
   "battle": "AngelBattle2026",
   "display_name": "Angel Battle 2026",
   "battle_end_iso": "2026-05-16T14:00:00Z",
-  "clan_name": "NONG",
+  "clan_name": "c0ld",
   "rows": [
     {
       "fetched_at": "2026-05-15T11:05:55.407Z",
@@ -958,7 +958,7 @@
   "clan_rank": 56,
   "clan_points": 23864000000,
   "clan_rank_source": "clans-current.json",
-  "clan_rank_matched_name": "NONG",
+  "clan_rank_matched_name": "c0ld",
   "clan_rank_snapshot_at": "2026-05-15T16:30:54.341Z",
   "projected_rank": 58,
   "projected_points": 25539822612,

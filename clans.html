@@ -20,9 +20,9 @@
       --link: #58a6ff;
       --hover: #1f2630;
       --accent: #58a6ff;
-      --nong-bg: rgba(255, 153, 51, 0.18);
-      --nong-border: rgba(255, 153, 51, 0.65);
-      --nong-text: #ffb15c;
+      --c0ld-bg: rgba(255, 153, 51, 0.18);
+      --c0ld-border: rgba(255, 153, 51, 0.65);
+      --c0ld-text: #ffb15c;
       --danger: #f85149;
       --danger-bg: rgba(248, 81, 73, 0.12);
     }
@@ -274,23 +274,23 @@
       flex: 0 0 auto;
     }
 
-    .nong-row {
-      background: var(--nong-bg);
+    .c0ld-row {
+      background: var(--c0ld-bg);
     }
 
-    .nong-row:hover {
+    .c0ld-row:hover {
       background: rgba(255, 153, 51, 0.24);
     }
 
-    .nong-row td {
-      border-top: 1px solid var(--nong-border);
-      border-bottom: 1px solid var(--nong-border);
+    .c0ld-row td {
+      border-top: 1px solid var(--c0ld-border);
+      border-bottom: 1px solid var(--c0ld-border);
     }
 
-    .nong-row td.rank,
-    .nong-row td.projected,
-    .nong-row .clan-name {
-      color: var(--nong-text);
+    .c0ld-row td.rank,
+    .c0ld-row td.projected,
+    .c0ld-row .clan-name {
+      color: var(--c0ld-text);
       font-weight: 700;
     }
 
@@ -358,17 +358,17 @@
 
       <a
         class="github-btn"
-        href="https://github.com/OpalApocalypse/NONG_Leaderboard"
+        href="https://github.com/OpalApocalypse/c0ld_Leaderboard"
         target="_blank"
         rel="noopener"
       >GitHub</a>
     </div>
 
     <div class="menu-bar">
-      <a class="menu-btn" href="index.html">NONG Leaderboard</a>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
       <a class="menu-btn active" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="players.html">Player Profiles</a>
-      <a class="menu-btn" href="index.html#history">NONG History</a>
+      <a class="menu-btn" href="index.html#history">c0ld History</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
     <a class="menu-btn" href="top-clan-thresholds.html">Top Clan Filter</a>
     </div>
@@ -377,8 +377,8 @@
   <main>
     <section class="cards">
       <div class="card">
-        <div class="label">NONG Current Rank</div>
-        <div class="value" id="nong-current-rank">—</div>
+        <div class="label">c0ld Current Rank</div>
+        <div class="value" id="c0ld-current-rank">—</div>
       </div>
 
       <div class="card">
@@ -393,7 +393,7 @@
 
       <div class="card">
         <div class="label">Projected Rank</div>
-        <div class="value" id="nong-projected-rank">—</div>
+        <div class="value" id="c0ld-projected-rank">—</div>
       </div>
     </section>
 
@@ -435,7 +435,7 @@
   </main>
 
   <script>
-    const TARGET_CLAN = "NONG";
+    const TARGET_CLAN = "c0ld";
     const AUTO_REFRESH_MS = 60 * 1000;
 
     const DEFAULT_CLAN_ICON =
@@ -666,13 +666,13 @@
 
     function renderCards() {
       const currentRows = getCurrentRows();
-      const currentNong = currentRows.find(row => isTargetClan(row.clan_name)) || null;
+      const currentC0ld = currentRows.find(row => isTargetClan(row.clan_name)) || null;
 
-      document.getElementById("nong-current-rank").textContent =
-        fmtRank(currentNong?.rank ?? currentData?.clan_rank);
+      document.getElementById("c0ld-current-rank").textContent =
+        fmtRank(currentC0ld?.rank ?? currentData?.clan_rank);
 
-      document.getElementById("nong-projected-rank").textContent =
-        fmtRank(currentNong?.projected_rank ?? currentData?.projected_rank);
+      document.getElementById("c0ld-projected-rank").textContent =
+        fmtRank(currentC0ld?.projected_rank ?? currentData?.projected_rank);
 
       document.getElementById("last-db-update").textContent =
         fmtDateTime(currentData?.snapshot_at || currentData?.generated_at);
@@ -750,10 +750,10 @@
       }
 
       tbody.innerHTML = rows.map(row => {
-        const isNong = isTargetClan(row.clan_name);
+        const isC0ld = isTargetClan(row.clan_name);
 
         return `
-          <tr class="${isNong ? "nong-row" : ""}">
+          <tr class="${isC0ld ? "c0ld-row" : ""}">
             <td class="rank">${fmtRank(row.rank)}</td>
             <td class="clan">
               <div class="clan-cell">

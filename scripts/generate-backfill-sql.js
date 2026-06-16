@@ -33,7 +33,7 @@ async function main() {
     headers: {
       "Content-Type": "application/json",
       "Accept": "application/json",
-      "User-Agent": "NONG-Leaderboard-SQL-Generator"
+      "User-Agent": "c0ld-Leaderboard-SQL-Generator"
     },
     body: JSON.stringify({
       usernames: USERNAMES,

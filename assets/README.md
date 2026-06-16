@@ -22,5 +22,5 @@ inconsistent / narrow widths again.
 Referenced in `ingest.js` via the `EMBED_SPACER_IMAGE_URL` constant:
 
 ```
-https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png
+https://raw.githubusercontent.com/OpalApocalypse/c0ld_Leaderboard/main/assets/embed-spacer.png
 ```

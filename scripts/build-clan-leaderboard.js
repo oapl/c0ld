@@ -4,7 +4,7 @@ const path = require("path");
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-const CLAN_NAME = process.env.CLAN_NAME || "NONG";
+const CLAN_NAME = process.env.CLAN_NAME || "c0ld";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
 const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Angel Battle 2026";
 const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || "";
@@ -236,7 +236,7 @@ async function fetchClanIconMap(clanNames) {
       const res = await fetch(`https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clanName)}`, {
         headers: {
           Accept: "application/json",
-          "User-Agent": "NONG-Leaderboard-Clan-Icons"
+          "User-Agent": "c0ld-Leaderboard-Clan-Icons"
         }
       });
 
@@ -266,7 +266,7 @@ function calculateRows(snapshotRows, battleEndIso, iconMap) {
     return {
       latestRows: [],
       rows: [],
-      nong: null,
+      c0ld: null,
       generatedFromSnapshot: null,
       hoursRemaining: null
     };
@@ -329,12 +329,12 @@ function calculateRows(snapshotRows, battleEndIso, iconMap) {
     }))
     .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
 
-  const nong = finalRows.find(row => clanKey(row.clan_name) === clanKey(CLAN_NAME)) || null;
+  const c0ld = finalRows.find(row => clanKey(row.clan_name) === clanKey(CLAN_NAME)) || null;
 
   return {
     latestRows,
     rows: finalRows,
-    nong,
+    c0ld,
     generatedFromSnapshot: safeIso(latestRows[0]?.fetched_at),
     hoursRemaining: Number(hoursRemaining.toFixed(3))
   };
@@ -400,11 +400,11 @@ async function main() {
     battle_end_iso: meta.battle_end_iso,
     clan_name: CLAN_NAME,
 
-    clan_rank: calculated.nong?.rank ?? null,
-    clan_points: calculated.nong?.points ?? null,
-    projected_rank: calculated.nong?.projected_rank ?? null,
-    projected_points: calculated.nong?.projected_points ?? null,
-    projection_basis: calculated.nong?.projection_basis ?? null,
+    clan_rank: calculated.c0ld?.rank ?? null,
+    clan_points: calculated.c0ld?.points ?? null,
+    projected_rank: calculated.c0ld?.projected_rank ?? null,
+    projected_points: calculated.c0ld?.projected_points ?? null,
+    projection_basis: calculated.c0ld?.projection_basis ?? null,
     hours_remaining: calculated.hoursRemaining,
 
     rows: calculated.rows

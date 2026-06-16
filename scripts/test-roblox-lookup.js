@@ -11,7 +11,7 @@ async function main() {
     headers: {
       "Content-Type": "application/json",
       "Accept": "application/json",
-      "User-Agent": "NONG-Leaderboard-Test"
+      "User-Agent": "c0ld-Leaderboard-Test"
     },
     body: JSON.stringify({
       usernames,

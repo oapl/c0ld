@@ -10,7 +10,7 @@
 //   CLAN_NAME
 //   CURRENT_BATTLE_NAME
 //   CURRENT_BATTLE_DISPLAY_NAME
-//   CURRENT_NONG_TABLE
+//   CURRENT_C0LD_TABLE
 //   TOP_N
 //   DISCORD_WEBHOOK_URL
 //   DISCORD_MESSAGE_IDS
@@ -18,24 +18,24 @@
 const fs = require("fs/promises");
 
 // Config
-const CLAN_NAME = process.env.CLAN_NAME || "NONG";
+const CLAN_NAME = process.env.CLAN_NAME || "c0ld";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
 const CURRENT_BATTLE_DISPLAY_NAME =
   process.env.CURRENT_BATTLE_DISPLAY_NAME || CURRENT_BATTLE_NAME;
 
-function defaultNongTableFromBattleName(battleName) {
+function defaultC0ldTableFromBattleName(battleName) {
   const clean = String(battleName || "")
     .replace(/Battle$/i, "")
     .replace(/Archive$/i, "")
     .replace(/[^a-zA-Z0-9_]/g, "");
 
-  return `${clean}NONG`;
+  return `${clean}c0ld`;
 }
 
-const CURRENT_NONG_TABLE =
-  process.env.CURRENT_NONG_TABLE ||
-  process.env.CURRENT_BATTLE_NONG_TABLE ||
-  defaultNongTableFromBattleName(CURRENT_BATTLE_NAME);
+const CURRENT_C0LD_TABLE =
+  process.env.CURRENT_C0LD_TABLE ||
+  process.env.CURRENT_BATTLE_C0LD_TABLE ||
+  defaultC0ldTableFromBattleName(CURRENT_BATTLE_NAME);
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
@@ -53,7 +53,7 @@ const RANK_STAR_EMOJI = "<:RankStar:1499100837006413937>";
 const EMBED_COLOR = 0xf5a623;
 
 const SPACER_IMAGE_URL_BASE =
-  "https://raw.githubusercontent.com/OpalApocalypse/NONG_Leaderboard/main/assets/embed-spacer.png";
+  "https://raw.githubusercontent.com/OpalApocalypse/c0ld_Leaderboard/main/assets/embed-spacer.png";
 
 const EMBED_SPACER_IMAGE_URL = `${SPACER_IMAGE_URL_BASE}?v=${Math.floor(Date.now() / 1000)}`;
 
@@ -132,7 +132,7 @@ async function resolveRobloxUsernames(userIds) {
 async function fetchClanMembers() {
   const res = await fetch(BIG_GAMES_API, {
     headers: {
-      "User-Agent": "NONG-Leaderboard-Ingest"
+      "User-Agent": "c0ld-Leaderboard-Ingest"
     }
   });
 
@@ -209,7 +209,7 @@ function tableUrl(tableName) {
 }
 
 async function sbInsertArchive(rows) {
-  const res = await fetch(tableUrl(CURRENT_NONG_TABLE), {
+  const res = await fetch(tableUrl(CURRENT_C0LD_TABLE), {
     method: "POST",
     headers: sbHeaders({
       Prefer: "return=minimal"
@@ -220,7 +220,7 @@ async function sbInsertArchive(rows) {
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(
-      `Supabase archive insert failed for ${CURRENT_NONG_TABLE} (${res.status}): ${msg}`
+      `Supabase archive insert failed for ${CURRENT_C0LD_TABLE} (${res.status}): ${msg}`
     );
   }
 }
@@ -244,7 +244,7 @@ async function sbUpsertCurrent(rows) {
 }
 
 async function sbGetOldSnapshots(beforeIso) {
-  const url = new URL(tableUrl(CURRENT_NONG_TABLE));
+  const url = new URL(tableUrl(CURRENT_C0LD_TABLE));
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order", "fetched_at.desc");
   url.searchParams.set("limit", "500");
@@ -258,7 +258,7 @@ async function sbGetOldSnapshots(beforeIso) {
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(
-      `Supabase old snapshot query failed for ${CURRENT_NONG_TABLE} (${res.status}): ${msg}`
+      `Supabase old snapshot query failed for ${CURRENT_C0LD_TABLE} (${res.status}): ${msg}`
     );
   }
 
@@ -266,7 +266,7 @@ async function sbGetOldSnapshots(beforeIso) {
 }
 
 async function sbDeleteOld(olderThanIso) {
-  const url = new URL(tableUrl(CURRENT_NONG_TABLE));
+  const url = new URL(tableUrl(CURRENT_C0LD_TABLE));
   url.searchParams.set("fetched_at", `lt.${olderThanIso}`);
 
   const res = await fetch(url.toString(), {
@@ -277,13 +277,13 @@ async function sbDeleteOld(olderThanIso) {
   if (!res.ok) {
     const msg = await res.text();
     console.warn(
-      `Supabase cleanup warning for ${CURRENT_NONG_TABLE} (${res.status}): ${msg}`
+      `Supabase cleanup warning for ${CURRENT_C0LD_TABLE} (${res.status}): ${msg}`
     );
   }
 }
 
 async function sbGetPreviousSnapshot(beforeIso) {
-  const url = new URL(tableUrl(CURRENT_NONG_TABLE));
+  const url = new URL(tableUrl(CURRENT_C0LD_TABLE));
   url.searchParams.set("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order", "fetched_at.desc");
   url.searchParams.set("limit", "200");
@@ -297,7 +297,7 @@ async function sbGetPreviousSnapshot(beforeIso) {
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(
-      `Supabase previous-snapshot query failed for ${CURRENT_NONG_TABLE} (${res.status}): ${msg}`
+      `Supabase previous-snapshot query failed for ${CURRENT_C0LD_TABLE} (${res.status}): ${msg}`
     );
   }
 
@@ -313,7 +313,7 @@ async function sbGetPreviousSnapshot(beforeIso) {
 }
 
 async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
-  const url = new URL(tableUrl(CURRENT_NONG_TABLE));
+  const url = new URL(tableUrl(CURRENT_C0LD_TABLE));
   url.searchParams.append("fetched_at", `gt.${afterIso}`);
   url.searchParams.append("fetched_at", `lt.${beforeIso}`);
   url.searchParams.set("order", "fetched_at.desc");
@@ -328,7 +328,7 @@ async function sbGetSnapshotsInWindow(afterIso, beforeIso) {
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(
-      `Supabase window query failed for ${CURRENT_NONG_TABLE} (${res.status}): ${msg}`
+      `Supabase window query failed for ${CURRENT_C0LD_TABLE} (${res.status}): ${msg}`
     );
   }
 
@@ -429,7 +429,7 @@ ${after}`;
 }
 
 function cleanupReadmePreamble(readme) {
-  const canonicalHeader = "# NONG_Leaderboard";
+  const canonicalHeader = "# c0ld_Leaderboard";
   const idx = readme.indexOf(canonicalHeader);
 
   if (idx > 0) {
@@ -634,7 +634,7 @@ async function main() {
   console.log(`Fetching clan data for "${CLAN_NAME}"...`);
   console.log(`Current battle name: ${CURRENT_BATTLE_NAME}`);
   console.log(`Current battle display name: ${CURRENT_BATTLE_DISPLAY_NAME}`);
-  console.log(`Current NONG archive table: ${CURRENT_NONG_TABLE}`);
+  console.log(`Current c0ld archive table: ${CURRENT_C0LD_TABLE}`);
 
   const { members } = await fetchClanMembers();
 
@@ -686,7 +686,7 @@ async function main() {
     }));
 
     await sbInsertArchive(toInsert);
-    console.log(`Inserted ${toInsert.length} rows into ${CURRENT_NONG_TABLE}.`);
+    console.log(`Inserted ${toInsert.length} rows into ${CURRENT_C0LD_TABLE}.`);
 
     await sbUpsertCurrent(toInsert);
     console.log(`Upserted ${toInsert.length} rows into ${CURRENT_TABLE}.`);
@@ -694,7 +694,7 @@ async function main() {
     const pruneIso = new Date(now - KEEP_HOURS * 60 * 60 * 1000).toISOString();
 
     await sbDeleteOld(pruneIso);
-    console.log(`Old archive rows pruned from ${CURRENT_NONG_TABLE}.`);
+    console.log(`Old archive rows pruned from ${CURRENT_C0LD_TABLE}.`);
   } else {
     console.warn("SUPABASE_URL / SUPABASE_SERVICE_KEY not set. Skipping DB operations.");
     console.warn("60m gain will show as N/A.");

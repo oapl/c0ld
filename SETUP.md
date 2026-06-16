@@ -8,7 +8,7 @@ This guide covers every step needed to migrate from Google Sheets to
 ## 1. Create a Supabase project
 
 1. Go to [supabase.com](https://supabase.com) and create a free account.
-2. Click **New project** and pick any name (e.g. `nong-leaderboard`).
+2. Click **New project** and pick any name (e.g. `c0ld-leaderboard`).
 3. Choose a region close to you and set a database password. Save the password somewhere safe.
 4. Wait for the project to finish provisioning (~1 min).
 
@@ -59,7 +59,7 @@ In your Supabase project go to **Project Settings → API**.
 
 ## 4. Set up Discord (bot)
 
-NONG Bot uses the Discord **bot REST endpoint** (not webhooks) so it can render
+c0ld Bot uses the Discord **bot REST endpoint** (not webhooks) so it can render
 COLD-style Components V2 Container layouts. To set it up:
 
 1. Register an application at https://discord.com/developers/applications.
@@ -93,7 +93,7 @@ In this repository go to **Settings → Secrets and variables → Actions → Ne
 | `DISCORD_BOT_TOKEN` | Your Discord bot token (no `Bot ` prefix) |
 | `DISCORD_CHANNEL_ID` | Your Discord channel snowflake ID |
 
-> **Optional:** You can also add `CLAN_NAME` (default: `NONG`) and `TOP_N`
+> **Optional:** You can also add `CLAN_NAME` (default: `c0ld`) and `TOP_N`
 > (default: `10`) as secrets or plain repository variables if you want to
 > override them without editing code.
 
@@ -116,7 +116,7 @@ The first run will insert a snapshot but show `N/A` for the 60-minute gain
 ```
 GitHub Actions (every 5 min)
   └─ ingest.js
-       ├─ Fetch clan data from biggamesapi.io/api/clan/NONG
+       ├─ Fetch clan data from biggamesapi.io/api/clan/c0ld
        ├─ Read snapshot from ~60 min ago from StarryBattleArchive  →  compute 60m gains
        ├─ Read previous snapshot from StarryBattleArchive          →  compute last-gain delta
        ├─ Append new snapshot batch to StarryBattleArchive

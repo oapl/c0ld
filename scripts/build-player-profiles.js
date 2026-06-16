@@ -4,15 +4,15 @@ const path = require("path");
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-const CLAN_NAME = process.env.CLAN_NAME || "NONG";
+const CLAN_NAME = process.env.CLAN_NAME || "c0ld";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
 const CURRENT_BATTLE_DISPLAY_NAME = process.env.CURRENT_BATTLE_DISPLAY_NAME || "Angel Battle 2026";
 const CURRENT_BATTLE_END_ISO = process.env.CURRENT_BATTLE_END_ISO || null;
 
-const CURRENT_NONG_TABLE =
-  process.env.CURRENT_NONG_TABLE ||
-  process.env.CURRENT_BATTLE_NONG_TABLE ||
-  defaultNongTableFromBattleName(CURRENT_BATTLE_NAME);
+const CURRENT_C0LD_TABLE =
+  process.env.CURRENT_C0LD_TABLE ||
+  process.env.CURRENT_BATTLE_C0LD_TABLE ||
+  defaultC0ldTableFromBattleName(CURRENT_BATTLE_NAME);
 
 const OUT_DIR = path.join(process.cwd(), "Data");
 const PLAYERS_DIR = path.join(OUT_DIR, "players");
@@ -28,13 +28,13 @@ const ROBLOX_THUMB_BATCH_SIZE = 100;
 if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
 if (!SUPABASE_KEY) throw new Error("Missing SUPABASE_SERVICE_KEY");
 
-function defaultNongTableFromBattleName(battleName) {
+function defaultC0ldTableFromBattleName(battleName) {
   const clean = String(battleName || "")
     .replace(/Battle$/i, "")
     .replace(/Archive$/i, "")
     .replace(/[^a-zA-Z0-9_]/g, "");
 
-  return `${clean}NONG`;
+  return `${clean}c0ld`;
 }
 
 function sbHeaders(extra = {}) {
@@ -151,7 +151,7 @@ function cleanManualBattle(record) {
     battle: stringOrNull(record.battle || record.display_name),
     display_name: stringOrNull(record.display_name || record.battle),
     api_battle_key: stringOrNull(record.api_battle_key),
-    nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
+    c0ld_results_table: stringOrNull(record.c0ld_results_table || record.player_results_table),
     clan_results_table: stringOrNull(record.clan_results_table),
     first_snapshot: safeIso(record.first_snapshot),
     last_snapshot: safeIso(record.last_snapshot),
@@ -268,16 +268,16 @@ async function buildBattleConfigs() {
   const manual = manualRaw.map(cleanManualBattle);
 
   const tableBacked = manual
-    .filter(b => b.battle && b.display_name && b.nong_results_table)
+    .filter(b => b.battle && b.display_name && b.c0ld_results_table)
     .map(b => ({
       ...b,
-      table: b.nong_results_table
+      table: b.c0ld_results_table
     }));
 
   const hasCurrent = tableBacked.some(b =>
     normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
     normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
-    normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
+    normalizeKey(b.table) === normalizeKey(CURRENT_C0LD_TABLE)
   );
 
   if (!hasCurrent) {
@@ -285,7 +285,7 @@ async function buildBattleConfigs() {
       battle: CURRENT_BATTLE_NAME,
       display_name: CURRENT_BATTLE_DISPLAY_NAME,
       api_battle_key: CURRENT_BATTLE_NAME,
-      nong_results_table: CURRENT_NONG_TABLE,
+      c0ld_results_table: CURRENT_C0LD_TABLE,
       clan_results_table: null,
       first_snapshot: null,
       last_snapshot: null,
@@ -295,7 +295,7 @@ async function buildBattleConfigs() {
       placement: null,
       update_number: null,
       update_url: null,
-      table: CURRENT_NONG_TABLE
+      table: CURRENT_C0LD_TABLE
     });
   }
 
@@ -310,12 +310,12 @@ async function buildBattleConfigs() {
     const aCurrent =
       normalizeKey(a.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
       normalizeKey(a.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
-      normalizeKey(a.table) === normalizeKey(CURRENT_NONG_TABLE);
+      normalizeKey(a.table) === normalizeKey(CURRENT_C0LD_TABLE);
 
     const bCurrent =
       normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
       normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
-      normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE);
+      normalizeKey(b.table) === normalizeKey(CURRENT_C0LD_TABLE);
 
     if (aCurrent && !bCurrent) return 1;
     if (!aCurrent && bCurrent) return -1;
@@ -327,13 +327,13 @@ async function buildBattleConfigs() {
     configs.find(b =>
       normalizeKey(b.api_battle_key) === normalizeKey(CURRENT_BATTLE_NAME) ||
       normalizeKey(b.battle) === normalizeKey(CURRENT_BATTLE_NAME) ||
-      normalizeKey(b.table) === normalizeKey(CURRENT_NONG_TABLE)
+      normalizeKey(b.table) === normalizeKey(CURRENT_C0LD_TABLE)
     ) || {
       battle: CURRENT_BATTLE_NAME,
       display_name: CURRENT_BATTLE_DISPLAY_NAME,
       api_battle_key: CURRENT_BATTLE_NAME,
-      table: CURRENT_NONG_TABLE,
-      nong_results_table: CURRENT_NONG_TABLE,
+      table: CURRENT_C0LD_TABLE,
+      c0ld_results_table: CURRENT_C0LD_TABLE,
       clan_results_table: null
     };
 
@@ -451,7 +451,7 @@ async function resolveUserIdsByUsername(usernames) {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "User-Agent": "NONG-Leaderboard-Username-Resolver"
+        "User-Agent": "c0ld-Leaderboard-Username-Resolver"
       },
       body: JSON.stringify({
         usernames: batch,
@@ -497,7 +497,7 @@ async function fetchAvatarHeadshots(userIds) {
       const res = await fetch(url.toString(), {
         headers: {
           Accept: "application/json",
-          "User-Agent": "NONG-Leaderboard-Profiles"
+          "User-Agent": "c0ld-Leaderboard-Profiles"
         }
       });
 
@@ -542,7 +542,7 @@ async function downloadAvatarToCache(userId, imageUrl) {
 
   try {
     const res = await fetch(imageUrl, {
-      headers: { "User-Agent": "NONG-Leaderboard-Avatar-Cache" }
+      headers: { "User-Agent": "c0ld-Leaderboard-Avatar-Cache" }
     });
 
     if (!res.ok) return imageUrl;
@@ -768,7 +768,7 @@ function buildBattleSummary(battleConfig, rows) {
       update_number: battleConfig.update_number ?? null,
       update_url: battleConfig.update_url ?? null,
       api_battle_key: battleConfig.api_battle_key ?? null,
-      nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+      c0ld_results_table: battleConfig.c0ld_results_table ?? battleConfig.table ?? null,
       clan_results_table: battleConfig.clan_results_table ?? null
     };
   }
@@ -788,7 +788,7 @@ function buildBattleSummary(battleConfig, rows) {
     update_number: battleConfig.update_number ?? null,
     update_url: battleConfig.update_url ?? null,
     api_battle_key: battleConfig.api_battle_key ?? null,
-    nong_results_table: battleConfig.nong_results_table ?? battleConfig.table ?? null,
+    c0ld_results_table: battleConfig.c0ld_results_table ?? battleConfig.table ?? null,
     clan_results_table: battleConfig.clan_results_table ?? null
   };
 }

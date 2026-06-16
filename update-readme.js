@@ -1,7 +1,7 @@
 const fs = require("fs/promises");
 
 const SOURCE_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/1JIhSVcbfgEFlz7L20qkQ1QiY95Y0ZZsl8DJmbuB7GJw/gviz/tq?tqx=out:csv&sheet=NONG%20Leaderboard";
+  "https://docs.google.com/spreadsheets/d/1JIhSVcbfgEFlz7L20qkQ1QiY95Y0ZZsl8DJmbuB7GJw/gviz/tq?tqx=out:csv&sheet=c0ld%20Leaderboard";
 
 const README_PATH = "README.md";
 const START_MARKER = "<!-- START_LEADERBOARD -->";
@@ -63,7 +63,7 @@ function findHeaderIndex(headers, target) {
 
 async function main() {
   const res = await fetch(SOURCE_CSV_URL, {
-    headers: { "User-Agent": "NONG-Leaderboard-README-Updater" }
+    headers: { "User-Agent": "c0ld-Leaderboard-README-Updater" }
   });
 
   if (!res.ok) {

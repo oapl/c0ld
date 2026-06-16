@@ -268,7 +268,7 @@ async function fetchClanIconMap(clanNames) {
       const res = await fetch(`https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clanName)}`, {
         headers: {
           Accept: "application/json",
-          "User-Agent": "NONG-Leaderboard-Clan-Icons"
+          "User-Agent": "c0ld-Leaderboard-Clan-Icons"
         }
       });
 

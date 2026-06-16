@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NONG Leaderboard</title>
+  <title>c0ld Leaderboard</title>
 
-  <meta property="og:title" content="NONG Leaderboard" />
-  <meta property="og:description" content="Pet Simulator 99 NONG clan leaderboard, member stats, clan history, and battle projections." />
+  <meta property="og:title" content="c0ld Leaderboard" />
+  <meta property="og:description" content="Pet Simulator 99 c0ld clan leaderboard, member stats, clan history, and battle projections." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://opalapocalypse.github.io/NONG_Leaderboard/" />
-  <meta property="og:image" content="https://opalapocalypse.github.io/NONG_Leaderboard/assets/preview.png" />
+  <meta property="og:url" content="https://opalapocalypse.github.io/c0ld_Leaderboard/" />
+  <meta property="og:image" content="https://opalapocalypse.github.io/c0ld_Leaderboard/assets/preview.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
 
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="NONG Leaderboard" />
-  <meta name="twitter:description" content="Pet Simulator 99 NONG clan leaderboard, member stats, clan history, and battle projections." />
-  <meta name="twitter:image" content="https://opalapocalypse.github.io/NONG_Leaderboard/assets/preview.png" />
+  <meta name="twitter:title" content="c0ld Leaderboard" />
+  <meta name="twitter:description" content="Pet Simulator 99 c0ld clan leaderboard, member stats, clan history, and battle projections." />
+  <meta name="twitter:image" content="https://opalapocalypse.github.io/c0ld_Leaderboard/assets/preview.png" />
 
   <style>
     *, *::before, *::after {
@@ -400,18 +400,18 @@
   <header>
     <div class="header-inner">
       <div class="title-wrap">
-        <h1>NONG Leaderboard</h1>
+        <h1>c0ld Leaderboard</h1>
         <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
       </div>
 
-      <a class="github-btn" href="https://github.com/OpalApocalypse/NONG_Leaderboard" target="_blank" rel="noopener">GitHub</a>
+      <a class="github-btn" href="https://github.com/OpalApocalypse/c0ld_Leaderboard" target="_blank" rel="noopener">GitHub</a>
     </div>
 
     <div class="menu-bar">
-      <button class="menu-btn active" id="tab-btn-leaderboard" type="button">NONG Leaderboard</button>
+      <button class="menu-btn active" id="tab-btn-leaderboard" type="button">c0ld Leaderboard</button>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="players.html">Player Profiles</a>
-      <button class="menu-btn" id="tab-btn-history" type="button">NONG History</button>
+      <button class="menu-btn" id="tab-btn-history" type="button">c0ld History</button>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="top-clan-thresholds.html">Top Clan Filter</a>
     </div>
@@ -422,8 +422,8 @@
 
     <section class="cards">
       <div class="card">
-        <div class="label">NONG Current Rank</div>
-        <div id="nong-rank-value" class="value">—</div>
+        <div class="label">c0ld Current Rank</div>
+        <div id="c0ld-rank-value" class="value">—</div>
       </div>
 
       <div class="card">
@@ -444,7 +444,7 @@
 
     <section id="view-leaderboard" class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">NONG Leaderboard</h2>
+        <h2 class="panel-title">c0ld Leaderboard</h2>
 
         <div class="toolbar">
           <select id="battle-select">
@@ -481,7 +481,7 @@
 
       <div class="history-note">
         <br>
-        NONG was created on 2023-12-01 @ 20:31:08 UTC 👵
+        c0ld was created on 2023-12-01 @ 20:31:08 UTC 👵
       </div>
 
       <div class="history-stats" id="history-stats">
@@ -539,7 +539,7 @@
     let clanData = null;
     let currentRows = [];
     let battles = [];
-    let nongHistoryData = [];
+    let c0ldHistoryData = [];
     let playerIndex = [];
     let liveAvatarUrls = new Map();
 
@@ -809,7 +809,7 @@
     function fmtBattleHistoryLink(battle) {
       const label = escapeHtml(battle.display_name || battle.battle || "Unknown");
 
-      if (!battle.nong_results_table) {
+      if (!battle.c0ld_results_table) {
         return label;
       }
 
@@ -900,7 +900,7 @@
     }
 
     async function buildHistoricalRows(battleName) {
-      const battle = (nongHistoryData || []).find(
+      const battle = (c0ldHistoryData || []).find(
         item => normalizeKey(item.battle) === normalizeKey(battleName)
       );
 
@@ -1034,7 +1034,7 @@
       const rank = clanData?.clan_rank ?? currentData?.clan_rank ?? null;
       const projectedRank = clanData?.projected_rank ?? currentData?.projected_rank ?? null;
 
-      document.getElementById("nong-rank-value").textContent =
+      document.getElementById("c0ld-rank-value").textContent =
         rank ? `#${rank}` : "—";
 
       const latest = clanData?.snapshot_at || getCurrentFetchedAt();
@@ -1127,7 +1127,7 @@
         (battles || []).filter(battle =>
           battle &&
           battle.battle &&
-          battle.nong_results_table
+          battle.c0ld_results_table
         )
       );
 
@@ -1217,7 +1217,7 @@
 
       const selected = battles.find(b => normalizeKey(b.battle) === normalizeKey(activeBattle));
 
-      if (!selected || !selected.nong_results_table) {
+      if (!selected || !selected.c0ld_results_table) {
         activeBattle = "current";
         clanData = currentData;
         currentRows = normalizeCurrentRows(currentData?.rows || []);
@@ -1228,7 +1228,7 @@
 
       currentRows = await buildHistoricalRows(selected.battle);
 
-      const historicalMeta = (nongHistoryData || []).find(
+      const historicalMeta = (c0ldHistoryData || []).find(
         item => normalizeKey(item.battle) === normalizeKey(selected.battle)
       );
 
@@ -1254,11 +1254,11 @@
       try {
         const cacheBust = Date.now();
 
-        const [currentRes, battlesRes, playersRes, nongHistoryRes] = await Promise.all([
+        const [currentRes, battlesRes, playersRes, c0ldHistoryRes] = await Promise.all([
           fetch(`Data/current.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/nong-history.json?v=${cacheBust}`, { cache: "no-store" })
+          fetch(`Data/c0ld-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
         if (!currentRes.ok) {
@@ -1278,8 +1278,8 @@
         if (!Array.isArray(playerIndex)) playerIndex = [];
         rebuildPlayerIndexMaps();
 
-        nongHistoryData = nongHistoryRes.ok ? await nongHistoryRes.json() : [];
-        if (!Array.isArray(nongHistoryData)) nongHistoryData = [];
+        c0ldHistoryData = c0ldHistoryRes.ok ? await c0ldHistoryRes.json() : [];
+        if (!Array.isArray(c0ldHistoryData)) c0ldHistoryData = [];
 
         if (!activeBattle) {
           activeBattle = "current";

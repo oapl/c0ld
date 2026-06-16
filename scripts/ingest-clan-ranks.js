@@ -9,7 +9,7 @@
 //   SUPABASE_SERVICE_KEY
 //
 // Optional env:
-//   CLAN_NAME = NONG
+//   CLAN_NAME = c0ld
 //   CURRENT_BATTLE_NAME = AngelBattle2026
 //   CURRENT_BATTLE_HISTORY_TABLE = AngelBattle2026Clans
 //   CLAN_RANK_TOP_N = 100
@@ -20,7 +20,7 @@ const path = require("path");
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-const CLAN_NAME = process.env.CLAN_NAME || "NONG";
+const CLAN_NAME = process.env.CLAN_NAME || "c0ld";
 const CURRENT_BATTLE_NAME = process.env.CURRENT_BATTLE_NAME || "AngelBattle2026";
 const CURRENT_BATTLE_HISTORY_TABLE = process.env.CURRENT_BATTLE_HISTORY_TABLE || "";
 const TOP_N = Number(process.env.CLAN_RANK_TOP_N || 100);
@@ -205,7 +205,7 @@ async function fetchClanPageFromHost(baseUrl, page) {
   const json = await fetchJson(url.toString(), {
     headers: {
       Accept: "application/json",
-      "User-Agent": "NONG-Leaderboard-Clan-Rank-Ingest"
+      "User-Agent": "c0ld-Leaderboard-Clan-Rank-Ingest"
     }
   });
 

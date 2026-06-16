@@ -72,7 +72,7 @@ jobs:
           CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
           CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
           CURRENT_BATTLE_END_ISO: ${{ vars.CURRENT_BATTLE_END_ISO }}
-          CURRENT_NONG_TABLE: ${{ vars.CURRENT_NONG_TABLE }}
+          CURRENT_C0LD_TABLE: ${{ vars.CURRENT_C0LD_TABLE }}
 
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -119,7 +119,7 @@ jobs:
           CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
           CURRENT_BATTLE_DISPLAY_NAME: ${{ vars.CURRENT_BATTLE_DISPLAY_NAME }}
           CURRENT_BATTLE_END_ISO: ${{ vars.CURRENT_BATTLE_END_ISO }}
-          CURRENT_NONG_TABLE: ${{ vars.CURRENT_NONG_TABLE }}
+          CURRENT_C0LD_TABLE: ${{ vars.CURRENT_C0LD_TABLE }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/build-player-profiles.js
@@ -128,12 +128,12 @@ jobs:
         if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
         run: node scripts/merge-manual-battles.js
 
-      - name: Build historical NONG leaderboard data
+      - name: Build historical c0ld leaderboard data
         if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: node scripts/build-nong-history.js
+        run: node scripts/build-c0ld-history.js
 
       - name: Build historical clan leaderboard data
         if: ${{ github.event_name == 'schedule' || github.event.inputs.rebuild_history == 'true' }}

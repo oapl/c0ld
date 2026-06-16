@@ -6,7 +6,7 @@
 //
 // IMPORTANT:
 // Manual dates win when provided.
-// This prevents imported historical tables, like PoisonTurtleNONG, from being sorted
+// This prevents imported historical tables, like PoisonTurtlec0ld, from being sorted
 // by their import created_at date instead of the real battle date.
 //
 // Manual fields are source of truth:
@@ -14,7 +14,7 @@
 //   update_number
 //   update_url
 //   api_battle_key
-//   nong_results_table
+//   c0ld_results_table
 //   clan_results_table
 //   first_snapshot, last_snapshot when manually supplied
 //
@@ -68,7 +68,7 @@ function cleanRecord(record) {
     display_name: stringOrNull(record.display_name || record.battle),
 
     api_battle_key: stringOrNull(record.api_battle_key),
-    nong_results_table: stringOrNull(record.nong_results_table || record.player_results_table),
+    c0ld_results_table: stringOrNull(record.c0ld_results_table || record.player_results_table),
     clan_results_table: stringOrNull(record.clan_results_table),
 
     first_snapshot: dateOrNull(record.first_snapshot),
@@ -104,7 +104,7 @@ function mergeRecord(manual, generated) {
     update_url: manual?.update_url ?? generated?.update_url ?? null,
 
     api_battle_key: manual?.api_battle_key ?? generated?.api_battle_key ?? null,
-    nong_results_table: manual?.nong_results_table ?? generated?.nong_results_table ?? null,
+    c0ld_results_table: manual?.c0ld_results_table ?? generated?.c0ld_results_table ?? null,
     clan_results_table: manual?.clan_results_table ?? generated?.clan_results_table ?? null
   };
 }

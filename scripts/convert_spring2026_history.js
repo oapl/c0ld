@@ -1,7 +1,7 @@
 /**
  * convert_spring2026_history.js
  *
- * One-shot conversion: reads Data/NONG PS99 CB-DB - PS99 History_Spring2026.tsv
+ * One-shot conversion: reads Data/c0ld PS99 CB-DB - PS99 History_Spring2026.tsv
  * and writes Data/spring2026_archive_import.csv, ready to import into the
  * Supabase Spring2026Archive table (fetched_at, rank, username, total_points).
  *
@@ -16,7 +16,7 @@ const path = require("path");
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 const REPO_ROOT = path.resolve(__dirname, "..");
-const TSV_PATH  = path.join(REPO_ROOT, "Data", "NONG PS99 CB-DB - PS99 History_Spring2026.tsv");
+const TSV_PATH  = path.join(REPO_ROOT, "Data", "c0ld PS99 CB-DB - PS99 History_Spring2026.tsv");
 const CSV_PATH  = path.join(REPO_ROOT, "Data", "spring2026_archive_import.csv");
 
 // ── Timestamp parser ──────────────────────────────────────────────────────────
