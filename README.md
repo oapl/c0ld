@@ -1,6 +1,6 @@
 # c0ld_Leaderboard
 
-Leaderboard Page: https://opalapocalypse.github.io/c0ld/
+Leaderboard Page: https://oapl.github.io/c0ld/
 
 I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website, discord and anywhere else I choose to link this.
 
