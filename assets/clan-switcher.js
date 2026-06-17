@@ -33,11 +33,16 @@
   let wmsySortAsc = true;
   let wmsySearch = "";
   let wmsyLoading = false;
+  let wmsyRendering = false;
   let clansCurrentPromise = null;
   let applyTimer = null;
 
   function normalizeClanKey(value) {
     return String(value || "c0ld").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+
+  function normalizeText(value) {
+    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
   function currentClan() {
@@ -91,9 +96,7 @@
     const parts = splitUrl(href);
     let page = parts.path.split("/").pop() || "index.html";
 
-    if (page === "wmsy.html") {
-      page = "index.html";
-    }
+    if (page === "wmsy.html") page = "index.html";
 
     const params = new URLSearchParams(parts.query);
 
@@ -115,19 +118,15 @@
       .replace(/"/g, "&quot;");
   }
 
-  function normalizeText(value) {
-    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  function fmtNum(value) {
+    if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "—";
+    return Number(value).toLocaleString("en-US");
   }
 
-  function fmtNum(n) {
-    if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
-    return Number(n).toLocaleString("en-US");
-  }
+  function fmtShortNum(value) {
+    if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "—";
 
-  function fmtShortNum(n) {
-    if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
-
-    const num = Number(n);
+    const num = Number(value);
     const tiers = [
       { value: 1e12, suffix: "T" },
       { value: 1e9, suffix: "B" },
@@ -144,9 +143,9 @@
     return String(num);
   }
 
-  function fmtDateTime(s) {
-    if (!s) return "—";
-    const d = new Date(s);
+  function fmtDateTime(value) {
+    if (!value) return "—";
+    const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "—";
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   }
@@ -177,93 +176,8 @@
         throw err;
       });
     }
+
     return clansCurrentPromise;
-  }
-
-  function sortRows(rows) {
-    const list = rows.slice();
-    list.sort((a, b) => {
-      const av = a[wmsySortKey];
-      const bv = b[wmsySortKey];
-      const an = Number(av);
-      const bn = Number(bv);
-      let result;
-
-      if (!Number.isNaN(an) && !Number.isNaN(bn)) {
-        result = an - bn;
-      } else {
-        result = String(av || "").localeCompare(String(bv || ""));
-      }
-
-      return wmsySortAsc ? result : -result;
-    });
-    return list;
-  }
-
-  function visibleWmsyRows() {
-    let rows = wmsyRows.slice();
-    const q = wmsySearch.trim().toLowerCase();
-
-    if (q) {
-      rows = rows.filter(row =>
-        String(row.username || "").toLowerCase().includes(q) ||
-        String(row.user_id || "").includes(q)
-      );
-    }
-
-    return sortRows(rows);
-  }
-
-  function renderWmsyLeaderboard() {
-    if (!isWmsy() || !isIndexPage()) return;
-
-    const tbody = document.getElementById("leaderboard-body");
-    if (!tbody) return;
-
-    const rows = visibleWmsyRows();
-
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:#8b949e;">No WMSY players found.</td></tr>`;
-      return;
-    }
-
-    tbody.innerHTML = rows.map(row => {
-      const avatar = escapeHtml(row.avatar_url || DEFAULT_AVATAR_SVG);
-      const fallback = escapeHtml(DEFAULT_AVATAR_SVG);
-
-      return `
-        <tr>
-          <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
-          <td>
-            <a class="player-cell" href="${escapeHtml(profileUrl(row))}">
-              <img class="avatar" src="${avatar}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallback}';">
-              <div><div class="player-name">${escapeHtml(row.username || "Unknown")}</div></div>
-            </a>
-          </td>
-          <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
-          <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
-          <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
-          <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
-          <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
-        </tr>
-      `;
-    }).join("");
-  }
-
-  async function loadWmsyLeaderboard() {
-    if (!isWmsy() || !isIndexPage() || wmsyLoading) return;
-
-    wmsyLoading = true;
-    try {
-      wmsyData = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=WMSY`);
-      wmsyRows = Array.isArray(wmsyData?.rows) ? wmsyData.rows.slice() : [];
-      renderWmsyLeaderboard();
-      applyTrackedClanCards();
-    } catch (err) {
-      console.warn("WMSY leaderboard refresh failed", err);
-    } finally {
-      wmsyLoading = false;
-    }
   }
 
   function ensureStyle(id, css) {
@@ -344,6 +258,25 @@
     `);
   }
 
+  function applyProfileRedScheme() {
+    if (!isProfilePage() || isWmsy() || document.getElementById("clan-profile-red-scheme")) return;
+
+    ensureStyle("clan-profile-red-scheme", `
+      :root { --link: #ff9b96 !important; }
+      .menu-btn.active {
+        border-color: #ff9b96 !important;
+        color: #ff9b96 !important;
+        background: rgba(248, 81, 73, 0.12) !important;
+      }
+      .menu-btn:hover,
+      select:hover,
+      select:focus {
+        border-color: #ff9b96 !important;
+        color: #ff9b96 !important;
+      }
+    `);
+  }
+
   function applyClanHighlightStyles() {
     ensureStyle("clan-row-highlight-styles", `
       .wmsy-row {
@@ -362,6 +295,23 @@
         color: #74d99f !important;
         font-weight: 700 !important;
       }
+
+      .nong-row {
+        background: rgba(251, 146, 60, 0.14) !important;
+      }
+      .nong-row:hover {
+        background: rgba(251, 146, 60, 0.22) !important;
+      }
+      .nong-row td {
+        border-top: 1px solid rgba(251, 146, 60, 0.50) !important;
+        border-bottom: 1px solid rgba(251, 146, 60, 0.50) !important;
+      }
+      .nong-row td.rank,
+      .nong-row td.projected,
+      .nong-row .clan-name {
+        color: #f6ad55 !important;
+        font-weight: 700 !important;
+      }
     `);
   }
 
@@ -377,7 +327,96 @@
       if (clanName === "wmsy") {
         row.classList.add("wmsy-row");
       }
+
+      if (clanName === "nong") {
+        row.classList.add("nong-row");
+      }
     });
+  }
+
+  function sortWmsyRows(rows) {
+    const list = rows.slice();
+    list.sort((a, b) => {
+      const av = a[wmsySortKey];
+      const bv = b[wmsySortKey];
+      const an = Number(av);
+      const bn = Number(bv);
+      const result = !Number.isNaN(an) && !Number.isNaN(bn)
+        ? an - bn
+        : String(av || "").localeCompare(String(bv || ""));
+      return wmsySortAsc ? result : -result;
+    });
+    return list;
+  }
+
+  function visibleWmsyRows() {
+    let rows = wmsyRows.slice();
+    const q = wmsySearch.trim().toLowerCase();
+
+    if (q) {
+      rows = rows.filter(row =>
+        String(row.username || "").toLowerCase().includes(q) ||
+        String(row.user_id || "").includes(q)
+      );
+    }
+
+    return sortWmsyRows(rows);
+  }
+
+  function renderWmsyLeaderboard() {
+    if (!isWmsy() || !isIndexPage()) return;
+
+    const tbody = document.getElementById("leaderboard-body");
+    if (!tbody) return;
+
+    const rows = visibleWmsyRows();
+    wmsyRendering = true;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:#8b949e;">No WMSY players found.</td></tr>`;
+      window.setTimeout(() => { wmsyRendering = false; }, 0);
+      return;
+    }
+
+    tbody.innerHTML = rows.map(row => {
+      const avatar = escapeHtml(row.avatar_url || DEFAULT_AVATAR_SVG);
+      const fallback = escapeHtml(DEFAULT_AVATAR_SVG);
+
+      return `
+        <tr>
+          <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
+          <td>
+            <a class="player-cell" href="${escapeHtml(profileUrl(row))}">
+              <img class="avatar" src="${avatar}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallback}';">
+              <div><div class="player-name">${escapeHtml(row.username || "Unknown")}</div></div>
+            </a>
+          </td>
+          <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
+          <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
+          <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
+          <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
+          <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    window.setTimeout(() => { wmsyRendering = false; }, 0);
+  }
+
+  async function loadWmsyLeaderboard() {
+    if (!isWmsy() || !isIndexPage() || wmsyLoading) return;
+
+    wmsyLoading = true;
+    try {
+      wmsyData = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=WMSY`);
+      wmsyRows = Array.isArray(wmsyData?.rows) ? wmsyData.rows.slice() : [];
+      renderWmsyLeaderboard();
+      applyTrackedClanCards();
+    } catch (err) {
+      console.warn("WMSY leaderboard refresh failed", err);
+    } finally {
+      wmsyLoading = false;
+    }
   }
 
   function updateRankCardLabels(clan) {
@@ -426,25 +465,41 @@
   }
 
   function getLookupClanName() {
-    const cardClan = document.getElementById("card-clan");
-    const cardText = String(cardClan?.textContent || "").trim();
-
-    if (cardText && cardText !== "—") {
-      return cardText;
-    }
+    const cardText = String(document.getElementById("card-clan")?.textContent || "").trim();
+    if (cardText && cardText !== "—") return cardText;
 
     const inputText = String(document.getElementById("clan-input")?.value || "").trim();
     return inputText && inputText !== "—" ? inputText : "";
   }
 
+  function arrangeClanLookupCards() {
+    if (!isClanLookupPage()) return;
+
+    const membersCard = document.getElementById("card-members")?.closest(".card");
+    const projectedCard = document.getElementById("card-owner")?.closest(".card");
+    const levelCard = document.getElementById("card-level")?.closest(".card");
+    const pulledCard = document.getElementById("card-pulled")?.closest(".card");
+    const parent = membersCard?.parentElement;
+
+    if (!parent || !membersCard || !projectedCard || !levelCard) return;
+
+    parent.insertBefore(levelCard, membersCard.nextSibling);
+    parent.insertBefore(projectedCard, levelCard.nextSibling);
+
+    if (pulledCard) {
+      parent.appendChild(pulledCard);
+    }
+  }
+
   async function applyClanLookupProjectedRank() {
     if (!isClanLookupPage()) return;
+
+    arrangeClanLookupCards();
 
     const valueEl = document.getElementById("card-owner");
     if (!valueEl) return;
 
-    const card = valueEl.closest(".card");
-    const label = card?.querySelector(".label");
+    const label = valueEl.closest(".card")?.querySelector(".label");
     if (label) label.textContent = "Projected Rank";
 
     const clanName = getLookupClanName();
@@ -452,16 +507,8 @@
 
     if (!clanKey) {
       valueEl.textContent = "—";
-      valueEl.dataset.projectedClan = "";
       return;
     }
-
-    if (valueEl.dataset.projectedClan === clanKey && valueEl.dataset.projectedDone === "1") {
-      return;
-    }
-
-    valueEl.dataset.projectedClan = clanKey;
-    valueEl.dataset.projectedDone = "0";
 
     try {
       const data = await getClansCurrent();
@@ -469,39 +516,11 @@
       const row = rows.find(item => normalizeText(item.clan_name) === clanKey);
       const projected = row?.projected_rank ?? row?.projectedRank ?? row?.projected ?? row?.rank;
 
-      if (valueEl.dataset.projectedClan !== clanKey) return;
-
       valueEl.textContent = row ? formatRank(projected) : "200+";
-      valueEl.dataset.projectedDone = "1";
     } catch (err) {
       console.warn("Clan lookup projected rank refresh failed", err);
-      if (valueEl.dataset.projectedClan === clanKey) {
-        valueEl.textContent = "200+";
-        valueEl.dataset.projectedDone = "1";
-      }
+      valueEl.textContent = "200+";
     }
-  }
-
-  function applyProfileRedScheme() {
-    if (!isProfilePage() || isWmsy() || document.getElementById("clan-profile-red-scheme")) return;
-
-    const style = document.createElement("style");
-    style.id = "clan-profile-red-scheme";
-    style.textContent = `
-      :root { --link: #ff9b96 !important; }
-      .menu-btn.active {
-        border-color: #ff9b96 !important;
-        color: #ff9b96 !important;
-        background: rgba(248, 81, 73, 0.12) !important;
-      }
-      .menu-btn:hover,
-      select:hover,
-      select:focus {
-        border-color: #ff9b96 !important;
-        color: #ff9b96 !important;
-      }
-    `;
-    document.head.appendChild(style);
   }
 
   function wireWmsyControls() {
@@ -539,7 +558,7 @@
     });
   }
 
-  function applyClanSwitcher() {
+  function applyChrome() {
     const clan = currentClan();
 
     applyWmsyTheme();
@@ -567,7 +586,10 @@
         link.textContent = `${clan.label} Leaderboard`;
       }
     });
+  }
 
+  function applyAll() {
+    applyChrome();
     applyTrackedClanCards();
     applyClanLookupProjectedRank();
     highlightTrackedClanRows();
@@ -577,8 +599,8 @@
   }
 
   function scheduleApply() {
-    applyClanSwitcher();
-    [250, 1000, 2500, 5000].forEach(delay => window.setTimeout(applyClanSwitcher, delay));
+    applyAll();
+    [250, 1000, 2500, 5000].forEach(delay => window.setTimeout(applyAll, delay));
   }
 
   if (document.readyState === "loading") {
@@ -589,14 +611,25 @@
 
   window.addEventListener("pageshow", scheduleApply);
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver(mutations => {
+    if (wmsyRendering) return;
+
+    const touchedWmsyTable = isWmsy() && isIndexPage() && mutations.some(mutation => {
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+      return Boolean(target?.closest?.("#leaderboard-body"));
+    });
+
     window.clearTimeout(applyTimer);
     applyTimer = window.setTimeout(() => {
-      renderWmsyLeaderboard();
+      applyChrome();
       applyTrackedClanCards();
       applyClanLookupProjectedRank();
       highlightTrackedClanRows();
       applyWmsyTheme();
+
+      if (touchedWmsyTable) {
+        renderWmsyLeaderboard();
+      }
     }, 100);
   });
 
