@@ -39,6 +39,7 @@ jobs:
           script_tags = [
               '  <script src="assets/clan-switcher.js"></script>\n',
               '  <script src="assets/site-enhancements.js"></script>\n',
+              '  <script src="assets/site-enhancements-compat.js"></script>\n',
           ]
 
           for path in Path('_site').glob('*.html'):
