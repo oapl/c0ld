@@ -25,6 +25,8 @@
       --ok-bg: rgba(63, 185, 80, 0.12);
       --warn: #d29922;
       --warn-bg: rgba(210, 153, 34, 0.12);
+      --disabled: #6e7681;
+      --disabled-bg: rgba(110, 118, 129, 0.12);
     }
 
     html, body {
@@ -315,7 +317,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 620px;
+      min-width: 720px;
     }
 
     th,
@@ -348,6 +350,7 @@
       text-align: center;
     }
 
+    .server-pill,
     .clan-pill {
       display: inline-flex;
       align-items: center;
@@ -358,6 +361,25 @@
       border-radius: 999px;
       background: var(--panel-2);
       font-size: 12px;
+    }
+
+    .server-pill.online {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .server-pill.full {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
+    .server-pill.offline,
+    .clan-pill.unknown {
+      border-color: var(--disabled);
+      background: var(--disabled-bg);
+      color: #c9d1d9;
     }
 
     .clan-pill.c0ld,
@@ -371,6 +393,75 @@
       border-color: var(--warn);
       background: var(--warn-bg);
       color: #f2cc60;
+    }
+
+    .player-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 220px;
+    }
+
+    .player-avatar {
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      object-fit: cover;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    .player-avatar.unknown {
+      border-color: var(--disabled);
+      background:
+        radial-gradient(circle at 35% 32%, rgba(230, 237, 243, 0.20) 0 18%, transparent 19%),
+        radial-gradient(circle at 50% 78%, rgba(230, 237, 243, 0.16) 0 30%, transparent 31%),
+        var(--panel-2);
+      color: #c9d1d9;
+    }
+
+    .player-name-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .player-name {
+      font-weight: 700;
+      color: var(--text);
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .player-name a {
+      color: var(--text);
+    }
+
+    .player-name a:hover {
+      color: var(--link);
+      text-decoration: underline;
+    }
+
+    .player-sub {
+      color: var(--muted);
+      font-size: 12px;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .muted {
+      color: var(--muted);
     }
 
     @media (max-width: 700px) {
@@ -452,6 +543,10 @@
             <span id="server-id" class="summary-value">-</span>
           </div>
           <div class="summary-item">
+            <span class="summary-label">Status</span>
+            <span id="server-status" class="summary-value">-</span>
+          </div>
+          <div class="summary-item">
             <span class="summary-label">Location</span>
             <span id="server-location" class="summary-value">-</span>
           </div>
@@ -486,14 +581,13 @@
           <thead>
             <tr>
               <th>Player</th>
-              <th>Display Name</th>
               <th>User ID</th>
               <th>Clan</th>
             </tr>
           </thead>
           <tbody id="players-body">
             <tr>
-              <td colspan="4" class="empty-state">No player list available.</td>
+              <td colspan="3" class="empty-state">No player list available.</td>
             </tr>
           </tbody>
         </table>
@@ -509,7 +603,8 @@
     const SERVERS_DATA_PATH = "/api/servers";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
-    const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
+    const OFFLINE_LABEL = "Offline";
+    const UNKNOWN_LABEL = "Unknown";
 
     let servers = [];
     let activeServer = null;
@@ -552,43 +647,83 @@
 
     function toNumberOrNull(value) {
       if (value === null || value === undefined || value === "") return null;
+      if (Array.isArray(value) || typeof value === "object") return null;
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
     }
 
+    function firstNumber(...values) {
+      for (const value of values) {
+        const n = toNumberOrNull(value);
+        if (n !== null) return n;
+      }
+      return null;
+    }
+
     function getPlayerCount(row) {
-      return toNumberOrNull(
-        row.players ??
-        row.player_count ??
-        row.players_current ??
-        row.current_players ??
-        row.member_count ??
+      return firstNumber(
+        row.players,
+        row.player_count,
+        row.players_current,
+        row.current_players,
+        row.member_count,
         row.members_count
       );
     }
 
     function getMaxPlayers(row) {
-      return toNumberOrNull(
-        row.max_players ??
-        row.players_max ??
-        row.player_capacity ??
-        row.capacity ??
-        discordConfig.default_max_players ??
+      return firstNumber(
+        row.max_players,
+        row.players_max,
+        row.player_capacity,
+        row.capacity,
+        discordConfig.default_max_players,
         DEFAULT_MAX_PLAYERS
       ) || DEFAULT_MAX_PLAYERS;
+    }
+
+    function normalizePlayer(player, index) {
+      const userId = player.user_id || player.userId || player.id || null;
+      const unknown = Boolean(player.unknown || !userId);
+      const slot = Number(player.slot || index + 1);
+
+      return {
+        slot,
+        unknown,
+        username: String(player.username || player.name || player.displayName || (unknown ? `Unknown Player ${slot}` : `User ${userId}`)),
+        display_name: String(player.display_name || player.displayName || ""),
+        user_id: userId,
+        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
+        clan: String(player.clan || "")
+      };
     }
 
     function normalizePlayersList(row) {
       const list = row.players_list || row.members || row.player_list || [];
       if (!Array.isArray(list)) return [];
+      return list.map(normalizePlayer);
+    }
 
-      return list.map(player => ({
-        username: String(player.username || player.name || player.displayName || "Unknown"),
-        display_name: String(player.display_name || player.displayName || ""),
-        user_id: player.user_id || player.userId || player.id || null,
-        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
-        clan: String(player.clan || "")
-      }));
+    function completePlayersList(row) {
+      const expected = Math.max(0, getPlayerCount(row) || 0);
+      const maxPlayers = getMaxPlayers(row);
+      const target = expected || (serverAvailability(row) === "offline" ? 0 : maxPlayers);
+      const players = normalizePlayersList(row).slice(0, target);
+
+      while (players.length < target) {
+        const slot = players.length + 1;
+        players.push({
+          slot,
+          unknown: true,
+          username: `Unknown Player ${slot}`,
+          display_name: "",
+          user_id: null,
+          avatar_url: "",
+          clan: ""
+        });
+      }
+
+      return players;
     }
 
     function parseRows(payload) {
@@ -610,16 +745,16 @@
         const normalized = {
           id: stableServerId(row, link),
           rank: toNumberOrNull(row.rank ?? row.server_number),
-          location: String(row.location || row.region || "").trim() || "Unknown",
+          location: String(row.location || row.region || "").trim() || UNKNOWN_LABEL,
           link,
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
           clan_counts: row.clan_counts || {},
-          compromise_status: String(row.compromise_status || row.status || "unknown"),
+          compromise_status: String(row.compromise_status || row.status || row.server_status || "").trim(),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
-          video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
+          video_url: String(row.video_url || row.pathing_video || row.pathing_video_url || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
         };
 
@@ -645,15 +780,42 @@
       })).sort((a, b) => a.rank - b.rank);
     }
 
+    function serverAvailability(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const status = String(row.compromise_status || row.status || row.server_status || "").trim().toLowerCase();
+
+      if (status === "full") return "full";
+      if (status === "online") return "online";
+      if (status === "offline") return "offline";
+
+      if (players !== null && players >= maxPlayers) return "full";
+      if (players !== null && players > 0) return "online";
+
+      return "offline";
+    }
+
+    function serverAvailabilityLabel(row) {
+      const availability = serverAvailability(row);
+      if (availability === "full") return "Full";
+      if (availability === "online") return "Online";
+      return "Offline";
+    }
+
+    function displayLocation(row) {
+      if (serverAvailability(row) === "offline") {
+        return OFFLINE_LABEL;
+      }
+
+      const location = String(row.location || row.region || "").trim();
+      return location || UNKNOWN_LABEL;
+    }
+
     function fmtPlayers(row) {
       const players = getPlayerCount(row);
       const maxPlayers = getMaxPlayers(row);
       const current = players === null ? "-" : players.toLocaleString("en-US");
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
-    }
-
-    function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "-" : (row.location || "-");
     }
 
     function fmtDateTime(value) {
@@ -706,6 +868,8 @@
     }
 
     function clanLabel(player) {
+      if (player.unknown || !player.user_id) return UNKNOWN_LABEL;
+
       const clan = String(player.clan || "").trim().toUpperCase();
       if (clan === "C0LD") return "C0LD";
       if (clan === "WMSY") return "WMSY";
@@ -713,27 +877,62 @@
     }
 
     function clanClass(player) {
+      if (player.unknown || !player.user_id) return "unknown";
+
       const clan = String(player.clan || "").trim().toLowerCase();
       return clan === "c0ld" || clan === "wmsy" ? clan : "other";
     }
 
+    function playerProfileUrl(player) {
+      if (!player.user_id) return "";
+      return `https://www.roblox.com/users/${encodeURIComponent(player.user_id)}/profile`;
+    }
+
+    function playerAvatarMarkup(player) {
+      if (player.avatar_url && !player.unknown) {
+        return `<img class="player-avatar" src="${htmlEscape(player.avatar_url)}" alt="${htmlEscape(player.username)}">`;
+      }
+
+      return `<span class="player-avatar unknown" aria-label="Unknown player">?</span>`;
+    }
+
     function renderPlayers(row) {
       const tbody = document.getElementById("players-body");
-      const players = row.players_list || [];
+      const players = completePlayersList(row);
 
       if (!players.length) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No player list available.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No players detected.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = players.map(player => `
-        <tr>
-          <td>${htmlEscape(player.username)}</td>
-          <td>${htmlEscape(player.display_name || "-")}</td>
-          <td>${htmlEscape(player.user_id || "-")}</td>
-          <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
-        </tr>
-      `).join("");
+      tbody.innerHTML = players.map(player => {
+        const profile = playerProfileUrl(player);
+        const name = htmlEscape(player.username || `Unknown Player ${player.slot}`);
+        const displayName = htmlEscape(player.display_name || (player.unknown ? "Profile unavailable" : ""));
+        const userId = player.user_id ? htmlEscape(player.user_id) : "-";
+
+        return `
+          <tr>
+            <td>
+              <div class="player-cell">
+                ${playerAvatarMarkup(player)}
+                <div class="player-name-wrap">
+                  <span class="player-name">
+                    ${
+                      profile
+                        ? `<a href="${htmlEscape(profile)}" target="_blank" rel="noopener">${name}</a>`
+                        : name
+                    }
+                  </span>
+                  <span class="player-sub">${displayName || " "}</span>
+                </div>
+              </div>
+            </td>
+            <td>${userId}</td>
+            <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
+          </tr>
+        `;
+      }).join("");
     }
 
     function renderServer(row) {
@@ -744,9 +943,10 @@
       document.getElementById("players-panel").hidden = false;
       document.getElementById("server-title").textContent = `Server ${row.rank}`;
       document.getElementById("server-id").textContent = `Server ${row.rank}`;
+      document.getElementById("server-status").innerHTML = `<span class="server-pill ${htmlEscape(serverAvailability(row))}">${htmlEscape(serverAvailabilityLabel(row))}</span>`;
       document.getElementById("server-location").textContent = displayLocation(row);
       document.getElementById("server-players").textContent = fmtPlayers(row);
-      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at);
+      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at || row.players_updated_at);
 
       const joinLink = document.getElementById("join-link");
       joinLink.href = row.link;
