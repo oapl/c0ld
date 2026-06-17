@@ -63,10 +63,24 @@
       max-width: 1200px;
       margin: 0 auto;
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
+      align-items: center;
+      justify-content: center;
       gap: 18px;
       flex-wrap: wrap;
+    }
+
+    .site-logo-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+    }
+
+    .site-logo {
+      display: block;
+      width: 76px;
+      height: auto;
+      border-radius: 10px;
     }
 
     .title-wrap h1 {
@@ -384,11 +398,9 @@
 <body>
   <header>
     <div class="header-inner">
-      <div class="title-wrap">
-        <h1>c0ld Leaderboard</h1>
-        <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
-      </div>
-
+      <a class="site-logo-link" href="index.html" aria-label="c0ld home">
+        <img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld">
+      </a>
     </div>
 
     <div class="menu-bar">
