@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clan Profile</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0d1117;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #58a6ff;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: none; }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 22px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .site-logo-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+      border-radius: 10px;
+      transition: transform 0.12s ease, filter 0.15s ease;
+    }
+
+    .site-logo-link:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.12);
+    }
+
+    .site-logo {
+      display: block;
+      width: 76px;
+      height: auto;
+      border-radius: 10px;
+      object-fit: contain;
+    }
+
+    .menu-bar {
+      max-width: 1200px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 22px 24px 24px;
+    }
+
+    .profile-header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 18px;
+      margin-bottom: 24px;
+    }
+
+    .clan-icon {
+      width: 96px;
+      height: 96px;
+      border-radius: 10px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .profile-name {
+      margin: 0 0 6px;
+      font-size: 34px;
+      line-height: 1.05;
+    }
+
+    .profile-meta {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      min-height: 82px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 21px;
+      font-weight: bold;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .section-title-row {
+      margin: 24px 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .battle-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      margin-bottom: 18px;
+      overflow: hidden;
+    }
+
+    .battle-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .battle-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    .battle-dates {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .stats {
+      padding: 8px 16px 16px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: minmax(190px, 1fr) minmax(100px, 1fr);
+      gap: 16px;
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat-row:last-child { border-bottom: 0; }
+    .stat-label { color: var(--muted); }
+    .stat-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .chart-wrap {
+      padding: 0 16px 16px;
+      position: relative;
+    }
+
+    .chart-title {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 10px 0;
+    }
+
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin: 8px 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chart-control-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chart-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chart-controls input { accent-color: var(--link); }
+
+    .chart-legend-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .chart-legend-pill::before {
+      content: "";
+      width: 10px;
+      height: 3px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .chart-box {
+      width: 100%;
+      height: 260px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      display: block;
+      cursor: crosshair;
+    }
+
+    .tooltip {
+      position: absolute;
+      z-index: 5;
+      pointer-events: none;
+      display: none;
+      min-width: 230px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0b0f14;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .empty, .error {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 18px;
+      color: var(--muted);
+    }
+
+    .error {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    @media (max-width: 1000px) {
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 700px) {
+      main { padding: 16px; }
+      .menu-bar { justify-content: flex-start; }
+      .site-logo { width: 64px; }
+      .profile-header { align-items: flex-start; }
+      .profile-name { font-size: 26px; }
+      .clan-icon { width: 76px; height: 76px; }
+      .cards { grid-template-columns: 1fr; }
+      .stat-row { grid-template-columns: 1fr; gap: 4px; }
+      .stat-value { text-align: left; }
+      .chart-box { height: 220px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a id="clan-mascot-link" class="site-logo-link" href="index.html?clan=WMSY" aria-label="Switch clan view" title="Switch clan view">
+        <img id="site-mascot" class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld">
+      </a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" data-clan-link data-page="index.html" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" data-clan-link data-page="clans.html" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" data-clan-link data-page="live-clan.html" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn" data-clan-link data-page="servers.html" href="servers.html">Servers</a>
+      <a class="menu-btn" data-clan-link data-page="macros.html" href="macros.html">Macros</a>
+    </div>
+  </header>
+
+  <main id="app">
+    <div class="empty">Loading clan profile...</div>
+  </main>
+
+  <script>
+    const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+    const CLANS_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/history";
+
+    const SPECIAL_CLANS = {
+      c0ld: { label: "c0ld", color: "#ff9b96" },
+      wmsy: { label: "WMSY", color: "#74d99f" },
+      nong: { label: "NONG", color: "#f6ad55" }
+    };
+
+    const COLORS = {
+      defaultPoints: "#58a6ff",
+      rank: "#8b949e"
+    };
+
+    const DEFAULT_CLAN_ICON =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+          <rect width="150" height="150" rx="16" fill="#21262d"/>
+          <path d="M46 98V52l29-15 29 15v46l-29 15-29-15z" fill="#6e7681"/>
+        </svg>
+      `);
+
+    let currentData = null;
+    let historyData = null;
+    let selectedClan = null;
+    let selectedRow = null;
+    let chartState = {
+      points: true,
+      rank: false,
+      compare: {}
+    };
+
+    function normalize(value) {
+      return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
+    function displayName(value) {
+      const key = normalize(value);
+      return SPECIAL_CLANS[key]?.label || String(value || "").trim();
+    }
+
+    function viewedClanName() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("name") || params.get("target") || params.get("clanName") || params.get("clan") || "c0ld";
+    }
+
+    function clanColor(name) {
+      return SPECIAL_CLANS[normalize(name)]?.color || COLORS.defaultPoints;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function finiteNumber(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function fmtNum(value) {
+      const n = finiteNumber(value);
+      return n === null ? "—" : n.toLocaleString("en-US");
+    }
+
+    function fmtShortNum(value) {
+      const n = finiteNumber(value);
+      if (n === null) return "—";
+
+      const tiers = [
+        { value: 1e12, suffix: "T" },
+        { value: 1e9, suffix: "B" },
+        { value: 1e6, suffix: "M" },
+        { value: 1e3, suffix: "K" }
+      ];
+
+      for (const tier of tiers) {
+        if (Math.abs(n) >= tier.value) {
+          return (n / tier.value).toFixed(2).replace(/\.?0+$/, "") + tier.suffix;
+        }
+      }
+
+      return String(n);
+    }
+
+    function fmtRank(value) {
+      const n = finiteNumber(value);
+      return n === null ? "—" : `#${n.toLocaleString("en-US")}`;
+    }
+
+    function fmtDate(value) {
+      if (!value) return "—";
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "—";
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function findClanRow(rows, name) {
+      const key = normalize(name);
+      return (rows || []).find(row => normalize(row.clan_name) === key) || null;
+    }
+
+    function historyRowsFor(name) {
+      const key = normalize(name);
+      return (historyData?.rows || [])
+        .filter(row => normalize(row.clan_name) === key)
+        .map(row => ({
+          t: row.fetched_at,
+          rank: finiteNumber(row.rank),
+          points: finiteNumber(row.points),
+          clan_name: row.clan_name,
+          icon_url: row.icon_url || null
+        }))
+        .filter(row => row.t)
+        .sort((a, b) => new Date(a.t) - new Date(b.t));
+    }
+
+    function seriesFor(name) {
+      let rows = historyRowsFor(name);
+      const currentRow = findClanRow(currentData?.rows, name);
+
+      if (currentRow?.fetched_at && !rows.some(row => row.t === currentRow.fetched_at)) {
+        rows.push({
+          t: currentRow.fetched_at,
+          rank: finiteNumber(currentRow.rank),
+          points: finiteNumber(currentRow.points),
+          clan_name: currentRow.clan_name,
+          icon_url: currentRow.icon_url || null
+        });
+        rows.sort((a, b) => new Date(a.t) - new Date(b.t));
+      }
+
+      if (!rows.length && currentRow) {
+        rows = [{
+          t: currentData.snapshot_at || currentData.generated_at,
+          rank: finiteNumber(currentRow.rank),
+          points: finiteNumber(currentRow.points),
+          clan_name: currentRow.clan_name,
+          icon_url: currentRow.icon_url || null
+        }].filter(row => row.t);
+      }
+
+      return rows;
+    }
+
+    function battleStats(rows) {
+      const ranks = rows.map(row => row.rank).filter(Number.isFinite);
+      const first = rows[0] || {};
+      const last = rows[rows.length - 1] || {};
+
+      return {
+        firstActive: first.t || null,
+        startingRank: first.rank ?? null,
+        worstRank: ranks.length ? Math.max(...ranks) : null,
+        bestRank: ranks.length ? Math.min(...ranks) : null,
+        endRank: selectedRow?.rank ?? last.rank ?? null,
+        endingPoints: selectedRow?.points ?? last.points ?? null
+      };
+    }
+
+    function comparisonOptions() {
+      const selectedKey = normalize(selectedClan);
+      return Object.entries(SPECIAL_CLANS)
+        .filter(([key]) => key !== selectedKey)
+        .map(([key, meta]) => ({ key, ...meta }))
+        .filter(item => findClanRow(currentData?.rows, item.label));
+    }
+
+    function currentPointColor() {
+      return clanColor(selectedClan);
+    }
+
+    function updateThemeColor() {
+      const color = currentPointColor();
+      document.documentElement.style.setProperty("--link", color);
+    }
+
+    function renderShell() {
+      const app = document.getElementById("app");
+      const row = selectedRow;
+      const rows = seriesFor(selectedClan);
+      const stats = battleStats(rows);
+      const icon = row?.icon_url || rows.find(item => item.icon_url)?.icon_url || DEFAULT_CLAN_ICON;
+      const battleName = currentData?.display_name || currentData?.battle || "Current Clan Battle";
+      const start = currentData?.battle_start_iso || rows[0]?.t;
+      const end = currentData?.battle_end_iso || rows[rows.length - 1]?.t;
+
+      app.innerHTML = `
+        <section class="profile-header">
+          <img class="clan-icon" src="${escapeHtml(icon)}" alt="" onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">
+          <div>
+            <h2 class="profile-name">${escapeHtml(displayName(selectedClan))}</h2>
+            <div class="profile-meta">
+              Current Battle: ${escapeHtml(battleName)}<br>
+              ${row ? `Top 200 clan profile · Rank ${fmtRank(row.rank)}` : "Clan not currently in top 200"}
+            </div>
+          </div>
+        </section>
+
+        <section class="cards">
+          <div class="card">
+            <div class="label">Current Rank</div>
+            <div class="value">${fmtRank(row?.rank)}</div>
+          </div>
+          <div class="card">
+            <div class="label">Projected Rank</div>
+            <div class="value">${fmtRank(row?.projected_rank)}</div>
+          </div>
+          <div class="card">
+            <div class="label">Current Points</div>
+            <div class="value">${fmtNum(row?.points)}</div>
+          </div>
+          <div class="card">
+            <div class="label">Latest Seen</div>
+            <div class="value">${fmtDateTime(currentData?.snapshot_at || currentData?.generated_at)}</div>
+          </div>
+        </section>
+
+        <div class="section-title-row">
+          <h2 class="section-title">Battle History</h2>
+        </div>
+
+        <article class="battle-card">
+          <div class="battle-header">
+            <h3 class="battle-title">${escapeHtml(battleName)}</h3>
+            <div class="battle-dates">${fmtDate(start)} → ${fmtDate(end)}</div>
+          </div>
+
+          <div class="stats">
+            <div class="stat-row"><div class="stat-label">First Active Date</div><div class="stat-value">${fmtDate(stats.firstActive)}</div></div>
+            <div class="stat-row"><div class="stat-label">Starting Rank</div><div class="stat-value">${fmtRank(stats.startingRank)}</div></div>
+            <div class="stat-row"><div class="stat-label">Worst Rank</div><div class="stat-value">${fmtRank(stats.worstRank)}</div></div>
+            <div class="stat-row"><div class="stat-label">Best Rank</div><div class="stat-value">${fmtRank(stats.bestRank)}</div></div>
+            <div class="stat-row"><div class="stat-label">End Rank</div><div class="stat-value">${fmtRank(stats.endRank)}</div></div>
+            <div class="stat-row"><div class="stat-label">Ending Points</div><div class="stat-value">${fmtNum(stats.endingPoints)}</div></div>
+          </div>
+
+          <div class="chart-wrap">
+            <div class="chart-title">Progression</div>
+            <div class="chart-controls">
+              <div class="chart-control-group">
+                <label style="color:${currentPointColor()}"><input id="toggle-points" type="checkbox" ${chartState.points ? "checked" : ""}> <span class="chart-legend-pill">Points</span></label>
+                <label style="color:${COLORS.rank}"><input id="toggle-rank" type="checkbox" ${chartState.rank ? "checked" : ""}> <span class="chart-legend-pill">Rank</span></label>
+              </div>
+              <div class="chart-control-group" id="compare-controls">
+                ${comparisonOptions().map(item => `
+                  <label style="color:${item.color}">
+                    <input class="compare-toggle" type="checkbox" data-clan="${escapeHtml(item.label)}" ${chartState.compare[normalize(item.label)] ? "checked" : ""}>
+                    <span class="chart-legend-pill">${escapeHtml(item.label)}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </div>
+            <canvas class="chart-box" id="progress-chart"></canvas>
+            <div class="tooltip" id="chart-tooltip"></div>
+          </div>
+        </article>
+      `;
+
+      wireControls();
+      requestAnimationFrame(drawChart);
+    }
+
+    function visibleSeries() {
+      const viewed = seriesFor(selectedClan);
+      const comparisons = comparisonOptions()
+        .filter(item => chartState.compare[normalize(item.label)])
+        .map(item => ({ ...item, series: seriesFor(item.label) }))
+        .filter(item => item.series.length > 1);
+
+      return { viewed, comparisons };
+    }
+
+    function yScale(value, min, max, top, height, type) {
+      if (max === min) return top + height / 2;
+      const pct = (value - min) / (max - min);
+      return type === "rank" ? top + pct * height : top + (1 - pct) * height;
+    }
+
+    function drawLine(ctx, rows, x, y, color) {
+      if (!rows.length) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      rows.forEach((row, index) => index === 0 ? ctx.moveTo(x(row), y(row)) : ctx.lineTo(x(row), y(row)));
+      ctx.stroke();
+      const last = rows[rows.length - 1];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x(last), y(last), 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawChart() {
+      const canvas = document.getElementById("progress-chart");
+      const tooltip = document.getElementById("chart-tooltip");
+      if (!canvas || !tooltip) return;
+
+      const ctx = canvas.getContext("2d");
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const { viewed, comparisons } = visibleSeries();
+      const viewedPoints = chartState.points ? viewed.filter(row => row.points !== null) : [];
+      const viewedRanks = chartState.rank ? viewed.filter(row => row.rank !== null) : [];
+      const comparePointRows = comparisons.flatMap(item => item.series.filter(row => row.points !== null));
+      const visible = [...viewedPoints, ...viewedRanks, ...comparePointRows];
+
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      if (visible.length < 2) {
+        ctx.fillStyle = "#8b949e";
+        ctx.font = "13px Arial";
+        ctx.fillText("Not enough points to chart.", 16, 28);
+        return;
+      }
+
+      const padLeft = 58;
+      const padRight = 18;
+      const padTop = 18;
+      const padBottom = 34;
+      const width = rect.width - padLeft - padRight;
+      const height = rect.height - padTop - padBottom;
+      const minT = Math.min(...visible.map(row => new Date(row.t).getTime()));
+      const maxT = Math.max(...visible.map(row => new Date(row.t).getTime()));
+      const pointValues = [...viewedPoints, ...comparePointRows].map(row => row.points).filter(Number.isFinite);
+      const rankValues = viewedRanks.map(row => row.rank).filter(Number.isFinite);
+      const minPoints = pointValues.length ? Math.min(...pointValues) : 0;
+      const maxPoints = pointValues.length ? Math.max(...pointValues) : 0;
+      const minRank = rankValues.length ? Math.min(...rankValues) : 0;
+      const maxRank = rankValues.length ? Math.max(...rankValues) : 0;
+
+      function x(row) {
+        const t = new Date(row.t).getTime();
+        if (maxT === minT) return padLeft;
+        return padLeft + ((t - minT) / (maxT - minT)) * width;
+      }
+
+      function yPoints(row) {
+        return yScale(row.points, minPoints, maxPoints, padTop, height, "points");
+      }
+
+      function yRank(row) {
+        return yScale(row.rank, minRank, maxRank, padTop, height, "rank");
+      }
+
+      ctx.strokeStyle = "#30363d";
+      ctx.lineWidth = 1;
+      ctx.font = "12px Arial";
+      ctx.fillStyle = "#8b949e";
+
+      const grid = pointValues.length ? { min: minPoints, max: maxPoints, type: "points" } : { min: minRank, max: maxRank, type: "rank" };
+      for (let i = 0; i <= 4; i++) {
+        const pct = i / 4;
+        const yy = padTop + pct * height;
+        const value = grid.type === "rank"
+          ? grid.min + pct * (grid.max - grid.min)
+          : grid.max - pct * (grid.max - grid.min);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, yy);
+        ctx.lineTo(rect.width - padRight, yy);
+        ctx.stroke();
+        ctx.fillText(grid.type === "rank" ? `#${Math.round(value)}` : fmtShortNum(value), 8, yy + 4);
+      }
+
+      drawLine(ctx, viewedPoints, x, yPoints, currentPointColor());
+      drawLine(ctx, viewedRanks, x, yRank, COLORS.rank);
+
+      for (const item of comparisons) {
+        drawLine(ctx, item.series.filter(row => row.points !== null), x, yPoints, item.color);
+      }
+
+      const firstDate = new Date(minT);
+      const lastDate = new Date(maxT);
+      ctx.fillStyle = "#8b949e";
+      ctx.fillText(firstDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }), padLeft, rect.height - 12);
+      const lastLabel = lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const lastWidth = ctx.measureText(lastLabel).width;
+      ctx.fillText(lastLabel, rect.width - padRight - lastWidth, rect.height - 12);
+
+      canvas._chart = { viewed, comparisons, x, yPoints, yRank, padTop, padBottom, rect };
+      bindTooltip(canvas, tooltip);
+    }
+
+    function bindTooltip(canvas, tooltip) {
+      if (canvas.dataset.tooltipBound === "1") return;
+      canvas.dataset.tooltipBound = "1";
+
+      function hide() { tooltip.style.display = "none"; }
+
+      function move(ev) {
+        const chart = canvas._chart;
+        if (!chart?.viewed?.length) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        let nearest = chart.viewed[0];
+        let nearestDist = Math.abs(chart.x(nearest) - mx);
+
+        for (const row of chart.viewed) {
+          const dist = Math.abs(chart.x(row) - mx);
+          if (dist < nearestDist) {
+            nearest = row;
+            nearestDist = dist;
+          }
+        }
+
+        drawChart();
+        const fresh = canvas._chart;
+        const ctx = canvas.getContext("2d");
+        const px = fresh.x(nearest);
+        const py = chartState.points && nearest.points !== null ? fresh.yPoints(nearest) : fresh.yRank(nearest);
+        ctx.save();
+        ctx.strokeStyle = "rgba(139, 148, 158, 0.55)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, fresh.padTop);
+        ctx.lineTo(px, fresh.rect.height - fresh.padBottom);
+        ctx.stroke();
+        ctx.fillStyle = "#e6edf3";
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const compareRows = fresh.comparisons.map(item => {
+          const close = item.series.reduce((best, row) => {
+            const dist = Math.abs(new Date(row.t).getTime() - new Date(nearest.t).getTime());
+            if (!best || dist < best.dist) return { row, dist };
+            return best;
+          }, null)?.row;
+          return `<div style="color:${item.color}">${escapeHtml(item.label)} Points: ${fmtNum(close?.points)}</div>`;
+        }).join("");
+
+        tooltip.innerHTML = `
+          <strong>${fmtDateTime(nearest.t)}</strong>
+          <div>Points: ${fmtNum(nearest.points)}</div>
+          <div>Rank: ${fmtRank(nearest.rank)}</div>
+          ${compareRows}
+        `;
+        tooltip.style.display = "block";
+
+        const tooltipRect = tooltip.getBoundingClientRect();
+        let left = ev.clientX - rect.left + 14;
+        let top = ev.clientY - rect.top + 14;
+        if (left + tooltipRect.width > rect.width) left = ev.clientX - rect.left - tooltipRect.width - 14;
+        if (top + tooltipRect.height > rect.height) top = ev.clientY - rect.top - tooltipRect.height - 14;
+        tooltip.style.left = `${Math.max(8, left)}px`;
+        tooltip.style.top = `${Math.max(8, top)}px`;
+      }
+
+      canvas.addEventListener("mousemove", move);
+      canvas.addEventListener("mouseleave", hide);
+      canvas.addEventListener("touchstart", ev => ev.touches?.[0] && move(ev.touches[0]), { passive: true });
+      canvas.addEventListener("touchmove", ev => ev.touches?.[0] && move(ev.touches[0]), { passive: true });
+      canvas.addEventListener("touchend", hide);
+    }
+
+    function wireControls() {
+      document.getElementById("toggle-points")?.addEventListener("change", event => {
+        if (!event.target.checked && !chartState.rank) event.target.checked = true;
+        chartState.points = event.target.checked;
+        drawChart();
+      });
+
+      document.getElementById("toggle-rank")?.addEventListener("change", event => {
+        if (!event.target.checked && !chartState.points) event.target.checked = true;
+        chartState.rank = event.target.checked;
+        drawChart();
+      });
+
+      document.querySelectorAll(".compare-toggle").forEach(input => {
+        input.addEventListener("change", event => {
+          chartState.compare[normalize(event.target.dataset.clan)] = event.target.checked;
+          drawChart();
+        });
+      });
+    }
+
+    async function loadData() {
+      selectedClan = displayName(viewedClanName());
+      const app = document.getElementById("app");
+
+      try {
+        currentData = await fetchJson(CLANS_API_CURRENT_URL);
+        selectedRow = findClanRow(currentData.rows, selectedClan);
+
+        if (!selectedRow) {
+          app.innerHTML = `<div class="error">${escapeHtml(selectedClan)} is not currently in the top 200 clans list.</div>`;
+          return;
+        }
+
+        const historyUrl = `${CLANS_API_HISTORY_URL}?battle=${encodeURIComponent(currentData.battle || "current")}&hours=336&limit=50000`;
+        historyData = await fetchJson(historyUrl).catch(() => ({ rows: [] }));
+        document.title = `${displayName(selectedClan)} - Clan Profile`;
+        updateThemeColor();
+        renderShell();
+      } catch (err) {
+        console.error(err);
+        app.innerHTML = `<div class="error">Could not load clan profile. ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    window.addEventListener("resize", () => {
+      window.clearTimeout(window.__clanProfileResize);
+      window.__clanProfileResize = window.setTimeout(drawChart, 100);
+    });
+
+    loadData();
+  </script>
+  <script src="assets/clan-switcher.js"></script>
+  <script src="assets/site-enhancements.js"></script>
+</body>
+</html>
