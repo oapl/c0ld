@@ -9,9 +9,9 @@
   };
 
   const WINDOWS = {
-    "1h": { label: "1 Hour — 5m gains", short: "1 Hour", hours: 1, bucketMinutes: 5 },
-    "12h": { label: "12 Hours — 30m gains", short: "12 Hour", hours: 12, bucketMinutes: 30 },
-    "24h": { label: "24 Hours — hourly gains", short: "24 Hour", hours: 24, bucketMinutes: 60 }
+    "1h": { label: "1 Hour — 5m gains", short: "1 Hour", hours: 1, bucketMinutes: 5, gainKey: "gain_1h" },
+    "12h": { label: "12 Hours — 30m gains", short: "12 Hour", hours: 12, bucketMinutes: 30, gainKey: "gain_12h" },
+    "24h": { label: "24 Hours — hourly gains", short: "24 Hour", hours: 24, bucketMinutes: 60, gainKey: "gain_24h" }
   };
 
   const SPECIAL_COLORS = {
@@ -318,35 +318,135 @@
     return best;
   }
 
-  function buildIntervalPoints(rows, windowConfig, endMs) {
+  function interpolatedPointsAt(rows, timestamp) {
+    if (!rows.length) return null;
+
+    const cleanRows = rows
+      .map(row => ({ ...row, ms: new Date(row.fetched_at).getTime() }))
+      .filter(row => Number.isFinite(row.ms) && finite(row.points) !== null)
+      .sort((a, b) => a.ms - b.ms);
+
+    if (!cleanRows.length) return null;
+
+    if (timestamp <= cleanRows[0].ms) {
+      return { points: cleanRows[0].points, rank: cleanRows[0].rank };
+    }
+
+    const last = cleanRows[cleanRows.length - 1];
+    if (timestamp >= last.ms) {
+      return { points: last.points, rank: last.rank };
+    }
+
+    for (let i = 1; i < cleanRows.length; i += 1) {
+      const prev = cleanRows[i - 1];
+      const next = cleanRows[i];
+      if (timestamp <= next.ms) {
+        const span = Math.max(1, next.ms - prev.ms);
+        const pct = Math.max(0, Math.min(1, (timestamp - prev.ms) / span));
+        return {
+          points: prev.points + (next.points - prev.points) * pct,
+          rank: next.rank ?? prev.rank
+        };
+      }
+    }
+
+    return { points: last.points, rank: last.rank };
+  }
+
+  function rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs) {
     const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
+    const output = rows.slice();
+    const currentPoint = rowAtOrBefore(output, endMs) || {
+      fetched_at: new Date(endMs).toISOString(),
+      rank: clanRow.rank,
+      clan_name: clanRow.clan_name,
+      points: clanRow.points
+    };
+
+    if (!output.some(row => new Date(row.fetched_at).getTime() === endMs) && finite(clanRow.points) !== null) {
+      output.push({
+        fetched_at: new Date(endMs).toISOString(),
+        rank: clanRow.rank,
+        clan_name: clanRow.clan_name,
+        points: clanRow.points
+      });
+    }
+
+    const earliestMs = Math.min(...output.map(row => new Date(row.fetched_at).getTime()).filter(Number.isFinite));
+    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
+    const endPoints = finite(currentPoint?.points) ?? finite(clanRow.points);
+
+    if ((output.length < 2 || !Number.isFinite(earliestMs) || earliestMs > startMs) && endPoints !== null) {
+      const startPoints = gainValue !== null ? Math.max(0, endPoints - gainValue) : endPoints;
+      output.push({
+        fetched_at: new Date(startMs).toISOString(),
+        rank: clanRow.rank,
+        clan_name: clanRow.clan_name,
+        points: startPoints,
+        synthetic: true
+      });
+    }
+
+    // Add anchor points on exact bucket boundaries by interpolation. This guarantees
+    // 12 points for 1h/5m, 24 points for 12h/30m, and 24 points for 24h/1h even
+    // when the API only has sparse snapshots inside the selected window.
+    const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
+    for (let i = 0; i <= bucketCount; i += 1) {
+      const t = startMs + i * bucketMs;
+      const sample = interpolatedPointsAt(output, t);
+      if (sample) {
+        output.push({
+          fetched_at: new Date(t).toISOString(),
+          rank: sample.rank ?? clanRow.rank,
+          clan_name: clanRow.clan_name,
+          points: sample.points,
+          synthetic: true
+        });
+      }
+    }
+
+    return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+  }
+
+  function buildIntervalPoints(rows, windowConfig, endMs, clanRow) {
+    const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
+    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
+    const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
+    const preparedRows = rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs);
     const points = [];
 
-    for (let bucketEnd = startMs + bucketMs; bucketEnd <= endMs + 1000; bucketEnd += bucketMs) {
+    for (let bucketIndex = 1; bucketIndex <= bucketCount; bucketIndex += 1) {
+      const bucketEnd = startMs + bucketIndex * bucketMs;
       const bucketStart = bucketEnd - bucketMs;
-      const startRow = rowAtOrBefore(rows, bucketStart);
-      const endRow = rowAtOrBefore(rows, bucketEnd);
-      if (!startRow || !endRow || finite(startRow.points) === null || finite(endRow.points) === null) continue;
+      const startPoint = interpolatedPointsAt(preparedRows, bucketStart);
+      const endPoint = interpolatedPointsAt(preparedRows, bucketEnd);
+      const startPoints = finite(startPoint?.points);
+      const endPoints = finite(endPoint?.points);
 
       points.push({
         t: bucketEnd,
         rawT: new Date(bucketEnd).toISOString(),
         bucketStart: new Date(bucketStart).toISOString(),
-        gain: Math.max(0, endRow.points - startRow.points),
-        rank: endRow.rank
+        gain: startPoints === null || endPoints === null ? 0 : Math.max(0, endPoints - startPoints),
+        rank: endPoint?.rank ?? clanRow.rank,
+        bucketIndex,
+        bucketCount
       });
     }
 
     return points;
   }
 
-  function totalGainOverWindow(rows, windowConfig, endMs) {
+  function totalGainOverWindow(rows, windowConfig, endMs, clanRow) {
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-    const startRow = rowAtOrBefore(rows, startMs);
-    const endRow = rowAtOrBefore(rows, endMs);
-    if (!startRow || !endRow || finite(startRow.points) === null || finite(endRow.points) === null) return 0;
-    return Math.max(0, endRow.points - startRow.points);
+    const preparedRows = rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs);
+    const startPoint = interpolatedPointsAt(preparedRows, startMs);
+    const endPoint = interpolatedPointsAt(preparedRows, endMs);
+    const startPoints = finite(startPoint?.points);
+    const endPoints = finite(endPoint?.points);
+    if (startPoints === null || endPoints === null) return 0;
+    return Math.max(0, endPoints - startPoints);
   }
 
   function buildSeries() {
@@ -356,14 +456,14 @@
 
     return selectedRows().map((row, index) => {
       const history = historyForClan(row.clan_name);
-      const points = buildIntervalPoints(history, windowConfig, endMs);
+      const points = buildIntervalPoints(history, windowConfig, endMs, row);
       return {
         clan_name: row.clan_name,
         rank: row.rank,
         color: clanColor(row.clan_name, index),
         current: row,
         points,
-        totalWindowGain: totalGainOverWindow(history, windowConfig, endMs),
+        totalWindowGain: totalGainOverWindow(history, windowConfig, endMs, row),
         isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
     }).filter(series => series.points.length >= 1);
@@ -518,7 +618,7 @@
       const legendItems = [...cutoffItems, ...otherItems];
       legend.innerHTML = legendItems.map(series => `
         <span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>
-      `).join("") + `<span>${windowConfig.bucketMinutes}m interval gains</span>`;
+      `).join("") + `<span>${seriesList[0]?.points?.length || 0} intervals · ${windowConfig.bucketMinutes}m gain each</span>`;
     }
 
     canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect, windowConfig };
@@ -577,6 +677,7 @@
 
       tooltip.innerHTML = `
         <strong style="color:${nearestSeries.color}">#${nearestSeries.rank} ${escapeHtml(nearestSeries.clan_name)}</strong>
+        <div>Interval ${nearest.bucketIndex}/${nearest.bucketCount}</div>
         <div>${fresh.windowConfig.bucketMinutes}m gain: ${fmtShort(nearest.gain)}</div>
         <div>Interval ending: ${fmtDateTime(nearest.rawT)}</div>
       `;
