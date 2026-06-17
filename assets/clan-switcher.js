@@ -16,11 +16,12 @@
     }
   };
 
+  const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+  let clansCurrentPromise = null;
+  let cardRefreshTimer = null;
+
   function normalizeClanKey(value) {
-    return String(value || "c0ld")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+    return String(value || "c0ld").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
   function currentClan() {
@@ -39,7 +40,7 @@
     if (!href) return false;
     const value = String(href).trim();
     if (!value || value.startsWith("#")) return false;
-    if (/^(https?:|mailto:|tel:|javascript:)/i.test(value)) return false;
+    if (/^(https?:|mailto:|tel:)/i.test(value)) return false;
     return /(^|\/)[^/?#]+\.html(?:[?#].*)?$/.test(value) || value === "index.html" || value.startsWith("index.html?");
   }
 
@@ -65,8 +66,89 @@
     return `${page}${query ? `?${query}` : ""}${parts.hash}`;
   }
 
+  function formatRank(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? `#${n}` : "—";
+  }
+
+  function normalizeText(value) {
+    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+
+  function isProfilePage() {
+    const page = window.location.pathname.split("/").pop() || "index.html";
+    return page === "profile.html";
+  }
+
+  function applyProfileRedScheme() {
+    if (!isProfilePage() || document.getElementById("clan-profile-red-scheme")) return;
+
+    const style = document.createElement("style");
+    style.id = "clan-profile-red-scheme";
+    style.textContent = `
+      :root { --link: #ff9b96 !important; }
+      .menu-btn.active {
+        border-color: #ff9b96 !important;
+        color: #ff9b96 !important;
+        background: rgba(248, 81, 73, 0.12) !important;
+      }
+      .menu-btn:hover,
+      select:hover,
+      select:focus {
+        border-color: #ff9b96 !important;
+        color: #ff9b96 !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getClansCurrent() {
+    if (!clansCurrentPromise) {
+      clansCurrentPromise = fetch(`${CLANS_API_CURRENT_URL}?v=${Date.now()}`, { cache: "no-store" })
+        .then(res => {
+          if (!res.ok) throw new Error(`Could not load clans current. HTTP ${res.status}`);
+          return res.json();
+        })
+        .catch(err => {
+          clansCurrentPromise = null;
+          throw err;
+        });
+    }
+
+    return clansCurrentPromise;
+  }
+
+  async function applyTrackedClanCards() {
+    const rankEl = document.getElementById("c0ld-rank-value");
+    const projectionEl = document.getElementById("projected-rank-value");
+    const rankLabel = document.getElementById("tracked-rank-label");
+
+    if (!rankEl && !projectionEl && !rankLabel) return;
+
+    const clan = currentClan();
+
+    if (rankLabel) {
+      rankLabel.textContent = `${clan.label} Current Rank`;
+    }
+
+    try {
+      const data = await getClansCurrent();
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      const row = rows.find(item => normalizeText(item.clan_name) === normalizeText(clan.label));
+
+      if (!row) return;
+
+      if (rankEl) rankEl.textContent = formatRank(row.rank);
+      if (projectionEl) projectionEl.textContent = formatRank(row.projected_rank ?? row.rank);
+    } catch (err) {
+      console.warn("Clan rank/projection refresh failed", err);
+    }
+  }
+
   function applyClanSwitcher() {
     const clan = currentClan();
+
+    applyProfileRedScheme();
 
     const logo = document.querySelector("#site-mascot, .site-logo");
     if (logo) {
@@ -90,13 +172,34 @@
         link.textContent = `${clan.label} Leaderboard`;
       }
     });
+
+    applyTrackedClanCards();
+  }
+
+  function scheduleApply() {
+    applyClanSwitcher();
+
+    [250, 1000, 2500, 5000].forEach(delay => {
+      window.setTimeout(applyClanSwitcher, delay);
+    });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", applyClanSwitcher);
+    document.addEventListener("DOMContentLoaded", scheduleApply);
   } else {
-    applyClanSwitcher();
+    scheduleApply();
   }
 
-  window.addEventListener("pageshow", applyClanSwitcher);
+  window.addEventListener("pageshow", scheduleApply);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(cardRefreshTimer);
+    cardRefreshTimer = window.setTimeout(applyTrackedClanCards, 100);
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
 })();
