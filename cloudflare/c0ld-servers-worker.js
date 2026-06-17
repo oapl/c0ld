@@ -20,6 +20,8 @@ export default {
         response = json({ ok: true, service: "c0ld-servers" });
       } else if (request.method === "GET" && url.pathname === "/api/servers") {
         response = await handleServers(env);
+      } else if (request.method === "GET" && url.pathname === "/api/servers/submission-status") {
+        response = handleSubmissionStatus(env);
       } else if (request.method === "POST" && url.pathname === "/api/servers/submit") {
         response = await handleSubmit(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/admin/submissions") {
@@ -66,12 +68,18 @@ async function handleServers(env) {
       empty_emoji: ":mobile_phone_off:",
       default_max_players: DEFAULT_MAX_PLAYERS
     },
+    submissions: getSubmissionStatus(env),
     rows: servers
   }, env);
 }
 
 async function handleSubmit(request, env) {
   requireSupabase(env);
+  const submissionStatus = getSubmissionStatus(env);
+  if (!submissionStatus.accepting) {
+    throw httpError(403, submissionStatus.message);
+  }
+
   const user = await authorizeSubmission(request, env);
   const form = await request.formData();
   const serverLink = String(form.get("server_link") || "").trim();
@@ -125,6 +133,26 @@ async function handleSubmit(request, env) {
     submission_id: submissionRows?.[0]?.id || null,
     matched_server_number: matched?.server_number || null
   }, 202);
+}
+
+function handleSubmissionStatus(env) {
+  return cacheJson(getSubmissionStatus(env), env);
+}
+
+function getSubmissionStatus(env) {
+  const accepting =
+    String(env.SERVER_SUBMISSIONS_OPEN || "").toLowerCase() === "true" ||
+    String(env.ALLOW_SERVER_SUBMISSIONS || "").toLowerCase() === "true";
+
+  return {
+    ok: true,
+    accepting,
+    disabled: !accepting,
+    message: String(
+      env.SERVER_SUBMISSIONS_MESSAGE ||
+      (accepting ? "Server submissions are open." : "Server submissions are currently closed.")
+    )
+  };
 }
 
 async function handleAdminSubmissions(request, env) {

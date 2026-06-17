@@ -373,6 +373,7 @@
 
   <script>
     const PREVIOUS_PAGE_SIZE = 25;
+    const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -466,27 +467,14 @@
     }
 
     function getAvatarUrl(player) {
-      const match = getAvatarMatch(player);
-
       if (player.avatar_url) return player.avatar_url;
-      if (match?.avatar_url) return match.avatar_url;
-
-      if (player.user_id) return `assets/avatars/${encodeURIComponent(player.user_id)}.png`;
-      if (match?.user_id) return `assets/avatars/${encodeURIComponent(match.user_id)}.png`;
-
-      if (player.profile_key) return `assets/avatars/${encodeURIComponent(player.profile_key)}.png`;
-      if (match?.profile_key) return `assets/avatars/${encodeURIComponent(match.profile_key)}.png`;
 
       return DEFAULT_AVATAR_SVG;
     }
 
     function getProfileLink(player) {
-      const match = getAvatarMatch(player);
-
       if (player.user_id) return `profile.html?id=${encodeURIComponent(player.user_id)}`;
-      if (match?.user_id) return `profile.html?id=${encodeURIComponent(match.user_id)}`;
       if (player.profile_key) return `profile.html?id=${encodeURIComponent(player.profile_key)}`;
-      if (match?.profile_key) return `profile.html?id=${encodeURIComponent(match.profile_key)}`;
       if (player.username) return `profile.html?id=${encodeURIComponent(player.username)}`;
       return "profile.html";
     }
@@ -776,31 +764,37 @@
       });
     }
 
+    async function fetchLiveJson(url, label) {
+      const separator = url.includes("?") ? "&" : "?";
+      const res = await fetch(`${url}${separator}v=${Date.now()}`);
+
+      if (!res.ok) {
+        throw new Error(`Could not load ${label} (HTTP ${res.status})`);
+      }
+
+      return res.json();
+    }
+
+    function normalizeCurrentRows(rows) {
+      return (rows || [])
+        .map(row => ({
+          username: row.username || "",
+          user_id: row.user_id || null,
+          profile_key: row.user_id || row.username || null,
+          latest_rank: row.rank ?? null,
+          latest_points: row.total_points ?? row.points ?? null,
+          latest_seen: row.fetched_at || null,
+          total_battles: null,
+          avatar_url: row.avatar_url || null
+        }))
+        .filter(row => row.username || row.user_id);
+    }
+
     async function main() {
       try {
-        const cacheBust = Date.now();
-
-        const [playersRes, currentRes, playerIndexRes] = await Promise.all([
-          fetch(`Data/players.json?v=${cacheBust}`),
-          fetch(`Data/current.json?v=${cacheBust}`),
-          fetch(`Data/player-index.json?v=${cacheBust}`)
-        ]);
-
-        if (!playersRes.ok) {
-          throw new Error(`Could not load Data/players.json (HTTP ${playersRes.status})`);
-        }
-
-        if (!currentRes.ok) {
-          throw new Error(`Could not load Data/current.json (HTTP ${currentRes.status})`);
-        }
-
-        if (!playerIndexRes.ok) {
-          throw new Error(`Could not load Data/player-index.json (HTTP ${playerIndexRes.status})`);
-        }
-
-        allPlayers = await playersRes.json();
-        currentData = await currentRes.json();
-        playerIndex = await playerIndexRes.json();
+        currentData = await fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld members");
+        allPlayers = normalizeCurrentRows(currentData.rows || []);
+        playerIndex = [];
 
         rebuildPlayerIndexMaps();
         buildCurrentKeys();

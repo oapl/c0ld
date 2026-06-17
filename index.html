@@ -462,6 +462,7 @@
   <script>
     const AUTO_REFRESH_MS = 60 * 1000;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -474,6 +475,7 @@
 
     let currentData = null;
     let clanData = null;
+    let clansCurrentData = null;
     let currentRows = [];
     let battles = [];
     let c0ldHistoryData = [];
@@ -582,6 +584,90 @@
     function parseDateValue(v) {
       const t = new Date(v).getTime();
       return Number.isNaN(t) ? null : t;
+    }
+
+    function toFiniteNumber(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function chooseClanProjectionRate(row) {
+      const windows = [
+        { key: "gain_1h", basis: "1h", hours: 1 },
+        { key: "gain_12h", basis: "12h", hours: 12 },
+        { key: "gain_24h", basis: "24h", hours: 24 },
+        { key: "gain_5m", basis: "5m", hours: 5 / 60 }
+      ];
+
+      for (const window of windows) {
+        const gain = toFiniteNumber(row[window.key]);
+        if (gain === null) continue;
+
+        return {
+          basis: window.basis,
+          rate_per_hour: gain / window.hours
+        };
+      }
+
+      return {
+        basis: "none",
+        rate_per_hour: 0
+      };
+    }
+
+    function withClanProjections(data) {
+      if (!data || !Array.isArray(data.rows)) return data;
+
+      const battleEndMs = new Date(data.battle_end_iso || "").getTime();
+      if (!Number.isFinite(battleEndMs)) return data;
+
+      const remainingHours = Math.max(0, (battleEndMs - Date.now()) / (60 * 60 * 1000));
+      const rows = data.rows.map(row => {
+        const rate = chooseClanProjectionRate(row);
+        const points = toFiniteNumber(row.points ?? row.total_points) || 0;
+
+        return {
+          ...row,
+          projection_basis: row.projection_basis || rate.basis,
+          rate_per_hour: row.rate_per_hour ?? rate.rate_per_hour,
+          projected_points: row.projected_points ?? Math.round(points + rate.rate_per_hour * remainingHours)
+        };
+      });
+
+      const sorted = rows.slice().sort((a, b) => {
+        const ap = toFiniteNumber(a.projected_points) ?? toFiniteNumber(a.points) ?? 0;
+        const bp = toFiniteNumber(b.projected_points) ?? toFiniteNumber(b.points) ?? 0;
+        if (bp !== ap) return bp - ap;
+
+        const ar = toFiniteNumber(a.rank);
+        const br = toFiniteNumber(b.rank);
+        if (ar !== null && br !== null && ar !== br) return ar - br;
+
+        return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+      });
+
+      const rankByClan = new Map();
+      sorted.forEach((row, index) => {
+        rankByClan.set(normalizeKey(row.clan_name), index + 1);
+      });
+
+      const rowsWithRanks = rows.map(row => ({
+        ...row,
+        projected_rank: row.projected_rank ?? rankByClan.get(normalizeKey(row.clan_name)) ?? null
+      }));
+
+      const tracked = rowsWithRanks.find(row => normalizeKey(row.clan_name) === "c0ld") || null;
+
+      return {
+        ...data,
+        rows: rowsWithRanks,
+        clan_rank: tracked?.rank ?? data.clan_rank,
+        clan_points: tracked?.points ?? data.clan_points,
+        projected_rank: tracked?.projected_rank ?? data.projected_rank,
+        projected_points: tracked?.projected_points ?? data.projected_points,
+        projection_basis: tracked?.projection_basis ?? data.projection_basis
+      };
     }
 
     function rebuildPlayerIndexMaps() {
@@ -788,13 +874,9 @@
 
     function getAvatar(row) {
       const userId = String(row.user_id || "").trim();
-      const match = getAvatarMatch(row);
 
       if (row.avatar_url) return row.avatar_url;
-      if (match?.avatar_url) return match.avatar_url;
       if (userId && liveAvatarUrls.has(userId)) return liveAvatarUrls.get(userId);
-      if (match?.profile_key) return `assets/avatars/${encodeURIComponent(match.profile_key)}.png`;
-      if (row.profile_key) return `assets/avatars/${encodeURIComponent(row.profile_key)}.png`;
 
       return DEFAULT_AVATAR_SVG;
     }
@@ -820,12 +902,10 @@
 
     function normalizeCurrentRows(rows) {
       return rows.map(row => {
-        const match = getAvatarMatch(row);
-
         return {
           ...row,
-          profile_key: match?.profile_key || row.profile_key || row.user_id || row.username,
-          avatar_url: row.avatar_url || match?.avatar_url || null
+          profile_key: row.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || null
         };
       });
     }
@@ -848,15 +928,13 @@
       }
 
       return battle.rows.map(row => {
-        const match = getAvatarMatch(row);
-
         return {
           rank: row.rank,
           stored_rank: row.rank,
           username: row.username,
           user_id: row.user_id,
-          profile_key: row.profile_key || match?.profile_key || row.user_id || row.username,
-          avatar_url: row.avatar_url || match?.avatar_url || null,
+          profile_key: row.profile_key || row.user_id || row.username,
+          avatar_url: row.avatar_url || null,
           total_points: row.total_points,
           gain_5m: row.gain_5m ?? null,
           gain_1h: row.gain_1h ?? null,
@@ -1149,7 +1227,7 @@
 
     async function applyBattleSelection() {
       if (activeBattle === "current") {
-        clanData = currentData;
+        clanData = clansCurrentData || currentData;
         currentRows = normalizeCurrentRows(currentData?.rows || []);
         startCountdown(getBattleEndIso());
         await renderAll();
@@ -1160,7 +1238,7 @@
 
       if (!selected || !selected.c0ld_results_table) {
         activeBattle = "current";
-        clanData = currentData;
+        clanData = clansCurrentData || currentData;
         currentRows = normalizeCurrentRows(currentData?.rows || []);
         startCountdown(getBattleEndIso());
         await renderAll();
@@ -1186,24 +1264,16 @@
       await renderAll();
     }
 
-    async function fetchJsonWithFallback(primaryUrl, fallbackUrl, label) {
-      try {
-        const primary = await fetch(`${primaryUrl}${primaryUrl.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-          cache: "no-store"
-        });
+    async function fetchLiveJson(url, label) {
+      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+        cache: "no-store"
+      });
 
-        if (primary.ok) {
-          return primary.json();
-        }
-      } catch {
+      if (!res.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${res.status}`);
       }
 
-      const fallback = await fetch(fallbackUrl, { cache: "no-store" });
-      if (!fallback.ok) {
-        throw new Error(`Could not load ${label}. HTTP ${fallback.status}`);
-      }
-
-      return fallback.json();
+      return res.json();
     }
 
     async function loadData() {
@@ -1213,34 +1283,36 @@
       const status = document.getElementById("status");
 
       try {
-        const cacheBust = Date.now();
-
-        const [currentJson, battlesRes, playersRes, c0ldHistoryRes] = await Promise.all([
-          fetchJsonWithFallback(
-            MEMBER_API_CURRENT_URL,
-            `Data/current.json?v=${cacheBust}`,
-            "live c0ld leaderboard"
-          ),
-          fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/c0ld-history.json?v=${cacheBust}`, { cache: "no-store" })
+        const [currentJson, clansJson] = await Promise.all([
+          fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld leaderboard"),
+          fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard")
         ]);
 
         currentData = currentJson;
+        clansCurrentData = withClanProjections(clansJson);
 
         if (!currentData || !Array.isArray(currentData.rows)) {
           throw new Error("Live c0ld leaderboard does not contain a rows array.");
         }
 
-        battles = battlesRes.ok ? await battlesRes.json() : [];
-        if (!Array.isArray(battles)) battles = [];
+        if (clansCurrentData) {
+          currentData = {
+            ...currentData,
+            clan_rank: clansCurrentData.clan_rank ?? currentData.clan_rank,
+            clan_points: clansCurrentData.clan_points ?? currentData.clan_points,
+            projected_rank: clansCurrentData.projected_rank ?? currentData.projected_rank,
+            projected_points: clansCurrentData.projected_points ?? currentData.projected_points,
+            projection_basis: clansCurrentData.projection_basis ?? currentData.projection_basis,
+            battle_end_iso: currentData.battle_end_iso || clansCurrentData.battle_end_iso,
+            clan_rank_source: "clans-current-api",
+            clan_rank_snapshot_at: clansCurrentData.snapshot_at || currentData.clan_rank_snapshot_at
+          };
+        }
 
-        playerIndex = playersRes.ok ? await playersRes.json() : [];
-        if (!Array.isArray(playerIndex)) playerIndex = [];
+        battles = [];
+        playerIndex = [];
         rebuildPlayerIndexMaps();
-
-        c0ldHistoryData = c0ldHistoryRes.ok ? await c0ldHistoryRes.json() : [];
-        if (!Array.isArray(c0ldHistoryData)) c0ldHistoryData = [];
+        c0ldHistoryData = [];
 
         if (!activeBattle) {
           activeBattle = "current";

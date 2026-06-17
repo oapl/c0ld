@@ -421,6 +421,18 @@
   </main>
 
   <script>
+    const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
+    const DEFAULT_AVATAR_SVG =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+          <rect width="150" height="150" rx="16" fill="#21262d"/>
+          <circle cx="75" cy="58" r="26" fill="#6e7681"/>
+          <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
+        </svg>
+      `);
+
     let loadedProfile = null;
     let selectedBattleIndex = 0;
     let currentChart = null;
@@ -838,7 +850,7 @@
 
       app.innerHTML = `
         <section class="profile-header">
-          <img class="avatar" src="${escapeHtml(profile.avatar_url || "assets/embed-spacer.png")}" alt="">
+          <img class="avatar" src="${escapeHtml(profile.avatar_url || DEFAULT_AVATAR_SVG)}" alt="">
           <div>
             <h2 class="profile-name">${escapeHtml(profile.username || "Unknown")}</h2>
             <div class="profile-meta">
@@ -902,6 +914,118 @@
       renderBattle(profile, selectedBattleIndex);
     }
 
+    function normalizeProfileKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/[^a-z0-9_]/g, "");
+    }
+
+    async function fetchLiveJson(url, label) {
+      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${res.status}`);
+      }
+
+      return res.json();
+    }
+
+    function findCurrentRow(current, id) {
+      const raw = String(id || "").trim();
+      const normalized = normalizeProfileKey(raw);
+
+      return (current.rows || []).find(row =>
+        String(row.user_id || "") === raw ||
+        normalizeProfileKey(row.username) === normalized
+      ) || null;
+    }
+
+    function summarizeLiveProfile(current, history, id) {
+      const currentRow = findCurrentRow(current, id);
+      const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? Number(id) : null);
+      const rows = Array.isArray(history?.rows) ? history.rows.slice() : [];
+
+      if (!rows.length && currentRow) {
+        rows.push({
+          fetched_at: currentRow.fetched_at || current.snapshot_at || current.generated_at,
+          rank: currentRow.rank,
+          username: currentRow.username,
+          user_id: currentRow.user_id,
+          total_points: currentRow.total_points
+        });
+      }
+
+      if (!rows.length && !currentRow) {
+        throw new Error(`No live c0ld profile data found for ${id}.`);
+      }
+
+      rows.sort((a, b) => new Date(a.fetched_at || 0) - new Date(b.fetched_at || 0));
+
+      const first = rows[0] || currentRow || {};
+      const last = rows[rows.length - 1] || currentRow || {};
+      const ranks = rows.map(row => Number(row.rank)).filter(Number.isFinite);
+      const points = rows.map(row => Number(row.total_points || 0)).filter(Number.isFinite);
+      const username = currentRow?.username || last.username || first.username || String(id);
+      const latestPoints = currentRow?.total_points ?? last.total_points ?? 0;
+      const latestRank = currentRow?.rank ?? last.rank ?? null;
+      const latestSeen = currentRow?.fetched_at || last.fetched_at || current.snapshot_at || current.generated_at || null;
+
+      const battle = {
+        battle: current.battle || "current",
+        display_name: current.display_name || current.battle || "Current Clan Battle",
+        battle_first_snapshot: current.battle_start_iso || first.fetched_at || null,
+        battle_last_snapshot: latestSeen,
+        first_seen: first.fetched_at || null,
+        last_seen: latestSeen,
+        starting_rank: first.rank ?? null,
+        starting_points: first.total_points ?? null,
+        worst_rank: ranks.length ? Math.max(...ranks) : null,
+        best_rank: ranks.length ? Math.min(...ranks) : null,
+        ending_rank: latestRank,
+        ending_points: latestPoints,
+        series: rows.map(row => ({
+          t: row.fetched_at,
+          rank: row.rank ?? null,
+          points: Number(row.total_points || 0)
+        })).filter(point => point.t)
+      };
+
+      return {
+        aliases: [String(id)],
+        username,
+        user_id: userId,
+        avatar_url: currentRow?.avatar_url || null,
+        profile_url: userId ? `https://www.roblox.com/users/${userId}/profile` : null,
+        total_battles: 1,
+        latest_rank: latestRank,
+        latest_points: latestPoints,
+        latest_seen: latestSeen,
+        battles: [battle]
+      };
+    }
+
+    async function loadLiveProfile(id) {
+      const current = await fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld leaderboard");
+      const currentRow = findCurrentRow(current, id);
+      const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? id : "");
+
+      if (!userId) {
+        return summarizeLiveProfile(current, { rows: [] }, id);
+      }
+
+      const historyUrl = new URL(MEMBER_API_HISTORY_URL);
+      historyUrl.searchParams.set("user_id", String(userId));
+      historyUrl.searchParams.set("hours", "336");
+      historyUrl.searchParams.set("limit", "50000");
+
+      const history = await fetchLiveJson(historyUrl.toString(), "live c0ld profile history");
+      return summarizeLiveProfile(current, history, userId);
+    }
+
     async function main() {
       const app = document.getElementById("app");
       const id = getProfileId();
@@ -912,14 +1036,7 @@
       }
 
       try {
-        const cacheBust = Date.now();
-        const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${cacheBust}`);
-
-        if (!res.ok) {
-          throw new Error(`Could not load profile ${id}. HTTP ${res.status}`);
-        }
-
-        const profile = await res.json();
+        const profile = await loadLiveProfile(id);
 
         document.title = `${profile.username || "Player"} - c0ld Profile`;
         render(profile);

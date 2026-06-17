@@ -188,6 +188,10 @@ async function handleCurrent(request, env) {
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
+  const avatarMap = await resolveRobloxAvatarHeadshots(
+    rowsWithGains.map(row => row.user_id),
+    env
+  ).catch(() => new Map());
   const trackedClan = await fetchTrackedClanCurrent(env, clan).catch(() => null);
 
   return cacheJson({
@@ -206,6 +210,7 @@ async function handleCurrent(request, env) {
       rank: toNumber(row.rank),
       username: row.username,
       user_id: toNumber(row.user_id),
+      avatar_url: avatarMap.get(String(row.user_id)) || null,
       total_points: toNumber(row.total_points) || 0,
       gain_5m: row.gain_5m,
       gain_1h: row.gain_1h,
@@ -319,8 +324,9 @@ async function handleClansCurrent(request, env) {
 
   const latest = latestClanMetaFromRows(rows);
   const rowsWithGains = latest ? await addClanGainFields(env, rows, latest) : rows;
+  const rowsWithProjections = latest ? addClanProjectionFields(rowsWithGains, latest) : rowsWithGains;
   const trackedClan = clanName(env);
-  const tracked = rowsWithGains.find(row => normalizeText(row.clan_name) === normalizeText(trackedClan));
+  const tracked = rowsWithProjections.find(row => normalizeText(row.clan_name) === normalizeText(trackedClan));
 
   return cacheJson({
     generated_at: new Date().toISOString(),
@@ -332,8 +338,10 @@ async function handleClansCurrent(request, env) {
     clan_name: trackedClan,
     clan_rank: tracked?.rank ?? null,
     clan_points: tracked?.points ?? null,
-    projected_rank: null,
-    rows: rowsWithGains.map(row => ({
+    projected_rank: tracked?.projected_rank ?? null,
+    projected_points: tracked?.projected_points ?? null,
+    projection_basis: tracked?.projection_basis ?? null,
+    rows: rowsWithProjections.map(row => ({
       fetched_at: row.fetched_at,
       rank: toNumber(row.rank),
       clan_name: row.clan_name,
@@ -344,7 +352,10 @@ async function handleClansCurrent(request, env) {
       gain_1h: row.gain_1h,
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h,
-      projected_rank: null
+      rate_per_hour: row.rate_per_hour,
+      projected_points: row.projected_points,
+      projected_rank: row.projected_rank,
+      projection_basis: row.projection_basis
     }))
   }, env);
 }
@@ -696,6 +707,51 @@ async function resolveRobloxUsernames(userIds, env) {
   return result;
 }
 
+async function resolveRobloxAvatarHeadshots(userIds, env) {
+  const shouldLookup = String(env.ROBLOX_AVATAR_LOOKUPS || "true").toLowerCase() !== "false";
+  const result = new Map();
+  const ids = [...new Set(userIds.map(Number).filter(Boolean))];
+
+  if (!shouldLookup || !ids.length) {
+    return result;
+  }
+
+  for (let i = 0; i < ids.length; i += ROBLOX_BATCH_SIZE) {
+    const batch = ids.slice(i, i + ROBLOX_BATCH_SIZE);
+    const url = new URL("https://thumbnails.roblox.com/v1/users/avatar-headshot");
+    url.searchParams.set("userIds", batch.join(","));
+    url.searchParams.set("size", "150x150");
+    url.searchParams.set("format", "Png");
+    url.searchParams.set("isCircular", "false");
+
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "c0ld-Clan-API-Worker"
+        }
+      });
+
+      if (!res.ok) continue;
+
+      const json = await res.json();
+      for (const item of json.data || []) {
+        const id = String(item?.targetId || "").trim();
+        const imageUrl = String(item?.imageUrl || "").trim();
+        const state = String(item?.state || "").trim();
+
+        if (id && imageUrl && state === "Completed") {
+          result.set(id, imageUrl);
+        }
+      }
+    } catch {
+      // Keep avatar_url null if Roblox thumbnail lookup is unavailable.
+    }
+  }
+
+  return result;
+}
+
 async function addGainFields(env, rows, latest) {
   if (!rows.length) return [];
 
@@ -776,6 +832,83 @@ async function addClanGainFields(env, rows, latest) {
 
     return out;
   });
+}
+
+function addClanProjectionFields(rows, latest) {
+  if (!rows.length) return [];
+
+  const battleEndMs = new Date(latest?.battle_ended_at || "").getTime();
+  const remainingHours =
+    Number.isFinite(battleEndMs)
+      ? Math.max(0, (battleEndMs - Date.now()) / (60 * 60 * 1000))
+      : null;
+
+  const projectedRows = rows.map(row => {
+    const rate = chooseClanProjectionRate(row);
+    const points = toNumber(row.points) || 0;
+    const projectedPoints =
+      remainingHours === null
+        ? null
+        : Math.round(points + rate.rate_per_hour * remainingHours);
+
+    return {
+      ...row,
+      rate_per_hour: rate.rate_per_hour,
+      projection_basis: rate.basis,
+      projected_points: projectedPoints,
+      projected_rank: null
+    };
+  });
+
+  if (remainingHours === null) {
+    return projectedRows;
+  }
+
+  const sorted = projectedRows.slice().sort((a, b) => {
+    const ap = toNumber(a.projected_points) ?? toNumber(a.points) ?? 0;
+    const bp = toNumber(b.projected_points) ?? toNumber(b.points) ?? 0;
+    if (bp !== ap) return bp - ap;
+
+    const ar = toNumber(a.rank);
+    const br = toNumber(b.rank);
+    if (ar !== null && br !== null && ar !== br) return ar - br;
+
+    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+  });
+
+  const projectedRanks = new Map();
+  sorted.forEach((row, index) => {
+    projectedRanks.set(normalizeText(row.clan_name), index + 1);
+  });
+
+  return projectedRows.map(row => ({
+    ...row,
+    projected_rank: projectedRanks.get(normalizeText(row.clan_name)) || null
+  }));
+}
+
+function chooseClanProjectionRate(row) {
+  const windows = [
+    { key: "gain_1h", basis: "1h", hours: 1 },
+    { key: "gain_12h", basis: "12h", hours: 12 },
+    { key: "gain_24h", basis: "24h", hours: 24 },
+    { key: "gain_5m", basis: "5m", hours: 5 / 60 }
+  ];
+
+  for (const window of windows) {
+    const gain = toNumber(row[window.key]);
+    if (gain === null) continue;
+
+    return {
+      basis: window.basis,
+      rate_per_hour: gain / window.hours
+    };
+  }
+
+  return {
+    basis: "none",
+    rate_per_hour: 0
+  };
 }
 
 function addNullGains(row) {

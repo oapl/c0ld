@@ -362,11 +362,25 @@
     }
 
     .server-id a {
-      color: var(--text);
+      color: var(--link);
     }
 
     .server-id a:hover {
       color: var(--link);
+      text-decoration: underline;
+    }
+
+    .check-cell {
+      width: 58px;
+      text-align: center;
+    }
+
+    .server-check {
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      accent-color: var(--link);
+      cursor: pointer;
     }
 
     .player-pill {
@@ -410,6 +424,12 @@
       border-color: var(--warn);
       background: var(--warn-bg);
       color: #f2cc60;
+    }
+
+    .clan-pill.offline {
+      border-color: var(--disabled);
+      background: var(--disabled-bg);
+      color: #c9d1d9;
     }
 
     .clan-pill.possible_compromise,
@@ -542,6 +562,12 @@
         <div class="panel-header">
           <h2 class="panel-title">Approved Servers</h2>
           <div class="panel-actions">
+            <select id="server-sort-control" aria-label="Sort approved servers">
+              <option value="rank">Sort by ID</option>
+              <option value="location">Sort by Location</option>
+              <option value="players">Sort by Players</option>
+              <option value="updated_at">Sort by Updated</option>
+            </select>
             <button id="refresh-btn" type="button">Refresh</button>
           </div>
         </div>
@@ -550,6 +576,7 @@
           <table>
             <thead>
               <tr>
+                <th data-sort="checked">Done</th>
                 <th data-sort="rank">ID</th>
                 <th data-sort="location">Location</th>
                 <th data-sort="link">Link</th>
@@ -561,7 +588,7 @@
             </thead>
             <tbody id="servers-body">
               <tr>
-                <td colspan="7" class="empty-state">Loading servers...</td>
+                <td colspan="8" class="empty-state">Loading servers...</td>
               </tr>
             </tbody>
           </table>
@@ -580,11 +607,14 @@
     const SUBMISSION_STATUS_PATH = "/api/servers/submission-status";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
+    const OFFLINE_LABEL = "Offline";
 
     let servers = [];
     let sortKey = "rank";
     let sortAsc = true;
     let discordConfig = {};
+    let currentDiscordUserId = "";
+    let checkedServers = {};
     let submissionState = {
       accepting: false,
       disabled: true,
@@ -618,6 +648,12 @@
       }
 
       return (hash >>> 0).toString(36);
+    }
+
+    function normalizeLocationLabel(value) {
+      const text = String(value || "").trim();
+      if (!text || text.toLowerCase() === "unknown") return OFFLINE_LABEL;
+      return text;
     }
 
     function stableServerId(row, link) {
@@ -658,7 +694,7 @@
       if (!Array.isArray(list)) return [];
 
       return list.map(player => ({
-        username: String(player.username || player.name || player.displayName || "Unknown"),
+        username: String(player.username || player.name || player.displayName || OFFLINE_LABEL),
         display_name: String(player.display_name || player.displayName || ""),
         user_id: player.user_id || player.userId || player.id || null,
         avatar_url: String(player.avatar_url || player.avatarUrl || ""),
@@ -741,9 +777,11 @@
 
         const normalized = {
           id: stableServerId(row, link),
+          db_id: row.db_id || row.database_id || null,
           rank: toNumberOrNull(row.rank ?? row.server_number),
-          location: String(row.location || row.region || "").trim() || "Unknown",
+          location: normalizeLocationLabel(row.location || row.region),
           link,
+          share_code: String(row.share_code || row.code || "").trim(),
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
@@ -777,6 +815,57 @@
       })).sort((a, b) => a.rank - b.rank);
     }
 
+    function getCheckedStorageKey() {
+      return currentDiscordUserId ? `c0ld.servers.checked.v1.${currentDiscordUserId}` : "";
+    }
+
+    function loadCheckedServers() {
+      const key = getCheckedStorageKey();
+      if (!key) {
+        checkedServers = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+        checkedServers = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        checkedServers = {};
+      }
+    }
+
+    function saveCheckedServers() {
+      const key = getCheckedStorageKey();
+      if (!key) return;
+      localStorage.setItem(key, JSON.stringify(checkedServers));
+    }
+
+    function serverCheckKey(row) {
+      return String(row.db_id || row.share_code || row.id || normalizeLink(row.link));
+    }
+
+    function serverRevision(row) {
+      return String(row.updated_at || row.approved_at || row.players_updated_at || row.share_code || row.link || "");
+    }
+
+    function isServerChecked(row) {
+      const key = serverCheckKey(row);
+      return Boolean(key) && checkedServers[key] === serverRevision(row);
+    }
+
+    function setServerChecked(row, checked) {
+      const key = serverCheckKey(row);
+      if (!key) return;
+
+      if (checked) {
+        checkedServers[key] = serverRevision(row);
+      } else {
+        delete checkedServers[key];
+      }
+
+      saveCheckedServers();
+    }
+
     function fmtPlayers(row) {
       const players = getPlayerCount(row);
       const maxPlayers = getMaxPlayers(row);
@@ -804,13 +893,42 @@
         if (other) parts.push(`Other ${other}`);
         return parts.join(" · ");
       }
-      return "Unknown";
+      return OFFLINE_LABEL;
     }
 
     function clanStatusClass(row) {
       const status = String(row.compromise_status || "unknown");
       if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
-      return "unknown";
+      return "offline";
+    }
+
+    function displayLocation(row) {
+      return getPlayerCount(row) === 0 ? OFFLINE_LABEL : normalizeLocationLabel(row.location);
+    }
+
+    function clanStatusLabel(row) {
+      const status = String(row.compromise_status || "unknown");
+      const counts = row.clan_counts || {};
+      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
+      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
+      const other = Number(counts.other || counts.OTHER || 0);
+
+      if (status === "empty") return "Empty";
+      if (status === "possible_compromise") return "Review";
+      if (c0ld || wmsy || other) {
+        const parts = [];
+        if (c0ld) parts.push(`C0LD ${c0ld}`);
+        if (wmsy) parts.push(`WMSY ${wmsy}`);
+        if (other) parts.push(`Other ${other}`);
+        return parts.join(" / ");
+      }
+      return OFFLINE_LABEL;
+    }
+
+    function clanStatusClass(row) {
+      const status = String(row.compromise_status || "unknown");
+      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
+      return "offline";
     }
 
     function fmtDateTime(value) {
@@ -830,6 +948,11 @@
       list.sort((a, b) => {
         let av = sortKey === "location" ? displayLocation(a) : a[sortKey];
         let bv = sortKey === "location" ? displayLocation(b) : b[sortKey];
+
+        if (sortKey === "checked") {
+          av = isServerChecked(a) ? 0 : 1;
+          bv = isServerChecked(b) ? 0 : 1;
+        }
 
         if (sortKey === "status") {
           av = clanStatusLabel(a);
@@ -862,7 +985,7 @@
       const rows = getVisibleServers();
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No approved servers yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No approved servers yet.</td></tr>`;
         return;
       }
 
@@ -872,9 +995,21 @@
           : "—";
         const players = getPlayerCount(row);
         const playerClass = players === 0 ? "player-pill empty" : "player-pill";
+        const checkKey = htmlEscape(serverCheckKey(row));
+        const revision = htmlEscape(serverRevision(row));
 
         return `
           <tr>
+            <td class="check-cell">
+              <input
+                class="server-check"
+                type="checkbox"
+                aria-label="Mark Server ${htmlEscape(row.rank)} complete"
+                data-server-key="${checkKey}"
+                data-server-revision="${revision}"
+                ${isServerChecked(row) ? "checked" : ""}
+              >
+            </td>
             <td class="server-id"><a href="server.html?id=${encodeURIComponent(row.id)}">Server ${htmlEscape(row.rank)}</a></td>
             <td>${htmlEscape(displayLocation(row))}</td>
             <td class="link-cell"><a href="${htmlEscape(row.link)}" target="_blank" rel="noopener">${htmlEscape(row.link)}</a></td>
@@ -964,6 +1099,30 @@
 
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
+      document.getElementById("server-sort-control").addEventListener("change", event => {
+        sortKey = event.target.value;
+        sortAsc = sortKey !== "players" && sortKey !== "updated_at";
+        renderServers();
+      });
+
+      document.getElementById("servers-body").addEventListener("change", event => {
+        const target = event.target;
+        if (!target.classList.contains("server-check")) return;
+
+        const row = servers.find(item =>
+          serverCheckKey(item) === target.dataset.serverKey &&
+          serverRevision(item) === target.dataset.serverRevision
+        );
+
+        if (!row) {
+          target.checked = false;
+          return;
+        }
+
+        setServerChecked(row, target.checked);
+        if (sortKey === "checked") renderServers();
+      });
+
       document.getElementById("refresh-btn").addEventListener("click", async () => {
         await loadServers();
         await loadSubmissionStatus();
@@ -978,6 +1137,11 @@
           } else {
             sortKey = key;
             sortAsc = key !== "players" && key !== "updated_at";
+          }
+
+          const sortControl = document.getElementById("server-sort-control");
+          if (sortControl && [...sortControl.options].some(option => option.value === sortKey)) {
+            sortControl.value = sortKey;
           }
 
           renderServers();
@@ -1001,6 +1165,8 @@
       });
 
       if (auth.allowed) {
+        currentDiscordUserId = String(auth.session?.user?.id || "");
+        loadCheckedServers();
         await loadServers();
         await loadSubmissionStatus();
       }
