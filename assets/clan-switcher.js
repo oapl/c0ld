@@ -62,6 +62,10 @@
     return currentPage() === "clans.html";
   }
 
+  function isClanLookupPage() {
+    return currentPage() === "live-clan.html";
+  }
+
   function isProfilePage() {
     return currentPage() === "profile.html";
   }
@@ -421,6 +425,63 @@
     if (projectionEl) projectionEl.textContent = formatRank(projectedRank);
   }
 
+  function getLookupClanName() {
+    const cardClan = document.getElementById("card-clan");
+    const cardText = String(cardClan?.textContent || "").trim();
+
+    if (cardText && cardText !== "—") {
+      return cardText;
+    }
+
+    const inputText = String(document.getElementById("clan-input")?.value || "").trim();
+    return inputText && inputText !== "—" ? inputText : "";
+  }
+
+  async function applyClanLookupProjectedRank() {
+    if (!isClanLookupPage()) return;
+
+    const valueEl = document.getElementById("card-owner");
+    if (!valueEl) return;
+
+    const card = valueEl.closest(".card");
+    const label = card?.querySelector(".label");
+    if (label) label.textContent = "Projected Rank";
+
+    const clanName = getLookupClanName();
+    const clanKey = normalizeText(clanName);
+
+    if (!clanKey) {
+      valueEl.textContent = "—";
+      valueEl.dataset.projectedClan = "";
+      return;
+    }
+
+    if (valueEl.dataset.projectedClan === clanKey && valueEl.dataset.projectedDone === "1") {
+      return;
+    }
+
+    valueEl.dataset.projectedClan = clanKey;
+    valueEl.dataset.projectedDone = "0";
+
+    try {
+      const data = await getClansCurrent();
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      const row = rows.find(item => normalizeText(item.clan_name) === clanKey);
+      const projected = row?.projected_rank ?? row?.projectedRank ?? row?.projected ?? row?.rank;
+
+      if (valueEl.dataset.projectedClan !== clanKey) return;
+
+      valueEl.textContent = row ? formatRank(projected) : "200+";
+      valueEl.dataset.projectedDone = "1";
+    } catch (err) {
+      console.warn("Clan lookup projected rank refresh failed", err);
+      if (valueEl.dataset.projectedClan === clanKey) {
+        valueEl.textContent = "200+";
+        valueEl.dataset.projectedDone = "1";
+      }
+    }
+  }
+
   function applyProfileRedScheme() {
     if (!isProfilePage() || isWmsy() || document.getElementById("clan-profile-red-scheme")) return;
 
@@ -508,6 +569,7 @@
     });
 
     applyTrackedClanCards();
+    applyClanLookupProjectedRank();
     highlightTrackedClanRows();
     wireWmsyControls();
     loadWmsyLeaderboard();
@@ -532,6 +594,7 @@
     applyTimer = window.setTimeout(() => {
       renderWmsyLeaderboard();
       applyTrackedClanCards();
+      applyClanLookupProjectedRank();
       highlightTrackedClanRows();
       applyWmsyTheme();
     }, 100);
