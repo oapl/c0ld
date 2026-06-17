@@ -2,7 +2,6 @@
   const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
   let timer = null;
   let currentPromise = null;
-  let delegatedClicksBound = false;
 
   function currentPage() {
     return window.location.pathname.split("/").pop() || "index.html";
@@ -29,14 +28,18 @@
     return slug || "clan";
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function clanPageHref(clanName) {
     const name = String(clanName || "").trim();
     const suffix = normalize(name) === "wmsy" ? "?clan=WMSY" : "";
     return `clans/${slugify(name)}/${suffix}`;
-  }
-
-  function shouldIgnoreModifiedClick(event) {
-    return event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
   }
 
   async function getCurrentClans() {
@@ -53,29 +56,34 @@
 
   function ensureStyle() {
     if (document.getElementById("clan-page-link-overrides")) return;
+
     const style = document.createElement("style");
     style.id = "clan-page-link-overrides";
     style.textContent = `
-      #clans-tbody .clan-cell,
-      #clans-tbody tr[data-clan-profile-href] td.clan {
-        cursor: pointer;
-      }
-
-      #clans-tbody .clan-cell:hover .clan-name,
-      .lookup-clan-profile-link:hover {
-        text-decoration: underline !important;
-      }
-
-      #clans-tbody .clan-cell:focus-visible {
-        outline: 2px solid var(--link, #58a6ff);
-        outline-offset: 3px;
-        border-radius: 8px;
-      }
-
+      #clans-tbody a.clan-profile-link,
       .lookup-clan-profile-link {
         color: inherit !important;
         text-decoration: none !important;
         cursor: pointer;
+      }
+
+      #clans-tbody a.clan-profile-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        max-width: 100%;
+      }
+
+      #clans-tbody a.clan-profile-link:hover .clan-name,
+      .lookup-clan-profile-link:hover {
+        text-decoration: underline !important;
+      }
+
+      #clans-tbody a.clan-profile-link:focus-visible,
+      .lookup-clan-profile-link:focus-visible {
+        outline: 2px solid var(--link, #58a6ff);
+        outline-offset: 3px;
+        border-radius: 8px;
       }
 
       #card-clan .lookup-clan-profile-link,
@@ -87,77 +95,50 @@
     document.head.appendChild(style);
   }
 
-  function unwrapCellLink(cell) {
-    const link = cell.closest("a.clan-profile-link");
-    if (!link) return;
+  function removeOldCellWrapper(cell) {
+    const oldWrapper = cell.closest("a.clan-profile-link");
+    if (!oldWrapper) return cell;
 
-    link.parentNode.insertBefore(cell, link);
-    if (!link.childNodes.length) {
-      link.remove();
-    }
+    oldWrapper.parentNode.insertBefore(cell, oldWrapper);
+    oldWrapper.remove();
+    return cell;
+  }
+
+  function linkClanCell(cell) {
+    cell = removeOldCellWrapper(cell);
+
+    const currentName = cell.querySelector(".clan-name")?.textContent?.trim();
+    if (!currentName) return;
+
+    const href = clanPageHref(currentName);
+    const icon = cell.querySelector(".clan-icon");
+    const nameText = escapeHtml(currentName);
+
+    cell.innerHTML = `
+      <a class="clan-profile-link" href="${href}" title="Open ${nameText} clan profile">
+        ${icon ? icon.outerHTML : ""}
+        <span class="clan-name">${nameText}</span>
+      </a>
+    `;
   }
 
   function linkClansTable() {
     if (!isClansPage()) return;
     ensureStyle();
-    bindDelegatedClicks();
 
     document.querySelectorAll("#clans-tbody .clan-cell").forEach(cell => {
-      const name = cell.querySelector(".clan-name")?.textContent?.trim();
+      const existing = cell.querySelector("a.clan-profile-link");
+      const name = existing?.querySelector(".clan-name")?.textContent?.trim() || cell.querySelector(".clan-name")?.textContent?.trim();
       if (!name) return;
 
-      unwrapCellLink(cell);
-
       const href = clanPageHref(name);
-      const row = cell.closest("tr");
-      const clanTd = cell.closest("td");
-
-      cell.dataset.clanProfileLinked = "1";
-      cell.dataset.clanProfileHref = href;
-      cell.tabIndex = 0;
-      cell.setAttribute("role", "link");
-      cell.title = `Open ${name} clan profile`;
-
-      if (row) {
-        row.dataset.clanProfileHref = href;
+      if (existing) {
+        existing.href = href;
+        existing.title = `Open ${name} clan profile`;
+        return;
       }
 
-      if (clanTd) {
-        clanTd.dataset.clanProfileHref = href;
-      }
-    });
-  }
-
-  function bindDelegatedClicks() {
-    if (delegatedClicksBound) return;
-    delegatedClicksBound = true;
-
-    document.addEventListener("click", event => {
-      if (!isClansPage() || shouldIgnoreModifiedClick(event)) return;
-
-      const target = event.target instanceof Element ? event.target : null;
-      const hit = target?.closest?.("#clans-tbody .clan-cell, #clans-tbody td.clan, #clans-tbody tr[data-clan-profile-href]");
-      if (!hit) return;
-
-      const href = hit.dataset.clanProfileHref || hit.closest("tr")?.dataset.clanProfileHref;
-      if (!href) return;
-
-      event.preventDefault();
-      window.location.href = href;
-    });
-
-    document.addEventListener("keydown", event => {
-      if (!isClansPage() || (event.key !== "Enter" && event.key !== " ")) return;
-
-      const target = event.target instanceof Element ? event.target : null;
-      const hit = target?.closest?.("#clans-tbody .clan-cell");
-      if (!hit) return;
-
-      const href = hit.dataset.clanProfileHref || hit.closest("tr")?.dataset.clanProfileHref;
-      if (!href) return;
-
-      event.preventDefault();
-      window.location.href = href;
+      linkClanCell(cell);
     });
   }
 
@@ -171,7 +152,7 @@
       return;
     }
 
-    el.innerHTML = `<a class="lookup-clan-profile-link" href="${href}" title="Open ${clanName} clan profile"></a>`;
+    el.innerHTML = `<a class="lookup-clan-profile-link" href="${href}" title="Open ${escapeHtml(clanName)} clan profile"></a>`;
     el.querySelector("a").textContent = clanName;
   }
 
