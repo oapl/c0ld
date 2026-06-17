@@ -6,9 +6,9 @@
     });
   }
 
-  function installRewardHistoryPadding() {
-    if (window.__rewardHistoryPaddingInstalled) return;
-    window.__rewardHistoryPaddingInstalled = true;
+  function installRewardHistoryRequestPatch() {
+    if (window.__rewardHistoryRequestPatchInstalled) return;
+    window.__rewardHistoryRequestPatchInstalled = true;
 
     const originalFetch = window.fetch.bind(window);
     const historyMarker = "c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/history";
@@ -17,12 +17,17 @@
       return url.pathname === "/api/clans/history" || url.href.includes(historyMarker);
     }
 
-    function paddedHours(hours) {
-      if (!Number.isFinite(hours)) return hours;
-      if (hours <= 1) return 2;
-      if (hours <= 12) return 13;
-      if (hours <= 24) return 25;
-      return hours;
+    function activeRankRange() {
+      const active = document.querySelector(".reward-range-btn.active[data-range]")?.dataset?.range || "1-4";
+      if (active === "5-11") return { min: 5, max: 11 };
+      if (active === "12-51") return { min: 12, max: 51 };
+      return { min: 1, max: 4 };
+    }
+
+    function bucketMinutesForHours(hours) {
+      if (hours <= 1) return 5;
+      if (hours <= 12) return 30;
+      return 60;
     }
 
     window.fetch = function patchedFetch(input, init) {
@@ -31,26 +36,28 @@
         if (rawUrl) {
           const url = new URL(rawUrl, window.location.href);
           if (shouldPatch(url)) {
-            const requestedHours = Number(url.searchParams.get("hours"));
-            const nextHours = paddedHours(requestedHours);
-            if (Number.isFinite(nextHours) && nextHours !== requestedHours) {
-              url.searchParams.set("hours", String(nextHours));
-              url.searchParams.set("chart_window_hours", String(requestedHours));
-              url.searchParams.set("include_baseline", "1");
-              if (typeof input === "string") return originalFetch(url.toString(), init);
-              return originalFetch(new Request(url.toString(), input), init);
-            }
+            const hours = Number(url.searchParams.get("hours") || "12");
+            const range = activeRankRange();
+
+            url.searchParams.set("rank_min", String(range.min));
+            url.searchParams.set("rank_max", String(range.max));
+            url.searchParams.set("bucket_minutes", String(bucketMinutesForHours(hours)));
+            url.searchParams.set("include_baseline", "1");
+            if (!url.searchParams.has("limit")) url.searchParams.set("limit", "50000");
+
+            if (typeof input === "string") return originalFetch(url.toString(), init);
+            return originalFetch(new Request(url.toString(), input), init);
           }
         }
       } catch (err) {
-        console.warn("Reward history padding skipped", err);
+        console.warn("Reward history request patch skipped", err);
       }
 
       return originalFetch(input, init);
     };
   }
 
-  installRewardHistoryPadding();
+  installRewardHistoryRequestPatch();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mark);
