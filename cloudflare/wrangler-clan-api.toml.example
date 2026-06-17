@@ -18,7 +18,7 @@ RETENTION_HOURS = "336"
 ROBLOX_USERNAME_LOOKUPS = "true"
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 INGEST_CLANS_LEADERBOARD = "true"
-CLAN_RANK_TOP_N = "100"
+CLAN_RANK_TOP_N = "200"
 
 # Set these with `wrangler secret put ...`
 # SUPABASE_SERVICE_KEY
