@@ -513,7 +513,7 @@
     c0ld: {
       key: "c0ld",
       label: "c0ld",
-      mascot: "assets/mascots/c0ld-mascot.svg",
+      mascot: "assets/c0ld-kitsune-logo.gif",
       switchTarget: "WMSY"
     },
     wmsy: {
@@ -572,25 +572,16 @@
     return `${url.pathname.split("/").pop()}${url.search}`;
   }
 
-  function buildCurrentClanUrl(clanLabel) {
+  function buildClanHomeUrl(clanLabel) {
     const target = getClanConfigByLabel(clanLabel);
-    const currentPage = window.location.pathname.split("/").pop() || "profile.html";
-    const url = new URL(currentPage, window.location.href);
-    const currentParams = new URLSearchParams(window.location.search);
-
+    const url = new URL("index.html", window.location.href);
     url.search = "";
 
-    for (const [key, value] of currentParams.entries()) {
-      url.searchParams.set(key, value);
-    }
-
-    if (target.key === "c0ld") {
-      url.searchParams.delete("clan");
-    } else {
+    if (target.key !== "c0ld") {
       url.searchParams.set("clan", target.label);
     }
 
-    return `${currentPage}${url.search}${window.location.hash}`;
+    return `index.html${url.search}`;
   }
 
   function isSpecialFrogProfile() {
@@ -614,12 +605,14 @@
     if (subtitle) subtitle.textContent = `${clan.label} Clan Battle History`;
 
     if (mascotSwitch && mascot && switchLabel) {
-      mascotSwitch.href = buildCurrentClanUrl(switchTarget.label);
-      mascotSwitch.setAttribute("aria-label", `Switch to ${switchTarget.label}`);
-      mascotSwitch.title = `Switch to ${switchTarget.label}`;
+      mascotSwitch.href = buildClanHomeUrl(switchTarget.label);
+      mascotSwitch.setAttribute("aria-label", `Switch to ${switchTarget.label} leaderboard`);
+      mascotSwitch.title = `Switch to ${switchTarget.label} leaderboard`;
+
       mascot.src = clan.mascot;
       mascot.alt = `${clan.label} mascot`;
-      switchLabel.textContent = `Switch to ${switchTarget.label}`;
+
+      switchLabel.textContent = `View ${switchTarget.label}`;
     }
 
     document.querySelectorAll("[data-clan-link]").forEach(link => {
@@ -701,7 +694,6 @@
 
   function getFirstActiveDate(battle) {
     const series = Array.isArray(battle.series) ? battle.series : [];
-
     const firstActive = series.find(item => Number(item.points || 0) > 0 && item.t);
 
     if (firstActive) {
