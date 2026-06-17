@@ -31,6 +31,10 @@ jobs:
           cp -R Data assets _site/
           touch _site/.nojekyll
 
+      - name: Add clan switcher script tag
+        run: |
+          python3 -c "from pathlib import Path; tag='  <script src=\"assets/clan-switcher.js\"></script>\n'; [p.write_text(p.read_text(encoding='utf-8').replace('</body>', tag+'</body>', 1), encoding='utf-8') for p in Path('_site').glob('*.html') if 'assets/clan-switcher.js' not in p.read_text(encoding='utf-8') and '</body>' in p.read_text(encoding='utf-8')]"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
