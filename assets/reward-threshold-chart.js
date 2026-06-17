@@ -8,11 +8,10 @@
     "12-51": { label: "Ranks 12–51", min: 12, max: 51, cutoffRank: 50, challengerRank: 51 }
   };
 
-  const PACES = {
-    "1h": { label: "Project with 1h pace", short: "1h pace", hours: 1 },
-    "12h": { label: "Project with 12h pace", short: "12h pace", hours: 12 },
-    "24h": { label: "Project with 24h pace", short: "24h pace", hours: 24 },
-    "none": { label: "Current gap only", short: "current gap", hours: 0 }
+  const WINDOWS = {
+    "1h": { label: "1 Hour — 5m gains", short: "1 Hour", hours: 1, bucketMinutes: 5 },
+    "12h": { label: "12 Hours — 30m gains", short: "12 Hour", hours: 12, bucketMinutes: 30 },
+    "24h": { label: "24 Hours — hourly gains", short: "24 Hour", hours: 24, bucketMinutes: 60 }
   };
 
   const SPECIAL_COLORS = {
@@ -31,7 +30,7 @@
   let currentData = null;
   let historyData = null;
   let selectedRange = "1-4";
-  let selectedPace = "12h";
+  let selectedWindow = "12h";
   let loading = false;
   let chartBound = false;
   let resizeTimer = null;
@@ -81,6 +80,20 @@
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   }
 
+  function fmtDuration(hours) {
+    if (!Number.isFinite(hours) || hours < 0) return "—";
+    const totalMinutes = Math.round(hours * 60);
+    const days = Math.floor(totalMinutes / 1440);
+    const remAfterDays = totalMinutes % 1440;
+    const hrs = Math.floor(remAfterDays / 60);
+    const mins = remAfterDays % 60;
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hrs) parts.push(`${hrs}h`);
+    if (mins || !parts.length) parts.push(`${mins}m`);
+    return parts.join(" ");
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -122,11 +135,10 @@
       .reward-threshold-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; color: var(--muted); font-size: 12px; }
       .reward-threshold-legend-item { display: inline-flex; align-items: center; gap: 5px; }
       .reward-threshold-legend-item::before { content: ""; width: 11px; height: 3px; border-radius: 999px; background: currentColor; }
-      .reward-threshold-legend-item.forecast::before { opacity: .75; background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px); }
       @media (max-width: 700px) {
         #reward-threshold-chart { height: 310px; }
-        .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics, #reward-threshold-pace { width: 100%; }
-        #reward-threshold-pace, #reward-threshold-refresh { min-width: 0; width: 100%; }
+        .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics, #reward-threshold-window { width: 100%; }
+        #reward-threshold-window, #reward-threshold-refresh { min-width: 0; width: 100%; }
       }
     `;
 
@@ -156,9 +168,9 @@
             `).join("")}
           </div>
           <div class="reward-threshold-metrics">
-            <select id="reward-threshold-pace" aria-label="Projection pace">
-              ${Object.entries(PACES).map(([key, pace]) => `
-                <option value="${key}"${key === selectedPace ? " selected" : ""}>${pace.label}</option>
+            <select id="reward-threshold-window" aria-label="Growth interval window">
+              ${Object.entries(WINDOWS).map(([key, option]) => `
+                <option value="${key}"${key === selectedWindow ? " selected" : ""}>${option.label}</option>
               `).join("")}
             </select>
             <button id="reward-threshold-refresh" type="button">Refresh Chart</button>
@@ -189,8 +201,8 @@
       });
     });
 
-    panel.querySelector("#reward-threshold-pace")?.addEventListener("change", event => {
-      selectedPace = event.target.value || selectedPace;
+    panel.querySelector("#reward-threshold-window")?.addEventListener("change", event => {
+      selectedWindow = event.target.value || selectedWindow;
       draw();
     });
 
@@ -286,84 +298,75 @@
     return rows;
   }
 
-  function findBase(rows, latest, hours) {
-    if (!hours || !rows.length || !latest?.fetched_at) return null;
-    const target = new Date(latest.fetched_at).getTime() - hours * 60 * 60 * 1000;
-    if (!Number.isFinite(target)) return null;
+  function latestTimestamp() {
+    const explicit = new Date(currentData?.snapshot_at || currentData?.generated_at || "").getTime();
+    if (Number.isFinite(explicit)) return explicit;
 
-    for (let i = rows.length - 2; i >= 0; i -= 1) {
-      const ms = new Date(rows[i].fetched_at).getTime();
-      if (Number.isFinite(ms) && ms <= target) return rows[i];
-    }
-
-    return rows.length > 1 ? rows[0] : null;
+    const times = currentRows()
+      .map(row => new Date(row.fetched_at || "").getTime())
+      .filter(Number.isFinite);
+    return times.length ? Math.max(...times) : Date.now();
   }
 
-  function rateFor(clanRow, rows, paceKey) {
-    const pace = PACES[paceKey] || PACES["12h"];
-    if (!pace.hours) return 0;
-
-    const latest = rows[rows.length - 1] || null;
-    const base = findBase(rows, latest, pace.hours);
-
-    if (latest && base && finite(latest.points) !== null && finite(base.points) !== null) {
-      const latestMs = new Date(latest.fetched_at).getTime();
-      const baseMs = new Date(base.fetched_at).getTime();
-      const hours = Math.max(0.01, (latestMs - baseMs) / (60 * 60 * 1000));
-      return (latest.points - base.points) / hours;
+  function rowAtOrBefore(rows, timestamp) {
+    let best = null;
+    for (const row of rows) {
+      const t = new Date(row.fetched_at).getTime();
+      if (Number.isFinite(t) && t <= timestamp) best = row;
+      if (Number.isFinite(t) && t > timestamp) break;
     }
-
-    const fallbackGain = clanRow?.[`gain_${paceKey}`];
-    if (finite(fallbackGain) !== null) return fallbackGain / pace.hours;
-    return 0;
+    return best;
   }
 
-  function projectionPoint(clanRow, rows) {
-    const latest = rows[rows.length - 1] || null;
-    if (!latest || selectedPace === "none") return null;
+  function buildIntervalPoints(rows, windowConfig, endMs) {
+    const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
+    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
+    const points = [];
 
-    const endMs = new Date(currentData?.battle_end_iso || "").getTime();
-    const latestMs = new Date(latest.fetched_at).getTime();
-    if (!Number.isFinite(endMs) || !Number.isFinite(latestMs) || endMs <= latestMs) return null;
+    for (let bucketEnd = startMs + bucketMs; bucketEnd <= endMs + 1000; bucketEnd += bucketMs) {
+      const bucketStart = bucketEnd - bucketMs;
+      const startRow = rowAtOrBefore(rows, bucketStart);
+      const endRow = rowAtOrBefore(rows, bucketEnd);
+      if (!startRow || !endRow || finite(startRow.points) === null || finite(endRow.points) === null) continue;
 
-    const rate = rateFor(clanRow, rows, selectedPace);
-    const remainingHours = Math.max(0, (endMs - latestMs) / (60 * 60 * 1000));
-    return {
-      t: endMs,
-      rawT: new Date(endMs).toISOString(),
-      points: Math.max(0, latest.points + rate * remainingHours),
-      rank: clanRow.rank,
-      projected: true,
-      rate
-    };
+      points.push({
+        t: bucketEnd,
+        rawT: new Date(bucketEnd).toISOString(),
+        bucketStart: new Date(bucketStart).toISOString(),
+        gain: Math.max(0, endRow.points - startRow.points),
+        rank: endRow.rank
+      });
+    }
+
+    return points;
+  }
+
+  function totalGainOverWindow(rows, windowConfig, endMs) {
+    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
+    const startRow = rowAtOrBefore(rows, startMs);
+    const endRow = rowAtOrBefore(rows, endMs);
+    if (!startRow || !endRow || finite(startRow.points) === null || finite(endRow.points) === null) return 0;
+    return Math.max(0, endRow.points - startRow.points);
   }
 
   function buildSeries() {
     const range = RANGES[selectedRange] || RANGES["1-4"];
-    return selectedRows().map((row, index) => {
-      const solid = historyForClan(row.clan_name)
-        .map(item => ({
-          t: new Date(item.fetched_at).getTime(),
-          rawT: item.fetched_at,
-          points: item.points,
-          rank: item.rank,
-          projected: false
-        }))
-        .filter(item => Number.isFinite(item.t) && item.points !== null);
+    const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
+    const endMs = latestTimestamp();
 
-      const forecast = projectionPoint(row, solid);
+    return selectedRows().map((row, index) => {
+      const history = historyForClan(row.clan_name);
+      const points = buildIntervalPoints(history, windowConfig, endMs);
       return {
         clan_name: row.clan_name,
         rank: row.rank,
         color: clanColor(row.clan_name, index),
         current: row,
-        solid,
-        forecast: forecast && solid.length ? [solid[solid.length - 1], forecast] : [],
-        projectedEnd: forecast?.points ?? solid[solid.length - 1]?.points ?? row.points,
-        rate: forecast?.rate ?? rateFor(row, solid, selectedPace),
+        points,
+        totalWindowGain: totalGainOverWindow(history, windowConfig, endMs),
         isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
-    }).filter(series => series.solid.length >= 1);
+    }).filter(series => series.points.length >= 1);
   }
 
   function drawLine(ctx, points, x, y, color, options = {}) {
@@ -372,19 +375,45 @@
     ctx.strokeStyle = color;
     ctx.lineWidth = options.width || 2;
     ctx.globalAlpha = options.alpha ?? 0.86;
-    if (options.dash) ctx.setLineDash(options.dash);
     ctx.beginPath();
     points.forEach((point, index) => index === 0 ? ctx.moveTo(x(point), y(point)) : ctx.lineTo(x(point), y(point)));
     ctx.stroke();
 
     const last = points[points.length - 1];
-    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(x(last), y(last), options.radius || 2.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+  }
+
+  function cutoffSummary(seriesList, summary, holder, challenger, range, windowConfig) {
+    if (!summary) return;
+
+    const holderSeries = seriesList.find(series => series.rank === range.cutoffRank) || null;
+    const challengerSeries = seriesList.find(series => series.rank === range.challengerRank) || null;
+
+    if (!holder || !challenger || !holderSeries || !challengerSeries) {
+      summary.textContent = `${range.label}: not enough data for the cutoff pair.`;
+      return;
+    }
+
+    const pointsToGain = Math.max(0, holder.points - challenger.points + 1);
+    const holderRate = holderSeries.totalWindowGain / windowConfig.hours;
+    const challengerRate = challengerSeries.totalWindowGain / windowConfig.hours;
+    const closeRate = challengerRate - holderRate;
+    const endMs = new Date(currentData?.battle_end_iso || "").getTime();
+    const nowMs = latestTimestamp();
+    const remainingHours = Number.isFinite(endMs) ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000)) : 0;
+
+    if (closeRate > 0) {
+      const hoursToPass = pointsToGain / closeRate;
+      const projectedToPass = remainingHours > 0 && hoursToPass <= remainingHours;
+      summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> more points than <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong> to pass. Based on the selected <strong>${windowConfig.short} rate</strong>, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}${projectedToPass ? ` in about <strong>${fmtDuration(hoursToPass)}</strong>` : ` before the battle ends; at this rate it would need about <strong>${fmtDuration(hoursToPass)}</strong>`}.`;
+    } else {
+      summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> more points than <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong> to pass. Based on the selected <strong>${windowConfig.short} rate</strong>, ${escapeHtml(challenger.clan_name)} <strong>is not projected to pass</strong> ${escapeHtml(holder.clan_name)} because it is not gaining faster in this window.`;
+    }
   }
 
   function draw() {
@@ -402,7 +431,7 @@
     const dpr = window.devicePixelRatio || 1;
     const seriesList = buildSeries();
     const { range, holder, challenger } = boundaryPair();
-    const pace = PACES[selectedPace] || PACES["12h"];
+    const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
 
     canvas.width = Math.floor(rect.width * dpr);
     canvas.height = Math.floor(rect.height * dpr);
@@ -412,19 +441,19 @@
     if (!seriesList.length) {
       ctx.fillStyle = "#8b949e";
       ctx.font = "13px Arial";
-      ctx.fillText("Not enough current or historical data is available for this range yet.", 16, 28);
-      if (summary) summary.textContent = `${range.label}: not enough data for this range.`;
+      ctx.fillText("Not enough interval data is available for this range yet.", 16, 28);
+      if (summary) summary.textContent = `${range.label}: not enough interval data for this window.`;
       if (legend) legend.innerHTML = "";
       canvas._rewardThresholdChart = null;
       return;
     }
 
-    const allPoints = seriesList.flatMap(series => [...series.solid, ...series.forecast]);
+    const allPoints = seriesList.flatMap(series => series.points);
     const minT = Math.min(...allPoints.map(point => point.t));
     const maxT = Math.max(...allPoints.map(point => point.t));
-    const minYRaw = Math.min(...allPoints.map(point => point.points));
-    const maxYRaw = Math.max(...allPoints.map(point => point.points));
-    const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 1_000_000);
+    const minYRaw = Math.min(...allPoints.map(point => point.gain));
+    const maxYRaw = Math.max(...allPoints.map(point => point.gain));
+    const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 100_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
     const crowded = seriesList.length > 12;
@@ -437,7 +466,7 @@
     const height = rect.height - padTop - padBottom;
 
     const x = point => maxT === minT ? padLeft : padLeft + ((point.t - minT) / (maxT - minT)) * width;
-    const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.points - minY) / (maxY - minY))) * height;
+    const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.gain - minY) / (maxY - minY))) * height;
 
     ctx.strokeStyle = "#30363d";
     ctx.lineWidth = 1;
@@ -455,18 +484,11 @@
       ctx.fillText(fmtShort(value), 8, yy + 4);
     }
 
-    // Draw non-cutoff clans first so the two critical cutoff lines stay visible on top.
     [...seriesList].sort((a, b) => Number(a.isCutoffPair) - Number(b.isCutoffPair)).forEach(series => {
-      drawLine(ctx, series.solid, x, y, series.color, {
+      drawLine(ctx, series.points, x, y, series.color, {
         width: series.isCutoffPair ? 2.7 : (crowded ? 1.1 : 1.8),
         alpha: series.isCutoffPair ? 0.96 : (crowded ? 0.50 : 0.74),
         radius: series.isCutoffPair ? 3.4 : 2.4
-      });
-      drawLine(ctx, series.forecast, x, y, series.color, {
-        width: series.isCutoffPair ? 2.25 : (crowded ? 1.0 : 1.5),
-        dash: [7, 5],
-        alpha: series.isCutoffPair ? 0.75 : (crowded ? 0.30 : 0.48),
-        radius: series.isCutoffPair ? 3 : 2.2
       });
     });
 
@@ -474,7 +496,7 @@
       ctx.save();
       ctx.font = "12px Arial";
       seriesList.forEach(series => {
-        const last = series.forecast.length ? series.forecast[series.forecast.length - 1] : series.solid[series.solid.length - 1];
+        const last = series.points[series.points.length - 1];
         ctx.fillStyle = series.color;
         ctx.fillText(`#${series.rank} ${series.clan_name}`, x(last) + 7, Math.max(padTop + 10, Math.min(rect.height - padBottom - 3, y(last) + 4)));
       });
@@ -484,27 +506,11 @@
     const firstDate = new Date(minT);
     const lastDate = new Date(maxT);
     ctx.fillStyle = "#8b949e";
-    ctx.fillText(firstDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }), padLeft, rect.height - 12);
-    const lastLabel = selectedPace === "none" ? lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Battle End";
+    ctx.fillText(firstDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), padLeft, rect.height - 12);
+    const lastLabel = lastDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
     ctx.fillText(lastLabel, rect.width - padRight - ctx.measureText(lastLabel).width, rect.height - 12);
 
-    const holderSeries = seriesList.find(series => series.rank === range.cutoffRank) || null;
-    const challengerSeries = seriesList.find(series => series.rank === range.challengerRank) || null;
-
-    if (summary && holder && challenger && holderSeries && challengerSeries) {
-      const currentGap = Math.max(0, holder.points - challenger.points + 1);
-      const projectedGap = holderSeries.projectedEnd - challengerSeries.projectedEnd + 1;
-
-      if (selectedPace === "none") {
-        summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to make up <strong>${fmtShort(currentGap)}</strong> points to pass <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong>.`;
-      } else if (projectedGap <= 0) {
-        summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to make up <strong>${fmtShort(currentGap)}</strong> points to pass <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong>. Using the selected <strong>${pace.short}</strong>, ${escapeHtml(challenger.clan_name)} <strong>is projected to pass</strong> ${escapeHtml(holder.clan_name)} by about <strong>${fmtShort(Math.abs(projectedGap))}</strong> points before the battle ends.`;
-      } else {
-        summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to make up <strong>${fmtShort(currentGap)}</strong> points to pass <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong>. Using the selected <strong>${pace.short}</strong>, ${escapeHtml(challenger.clan_name)} <strong>is not projected to pass</strong> ${escapeHtml(holder.clan_name)} and finishes about <strong>${fmtShort(projectedGap)}</strong> points short.`;
-      }
-    } else if (summary) {
-      summary.textContent = `${range.label}: not enough data for the cutoff pair.`;
-    }
+    cutoffSummary(seriesList, summary, holder, challenger, range, windowConfig);
 
     if (legend) {
       const cutoffItems = seriesList.filter(series => series.isCutoffPair);
@@ -512,10 +518,10 @@
       const legendItems = [...cutoffItems, ...otherItems];
       legend.innerHTML = legendItems.map(series => `
         <span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>
-      `).join("") + (selectedPace === "none" ? "" : `<span class="reward-threshold-legend-item forecast">dashed = projected to battle end</span>`);
+      `).join("") + `<span>${windowConfig.bucketMinutes}m interval gains</span>`;
     }
 
-    canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect };
+    canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect, windowConfig };
     bindTooltip(canvas, tooltip);
   }
 
@@ -538,7 +544,7 @@
       let nearestDist = Infinity;
 
       for (const series of chart.seriesList) {
-        for (const point of [...series.solid, ...series.forecast]) {
+        for (const point of series.points) {
           const dist = Math.abs(chart.x(point) - mx);
           if (dist < nearestDist) {
             nearest = point;
@@ -571,8 +577,8 @@
 
       tooltip.innerHTML = `
         <strong style="color:${nearestSeries.color}">#${nearestSeries.rank} ${escapeHtml(nearestSeries.clan_name)}</strong>
-        <div>${nearest.projected ? "Projected points" : "Points"}: ${fmtShort(nearest.points)}</div>
-        <div>${nearest.projected ? "Projected to" : "Seen"}: ${fmtDateTime(nearest.rawT)}</div>
+        <div>${fresh.windowConfig.bucketMinutes}m gain: ${fmtShort(nearest.gain)}</div>
+        <div>Interval ending: ${fmtDateTime(nearest.rawT)}</div>
       `;
 
       tooltip.style.display = "block";
