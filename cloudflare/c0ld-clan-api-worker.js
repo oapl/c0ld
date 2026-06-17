@@ -6,7 +6,7 @@ const CLANS_CURRENT_TABLE = "c0ld_clans_current";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "AngelBattle2026";
 const DEFAULT_RETENTION_HOURS = 336;
-const DEFAULT_PUBLIC_CACHE_SECONDS = 30;
+const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const ROBLOX_BATCH_SIZE = 100;
 const CLANS_PAGE_SIZE = 100;
 
@@ -73,7 +73,8 @@ async function handleIngest(env, source) {
   const configuredBattleKey = battleKey(env);
   const api = await fetchClanApi(clan);
   const battles = api.data?.Battles || {};
-  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const resolvedBattleKey = resolveBattleKey(battles, activeBattleMeta?.battleKey || configuredBattleKey, env);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
   if (!battle) {
@@ -97,7 +98,12 @@ async function handleIngest(env, source) {
     })
     .map((row, index) => ({ ...row, rank: index + 1 }));
 
-  const battleMeta = extractBattleMeta(battle, resolvedBattleKey, env);
+  const battleMeta = mergeBattleMeta(
+    extractBattleMeta(battle, resolvedBattleKey, env),
+    activeBattleMeta,
+    resolvedBattleKey,
+    { allowMismatch: true }
+  );
   const snapshotId = `${clan}:${resolvedBattleKey}:${fetchedAt}`;
   const rows = ranked.map(row => ({
     snapshot_id: snapshotId,
@@ -188,6 +194,11 @@ async function handleCurrent(request, env) {
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
+  const activeBattleMeta = !explicitBattle
+    ? await fetchActiveClanBattleMeta(env).catch(() => null)
+    : null;
+  latest = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const usernameMap = await resolveMissingUsernames(rowsWithGains, env);
   const avatarMap = await resolveRobloxAvatarHeadshots(
     rowsWithGains.map(row => row.user_id),
     env
@@ -208,7 +219,7 @@ async function handleCurrent(request, env) {
     rows: rowsWithGains.map(row => ({
       fetched_at: row.fetched_at,
       rank: toNumber(row.rank),
-      username: row.username,
+      username: displayUsername(row, usernameMap),
       user_id: toNumber(row.user_id),
       avatar_url: avatarMap.get(String(row.user_id)) || null,
       total_points: toNumber(row.total_points) || 0,
@@ -263,9 +274,15 @@ async function handleClansIngest(env, source) {
   const configuredBattleKey = battleKey(env);
   const api = await fetchClanApi(trackedClan);
   const battles = api.data?.Battles || {};
-  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const resolvedBattleKey = resolveBattleKey(battles, activeBattleMeta?.battleKey || configuredBattleKey, env);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
-  const battleMeta = extractBattleMeta(battle || {}, resolvedBattleKey, env);
+  const battleMeta = mergeBattleMeta(
+    extractBattleMeta(battle || {}, resolvedBattleKey, env),
+    activeBattleMeta,
+    resolvedBattleKey,
+    { allowMismatch: true }
+  );
   const clans = await fetchTopClans(env);
   const snapshotId = `clans:${resolvedBattleKey}:${fetchedAt}`;
 
@@ -323,18 +340,20 @@ async function handleClansCurrent(request, env) {
   });
 
   const latest = latestClanMetaFromRows(rows);
-  const rowsWithGains = latest ? await addClanGainFields(env, rows, latest) : rows;
-  const rowsWithProjections = latest ? addClanProjectionFields(rowsWithGains, latest) : rowsWithGains;
+  const activeBattleMeta = latest ? await fetchActiveClanBattleMeta(env).catch(() => null) : null;
+  const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: true });
+  const rowsWithGains = latestWithActiveMeta ? await addClanGainFields(env, rows, latestWithActiveMeta) : rows;
+  const rowsWithProjections = latestWithActiveMeta ? addClanProjectionFields(rowsWithGains, latestWithActiveMeta) : rowsWithGains;
   const trackedClan = clanName(env);
   const tracked = rowsWithProjections.find(row => normalizeText(row.clan_name) === normalizeText(trackedClan));
 
   return cacheJson({
     generated_at: new Date().toISOString(),
-    snapshot_at: latest?.fetched_at || null,
-    battle: latest?.battle_key || null,
-    display_name: latest?.battle_display_name || null,
-    battle_start_iso: latest?.battle_started_at || null,
-    battle_end_iso: latest?.battle_ended_at || null,
+    snapshot_at: latestWithActiveMeta?.fetched_at || null,
+    battle: latestWithActiveMeta?.battle_key || null,
+    display_name: latestWithActiveMeta?.battle_display_name || null,
+    battle_start_iso: latestWithActiveMeta?.battle_started_at || null,
+    battle_end_iso: latestWithActiveMeta?.battle_ended_at || null,
     clan_name: trackedClan,
     clan_rank: tracked?.rank ?? null,
     clan_points: tracked?.points ?? null,
@@ -419,6 +438,69 @@ async function fetchClanApi(clan) {
   }
 
   throw httpError(502, `Big Games clan API failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function fetchActiveClanBattleMeta(env) {
+  if (String(env.ACTIVE_BATTLE_LOOKUP || "true").toLowerCase() === "false") {
+    return null;
+  }
+
+  const urls = [
+    "https://ps99.biggamesapi.io/api/activeClanBattle",
+    "https://biggamesapi.io/api/activeClanBattle"
+  ];
+  let lastError = null;
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "c0ld-Clan-API-Worker"
+        },
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
+      }
+
+      const json = JSON.parse(text);
+      if (json.status && json.status !== "ok") {
+        throw new Error(`API status ${json.status}`);
+      }
+
+      const data = json.data || json;
+      const configData = data.configData || data.ConfigData || {};
+      const merged = { ...data, ...configData, configData };
+      const activeKey = String(firstDefined(
+        data.configName,
+        data.ConfigName,
+        configData.Title,
+        configData.title,
+        configData._id,
+        data._id
+      ) || "").trim();
+      const meta = extractBattleMeta(merged, activeKey || battleKey(env), env);
+
+      return {
+        battleKey: activeKey || meta.displayName || null,
+        displayName: meta.displayName,
+        startedAt: meta.startedAt,
+        endedAt: meta.endedAt,
+        raw: data
+      };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (String(env.REQUIRE_ACTIVE_BATTLE_LOOKUP || "").toLowerCase() === "true") {
+    throw httpError(502, `Active clan battle API failed: ${lastError?.message || "unknown error"}`);
+  }
+
+  return null;
 }
 
 async function fetchTopClans(env) {
@@ -673,9 +755,7 @@ async function resolveRobloxUsernames(userIds, env) {
     return result;
   }
 
-  for (let i = 0; i < ids.length; i += ROBLOX_BATCH_SIZE) {
-    const batch = ids.slice(i, i + ROBLOX_BATCH_SIZE);
-
+  const lookupBatch = async batch => {
     try {
       const res = await fetch("https://users.roblox.com/v1/users", {
         method: "POST",
@@ -690,7 +770,7 @@ async function resolveRobloxUsernames(userIds, env) {
         })
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) return;
 
       const json = await res.json();
       for (const user of json.data || []) {
@@ -702,9 +782,43 @@ async function resolveRobloxUsernames(userIds, env) {
     } catch {
       // Keep fallback user_ID labels if Roblox lookup is unavailable.
     }
+  };
+
+  const batches = [];
+  for (let i = 0; i < ids.length; i += ROBLOX_BATCH_SIZE) {
+    batches.push(lookupBatch(ids.slice(i, i + ROBLOX_BATCH_SIZE)));
   }
 
+  await Promise.all(batches);
   return result;
+}
+
+async function resolveMissingUsernames(rows, env) {
+  const ids = (rows || [])
+    .filter(row => isFallbackUsername(row.username, row.user_id))
+    .map(row => row.user_id);
+
+  if (!ids.length) return new Map();
+  return resolveRobloxUsernames(ids, env).catch(() => new Map());
+}
+
+function isFallbackUsername(username, userId) {
+  const text = String(username || "").trim();
+  const id = String(userId || "").trim();
+
+  if (!text) return true;
+  if (id && text === id) return true;
+  return /^user_\d+$/i.test(text);
+}
+
+function displayUsername(row, usernameMap) {
+  const id = toNumber(row.user_id);
+  const existing = String(row.username || "").trim();
+  const resolved = id ? String(usernameMap.get(id) || "").trim() : "";
+
+  if (resolved && !isFallbackUsername(resolved, id)) return resolved;
+  if (existing && !isFallbackUsername(existing, id)) return existing;
+  return existing || (id ? `user_${id}` : "");
 }
 
 async function resolveRobloxAvatarHeadshots(userIds, env) {
@@ -1285,10 +1399,61 @@ function battleDisplayName(env, fallback) {
   return String(env.CURRENT_BATTLE_DISPLAY_NAME || fallback || battleKey(env));
 }
 
+function activeBattleMatches(activeMeta, battleKeyValue, displayName) {
+  if (!activeMeta) return false;
+
+  const activeKeys = [
+    activeMeta.battleKey,
+    activeMeta.displayName
+  ].map(normalizeText).filter(Boolean);
+  const localKeys = [
+    battleKeyValue,
+    displayName
+  ].map(normalizeText).filter(Boolean);
+
+  return activeKeys.some(activeKey => localKeys.includes(activeKey));
+}
+
+function mergeBattleMeta(meta, activeMeta, battleKeyValue, options = {}) {
+  if (!activeMeta) return meta;
+
+  const canUseActive =
+    options.allowMismatch ||
+    activeBattleMatches(activeMeta, battleKeyValue, meta?.displayName);
+
+  if (!canUseActive) return meta;
+
+  return {
+    ...meta,
+    displayName: meta?.displayName || activeMeta.displayName,
+    startedAt: meta?.startedAt || activeMeta.startedAt,
+    endedAt: meta?.endedAt || activeMeta.endedAt
+  };
+}
+
+function mergeLatestMeta(latest, activeMeta, options = {}) {
+  if (!latest || !activeMeta) return latest;
+
+  const canUseActive =
+    options.allowMismatch ||
+    activeBattleMatches(activeMeta, latest.battle_key, latest.battle_display_name);
+
+  if (!canUseActive) return latest;
+
+  return {
+    ...latest,
+    battle_display_name: latest.battle_display_name || activeMeta.displayName,
+    battle_started_at: latest.battle_started_at || activeMeta.startedAt,
+    battle_ended_at: latest.battle_ended_at || activeMeta.endedAt
+  };
+}
+
 function extractBattleMeta(battle, resolvedBattleKey, env) {
   const displayName = String(firstDefined(
     env.CURRENT_BATTLE_DISPLAY_NAME,
     getFirstValue(battle, [
+      "ConfigName",
+      "configName",
       "DisplayName",
       "displayName",
       "display_name",

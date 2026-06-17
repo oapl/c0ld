@@ -215,7 +215,7 @@
     }
 
     .status.info {
-      display: block;
+      display: none;
       border: 1px solid var(--border);
       background: var(--panel);
       color: var(--text);
@@ -579,7 +579,7 @@
     function setStatus(text, kind = "info") {
       const el = document.getElementById("status");
       el.className = `status ${kind}`;
-      el.textContent = text;
+      el.textContent = kind === "error" ? text : "";
     }
 
     function setCardsEmpty() {
@@ -745,7 +745,7 @@
         renderMembers();
 
         refreshBtn.disabled = false;
-        setStatus(`Loaded live data for ${currentClanName}.`, "info");
+        setStatus("", "info");
       } catch (err) {
         console.error(err);
         currentClanName = "";
