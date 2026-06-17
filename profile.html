@@ -63,7 +63,7 @@
     header {
       background: var(--panel);
       border-bottom: 1px solid var(--border);
-      padding: 12px 22px 10px;
+      padding: 10px 22px 10px;
       position: relative;
       z-index: 1;
     }
@@ -72,70 +72,30 @@
       max-width: 1200px;
       margin: 0 auto;
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 18px;
-      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
     }
 
-    .title-wrap h1 {
-      margin: 0 0 3px;
-      font-size: 27px;
-      line-height: 1.1;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .github-btn {
-      display: inline-block;
-      padding: 8px 13px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-2);
-      white-space: nowrap;
-      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    }
-
-    .github-btn:hover {
-      background: var(--hover);
-      border-color: var(--link);
-    }
-
-    .mascot-switch {
+    .site-logo-link {
       display: inline-flex;
       align-items: center;
-      gap: 10px;
-      min-height: 58px;
-      padding: 7px 11px 7px 7px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-2);
-      color: var(--text);
-      transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+      justify-content: center;
+      line-height: 0;
+      border-radius: 10px;
+      transition: transform 0.12s ease, filter 0.15s ease;
     }
 
-    .mascot-switch:hover {
-      background: var(--hover);
-      border-color: var(--link);
+    .site-logo-link:hover {
       transform: translateY(-1px);
+      filter: brightness(1.12);
     }
 
-    .site-mascot {
-      width: 44px;
-      height: 44px;
-      object-fit: contain;
+    .site-logo {
       display: block;
-      flex: 0 0 auto;
-    }
-
-    .mascot-switch-label {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.2;
-      white-space: nowrap;
+      width: 76px;
+      height: auto;
+      border-radius: 10px;
+      object-fit: contain;
     }
 
     .menu-bar {
@@ -405,36 +365,23 @@
 
     @media (max-width: 700px) {
       header {
-        padding: 14px 16px 10px;
+        padding: 12px 16px 10px;
       }
 
       main {
         padding: 16px;
       }
 
-      .title-wrap h1 {
-        font-size: 24px;
-      }
-
       .menu-bar {
         justify-content: flex-start;
       }
 
+      .site-logo {
+        width: 64px;
+      }
+
       .profile-header {
         align-items: flex-start;
-      }
-
-      .mascot-switch {
-        min-height: 52px;
-      }
-
-      .site-mascot {
-        width: 38px;
-        height: 38px;
-      }
-
-      .mascot-switch-label {
-        display: none;
       }
 
       .profile-name {
@@ -478,20 +425,19 @@
 <body>
   <header>
     <div class="header-inner">
-      <div class="title-wrap">
-        <h1 id="page-title">Player Profile</h1>
-        <div id="page-subtitle" class="subtitle">c0ld Clan Battle History</div>
-      </div>
-
       <a
-        id="clan-mascot-switch"
-        class="mascot-switch"
-        href="profile.html"
+        id="clan-mascot-link"
+        class="site-logo-link"
+        href="index.html?clan=WMSY"
         aria-label="Switch clan view"
         title="Switch clan view"
       >
-        <img id="site-mascot" class="site-mascot" src="assets/mascots/c0ld-mascot.svg" alt="c0ld mascot">
-        <span id="mascot-switch-label" class="mascot-switch-label">Switch clan</span>
+        <img
+          id="site-mascot"
+          class="site-logo"
+          src="assets/c0ld-kitsune-logo.gif"
+          alt="c0ld"
+        >
       </a>
     </div>
 
@@ -508,828 +454,820 @@
     <div class="empty">Loading player profile...</div>
   </main>
 
-<script>
-  const CLAN_MASCOTS = {
-    c0ld: {
-      key: "c0ld",
-      label: "c0ld",
-      mascot: "assets/c0ld-kitsune-logo.gif",
-      switchTarget: "WMSY"
-    },
-    wmsy: {
-      key: "wmsy",
-      label: "WMSY",
-      mascot: "assets/mascots/wmsy-frog.png",
-      switchTarget: "c0ld"
-    }
-  };
-
-  const SPECIAL_FROG_PROFILE_ID = "351313092";
-
-  const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
-  const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
-
-  const DEFAULT_AVATAR_SVG =
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
-        <rect width="150" height="150" rx="16" fill="#21262d"/>
-        <circle cx="75" cy="58" r="26" fill="#6e7681"/>
-        <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
-      </svg>
-    `);
-
-  let loadedProfile = null;
-  let selectedBattleIndex = 0;
-  let currentChart = null;
-
-  function normalizeClanKey(value) {
-    return String(value || "c0ld")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-  }
-
-  function getRequestedClanConfig() {
-    const params = new URLSearchParams(window.location.search);
-    const key = normalizeClanKey(params.get("clan"));
-    return CLAN_MASCOTS[key] || CLAN_MASCOTS.c0ld;
-  }
-
-  function getClanConfigByLabel(value) {
-    return CLAN_MASCOTS[normalizeClanKey(value)] || CLAN_MASCOTS.c0ld;
-  }
-
-  function buildClanUrl(page, clanLabel) {
-    const target = getClanConfigByLabel(clanLabel);
-    const url = new URL(page, window.location.href);
-    url.search = "";
-
-    if (target.key !== "c0ld") {
-      url.searchParams.set("clan", target.label);
-    }
-
-    return `${url.pathname.split("/").pop()}${url.search}`;
-  }
-
-  function buildClanHomeUrl(clanLabel) {
-    const target = getClanConfigByLabel(clanLabel);
-    const url = new URL("index.html", window.location.href);
-    url.search = "";
-
-    if (target.key !== "c0ld") {
-      url.searchParams.set("clan", target.label);
-    }
-
-    return `index.html${url.search}`;
-  }
-
-  function isSpecialFrogProfile() {
-    const clan = getRequestedClanConfig();
-    return clan.key === "wmsy" && String(getProfileId() || "") === SPECIAL_FROG_PROFILE_ID;
-  }
-
-  function updateClanChrome() {
-    const clan = getRequestedClanConfig();
-    const switchTarget = getClanConfigByLabel(clan.switchTarget);
-    const title = document.getElementById("page-title");
-    const subtitle = document.getElementById("page-subtitle");
-    const mascotSwitch = document.getElementById("clan-mascot-switch");
-    const mascot = document.getElementById("site-mascot");
-    const switchLabel = document.getElementById("mascot-switch-label");
-
-    document.body.dataset.clan = clan.key;
-    document.body.classList.toggle("frog-profile", isSpecialFrogProfile());
-
-    if (title) title.textContent = `${clan.label} Player Profile`;
-    if (subtitle) subtitle.textContent = `${clan.label} Clan Battle History`;
-
-    if (mascotSwitch && mascot && switchLabel) {
-      mascotSwitch.href = buildClanHomeUrl(switchTarget.label);
-      mascotSwitch.setAttribute("aria-label", `Switch to ${switchTarget.label} leaderboard`);
-      mascotSwitch.title = `Switch to ${switchTarget.label} leaderboard`;
-
-      mascot.src = clan.mascot;
-      mascot.alt = `${clan.label} mascot`;
-
-      switchLabel.textContent = `View ${switchTarget.label}`;
-    }
-
-    document.querySelectorAll("[data-clan-link]").forEach(link => {
-      const page = link.getAttribute("data-page") || link.getAttribute("href") || "index.html";
-      link.href = buildClanUrl(page, clan.label);
-
-      if (page === "index.html") {
-        link.textContent = `${clan.label} Leaderboard`;
+  <script>
+    const CLAN_MASCOTS = {
+      c0ld: {
+        key: "c0ld",
+        label: "c0ld",
+        mascot: "assets/c0ld-kitsune-logo.gif",
+        switchTarget: "WMSY"
+      },
+      wmsy: {
+        key: "wmsy",
+        label: "WMSY",
+        mascot: "assets/mascots/wmsy-frog.png",
+        switchTarget: "c0ld"
       }
-    });
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function fmtNum(n) {
-    if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
-    return Number(n).toLocaleString("en-US");
-  }
-
-  function finiteNumber(value) {
-    if (value === null || value === undefined || value === "") return null;
-
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function fmtDate(s) {
-    if (!s) return "—";
-
-    const d = new Date(s);
-    if (Number.isNaN(d.getTime())) return "—";
-
-    return d.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-  }
-
-  function fmtDateTime(s) {
-    if (!s) return "—";
-
-    const d = new Date(s);
-    if (Number.isNaN(d.getTime())) return "—";
-
-    return d.toLocaleString(undefined, {
-      dateStyle: "short",
-      timeStyle: "medium"
-    });
-  }
-
-  function getProfileId() {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("id");
-  }
-
-  function getBattleSortTime(battle) {
-    const d = new Date(
-      battle.battle_last_snapshot ||
-      battle.last_snapshot ||
-      battle.last_seen ||
-      0
-    );
-
-    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-  }
-
-  function getSortedBattles(profile) {
-    return (profile.battles || [])
-      .slice()
-      .sort((a, b) => getBattleSortTime(b) - getBattleSortTime(a));
-  }
-
-  function getFirstActiveDate(battle) {
-    const series = Array.isArray(battle.series) ? battle.series : [];
-    const firstActive = series.find(item => Number(item.points || 0) > 0 && item.t);
-
-    if (firstActive) {
-      return firstActive.t;
-    }
-
-    if (Number(battle.starting_points || 0) > 0) {
-      return battle.first_seen || battle.battle_first_snapshot || battle.first_snapshot || null;
-    }
-
-    return null;
-  }
-
-  function getEventStartDate(battle) {
-    return battle.battle_first_snapshot || battle.first_snapshot || battle.first_seen || null;
-  }
-
-  function getEventEndDate(battle) {
-    return battle.battle_last_snapshot || battle.last_snapshot || battle.last_seen || null;
-  }
-
-  function getEndRank(battle) {
-    if (battle.ending_rank !== undefined && battle.ending_rank !== null) return battle.ending_rank;
-    if (battle.end_rank !== undefined && battle.end_rank !== null) return battle.end_rank;
-    if (battle.last_known_rank !== undefined && battle.last_known_rank !== null) return battle.last_known_rank;
-    return null;
-  }
-
-  function getChartPoints(series) {
-    return (series || [])
-      .map(item => ({
-        t: new Date(item.t).getTime(),
-        rawT: item.t,
-        points: finiteNumber(item.points),
-        rank: finiteNumber(item.rank)
-      }))
-      .filter(item => !Number.isNaN(item.t) && item.points !== null);
-  }
-
-  function drawChart(canvas, tooltip, series) {
-    const ctx = canvas.getContext("2d");
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-
-    const points = getChartPoints(series);
-
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    if (points.length < 2) {
-      ctx.fillStyle = "#8b949e";
-      ctx.font = "13px Arial";
-      ctx.fillText("Not enough points to chart.", 16, 28);
-      currentChart = null;
-      return;
-    }
-
-    const minT = Math.min(...points.map(p => p.t));
-    const maxT = Math.max(...points.map(p => p.t));
-    const minY = Math.min(...points.map(p => p.points));
-    const maxY = Math.max(...points.map(p => p.points));
-
-    const padLeft = 48;
-    const padRight = 18;
-    const padTop = 18;
-    const padBottom = 34;
-
-    const width = rect.width - padLeft - padRight;
-    const height = rect.height - padTop - padBottom;
-
-    function x(t) {
-      if (maxT === minT) return padLeft;
-      return padLeft + ((t - minT) / (maxT - minT)) * width;
-    }
-
-    function y(v) {
-      if (maxY === minY) return padTop + height / 2;
-      return padTop + (1 - ((v - minY) / (maxY - minY))) * height;
-    }
-
-    function niceLabel(v) {
-      const tiers = [
-        { value: 1e12, suffix: "T" },
-        { value: 1e9, suffix: "B" },
-        { value: 1e6, suffix: "M" },
-        { value: 1e3, suffix: "K" }
-      ];
-
-      for (const tier of tiers) {
-        if (Math.abs(v) >= tier.value) {
-          return (v / tier.value).toFixed(1).replace(/\.0$/, "") + tier.suffix;
-        }
-      }
-
-      return String(Math.round(v));
-    }
-
-    ctx.strokeStyle = "#30363d";
-    ctx.lineWidth = 1;
-    ctx.font = "12px Arial";
-    ctx.fillStyle = "#8b949e";
-
-    const gridLines = 4;
-
-    for (let i = 0; i <= gridLines; i++) {
-      const pct = i / gridLines;
-      const yy = padTop + pct * height;
-      const value = maxY - pct * (maxY - minY);
-
-      ctx.beginPath();
-      ctx.moveTo(padLeft, yy);
-      ctx.lineTo(rect.width - padRight, yy);
-      ctx.stroke();
-
-      ctx.fillText(niceLabel(value), 8, yy + 4);
-    }
-
-    ctx.strokeStyle = "#58a6ff";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    points.forEach((p, i) => {
-      const px = x(p.t);
-      const py = y(p.points);
-
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
-
-    ctx.stroke();
-
-    ctx.fillStyle = "#58a6ff";
-
-    const last = points[points.length - 1];
-    ctx.beginPath();
-    ctx.arc(x(last.t), y(last.points), 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#8b949e";
-
-    const firstDate = new Date(minT);
-    const lastDate = new Date(maxT);
-
-    ctx.fillText(
-      firstDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      padLeft,
-      rect.height - 12
-    );
-
-    const lastLabel = lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    const labelWidth = ctx.measureText(lastLabel).width;
-
-    ctx.fillText(
-      lastLabel,
-      rect.width - padRight - labelWidth,
-      rect.height - 12
-    );
-
-    currentChart = {
-      canvas,
-      tooltip,
-      points,
-      x,
-      y,
-      rect,
-      padTop,
-      padBottom
     };
-  }
 
-  function redrawActiveChart() {
-    if (!loadedProfile) return;
+    const SPECIAL_FROG_PROFILE_ID = "351313092";
 
-    const battles = getSortedBattles(loadedProfile);
-    const battle = battles[selectedBattleIndex];
+    const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-    if (!battle) return;
+    const DEFAULT_AVATAR_SVG =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+          <rect width="150" height="150" rx="16" fill="#21262d"/>
+          <circle cx="75" cy="58" r="26" fill="#6e7681"/>
+          <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
+        </svg>
+      `);
 
-    const canvas = document.querySelector(".chart-box");
-    const tooltip = document.querySelector(".tooltip");
+    let loadedProfile = null;
+    let selectedBattleIndex = 0;
+    let currentChart = null;
 
-    if (!canvas || !tooltip) return;
-
-    drawChart(canvas, tooltip, battle.series || []);
-  }
-
-  function bindChartHover() {
-    const canvas = document.querySelector(".chart-box");
-    const tooltip = document.querySelector(".tooltip");
-
-    if (!canvas || !tooltip) return;
-
-    function hideTooltip() {
-      tooltip.style.display = "none";
+    function normalizeClanKey(value) {
+      return String(value || "c0ld")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
     }
 
-    function showTooltip(ev) {
-      if (!currentChart || !currentChart.points.length) return;
+    function getRequestedClanConfig() {
+      const params = new URLSearchParams(window.location.search);
+      const key = normalizeClanKey(params.get("clan"));
+      return CLAN_MASCOTS[key] || CLAN_MASCOTS.c0ld;
+    }
 
-      const rect = canvas.getBoundingClientRect();
-      const mx = ev.clientX - rect.left;
+    function getClanConfigByLabel(value) {
+      return CLAN_MASCOTS[normalizeClanKey(value)] || CLAN_MASCOTS.c0ld;
+    }
 
-      let nearest = currentChart.points[0];
-      let nearestDist = Math.abs(currentChart.x(nearest.t) - mx);
+    function buildClanUrl(page, clanLabel) {
+      const target = getClanConfigByLabel(clanLabel);
+      const url = new URL(page, window.location.href);
+      url.search = "";
 
-      for (const p of currentChart.points) {
-        const dist = Math.abs(currentChart.x(p.t) - mx);
+      if (target.key !== "c0ld") {
+        url.searchParams.set("clan", target.label);
+      }
 
-        if (dist < nearestDist) {
-          nearest = p;
-          nearestDist = dist;
+      return `${url.pathname.split("/").pop()}${url.search}`;
+    }
+
+    function buildClanHomeUrl(clanLabel) {
+      const target = getClanConfigByLabel(clanLabel);
+      const url = new URL("index.html", window.location.href);
+      url.search = "";
+
+      if (target.key !== "c0ld") {
+        url.searchParams.set("clan", target.label);
+      }
+
+      return `index.html${url.search}`;
+    }
+
+    function isSpecialFrogProfile() {
+      const clan = getRequestedClanConfig();
+      return clan.key === "wmsy" && String(getProfileId() || "") === SPECIAL_FROG_PROFILE_ID;
+    }
+
+    function updateClanChrome() {
+      const clan = getRequestedClanConfig();
+      const switchTarget = getClanConfigByLabel(clan.switchTarget);
+      const mascotLink = document.getElementById("clan-mascot-link");
+      const mascot = document.getElementById("site-mascot");
+
+      document.body.dataset.clan = clan.key;
+      document.body.classList.toggle("frog-profile", isSpecialFrogProfile());
+
+      if (mascotLink && mascot) {
+        mascotLink.href = buildClanHomeUrl(switchTarget.label);
+        mascotLink.setAttribute("aria-label", `Switch to ${switchTarget.label} leaderboard`);
+        mascotLink.title = `Switch to ${switchTarget.label} leaderboard`;
+        mascot.src = clan.mascot;
+        mascot.alt = clan.label;
+      }
+
+      document.querySelectorAll("[data-clan-link]").forEach(link => {
+        const page = link.getAttribute("data-page") || link.getAttribute("href") || "index.html";
+        link.href = buildClanUrl(page, clan.label);
+
+        if (page === "index.html") {
+          link.textContent = `${clan.label} Leaderboard`;
+          link.classList.add("active");
         }
-      }
-
-      redrawActiveChart();
-
-      const ctx = canvas.getContext("2d");
-      const px = currentChart.x(nearest.t);
-      const py = currentChart.y(nearest.points);
-
-      ctx.save();
-      ctx.strokeStyle = "rgba(88, 166, 255, 0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(px, currentChart.padTop);
-      ctx.lineTo(px, currentChart.rect.height - currentChart.padBottom);
-      ctx.stroke();
-
-      ctx.fillStyle = "#e6edf3";
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      tooltip.innerHTML = `
-        <strong>${fmtDateTime(nearest.rawT)}</strong>
-        <div>Points: ${fmtNum(nearest.points)}</div>
-        <div>Rank: ${nearest.rank === null || Number.isNaN(nearest.rank) ? "—" : fmtNum(nearest.rank)}</div>
-      `;
-
-      tooltip.style.display = "block";
-
-      const tooltipRect = tooltip.getBoundingClientRect();
-      let left = ev.clientX - rect.left + 14;
-      let top = ev.clientY - rect.top + 14;
-
-      if (left + tooltipRect.width > rect.width) {
-        left = ev.clientX - rect.left - tooltipRect.width - 14;
-      }
-
-      if (top + tooltipRect.height > rect.height) {
-        top = ev.clientY - rect.top - tooltipRect.height - 14;
-      }
-
-      tooltip.style.left = `${Math.max(8, left)}px`;
-      tooltip.style.top = `${Math.max(8, top)}px`;
-    }
-
-    canvas.addEventListener("mousemove", showTooltip);
-    canvas.addEventListener("mouseleave", hideTooltip);
-
-    canvas.addEventListener("touchstart", ev => {
-      if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
-    }, { passive: true });
-
-    canvas.addEventListener("touchmove", ev => {
-      if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
-    }, { passive: true });
-
-    canvas.addEventListener("touchend", hideTooltip);
-  }
-
-  function renderBattle(profile, battleIndex) {
-    const battles = getSortedBattles(profile);
-    const battle = battles[battleIndex];
-    const container = document.getElementById("battle-detail");
-
-    if (!battle) {
-      container.innerHTML = `<div class="empty">No battle selected.</div>`;
-      return;
-    }
-
-    const eventStart = fmtDate(getEventStartDate(battle));
-    const eventEnd = fmtDate(getEventEndDate(battle));
-    const firstActiveDate = fmtDate(getFirstActiveDate(battle));
-    const endRank = getEndRank(battle);
-
-    container.innerHTML = `
-      <article class="battle-card">
-        <div class="battle-header">
-          <h3 class="battle-title">${escapeHtml(battle.display_name || battle.battle || "Unknown Battle")}</h3>
-          <div class="battle-dates">${eventStart} → ${eventEnd}</div>
-        </div>
-
-        <div class="stats">
-          <div class="stat-row">
-            <div class="stat-label">First Active Date</div>
-            <div class="stat-value">${firstActiveDate}</div>
-          </div>
-
-          <div class="stat-row">
-            <div class="stat-label">Starting Rank</div>
-            <div class="stat-value">${fmtNum(battle.starting_rank)}</div>
-          </div>
-
-          <div class="stat-row">
-            <div class="stat-label">Worst Rank</div>
-            <div class="stat-value">${fmtNum(battle.worst_rank)}</div>
-          </div>
-
-          <div class="stat-row">
-            <div class="stat-label">Best Rank</div>
-            <div class="stat-value">${fmtNum(battle.best_rank)}</div>
-          </div>
-
-          <div class="stat-row">
-            <div class="stat-label">End Rank</div>
-            <div class="stat-value">${fmtNum(endRank)}</div>
-          </div>
-
-          <div class="stat-row">
-            <div class="stat-label">Ending Points</div>
-            <div class="stat-value">${fmtNum(battle.ending_points)}</div>
-          </div>
-        </div>
-
-        ${
-          Array.isArray(battle.series) && battle.series.length > 1
-            ? `
-              <div class="chart-wrap">
-                <div class="chart-title">Points Progression</div>
-                <canvas class="chart-box"></canvas>
-                <div class="tooltip"></div>
-              </div>
-            `
-            : ""
-        }
-      </article>
-    `;
-
-    requestAnimationFrame(() => {
-      redrawActiveChart();
-      bindChartHover();
-    });
-  }
-
-  function render(profile) {
-    loadedProfile = profile;
-
-    const app = document.getElementById("app");
-    const battles = getSortedBattles(profile);
-
-    selectedBattleIndex = 0;
-
-    app.innerHTML = `
-      <section class="profile-header">
-        <img class="avatar" src="${escapeHtml(profile.avatar_url || DEFAULT_AVATAR_SVG)}" alt="">
-        <div>
-          <h2 class="profile-name">${escapeHtml(profile.username || "Unknown")}</h2>
-          <div class="profile-meta">
-            User ID: ${escapeHtml(profile.user_id ?? "N/A")}<br>
-            ${
-              profile.profile_url
-                ? `<a href="${escapeHtml(profile.profile_url)}" target="_blank" rel="noopener">Open Roblox Profile</a>`
-                : ""
-            }
-          </div>
-        </div>
-      </section>
-
-      <section class="cards">
-        <div class="card">
-          <div class="label">Battles</div>
-          <div class="value">${fmtNum(profile.total_battles)}</div>
-        </div>
-
-        <div class="card">
-          <div class="label">Latest Rank</div>
-          <div class="value">${fmtNum(profile.latest_rank)}</div>
-        </div>
-
-        <div class="card">
-          <div class="label">Latest Points</div>
-          <div class="value">${fmtNum(profile.latest_points)}</div>
-        </div>
-
-        <div class="card">
-          <div class="label">Latest Seen</div>
-          <div class="value">${fmtDateTime(profile.latest_seen)}</div>
-        </div>
-      </section>
-
-      <div class="section-title-row">
-        <h2 class="section-title">Battle History</h2>
-
-        <select id="battle-select">
-          ${battles.map((battle, index) => `
-            <option value="${index}">
-              ${escapeHtml(battle.display_name || battle.battle || `Battle ${index + 1}`)}
-            </option>
-          `).join("")}
-        </select>
-      </div>
-
-      <section id="battle-detail"></section>
-    `;
-
-    const avatar = app.querySelector(".avatar");
-
-    if (avatar) {
-      avatar.onerror = function () {
-        this.onerror = null;
-        this.src = DEFAULT_AVATAR_SVG;
-      };
-    }
-
-    if (!battles.length) {
-      document.getElementById("battle-detail").innerHTML = `<div class="empty">No battle history found for this player.</div>`;
-      return;
-    }
-
-    document.getElementById("battle-select").addEventListener("change", ev => {
-      selectedBattleIndex = Number(ev.target.value || 0);
-      renderBattle(profile, selectedBattleIndex);
-    });
-
-    renderBattle(profile, selectedBattleIndex);
-  }
-
-  function normalizeProfileKey(value) {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, "")
-      .replace(/[^a-z0-9_]/g, "");
-  }
-
-  function withApiClanQuery(url, params = {}) {
-    const clan = getRequestedClanConfig();
-    const out = new URL(url, window.location.href);
-
-    out.searchParams.set("clan", clan.label);
-
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null && value !== "") {
-        out.searchParams.set(key, String(value));
-      }
-    }
-
-    return out.toString();
-  }
-
-  async function fetchLiveJson(url, label) {
-    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-      cache: "no-store"
-    });
-
-    if (!res.ok) {
-      throw new Error(`Could not load ${label}. HTTP ${res.status}`);
-    }
-
-    return res.json();
-  }
-
-  function findCurrentRow(current, id) {
-    const raw = String(id || "").trim();
-    const normalized = normalizeProfileKey(raw);
-
-    return (current.rows || []).find(row =>
-      String(row.user_id || "") === raw ||
-      normalizeProfileKey(row.profile_key) === normalized ||
-      normalizeProfileKey(row.username) === normalized
-    ) || null;
-  }
-
-  function getRowPoints(row) {
-    return row.total_points ?? row.points ?? 0;
-  }
-
-  function summarizeLiveProfile(current, history, id) {
-    const currentRow = findCurrentRow(current, id);
-    const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? String(id) : null);
-    const rows = Array.isArray(history?.rows) ? history.rows.slice() : [];
-
-    if (!rows.length && currentRow) {
-      rows.push({
-        fetched_at: currentRow.fetched_at || current.snapshot_at || current.generated_at,
-        rank: currentRow.rank,
-        username: currentRow.username,
-        user_id: currentRow.user_id,
-        total_points: currentRow.total_points ?? currentRow.points ?? 0
       });
     }
 
-    if (!rows.length && !currentRow) {
-      throw new Error(`No live ${getRequestedClanConfig().label} profile data found for ${id}.`);
+    function escapeHtml(s) {
+      return String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
-    rows.sort((a, b) => new Date(a.fetched_at || 0) - new Date(b.fetched_at || 0));
-
-    const first = rows[0] || currentRow || {};
-    const last = rows[rows.length - 1] || currentRow || {};
-    const ranks = rows.map(row => Number(row.rank)).filter(Number.isFinite);
-
-    const username = currentRow?.username || last.username || first.username || String(id);
-    const latestPoints = currentRow?.total_points ?? currentRow?.points ?? getRowPoints(last);
-    const latestRank = currentRow?.rank ?? last.rank ?? null;
-    const latestSeen =
-      currentRow?.fetched_at ||
-      last.fetched_at ||
-      current.snapshot_at ||
-      current.generated_at ||
-      null;
-
-    const battle = {
-      battle: current.battle || "current",
-      display_name: current.display_name || current.battle || "Current Clan Battle",
-      battle_first_snapshot: current.battle_start_iso || first.fetched_at || null,
-      battle_last_snapshot: latestSeen,
-      first_seen: first.fetched_at || null,
-      last_seen: latestSeen,
-      starting_rank: first.rank ?? null,
-      starting_points: getRowPoints(first),
-      worst_rank: ranks.length ? Math.max(...ranks) : null,
-      best_rank: ranks.length ? Math.min(...ranks) : null,
-      ending_rank: latestRank,
-      ending_points: latestPoints,
-      series: rows.map(row => ({
-        t: row.fetched_at,
-        rank: row.rank ?? null,
-        points: Number(getRowPoints(row) || 0)
-      })).filter(point => point.t)
-    };
-
-    return {
-      aliases: [String(id)],
-      username,
-      user_id: userId,
-      avatar_url: currentRow?.avatar_url || null,
-      profile_url: userId ? `https://www.roblox.com/users/${userId}/profile` : null,
-      total_battles: 1,
-      latest_rank: latestRank,
-      latest_points: latestPoints,
-      latest_seen: latestSeen,
-      battles: [battle]
-    };
-  }
-
-  async function loadLiveProfile(id) {
-    const clan = getRequestedClanConfig();
-
-    const current = await fetchLiveJson(
-      withApiClanQuery(MEMBER_API_CURRENT_URL),
-      `live ${clan.label} leaderboard`
-    );
-
-    const currentRow = findCurrentRow(current, id);
-    const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? id : "");
-
-    if (!userId) {
-      return summarizeLiveProfile(current, { rows: [] }, id);
+    function fmtNum(n) {
+      if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
+      return Number(n).toLocaleString("en-US");
     }
 
-    const historyUrl = withApiClanQuery(MEMBER_API_HISTORY_URL, {
-      user_id: String(userId),
-      battle: current.battle || undefined,
-      hours: "336",
-      limit: "50000"
-    });
+    function finiteNumber(value) {
+      if (value === null || value === undefined || value === "") return null;
 
-    try {
-      const history = await fetchLiveJson(historyUrl, `live ${clan.label} profile history`);
-      return summarizeLiveProfile(current, history, userId);
-    } catch (err) {
-      if (currentRow) {
-        return summarizeLiveProfile(current, { rows: [] }, userId);
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function fmtDate(s) {
+      if (!s) return "—";
+
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+    }
+
+    function fmtDateTime(s) {
+      if (!s) return "—";
+
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return "—";
+
+      return d.toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "medium"
+      });
+    }
+
+    function getProfileId() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("id");
+    }
+
+    function getBattleSortTime(battle) {
+      const d = new Date(
+        battle.battle_last_snapshot ||
+        battle.last_snapshot ||
+        battle.last_seen ||
+        0
+      );
+
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    }
+
+    function getSortedBattles(profile) {
+      return (profile.battles || [])
+        .slice()
+        .sort((a, b) => getBattleSortTime(b) - getBattleSortTime(a));
+    }
+
+    function getFirstActiveDate(battle) {
+      const series = Array.isArray(battle.series) ? battle.series : [];
+      const firstActive = series.find(item => Number(item.points || 0) > 0 && item.t);
+
+      if (firstActive) {
+        return firstActive.t;
       }
 
-      throw err;
-    }
-  }
+      if (Number(battle.starting_points || 0) > 0) {
+        return battle.first_seen || battle.battle_first_snapshot || battle.first_snapshot || null;
+      }
 
-  async function loadStaticProfile(id) {
-    const cacheBust = Date.now();
-    const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${cacheBust}`, {
-      cache: "no-store"
-    });
-
-    if (!res.ok) {
-      throw new Error(`Could not load profile ${id}. HTTP ${res.status}`);
+      return null;
     }
 
-    return res.json();
-  }
-
-  async function main() {
-    const app = document.getElementById("app");
-    const id = getProfileId();
-    const clan = getRequestedClanConfig();
-
-    updateClanChrome();
-
-    if (!id) {
-      app.innerHTML = `<div class="error">Missing profile ID.</div>`;
-      return;
+    function getEventStartDate(battle) {
+      return battle.battle_first_snapshot || battle.first_snapshot || battle.first_seen || null;
     }
 
-    try {
-      let profile;
+    function getEventEndDate(battle) {
+      return battle.battle_last_snapshot || battle.last_snapshot || battle.last_seen || null;
+    }
 
-      if (clan.key === "c0ld") {
-        try {
-          profile = await loadStaticProfile(id);
-        } catch {
+    function getEndRank(battle) {
+      if (battle.ending_rank !== undefined && battle.ending_rank !== null) return battle.ending_rank;
+      if (battle.end_rank !== undefined && battle.end_rank !== null) return battle.end_rank;
+      if (battle.last_known_rank !== undefined && battle.last_known_rank !== null) return battle.last_known_rank;
+      return null;
+    }
+
+    function getChartPoints(series) {
+      return (series || [])
+        .map(item => ({
+          t: new Date(item.t).getTime(),
+          rawT: item.t,
+          points: finiteNumber(item.points),
+          rank: finiteNumber(item.rank)
+        }))
+        .filter(item => !Number.isNaN(item.t) && item.points !== null);
+    }
+
+    function drawChart(canvas, tooltip, series) {
+      const ctx = canvas.getContext("2d");
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      const points = getChartPoints(series);
+
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      if (points.length < 2) {
+        ctx.fillStyle = "#8b949e";
+        ctx.font = "13px Arial";
+        ctx.fillText("Not enough points to chart.", 16, 28);
+        currentChart = null;
+        return;
+      }
+
+      const minT = Math.min(...points.map(p => p.t));
+      const maxT = Math.max(...points.map(p => p.t));
+      const minY = Math.min(...points.map(p => p.points));
+      const maxY = Math.max(...points.map(p => p.points));
+
+      const padLeft = 48;
+      const padRight = 18;
+      const padTop = 18;
+      const padBottom = 34;
+
+      const width = rect.width - padLeft - padRight;
+      const height = rect.height - padTop - padBottom;
+
+      function x(t) {
+        if (maxT === minT) return padLeft;
+        return padLeft + ((t - minT) / (maxT - minT)) * width;
+      }
+
+      function y(v) {
+        if (maxY === minY) return padTop + height / 2;
+        return padTop + (1 - ((v - minY) / (maxY - minY))) * height;
+      }
+
+      function niceLabel(v) {
+        const tiers = [
+          { value: 1e12, suffix: "T" },
+          { value: 1e9, suffix: "B" },
+          { value: 1e6, suffix: "M" },
+          { value: 1e3, suffix: "K" }
+        ];
+
+        for (const tier of tiers) {
+          if (Math.abs(v) >= tier.value) {
+            return (v / tier.value).toFixed(1).replace(/\.0$/, "") + tier.suffix;
+          }
+        }
+
+        return String(Math.round(v));
+      }
+
+      ctx.strokeStyle = "#30363d";
+      ctx.lineWidth = 1;
+      ctx.font = "12px Arial";
+      ctx.fillStyle = "#8b949e";
+
+      const gridLines = 4;
+
+      for (let i = 0; i <= gridLines; i++) {
+        const pct = i / gridLines;
+        const yy = padTop + pct * height;
+        const value = maxY - pct * (maxY - minY);
+
+        ctx.beginPath();
+        ctx.moveTo(padLeft, yy);
+        ctx.lineTo(rect.width - padRight, yy);
+        ctx.stroke();
+
+        ctx.fillText(niceLabel(value), 8, yy + 4);
+      }
+
+      ctx.strokeStyle = "#58a6ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      points.forEach((p, i) => {
+        const px = x(p.t);
+        const py = y(p.points);
+
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+
+      ctx.stroke();
+
+      ctx.fillStyle = "#58a6ff";
+
+      const last = points[points.length - 1];
+      ctx.beginPath();
+      ctx.arc(x(last.t), y(last.points), 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#8b949e";
+
+      const firstDate = new Date(minT);
+      const lastDate = new Date(maxT);
+
+      ctx.fillText(
+        firstDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        padLeft,
+        rect.height - 12
+      );
+
+      const lastLabel = lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const labelWidth = ctx.measureText(lastLabel).width;
+
+      ctx.fillText(
+        lastLabel,
+        rect.width - padRight - labelWidth,
+        rect.height - 12
+      );
+
+      currentChart = {
+        canvas,
+        tooltip,
+        points,
+        x,
+        y,
+        rect,
+        padTop,
+        padBottom
+      };
+    }
+
+    function redrawActiveChart() {
+      if (!loadedProfile) return;
+
+      const battles = getSortedBattles(loadedProfile);
+      const battle = battles[selectedBattleIndex];
+
+      if (!battle) return;
+
+      const canvas = document.querySelector(".chart-box");
+      const tooltip = document.querySelector(".tooltip");
+
+      if (!canvas || !tooltip) return;
+
+      drawChart(canvas, tooltip, battle.series || []);
+    }
+
+    function bindChartHover() {
+      const canvas = document.querySelector(".chart-box");
+      const tooltip = document.querySelector(".tooltip");
+
+      if (!canvas || !tooltip) return;
+
+      function hideTooltip() {
+        tooltip.style.display = "none";
+      }
+
+      function showTooltip(ev) {
+        if (!currentChart || !currentChart.points.length) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+
+        let nearest = currentChart.points[0];
+        let nearestDist = Math.abs(currentChart.x(nearest.t) - mx);
+
+        for (const p of currentChart.points) {
+          const dist = Math.abs(currentChart.x(p.t) - mx);
+
+          if (dist < nearestDist) {
+            nearest = p;
+            nearestDist = dist;
+          }
+        }
+
+        redrawActiveChart();
+
+        const ctx = canvas.getContext("2d");
+        const px = currentChart.x(nearest.t);
+        const py = currentChart.y(nearest.points);
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(88, 166, 255, 0.45)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, currentChart.padTop);
+        ctx.lineTo(px, currentChart.rect.height - currentChart.padBottom);
+        ctx.stroke();
+
+        ctx.fillStyle = "#e6edf3";
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        tooltip.innerHTML = `
+          <strong>${fmtDateTime(nearest.rawT)}</strong>
+          <div>Points: ${fmtNum(nearest.points)}</div>
+          <div>Rank: ${nearest.rank === null || Number.isNaN(nearest.rank) ? "—" : fmtNum(nearest.rank)}</div>
+        `;
+
+        tooltip.style.display = "block";
+
+        const tooltipRect = tooltip.getBoundingClientRect();
+        let left = ev.clientX - rect.left + 14;
+        let top = ev.clientY - rect.top + 14;
+
+        if (left + tooltipRect.width > rect.width) {
+          left = ev.clientX - rect.left - tooltipRect.width - 14;
+        }
+
+        if (top + tooltipRect.height > rect.height) {
+          top = ev.clientY - rect.top - tooltipRect.height - 14;
+        }
+
+        tooltip.style.left = `${Math.max(8, left)}px`;
+        tooltip.style.top = `${Math.max(8, top)}px`;
+      }
+
+      canvas.addEventListener("mousemove", showTooltip);
+      canvas.addEventListener("mouseleave", hideTooltip);
+
+      canvas.addEventListener("touchstart", ev => {
+        if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
+      }, { passive: true });
+
+      canvas.addEventListener("touchmove", ev => {
+        if (ev.touches && ev.touches[0]) showTooltip(ev.touches[0]);
+      }, { passive: true });
+
+      canvas.addEventListener("touchend", hideTooltip);
+    }
+
+    function renderBattle(profile, battleIndex) {
+      const battles = getSortedBattles(profile);
+      const battle = battles[battleIndex];
+      const container = document.getElementById("battle-detail");
+
+      if (!battle) {
+        container.innerHTML = `<div class="empty">No battle selected.</div>`;
+        return;
+      }
+
+      const eventStart = fmtDate(getEventStartDate(battle));
+      const eventEnd = fmtDate(getEventEndDate(battle));
+      const firstActiveDate = fmtDate(getFirstActiveDate(battle));
+      const endRank = getEndRank(battle);
+
+      container.innerHTML = `
+        <article class="battle-card">
+          <div class="battle-header">
+            <h3 class="battle-title">${escapeHtml(battle.display_name || battle.battle || "Unknown Battle")}</h3>
+            <div class="battle-dates">${eventStart} → ${eventEnd}</div>
+          </div>
+
+          <div class="stats">
+            <div class="stat-row">
+              <div class="stat-label">First Active Date</div>
+              <div class="stat-value">${firstActiveDate}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Starting Rank</div>
+              <div class="stat-value">${fmtNum(battle.starting_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Worst Rank</div>
+              <div class="stat-value">${fmtNum(battle.worst_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Best Rank</div>
+              <div class="stat-value">${fmtNum(battle.best_rank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">End Rank</div>
+              <div class="stat-value">${fmtNum(endRank)}</div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-label">Ending Points</div>
+              <div class="stat-value">${fmtNum(battle.ending_points)}</div>
+            </div>
+          </div>
+
+          ${
+            Array.isArray(battle.series) && battle.series.length > 1
+              ? `
+                <div class="chart-wrap">
+                  <div class="chart-title">Points Progression</div>
+                  <canvas class="chart-box"></canvas>
+                  <div class="tooltip"></div>
+                </div>
+              `
+              : ""
+          }
+        </article>
+      `;
+
+      requestAnimationFrame(() => {
+        redrawActiveChart();
+        bindChartHover();
+      });
+    }
+
+    function render(profile) {
+      loadedProfile = profile;
+
+      const app = document.getElementById("app");
+      const battles = getSortedBattles(profile);
+
+      selectedBattleIndex = 0;
+
+      app.innerHTML = `
+        <section class="profile-header">
+          <img class="avatar" src="${escapeHtml(profile.avatar_url || DEFAULT_AVATAR_SVG)}" alt="">
+          <div>
+            <h2 class="profile-name">${escapeHtml(profile.username || "Unknown")}</h2>
+            <div class="profile-meta">
+              User ID: ${escapeHtml(profile.user_id ?? "N/A")}<br>
+              ${
+                profile.profile_url
+                  ? `<a href="${escapeHtml(profile.profile_url)}" target="_blank" rel="noopener">Open Roblox Profile</a>`
+                  : ""
+              }
+            </div>
+          </div>
+        </section>
+
+        <section class="cards">
+          <div class="card">
+            <div class="label">Battles</div>
+            <div class="value">${fmtNum(profile.total_battles)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Rank</div>
+            <div class="value">${fmtNum(profile.latest_rank)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Points</div>
+            <div class="value">${fmtNum(profile.latest_points)}</div>
+          </div>
+
+          <div class="card">
+            <div class="label">Latest Seen</div>
+            <div class="value">${fmtDateTime(profile.latest_seen)}</div>
+          </div>
+        </section>
+
+        <div class="section-title-row">
+          <h2 class="section-title">Battle History</h2>
+
+          <select id="battle-select">
+            ${battles.map((battle, index) => `
+              <option value="${index}">
+                ${escapeHtml(battle.display_name || battle.battle || `Battle ${index + 1}`)}
+              </option>
+            `).join("")}
+          </select>
+        </div>
+
+        <section id="battle-detail"></section>
+      `;
+
+      const avatar = app.querySelector(".avatar");
+
+      if (avatar) {
+        avatar.onerror = function () {
+          this.onerror = null;
+          this.src = DEFAULT_AVATAR_SVG;
+        };
+      }
+
+      if (!battles.length) {
+        document.getElementById("battle-detail").innerHTML = `<div class="empty">No battle history found for this player.</div>`;
+        return;
+      }
+
+      document.getElementById("battle-select").addEventListener("change", ev => {
+        selectedBattleIndex = Number(ev.target.value || 0);
+        renderBattle(profile, selectedBattleIndex);
+      });
+
+      renderBattle(profile, selectedBattleIndex);
+    }
+
+    function normalizeProfileKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/[^a-z0-9_]/g, "");
+    }
+
+    function withApiClanQuery(url, params = {}) {
+      const clan = getRequestedClanConfig();
+      const out = new URL(url, window.location.href);
+
+      out.searchParams.set("clan", clan.label);
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return out.toString();
+    }
+
+    async function fetchLiveJson(url, label) {
+      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${res.status}`);
+      }
+
+      return res.json();
+    }
+
+    function findCurrentRow(current, id) {
+      const raw = String(id || "").trim();
+      const normalized = normalizeProfileKey(raw);
+
+      return (current.rows || []).find(row =>
+        String(row.user_id || "") === raw ||
+        normalizeProfileKey(row.profile_key) === normalized ||
+        normalizeProfileKey(row.username) === normalized
+      ) || null;
+    }
+
+    function getRowPoints(row) {
+      return row.total_points ?? row.points ?? 0;
+    }
+
+    function summarizeLiveProfile(current, history, id) {
+      const currentRow = findCurrentRow(current, id);
+      const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? String(id) : null);
+      const rows = Array.isArray(history?.rows) ? history.rows.slice() : [];
+
+      if (!rows.length && currentRow) {
+        rows.push({
+          fetched_at: currentRow.fetched_at || current.snapshot_at || current.generated_at,
+          rank: currentRow.rank,
+          username: currentRow.username,
+          user_id: currentRow.user_id,
+          total_points: currentRow.total_points ?? currentRow.points ?? 0
+        });
+      }
+
+      if (!rows.length && !currentRow) {
+        throw new Error(`No live ${getRequestedClanConfig().label} profile data found for ${id}.`);
+      }
+
+      rows.sort((a, b) => new Date(a.fetched_at || 0) - new Date(b.fetched_at || 0));
+
+      const first = rows[0] || currentRow || {};
+      const last = rows[rows.length - 1] || currentRow || {};
+      const ranks = rows.map(row => Number(row.rank)).filter(Number.isFinite);
+
+      const username = currentRow?.username || last.username || first.username || String(id);
+      const latestPoints = currentRow?.total_points ?? currentRow?.points ?? getRowPoints(last);
+      const latestRank = currentRow?.rank ?? last.rank ?? null;
+      const latestSeen =
+        currentRow?.fetched_at ||
+        last.fetched_at ||
+        current.snapshot_at ||
+        current.generated_at ||
+        null;
+
+      const battle = {
+        battle: current.battle || "current",
+        display_name: current.display_name || current.battle || "Current Clan Battle",
+        battle_first_snapshot: current.battle_start_iso || first.fetched_at || null,
+        battle_last_snapshot: latestSeen,
+        first_seen: first.fetched_at || null,
+        last_seen: latestSeen,
+        starting_rank: first.rank ?? null,
+        starting_points: getRowPoints(first),
+        worst_rank: ranks.length ? Math.max(...ranks) : null,
+        best_rank: ranks.length ? Math.min(...ranks) : null,
+        ending_rank: latestRank,
+        ending_points: latestPoints,
+        series: rows.map(row => ({
+          t: row.fetched_at,
+          rank: row.rank ?? null,
+          points: Number(getRowPoints(row) || 0)
+        })).filter(point => point.t)
+      };
+
+      return {
+        aliases: [String(id)],
+        username,
+        user_id: userId,
+        avatar_url: currentRow?.avatar_url || null,
+        profile_url: userId ? `https://www.roblox.com/users/${userId}/profile` : null,
+        total_battles: 1,
+        latest_rank: latestRank,
+        latest_points: latestPoints,
+        latest_seen: latestSeen,
+        battles: [battle]
+      };
+    }
+
+    async function loadLiveProfile(id) {
+      const clan = getRequestedClanConfig();
+
+      const current = await fetchLiveJson(
+        withApiClanQuery(MEMBER_API_CURRENT_URL),
+        `live ${clan.label} leaderboard`
+      );
+
+      const currentRow = findCurrentRow(current, id);
+      const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? id : "");
+
+      if (!userId) {
+        return summarizeLiveProfile(current, { rows: [] }, id);
+      }
+
+      const historyUrl = withApiClanQuery(MEMBER_API_HISTORY_URL, {
+        user_id: String(userId),
+        battle: current.battle || undefined,
+        hours: "336",
+        limit: "50000"
+      });
+
+      try {
+        const history = await fetchLiveJson(historyUrl, `live ${clan.label} profile history`);
+        return summarizeLiveProfile(current, history, userId);
+      } catch (err) {
+        if (currentRow) {
+          return summarizeLiveProfile(current, { rows: [] }, userId);
+        }
+
+        throw err;
+      }
+    }
+
+    async function loadStaticProfile(id) {
+      const cacheBust = Date.now();
+      const res = await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${cacheBust}`, {
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        throw new Error(`Could not load profile ${id}. HTTP ${res.status}`);
+      }
+
+      return res.json();
+    }
+
+    async function main() {
+      const app = document.getElementById("app");
+      const id = getProfileId();
+      const clan = getRequestedClanConfig();
+
+      updateClanChrome();
+
+      if (!id) {
+        app.innerHTML = `<div class="error">Missing profile ID.</div>`;
+        return;
+      }
+
+      try {
+        let profile;
+
+        if (clan.key === "c0ld") {
+          try {
+            profile = await loadStaticProfile(id);
+          } catch {
+            profile = await loadLiveProfile(id);
+          }
+        } else {
           profile = await loadLiveProfile(id);
         }
-      } else {
-        profile = await loadLiveProfile(id);
+
+        document.title = `${profile.username || "Player"} - ${clan.label} Profile`;
+        render(profile);
+      } catch (err) {
+        console.error(err);
+        app.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
       }
-
-      document.title = `${profile.username || "Player"} - ${clan.label} Profile`;
-      render(profile);
-    } catch (err) {
-      console.error(err);
-      app.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
     }
-  }
 
-  window.addEventListener("resize", () => {
-    redrawActiveChart();
-  });
+    window.addEventListener("resize", () => {
+      redrawActiveChart();
+    });
 
-  main();
-</script>
+    main();
+  </script>
 </body>
 </html>
