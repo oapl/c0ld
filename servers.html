@@ -25,6 +25,8 @@
       --ok-bg: rgba(63, 185, 80, 0.12);
       --warn: #d29922;
       --warn-bg: rgba(210, 153, 34, 0.12);
+      --disabled: #6e7681;
+      --disabled-bg: rgba(110, 118, 129, 0.12);
     }
 
     html, body {
@@ -147,6 +149,21 @@
       gap: 12px;
       padding: 16px;
       align-items: end;
+      transition: opacity 0.15s ease, filter 0.15s ease;
+    }
+
+    .submission-form.submissions-disabled {
+      opacity: 0.48;
+      filter: grayscale(0.45);
+    }
+
+    .submission-form.submissions-disabled input,
+    .submission-form.submissions-disabled select,
+    .submission-form.submissions-disabled button {
+      background: #10141b;
+      border-color: #2b313a;
+      color: var(--disabled);
+      cursor: not-allowed;
     }
 
     .field {
@@ -168,6 +185,22 @@
       font-size: 13px;
     }
 
+    .submission-closed-note {
+      grid-column: 1 / -1;
+      display: none;
+      border: 1px solid var(--warn);
+      border-radius: 8px;
+      background: var(--warn-bg);
+      color: #f2cc60;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .submission-closed-note.visible {
+      display: block;
+    }
+
     input,
     select,
     button {
@@ -186,6 +219,13 @@
     button:hover {
       border-color: var(--link);
       background: var(--hover);
+    }
+
+    input:disabled,
+    select:disabled,
+    button:disabled {
+      opacity: 0.72;
+      cursor: not-allowed;
     }
 
     select {
@@ -372,7 +412,8 @@
       color: #f2cc60;
     }
 
-    .clan-pill.possible_compromise {
+    .clan-pill.possible_compromise,
+    .clan-pill.review {
       border-color: var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
@@ -433,7 +474,6 @@
         <h1>Servers</h1>
         <div class="subtitle">Pet Simulator 99 · Clan battle dashboard</div>
       </div>
-
     </div>
 
     <div class="menu-bar">
@@ -492,6 +532,7 @@
 
           <button id="submit-btn" type="submit">Submit</button>
 
+          <div id="submission-closed-note" class="submission-closed-note"></div>
           <div class="form-note">Submissions are reviewed before appearing.</div>
         </form>
       </section>
@@ -537,14 +578,19 @@
     const PAGE_KEY = "servers";
     const SERVERS_DATA_PATH = "/api/servers";
     const SERVERS_SUBMIT_PATH = "/api/servers/submit";
+    const SUBMISSION_STATUS_PATH = "/api/servers/submission-status";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
-    const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
 
     let servers = [];
     let sortKey = "rank";
     let sortAsc = true;
     let discordConfig = {};
+    let submissionState = {
+      accepting: false,
+      disabled: true,
+      message: "Checking submission status..."
+    };
 
     function htmlEscape(value) {
       return String(value ?? "")
@@ -558,7 +604,7 @@
       return String(value || "")
         .trim()
         .replace(/#.*$/, "")
-        .replace(/[?&]_=\d+$/, "")
+        .replace(/[?&]_\=\d+$/, "")
         .replace(/\/+$/, "")
         .toLowerCase();
     }
@@ -592,7 +638,6 @@
         row.players ??
         row.player_count ??
         row.players_current ??
-        row.current_players ??
         row.member_count ??
         row.members_count
       );
@@ -634,8 +679,53 @@
       el.textContent = "";
     }
 
+    function normalizeSubmissionStatus(status) {
+      const accepting = Boolean(status?.accepting);
+      return {
+        accepting,
+        disabled: !accepting,
+        message: String(status?.message || (accepting ? "Server submissions are open." : "Server submissions are currently closed."))
+      };
+    }
+
+    function applySubmissionStatus(status) {
+      submissionState = normalizeSubmissionStatus(status);
+
+      const form = document.getElementById("server-form");
+      const submitBtn = document.getElementById("submit-btn");
+      const note = document.getElementById("submission-closed-note");
+      const disabled = submissionState.disabled;
+
+      form.classList.toggle("submissions-disabled", disabled);
+      form.querySelectorAll("input, select, textarea, button").forEach(el => {
+        el.disabled = disabled;
+      });
+
+      submitBtn.textContent = disabled ? "Closed" : "Submit";
+      note.textContent = disabled ? submissionState.message : "";
+      note.classList.toggle("visible", disabled);
+    }
+
+    async function loadSubmissionStatus() {
+      try {
+        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, `${SUBMISSION_STATUS_PATH}?v=${Date.now()}`);
+        if (!res.ok) throw new Error(`Could not load submission status. HTTP ${res.status}`);
+        const payload = await res.json();
+        applySubmissionStatus(payload);
+        return payload;
+      } catch (err) {
+        console.error(err);
+        applySubmissionStatus({
+          accepting: false,
+          message: "Could not confirm submissions are open. Submissions are disabled until the status endpoint responds."
+        });
+        return submissionState;
+      }
+    }
+
     function parseRows(payload) {
       discordConfig = payload?.discord || {};
+      if (payload?.submissions) applySubmissionStatus(payload.submissions);
       if (Array.isArray(payload)) return payload;
       if (Array.isArray(payload?.rows)) return payload.rows;
       if (Array.isArray(payload?.servers)) return payload.servers;
@@ -662,7 +752,7 @@
           compromise_status: String(row.compromise_status || row.status || "unknown"),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
-          video_url: String(row.video_url || row.pathing_video || row.video || "").trim(),
+          video_url: String(row.video_url || row.pathing_video_url || row.pathing_video || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
         };
 
@@ -830,6 +920,12 @@
     async function submitServer(event) {
       event.preventDefault();
 
+      if (!submissionState.accepting) {
+        setStatus(submissionState.message || "Server submissions are currently closed.", "error");
+        applySubmissionStatus(submissionState);
+        return;
+      }
+
       const submitBtn = document.getElementById("submit-btn");
       submitBtn.disabled = true;
 
@@ -844,24 +940,35 @@
 
         if (!res.ok) {
           const text = await res.text().catch(() => "");
-          throw new Error(text || `Submission failed. HTTP ${res.status}`);
+          let message = text || `Submission failed. HTTP ${res.status}`;
+          try {
+            const json = JSON.parse(text);
+            message = json.message || message;
+          } catch {}
+          throw new Error(message);
         }
 
         form.reset();
         const payload = await res.json().catch(() => ({}));
         setStatus(payload.message || "Submission sent for review.", "ok");
         await loadServers();
+        await loadSubmissionStatus();
       } catch (err) {
         console.error(err);
         setStatus(err?.message || String(err), "error");
+        await loadSubmissionStatus();
       } finally {
-        submitBtn.disabled = false;
+        const currentSubmitBtn = document.getElementById("submit-btn");
+        currentSubmitBtn.disabled = !submissionState.accepting;
       }
     }
 
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
-      document.getElementById("refresh-btn").addEventListener("click", loadServers);
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        await loadServers();
+        await loadSubmissionStatus();
+      });
 
       document.querySelectorAll("th[data-sort]").forEach(th => {
         th.addEventListener("click", () => {
@@ -880,7 +987,9 @@
     }
 
     async function initPage() {
+      applySubmissionStatus(submissionState);
       wireEvents();
+
       const auth = await C0LD_AUTH.requireAccess({
         apiBase: PROTECTED_API_BASE,
         page: PAGE_KEY,
@@ -894,6 +1003,7 @@
 
       if (auth.allowed) {
         await loadServers();
+        await loadSubmissionStatus();
       }
     }
 
