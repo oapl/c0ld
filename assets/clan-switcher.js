@@ -58,6 +58,10 @@
     return page === "" || page === "index.html";
   }
 
+  function isClansPage() {
+    return currentPage() === "clans.html";
+  }
+
   function isProfilePage() {
     return currentPage() === "profile.html";
   }
@@ -258,16 +262,69 @@
     }
   }
 
+  function applyClanHighlightStyles() {
+    if (document.getElementById("clan-row-highlight-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "clan-row-highlight-styles";
+    style.textContent = `
+      .wmsy-row {
+        background: rgba(72, 187, 120, 0.14) !important;
+      }
+      .wmsy-row:hover {
+        background: rgba(72, 187, 120, 0.22) !important;
+      }
+      .wmsy-row td {
+        border-top: 1px solid rgba(72, 187, 120, 0.48) !important;
+        border-bottom: 1px solid rgba(72, 187, 120, 0.48) !important;
+      }
+      .wmsy-row td.rank,
+      .wmsy-row td.projected,
+      .wmsy-row .clan-name {
+        color: #74d99f !important;
+        font-weight: 700 !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function highlightTrackedClanRows() {
+    if (!isClansPage()) return;
+
+    applyClanHighlightStyles();
+
+    document.querySelectorAll("#clans-tbody tr").forEach(row => {
+      const nameEl = row.querySelector(".clan-name");
+      const clanName = normalizeText(nameEl ? nameEl.textContent : row.children[1]?.textContent || "");
+
+      if (clanName === "wmsy") {
+        row.classList.add("wmsy-row");
+      }
+    });
+  }
+
+  function updateRankCardLabels(clan) {
+    const trackedLabel = document.getElementById("tracked-rank-label");
+    if (trackedLabel) trackedLabel.textContent = `${clan.label} Current Rank`;
+
+    document.querySelectorAll(".card .label").forEach(label => {
+      const text = String(label.textContent || "").trim();
+      if (/^(c0ld|WMSY)\s+Current Rank$/i.test(text)) {
+        label.textContent = `${clan.label} Current Rank`;
+      }
+    });
+
+    const title = document.getElementById("leaderboard-title");
+    if (title) title.textContent = `${clan.label} Leaderboard`;
+  }
+
   async function applyTrackedClanCards() {
     const clan = currentClan();
-    const rankEl = document.getElementById("c0ld-rank-value");
-    const projectionEl = document.getElementById("projected-rank-value");
-    const rankLabel = document.getElementById("tracked-rank-label");
-    const title = document.getElementById("leaderboard-title");
-    const dbUpdate = document.getElementById("db-update-value");
+    const rankEl = document.getElementById("c0ld-rank-value") || document.getElementById("c0ld-current-rank");
+    const projectionEl = document.getElementById("projected-rank-value") || document.getElementById("c0ld-projected-rank");
+    const dbUpdate = document.getElementById("db-update-value") || document.getElementById("last-db-update");
 
-    if (rankLabel) rankLabel.textContent = `${clan.label} Current Rank`;
-    if (title) title.textContent = `${clan.label} Leaderboard`;
+    updateRankCardLabels(clan);
 
     if (clan.key !== "wmsy") return;
 
@@ -282,13 +339,13 @@
         rank = row.rank ?? rank;
         projectedRank = row.projected_rank ?? projectedRank ?? row.rank;
       }
+      if (dbUpdate && data?.snapshot_at) dbUpdate.textContent = fmtDateTime(data.snapshot_at);
     } catch (err) {
       console.warn("Clan rank/projection refresh failed", err);
     }
 
     if (rankEl) rankEl.textContent = formatRank(rank);
     if (projectionEl) projectionEl.textContent = formatRank(projectedRank);
-    if (dbUpdate && wmsyData?.snapshot_at) dbUpdate.textContent = fmtDateTime(wmsyData.snapshot_at);
   }
 
   function applyProfileRedScheme() {
@@ -377,6 +434,7 @@
     });
 
     applyTrackedClanCards();
+    highlightTrackedClanRows();
     wireWmsyControls();
     loadWmsyLeaderboard();
     renderWmsyLeaderboard();
@@ -400,6 +458,7 @@
     applyTimer = window.setTimeout(() => {
       renderWmsyLeaderboard();
       applyTrackedClanCards();
+      highlightTrackedClanRows();
     }, 100);
   });
 
