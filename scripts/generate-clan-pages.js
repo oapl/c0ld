@@ -129,6 +129,10 @@ async function main() {
       `function viewedClanName() {\n      return ${JSON.stringify(clanName)};\n    }`
     );
 
+    if (!html.includes("assets/profile-stat-cleanup.js")) {
+      html = html.replace("</body>", "  <script src=\"assets/profile-stat-cleanup.js\"></script>\n</body>");
+    }
+
     const dir = path.join(outputRoot, slug);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "index.html"), html, "utf8");
