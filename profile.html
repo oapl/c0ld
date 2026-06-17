@@ -17,7 +17,7 @@
       --border: #30363d;
       --text: #e6edf3;
       --muted: #8b949e;
-      --link: #58a6ff;
+      --link: #ff9b96;
       --hover: #1f2630;
       --danger: #f85149;
       --danger-bg: rgba(248, 81, 73, 0.12);
@@ -113,7 +113,7 @@
     .menu-btn.active {
       border-color: var(--link);
       color: var(--link);
-      background: rgba(88, 166, 255, 0.08);
+      background: rgba(248, 81, 73, 0.12);
     }
 
     main {
@@ -617,7 +617,7 @@
         ctx.fillText(niceLabel(value), 8, yy + 4);
       }
 
-      ctx.strokeStyle = "#58a6ff";
+      ctx.strokeStyle = "#ff9b96";
       ctx.lineWidth = 2;
       ctx.beginPath();
 
@@ -631,7 +631,7 @@
 
       ctx.stroke();
 
-      ctx.fillStyle = "#58a6ff";
+      ctx.fillStyle = "#ff9b96";
 
       const last = points[points.length - 1];
       ctx.beginPath();
@@ -718,7 +718,7 @@
         const py = currentChart.y(nearest.points);
 
         ctx.save();
-        ctx.strokeStyle = "rgba(88, 166, 255, 0.45)";
+        ctx.strokeStyle = "rgba(248, 81, 73, 0.45)";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(px, 18);

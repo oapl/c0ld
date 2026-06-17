@@ -17,7 +17,8 @@
       --border: #30363d;
       --text: #e6edf3;
       --muted: #8b949e;
-      --link: #58a6ff;
+      --link: #ff9b96;
+      --server-url-link: #58a6ff;
       --hover: #1f2630;
       --danger: #f85149;
       --danger-bg: rgba(248, 81, 73, 0.12);
@@ -103,7 +104,7 @@
     .menu-btn.active {
       border-color: var(--link);
       color: var(--link);
-      background: rgba(88, 166, 255, 0.08);
+      background: rgba(248, 81, 73, 0.12);
     }
 
     main {
@@ -362,11 +363,11 @@
     }
 
     .server-id a {
-      color: var(--link);
+      color: var(--server-url-link);
     }
 
     .server-id a:hover {
-      color: var(--link);
+      color: var(--server-url-link);
       text-decoration: underline;
     }
 
@@ -443,6 +444,15 @@
       max-width: 430px;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .link-cell a {
+      color: var(--server-url-link);
+    }
+
+    .link-cell a:hover {
+      color: var(--server-url-link);
+      text-decoration: underline;
     }
 
     .muted {
