@@ -90,7 +90,7 @@ jobs:
           CLAN_NAME: ${{ vars.CLAN_NAME }}
           CURRENT_BATTLE_NAME: ${{ vars.CURRENT_BATTLE_NAME }}
           CURRENT_BATTLE_HISTORY_TABLE: ${{ vars.CURRENT_BATTLE_HISTORY_TABLE }}
-          CLAN_RANK_TOP_N: ${{ vars.CLAN_RANK_TOP_N }}
+          CLAN_RANK_TOP_N: ${{ vars.CLAN_RANK_TOP_N || '200' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: node scripts/ingest-clan-ranks.js
