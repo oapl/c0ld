@@ -533,7 +533,6 @@
           <button id="submit-btn" type="submit">Submit</button>
 
           <div id="submission-closed-note" class="submission-closed-note"></div>
-          <div class="form-note">Submissions are reviewed before appearing.</div>
         </form>
       </section>
 
@@ -717,7 +716,7 @@
         console.error(err);
         applySubmissionStatus({
           accepting: false,
-          message: "Could not confirm submissions are open. Submissions are disabled until the status endpoint responds."
+          message: "Not accepting server submissions currently. Go touch grass."
         });
         return submissionState;
       }
