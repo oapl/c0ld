@@ -1321,6 +1321,30 @@
       throw liveError || staticError || new Error(`Could not load c0ld profile ${id}.`);
     }
 
+    async function resolveRobloxAvatarUrl(userId) {
+      const id = String(userId || "").trim();
+      if (!id) return null;
+
+      const url =
+        "https://thumbnails.roblox.com/v1/users/avatar-headshot" +
+        `?userIds=${encodeURIComponent(id)}` +
+        "&size=150x150&format=Png&isCircular=false";
+
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) return null;
+
+        const json = await res.json();
+        const item = Array.isArray(json?.data) ? json.data[0] : null;
+        const imageUrl = String(item?.imageUrl || "").trim();
+        const state = String(item?.state || "").trim();
+
+        return imageUrl && state === "Completed" ? imageUrl : null;
+      } catch {
+        return null;
+      }
+    }
+
     async function main() {
       const app = document.getElementById("app");
       const id = getProfileId();
@@ -1337,6 +1361,10 @@
         const profile = clan.key === "c0ld"
           ? await loadC0ldProfile(id)
           : await loadLiveProfile(id);
+
+        if (!profile.avatar_url && profile.user_id) {
+          profile.avatar_url = await resolveRobloxAvatarUrl(profile.user_id);
+        }
 
         document.title = `${profile.username || "Player"} - ${clan.label} Profile`;
         render(profile);
