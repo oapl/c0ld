@@ -1230,6 +1230,97 @@
       return res.json();
     }
 
+    function normalizeBattleKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function getBattleIdentity(battle) {
+      return normalizeBattleKey(
+        battle?.battle ||
+        battle?.display_name ||
+        battle?.name ||
+        battle?.battle_name ||
+        ""
+      );
+    }
+
+    function mergeStaticAndLiveProfiles(staticProfile, liveProfile) {
+      const liveBattles = Array.isArray(liveProfile?.battles) ? liveProfile.battles : [];
+      const staticBattles = Array.isArray(staticProfile?.battles) ? staticProfile.battles : [];
+
+      const seenBattles = new Set();
+      const mergedBattles = [];
+
+      for (const battle of liveBattles) {
+        const key = getBattleIdentity(battle) || `live-${mergedBattles.length}`;
+        seenBattles.add(key);
+        mergedBattles.push(battle);
+      }
+
+      for (const battle of staticBattles) {
+        const key = getBattleIdentity(battle) || `static-${mergedBattles.length}`;
+
+        if (!seenBattles.has(key)) {
+          seenBattles.add(key);
+          mergedBattles.push(battle);
+        }
+      }
+
+      return {
+        ...staticProfile,
+        ...liveProfile,
+
+        aliases: liveProfile?.aliases || staticProfile?.aliases || [],
+        username: liveProfile?.username || staticProfile?.username || "Unknown",
+        user_id: liveProfile?.user_id || staticProfile?.user_id || null,
+        avatar_url: liveProfile?.avatar_url || staticProfile?.avatar_url || null,
+        profile_url: liveProfile?.profile_url || staticProfile?.profile_url || null,
+
+        total_battles: mergedBattles.length,
+        latest_rank: liveProfile?.latest_rank ?? staticProfile?.latest_rank ?? null,
+        latest_points: liveProfile?.latest_points ?? staticProfile?.latest_points ?? null,
+        latest_seen: liveProfile?.latest_seen ?? staticProfile?.latest_seen ?? null,
+
+        battles: mergedBattles
+      };
+    }
+
+    async function loadC0ldProfile(id) {
+      let liveProfile = null;
+      let staticProfile = null;
+      let liveError = null;
+      let staticError = null;
+
+      try {
+        liveProfile = await loadLiveProfile(id);
+      } catch (err) {
+        liveError = err;
+      }
+
+      try {
+        staticProfile = await loadStaticProfile(id);
+      } catch (err) {
+        staticError = err;
+      }
+
+      if (liveProfile && staticProfile) {
+        return mergeStaticAndLiveProfiles(staticProfile, liveProfile);
+      }
+
+      if (liveProfile) {
+        return liveProfile;
+      }
+
+      if (staticProfile) {
+        return staticProfile;
+      }
+
+      throw liveError || staticError || new Error(`Could not load c0ld profile ${id}.`);
+    }
+
     async function main() {
       const app = document.getElementById("app");
       const id = getProfileId();
@@ -1242,126 +1333,24 @@
         return;
       }
 
-<script>
-  function normalizeBattleKey(value) {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-  }
+      try {
+        const profile = clan.key === "c0ld"
+          ? await loadC0ldProfile(id)
+          : await loadLiveProfile(id);
 
-  function getBattleIdentity(battle) {
-    return normalizeBattleKey(
-      battle?.battle ||
-      battle?.display_name ||
-      battle?.name ||
-      battle?.battle_name ||
-      ""
-    );
-  }
-
-  function mergeStaticAndLiveProfiles(staticProfile, liveProfile) {
-    const liveBattles = Array.isArray(liveProfile?.battles) ? liveProfile.battles : [];
-    const staticBattles = Array.isArray(staticProfile?.battles) ? staticProfile.battles : [];
-
-    const seenBattles = new Set();
-    const mergedBattles = [];
-
-    for (const battle of liveBattles) {
-      const key = getBattleIdentity(battle) || `live-${mergedBattles.length}`;
-      seenBattles.add(key);
-      mergedBattles.push(battle);
-    }
-
-    for (const battle of staticBattles) {
-      const key = getBattleIdentity(battle) || `static-${mergedBattles.length}`;
-
-      if (!seenBattles.has(key)) {
-        seenBattles.add(key);
-        mergedBattles.push(battle);
+        document.title = `${profile.username || "Player"} - ${clan.label} Profile`;
+        render(profile);
+      } catch (err) {
+        console.error(err);
+        app.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
       }
     }
 
-    return {
-      ...staticProfile,
-      ...liveProfile,
+    window.addEventListener("resize", () => {
+      redrawActiveChart();
+    });
 
-      aliases: liveProfile?.aliases || staticProfile?.aliases || [],
-      username: liveProfile?.username || staticProfile?.username || "Unknown",
-      user_id: liveProfile?.user_id || staticProfile?.user_id || null,
-      avatar_url: liveProfile?.avatar_url || staticProfile?.avatar_url || null,
-      profile_url: liveProfile?.profile_url || staticProfile?.profile_url || null,
-
-      total_battles: mergedBattles.length,
-      latest_rank: liveProfile?.latest_rank ?? staticProfile?.latest_rank ?? null,
-      latest_points: liveProfile?.latest_points ?? staticProfile?.latest_points ?? null,
-      latest_seen: liveProfile?.latest_seen ?? staticProfile?.latest_seen ?? null,
-
-      battles: mergedBattles
-    };
-  }
-
-  async function loadC0ldProfile(id) {
-    let liveProfile = null;
-    let staticProfile = null;
-    let liveError = null;
-    let staticError = null;
-
-    try {
-      liveProfile = await loadLiveProfile(id);
-    } catch (err) {
-      liveError = err;
-    }
-
-    try {
-      staticProfile = await loadStaticProfile(id);
-    } catch (err) {
-      staticError = err;
-    }
-
-    if (liveProfile && staticProfile) {
-      return mergeStaticAndLiveProfiles(staticProfile, liveProfile);
-    }
-
-    if (liveProfile) {
-      return liveProfile;
-    }
-
-    if (staticProfile) {
-      return staticProfile;
-    }
-
-    throw liveError || staticError || new Error(`Could not load c0ld profile ${id}.`);
-  }
-
-  async function main() {
-    const app = document.getElementById("app");
-    const id = getProfileId();
-    const clan = getRequestedClanConfig();
-
-    updateClanChrome();
-
-    if (!id) {
-      app.innerHTML = `<div class="error">Missing profile ID.</div>`;
-      return;
-    }
-
-    try {
-      let profile;
-
-      if (clan.key === "c0ld") {
-        profile = await loadC0ldProfile(id);
-      } else {
-        profile = await loadLiveProfile(id);
-      }
-
-      document.title = `${profile.username || "Player"} - ${clan.label} Profile`;
-      render(profile);
-    } catch (err) {
-      console.error(err);
-      app.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
-    }
-  }
-</script>
+    main();
+  </script>
 </body>
 </html>
