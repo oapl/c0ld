@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Servers</title>
+  <title>Server Details</title>
 
   <style>
     *, *::before, *::after {
@@ -18,7 +18,6 @@
       --text: #e6edf3;
       --muted: #8b949e;
       --link: #ff9b96;
-      --server-url-link: #58a6ff;
       --hover: #1f2630;
       --danger: #f85149;
       --danger-bg: rgba(248, 81, 73, 0.12);
@@ -88,6 +87,32 @@
       font-size: 13px;
     }
 
+    .button-link,
+    button {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+      line-height: 1;
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .button-link:hover,
+    button:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      color: var(--link);
+    }
+
+    button {
+      cursor: pointer;
+      font-family: inherit;
+    }
+
     .menu-bar {
       max-width: 1280px;
       margin: 9px auto 0;
@@ -136,6 +161,11 @@
       margin-bottom: 22px;
     }
 
+    .panel[hidden],
+    .status[hidden] {
+      display: none;
+    }
+
     .panel-header {
       padding: 16px;
       border-bottom: 1px solid var(--border);
@@ -158,134 +188,88 @@
       flex-wrap: wrap;
     }
 
-    .submission-form {
-      display: grid;
-      grid-template-columns: minmax(150px, 0.75fr) minmax(260px, 1.35fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
-      gap: 12px;
+    .detail-body {
       padding: 16px;
-      align-items: end;
-      transition: opacity 0.15s ease, filter 0.15s ease;
     }
 
-    .submission-form.submissions-disabled {
-      opacity: 0.48;
-      filter: grayscale(0.45);
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px 18px;
+      margin-bottom: 16px;
     }
 
-    .submission-form.submissions-disabled input,
-    .submission-form.submissions-disabled select,
-    .submission-form.submissions-disabled button {
-      background: #10141b;
-      border-color: #2b313a;
-      color: var(--disabled);
-      cursor: not-allowed;
-    }
-
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
+    .summary-item {
       min-width: 0;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
     }
 
-    label {
+    .summary-label {
+      display: block;
       color: var(--muted);
       font-size: 12px;
-      line-height: 1;
+      margin-bottom: 5px;
+      text-transform: uppercase;
     }
 
-    .form-note {
-      grid-column: 1 / -1;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .submission-closed-note {
-      grid-column: 1 / -1;
-      display: none;
-      border: 1px solid var(--warn);
-      border-radius: 8px;
-      background: var(--warn-bg);
-      color: #f2cc60;
-      padding: 10px 12px;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-
-    .submission-closed-note.visible {
+    .summary-value {
       display: block;
-    }
-
-    input,
-    select,
-    button {
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 10px 12px;
-      font-size: 14px;
-      outline: none;
-      transition: background 0.15s ease, border-color 0.15s ease;
-    }
-
-    input:focus,
-    select:focus,
-    button:hover {
-      border-color: var(--link);
-      background: var(--hover);
-    }
-
-    input:disabled,
-    select:disabled,
-    button:disabled {
-      opacity: 0.72;
-      cursor: not-allowed;
-    }
-
-    select {
-      appearance: none;
-      background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-      background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
-      background-size: 5px 5px, 5px 5px;
-      background-repeat: no-repeat;
-      padding-right: 32px;
-    }
-
-    input[type="file"] {
-      width: 100%;
-      min-height: 39px;
-    }
-
-    button {
-      cursor: pointer;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 16px;
+      font-weight: 700;
       white-space: nowrap;
     }
 
-    button:disabled {
-      opacity: 0.6;
-      cursor: default;
+    .summary-value.muted {
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .server-link-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 12px 0 16px;
+    }
+
+    .video-wrap {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+
+    .video-wrap[hidden] {
+      display: none;
+    }
+
+    video {
+      display: block;
+      width: min(100%, 860px);
+      max-height: 520px;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 8px;
     }
 
     .status {
-      display: none;
       padding: 14px 16px;
     }
 
     .status.info {
-      display: block;
       color: var(--text);
     }
 
     .status.ok {
-      display: block;
       border-color: var(--ok);
       background: var(--ok-bg);
       color: #9be9a8;
     }
 
     .status.error {
-      display: block;
       border-color: var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
@@ -295,8 +279,7 @@
       padding: 18px;
     }
 
-    .auth-panel[hidden],
-    .protected-content[hidden] {
+    .auth-panel[hidden] {
       display: none;
     }
 
@@ -334,7 +317,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 920px;
+      min-width: 720px;
     }
 
     th,
@@ -350,12 +333,7 @@
       font-size: 13px;
       font-weight: 500;
       text-align: left;
-      cursor: pointer;
       user-select: none;
-    }
-
-    th:hover {
-      color: var(--text);
     }
 
     tbody tr:hover {
@@ -366,61 +344,18 @@
       border-bottom: 0;
     }
 
-    .numeric {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .server-id {
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .server-id a {
-      color: var(--server-url-link);
-    }
-
-    .server-id a:hover {
-      color: var(--server-url-link);
-      text-decoration: underline;
-    }
-
-    .check-cell {
-      width: 58px;
+    .empty-state {
+      color: var(--muted);
+      padding: 28px 16px;
       text-align: center;
     }
 
-    .server-check {
-      width: 18px;
-      height: 18px;
-      min-width: 18px;
-      accent-color: var(--link);
-      cursor: pointer;
-    }
-
-    .player-pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 58px;
-      padding: 4px 8px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: var(--panel-2);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .player-pill.empty {
-      border-color: var(--danger);
-      background: var(--danger-bg);
-      color: #ffb4ad;
-    }
-
+    .server-pill,
     .clan-pill {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 88px;
+      min-width: 70px;
       padding: 4px 8px;
       border: 1px solid var(--border);
       border-radius: 999px;
@@ -428,59 +363,105 @@
       font-size: 12px;
     }
 
-    .clan-pill.online {
+    .server-pill.online {
       border-color: var(--ok);
       background: var(--ok-bg);
       color: #9be9a8;
     }
 
-    .clan-pill.full {
+    .server-pill.full {
       border-color: var(--warn);
       background: var(--warn-bg);
       color: #f2cc60;
     }
 
-    .clan-pill.offline {
+    .server-pill.offline,
+    .clan-pill.unknown {
       border-color: var(--disabled);
       background: var(--disabled-bg);
       color: #c9d1d9;
     }
 
-    .link-cell {
-      max-width: 430px;
+    .clan-pill.c0ld,
+    .clan-pill.wmsy {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .clan-pill.other {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
+    .player-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 220px;
+    }
+
+    .player-avatar {
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      object-fit: cover;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    .player-avatar.unknown {
+      border-color: var(--disabled);
+      background:
+        radial-gradient(circle at 35% 32%, rgba(230, 237, 243, 0.20) 0 18%, transparent 19%),
+        radial-gradient(circle at 50% 78%, rgba(230, 237, 243, 0.16) 0 30%, transparent 31%),
+        var(--panel-2);
+      color: #c9d1d9;
+    }
+
+    .player-name-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .player-name {
+      font-weight: 700;
+      color: var(--text);
+      max-width: 280px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .link-cell a {
-      color: var(--server-url-link);
+    .player-name a {
+      color: var(--text);
     }
 
-    .link-cell a:hover {
-      color: var(--server-url-link);
+    .player-name a:hover {
+      color: var(--link);
       text-decoration: underline;
+    }
+
+    .player-sub {
+      color: var(--muted);
+      font-size: 12px;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .muted {
       color: var(--muted);
-    }
-
-    .empty-state {
-      color: var(--muted);
-      padding: 28px 16px;
-      text-align: center;
-    }
-
-    @media (max-width: 900px) {
-      .submission-form {
-        grid-template-columns: 1fr;
-      }
-
-      .submission-form button,
-      .submission-form input,
-      .submission-form select {
-        width: 100%;
-      }
     }
 
     @media (max-width: 700px) {
@@ -498,6 +479,17 @@
 
       .menu-bar {
         justify-content: flex-start;
+      }
+
+      .panel-actions,
+      .server-link-row {
+        width: 100%;
+      }
+
+      .button-link,
+      button {
+        flex: 1 1 auto;
+        text-align: center;
       }
     }
   </style>
@@ -531,86 +523,76 @@
       </div>
     </section>
 
-    <div id="protected-content" class="protected-content" hidden>
-      <section class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Submit Server - THIS PAGE IS A WIP, DON'T JUDGE</h2>
+    <div id="protected-content" hidden></div>
+
+    <div id="status" class="status info" hidden></div>
+
+    <section id="detail-panel" class="panel" hidden>
+      <div class="panel-header">
+        <h2 id="server-title" class="panel-title">Server</h2>
+        <div class="panel-actions">
+          <a class="button-link" href="servers.html">Back</a>
+          <button id="refresh-btn" type="button">Refresh</button>
         </div>
+      </div>
 
-        <form id="server-form" class="submission-form">
-          <div class="field">
-            <label for="location-input">Server Region</label>
-            <select id="location-input" name="location" required>
-              <option value="NA">North America</option>
-              <option value="EU">Europe</option>
-              <option value="AS">Asia</option>
-              <option value="SA">South America</option>
-              <option value="OC">Oceania</option>
-              <option value="AF">Africa</option>
-            </select>
+      <div class="detail-body">
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="summary-label">ID</span>
+            <span id="server-id" class="summary-value">-</span>
           </div>
-
-          <div class="field">
-            <label for="server-link-input">Server Link</label>
-            <input id="server-link-input" name="server_link" placeholder="https://..." autocomplete="off" required />
+          <div class="summary-item">
+            <span class="summary-label">Status</span>
+            <span id="server-status" class="summary-value">-</span>
           </div>
-
-          <div class="field">
-            <label for="video-upload-input">Pathing Video Upload</label>
-            <input id="video-upload-input" name="video_file" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" />
+          <div class="summary-item">
+            <span class="summary-label">Location</span>
+            <span id="server-location" class="summary-value">-</span>
           </div>
-
-          <div class="field">
-            <label for="pathing-video-input">Pathing Video URL</label>
-            <input id="pathing-video-input" name="pathing_video" placeholder="Optional video link" autocomplete="off" />
+          <div class="summary-item">
+            <span class="summary-label">Players</span>
+            <span id="server-players" class="summary-value">-</span>
           </div>
-
-          <button id="submit-btn" type="submit">Submit</button>
-
-          <div id="submission-closed-note" class="submission-closed-note"></div>
-        </form>
-      </section>
-
-      <div id="status" class="status"></div>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">Approved Servers</h2>
-          <div class="panel-actions">
-            <select id="server-sort-control" aria-label="Sort approved servers">
-              <option value="rank">Sort by ID</option>
-              <option value="location">Sort by Location</option>
-              <option value="players">Sort by Players</option>
-              <option value="status">Sort by Status</option>
-              <option value="updated_at">Sort by Updated</option>
-            </select>
-            <button id="refresh-btn" type="button">Refresh</button>
+          <div class="summary-item">
+            <span class="summary-label">Updated</span>
+            <span id="server-updated" class="summary-value muted">-</span>
           </div>
         </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th data-sort="checked">Done</th>
-                <th data-sort="rank">ID</th>
-                <th data-sort="location">Location</th>
-                <th data-sort="link">Link</th>
-                <th data-sort="players" class="numeric">Players</th>
-                <th data-sort="status">Status</th>
-                <th data-sort="updated_at">Updated</th>
-                <th>Video</th>
-              </tr>
-            </thead>
-            <tbody id="servers-body">
-              <tr>
-                <td colspan="8" class="empty-state">Loading servers...</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="server-link-row">
+          <a id="join-link" class="button-link" href="#" target="_blank" rel="noopener">Open Server</a>
+          <a id="video-link" class="button-link" href="#" target="_blank" rel="noopener" hidden>Pathing Video</a>
         </div>
-      </section>
-    </div>
+
+        <div id="video-wrap" class="video-wrap" hidden>
+          <video id="pathing-video" controls playsinline></video>
+        </div>
+      </div>
+    </section>
+
+    <section id="players-panel" class="panel" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">Players In Server</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>User ID</th>
+              <th>Clan</th>
+            </tr>
+          </thead>
+          <tbody id="players-body">
+            <tr>
+              <td colspan="3" class="empty-state">No player list available.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <script src="assets/protected-access.js"></script>
@@ -619,24 +601,14 @@
     const SERVERS_API_BASE = "https://c0ld-servers.opal-dde.workers.dev";
     const PAGE_KEY = "servers";
     const SERVERS_DATA_PATH = "/api/servers";
-    const SERVERS_SUBMIT_PATH = "/api/servers/submit";
-    const SUBMISSION_STATUS_PATH = "/api/servers/submission-status";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const OFFLINE_LABEL = "Offline";
     const UNKNOWN_LABEL = "Unknown";
 
     let servers = [];
-    let sortKey = "rank";
-    let sortAsc = true;
+    let activeServer = null;
     let discordConfig = {};
-    let currentDiscordUserId = "";
-    let checkedServers = {};
-    let submissionState = {
-      accepting: false,
-      disabled: true,
-      message: "Checking submission status..."
-    };
 
     function htmlEscape(value) {
       return String(value ?? "")
@@ -650,7 +622,7 @@
       return String(value || "")
         .trim()
         .replace(/#.*$/, "")
-        .replace(/[?&]_\=\d+$/, "")
+        .replace(/[?&]_=\d+$/, "")
         .replace(/\/+$/, "")
         .toLowerCase();
     }
@@ -665,6 +637,12 @@
       }
 
       return (hash >>> 0).toString(36);
+    }
+
+    function stableServerId(row, link) {
+      const raw = String(row.id || row.server_id || row.key || "").trim();
+      if (raw) return raw;
+      return `srv-${hashString(normalizeLink(link))}`;
     }
 
     function toNumberOrNull(value) {
@@ -682,23 +660,12 @@
       return null;
     }
 
-    function stableServerId(row, link) {
-      const raw = String(row.id || row.server_id || row.key || "").trim();
-      if (raw) return raw;
-      return `srv-${hashString(normalizeLink(link))}`;
-    }
-
-    function normalizeLocationLabel(value) {
-      const text = String(value || "").trim();
-      if (!text || text.toLowerCase() === "unknown") return UNKNOWN_LABEL;
-      return text;
-    }
-
     function getPlayerCount(row) {
       return firstNumber(
         row.players,
         row.player_count,
         row.players_current,
+        row.current_players,
         row.member_count,
         row.members_count
       );
@@ -715,78 +682,52 @@
       ) || DEFAULT_MAX_PLAYERS;
     }
 
-    function normalizePlayersList(row) {
-      const list = row.players_list || row.members || row.player_list || [];
-      if (!Array.isArray(list)) return [];
+    function normalizePlayer(player, index) {
+      const userId = player.user_id || player.userId || player.id || null;
+      const unknown = Boolean(player.unknown || !userId);
+      const slot = Number(player.slot || index + 1);
 
-      return list.map(player => ({
-        username: String(player.username || player.name || player.displayName || OFFLINE_LABEL),
+      return {
+        slot,
+        unknown,
+        username: String(player.username || player.name || player.displayName || (unknown ? `Unknown Player ${slot}` : `User ${userId}`)),
         display_name: String(player.display_name || player.displayName || ""),
-        user_id: player.user_id || player.userId || player.id || null,
+        user_id: userId,
         avatar_url: String(player.avatar_url || player.avatarUrl || ""),
         clan: String(player.clan || "")
-      }));
-    }
-
-    function setStatus(message, kind = "info") {
-      const el = document.getElementById("status");
-      el.className = `status ${kind}`;
-      el.textContent = message;
-    }
-
-    function clearStatus() {
-      const el = document.getElementById("status");
-      el.className = "status";
-      el.textContent = "";
-    }
-
-    function normalizeSubmissionStatus(status) {
-      const accepting = Boolean(status?.accepting);
-      return {
-        accepting,
-        disabled: !accepting,
-        message: String(status?.message || (accepting ? "Server submissions are open." : "Server submissions are currently closed."))
       };
     }
 
-    function applySubmissionStatus(status) {
-      submissionState = normalizeSubmissionStatus(status);
-
-      const form = document.getElementById("server-form");
-      const submitBtn = document.getElementById("submit-btn");
-      const note = document.getElementById("submission-closed-note");
-      const disabled = submissionState.disabled;
-
-      form.classList.toggle("submissions-disabled", disabled);
-      form.querySelectorAll("input, select, textarea, button").forEach(el => {
-        el.disabled = disabled;
-      });
-
-      submitBtn.textContent = disabled ? "Closed" : "Submit";
-      note.textContent = disabled ? submissionState.message : "";
-      note.classList.toggle("visible", disabled);
+    function normalizePlayersList(row) {
+      const list = row.players_list || row.members || row.player_list || [];
+      if (!Array.isArray(list)) return [];
+      return list.map(normalizePlayer);
     }
 
-    async function loadSubmissionStatus() {
-      try {
-        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, `${SUBMISSION_STATUS_PATH}?v=${Date.now()}`);
-        if (!res.ok) throw new Error(`Could not load submission status. HTTP ${res.status}`);
-        const payload = await res.json();
-        applySubmissionStatus(payload);
-        return payload;
-      } catch (err) {
-        console.error(err);
-        applySubmissionStatus({
-          accepting: false,
-          message: "Not accepting server submissions currently. Go touch grass."
+    function completePlayersList(row) {
+      const expected = Math.max(0, getPlayerCount(row) || 0);
+      const maxPlayers = getMaxPlayers(row);
+      const target = expected || (serverAvailability(row) === "offline" ? 0 : maxPlayers);
+      const players = normalizePlayersList(row).slice(0, target);
+
+      while (players.length < target) {
+        const slot = players.length + 1;
+        players.push({
+          slot,
+          unknown: true,
+          username: `Unknown Player ${slot}`,
+          display_name: "",
+          user_id: null,
+          avatar_url: "",
+          clan: ""
         });
-        return submissionState;
       }
+
+      return players;
     }
 
     function parseRows(payload) {
       discordConfig = payload?.discord || {};
-      if (payload?.submissions) applySubmissionStatus(payload.submissions);
       if (Array.isArray(payload)) return payload;
       if (Array.isArray(payload?.rows)) return payload.rows;
       if (Array.isArray(payload?.servers)) return payload.servers;
@@ -803,11 +744,9 @@
 
         const normalized = {
           id: stableServerId(row, link),
-          db_id: row.db_id || row.database_id || null,
           rank: toNumberOrNull(row.rank ?? row.server_number),
-          location: normalizeLocationLabel(row.location || row.region),
+          location: String(row.location || row.region || "").trim() || UNKNOWN_LABEL,
           link,
-          share_code: String(row.share_code || row.code || "").trim(),
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
@@ -815,7 +754,7 @@
           compromise_status: String(row.compromise_status || row.status || row.server_status || "").trim(),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
-          video_url: String(row.video_url || row.pathing_video_url || row.pathing_video || row.video || "").trim(),
+          video_url: String(row.video_url || row.pathing_video || row.pathing_video_url || row.video || "").trim(),
           updated_at: row.updated_at || row.submitted_at || row.created_at || null
         };
 
@@ -841,64 +780,6 @@
       })).sort((a, b) => a.rank - b.rank);
     }
 
-    function getCheckedStorageKey() {
-      return currentDiscordUserId ? `c0ld.servers.checked.v1.${currentDiscordUserId}` : "";
-    }
-
-    function loadCheckedServers() {
-      const key = getCheckedStorageKey();
-      if (!key) {
-        checkedServers = {};
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(localStorage.getItem(key) || "{}");
-        checkedServers = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-      } catch {
-        checkedServers = {};
-      }
-    }
-
-    function saveCheckedServers() {
-      const key = getCheckedStorageKey();
-      if (!key) return;
-      localStorage.setItem(key, JSON.stringify(checkedServers));
-    }
-
-    function serverCheckKey(row) {
-      return String(row.db_id || row.share_code || row.id || normalizeLink(row.link));
-    }
-
-    function serverRevision(row) {
-      return String(row.updated_at || row.approved_at || row.players_updated_at || row.share_code || row.link || "");
-    }
-
-    function isServerChecked(row) {
-      const key = serverCheckKey(row);
-      return Boolean(key) && checkedServers[key] === serverRevision(row);
-    }
-
-    function setServerChecked(row, checked) {
-      const key = serverCheckKey(row);
-      if (!key) return;
-
-      if (checked) {
-        checkedServers[key] = serverRevision(row);
-      } else {
-        delete checkedServers[key];
-      }
-
-      saveCheckedServers();
-    }
-
-    function fmtPlayers(row) {
-      const players = getPlayerCount(row);
-      const maxPlayers = getMaxPlayers(row);
-      const current = players === null ? "—" : players.toLocaleString("en-US");
-      return `${current}/${maxPlayers.toLocaleString("en-US")}`;
-    }
-
     function serverAvailability(row) {
       const players = getPlayerCount(row);
       const maxPlayers = getMaxPlayers(row);
@@ -914,32 +795,33 @@
       return "offline";
     }
 
-    function displayLocation(row) {
+    function serverAvailabilityLabel(row) {
       const availability = serverAvailability(row);
-
-      if (availability === "offline") {
-        return OFFLINE_LABEL;
-      }
-
-      return normalizeLocationLabel(row.location || row.region || UNKNOWN_LABEL);
-    }
-
-    function clanStatusLabel(row) {
-      const availability = serverAvailability(row);
-
       if (availability === "full") return "Full";
       if (availability === "online") return "Online";
       return "Offline";
     }
 
-    function clanStatusClass(row) {
-      return serverAvailability(row);
+    function displayLocation(row) {
+      if (serverAvailability(row) === "offline") {
+        return OFFLINE_LABEL;
+      }
+
+      const location = String(row.location || row.region || "").trim();
+      return location || UNKNOWN_LABEL;
+    }
+
+    function fmtPlayers(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const current = players === null ? "-" : players.toLocaleString("en-US");
+      return `${current}/${maxPlayers.toLocaleString("en-US")}`;
     }
 
     function fmtDateTime(value) {
-      if (!value) return "—";
+      if (!value) return "-";
       const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return "—";
+      if (Number.isNaN(date.getTime())) return "-";
 
       return date.toLocaleString(undefined, {
         dateStyle: "short",
@@ -947,89 +829,157 @@
       });
     }
 
-    function getVisibleServers() {
-      const list = servers.slice();
-
-      list.sort((a, b) => {
-        let av = sortKey === "location" ? displayLocation(a) : a[sortKey];
-        let bv = sortKey === "location" ? displayLocation(b) : b[sortKey];
-
-        if (sortKey === "checked") {
-          av = isServerChecked(a) ? 0 : 1;
-          bv = isServerChecked(b) ? 0 : 1;
-        }
-
-        if (sortKey === "status") {
-          av = clanStatusLabel(a);
-          bv = clanStatusLabel(b);
-        }
-
-        if (sortKey === "updated_at") {
-          av = new Date(av || 0).getTime() || 0;
-          bv = new Date(bv || 0).getTime() || 0;
-        }
-
-        const an = Number(av);
-        const bn = Number(bv);
-        let result;
-
-        if (!Number.isNaN(an) && !Number.isNaN(bn)) {
-          result = an - bn;
-        } else {
-          result = String(av || "").localeCompare(String(bv || ""));
-        }
-
-        return sortAsc ? result : -result;
-      });
-
-      return list;
+    function setStatus(message, kind = "info") {
+      const el = document.getElementById("status");
+      el.hidden = false;
+      el.className = `status ${kind}`;
+      el.textContent = message;
     }
 
-    function renderServers() {
-      const tbody = document.getElementById("servers-body");
-      const rows = getVisibleServers();
+    function hideStatus() {
+      const el = document.getElementById("status");
+      el.hidden = true;
+      el.textContent = "";
+    }
 
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No approved servers yet.</td></tr>`;
+    function getRequestedServer() {
+      const params = new URLSearchParams(window.location.search);
+      const id = String(params.get("id") || "").trim();
+      const rank = toNumberOrNull(params.get("rank") || params.get("server"));
+
+      if (id) {
+        return servers.find(row => row.id === id || String(row.rank) === id);
+      }
+
+      if (rank !== null) {
+        return servers.find(row => row.rank === rank);
+      }
+
+      return null;
+    }
+
+    function isPlayableVideoUrl(value) {
+      try {
+        const url = new URL(value, window.location.href);
+        return /\.(mp4|webm|mov|m4v|ogg)$/i.test(url.pathname);
+      } catch {
+        return false;
+      }
+    }
+
+    function clanLabel(player) {
+      if (player.unknown || !player.user_id) return UNKNOWN_LABEL;
+
+      const clan = String(player.clan || "").trim().toUpperCase();
+      if (clan === "C0LD") return "C0LD";
+      if (clan === "WMSY") return "WMSY";
+      return "Other";
+    }
+
+    function clanClass(player) {
+      if (player.unknown || !player.user_id) return "unknown";
+
+      const clan = String(player.clan || "").trim().toLowerCase();
+      return clan === "c0ld" || clan === "wmsy" ? clan : "other";
+    }
+
+    function playerProfileUrl(player) {
+      if (!player.user_id) return "";
+      return `https://www.roblox.com/users/${encodeURIComponent(player.user_id)}/profile`;
+    }
+
+    function playerAvatarMarkup(player) {
+      if (player.avatar_url && !player.unknown) {
+        return `<img class="player-avatar" src="${htmlEscape(player.avatar_url)}" alt="${htmlEscape(player.username)}">`;
+      }
+
+      return `<span class="player-avatar unknown" aria-label="Unknown player">?</span>`;
+    }
+
+    function renderPlayers(row) {
+      const tbody = document.getElementById("players-body");
+      const players = completePlayersList(row);
+
+      if (!players.length) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No players detected.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map(row => {
-        const video = row.video_url
-          ? `<a href="${htmlEscape(row.video_url)}" target="_blank" rel="noopener">Open</a>`
-          : "—";
-
-        const players = getPlayerCount(row);
-        const playerClass = players === 0 ? "player-pill empty" : "player-pill";
-        const checkKey = htmlEscape(serverCheckKey(row));
-        const revision = htmlEscape(serverRevision(row));
+      tbody.innerHTML = players.map(player => {
+        const profile = playerProfileUrl(player);
+        const name = htmlEscape(player.username || `Unknown Player ${player.slot}`);
+        const displayName = htmlEscape(player.display_name || (player.unknown ? "Profile unavailable" : ""));
+        const userId = player.user_id ? htmlEscape(player.user_id) : "-";
 
         return `
           <tr>
-            <td class="check-cell">
-              <input
-                class="server-check"
-                type="checkbox"
-                aria-label="Mark Server ${htmlEscape(row.rank)} complete"
-                data-server-key="${checkKey}"
-                data-server-revision="${revision}"
-                ${isServerChecked(row) ? "checked" : ""}
-              >
+            <td>
+              <div class="player-cell">
+                ${playerAvatarMarkup(player)}
+                <div class="player-name-wrap">
+                  <span class="player-name">
+                    ${
+                      profile
+                        ? `<a href="${htmlEscape(profile)}" target="_blank" rel="noopener">${name}</a>`
+                        : name
+                    }
+                  </span>
+                  <span class="player-sub">${displayName || " "}</span>
+                </div>
+              </div>
             </td>
-            <td class="server-id"><a href="server.html?id=${encodeURIComponent(row.id)}">Server ${htmlEscape(row.rank)}</a></td>
-            <td>${htmlEscape(displayLocation(row))}</td>
-            <td class="link-cell"><a href="${htmlEscape(row.link)}" target="_blank" rel="noopener">${htmlEscape(row.link)}</a></td>
-            <td class="numeric"><span class="${playerClass}">${fmtPlayers(row)}</span></td>
-            <td><span class="clan-pill ${htmlEscape(clanStatusClass(row))}">${htmlEscape(clanStatusLabel(row))}</span></td>
-            <td>${htmlEscape(fmtDateTime(row.updated_at))}</td>
-            <td>${video}</td>
+            <td>${userId}</td>
+            <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
           </tr>
         `;
       }).join("");
     }
 
+    function renderServer(row) {
+      activeServer = row;
+      hideStatus();
+
+      document.getElementById("detail-panel").hidden = false;
+      document.getElementById("players-panel").hidden = false;
+      document.getElementById("server-title").textContent = `Server ${row.rank}`;
+      document.getElementById("server-id").textContent = `Server ${row.rank}`;
+      document.getElementById("server-status").innerHTML = `<span class="server-pill ${htmlEscape(serverAvailability(row))}">${htmlEscape(serverAvailabilityLabel(row))}</span>`;
+      document.getElementById("server-location").textContent = displayLocation(row);
+      document.getElementById("server-players").textContent = fmtPlayers(row);
+      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at || row.players_updated_at);
+
+      const joinLink = document.getElementById("join-link");
+      joinLink.href = row.link;
+
+      const videoLink = document.getElementById("video-link");
+      const videoWrap = document.getElementById("video-wrap");
+      const video = document.getElementById("pathing-video");
+
+      if (row.video_url) {
+        videoLink.hidden = false;
+        videoLink.href = row.video_url;
+
+        if (isPlayableVideoUrl(row.video_url)) {
+          video.src = row.video_url;
+          videoWrap.hidden = false;
+        } else {
+          video.removeAttribute("src");
+          videoWrap.hidden = true;
+        }
+      } else {
+        videoLink.hidden = true;
+        videoLink.removeAttribute("href");
+        video.removeAttribute("src");
+        videoWrap.hidden = true;
+      }
+
+      renderPlayers(row);
+    }
+
     async function loadServers() {
-      clearStatus();
+      setStatus("Loading server...", "info");
+      document.getElementById("detail-panel").hidden = true;
+      document.getElementById("players-panel").hidden = true;
 
       try {
         const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, `${SERVERS_DATA_PATH}?v=${Date.now()}`);
@@ -1040,126 +990,38 @@
 
         const payload = await res.json();
         servers = dedupeServers(parseRows(payload));
-        renderServers();
+        const row = getRequestedServer();
+
+        if (!row) {
+          setStatus("Server not found.", "error");
+          return;
+        }
+
+        renderServer(row);
       } catch (err) {
         console.error(err);
         try {
           const fallback = await fetch(`${SERVERS_STATIC_FALLBACK}?v=${Date.now()}`, { cache: "no-store" });
           const payload = await fallback.json();
           servers = dedupeServers(parseRows(payload));
-          renderServers();
-          setStatus("Loaded the seeded server list. Deploy the c0ld Servers Worker to enable submissions and live updates.", "info");
+          const row = getRequestedServer();
+
+          if (!row) {
+            setStatus("Server not found.", "error");
+            return;
+          }
+
+          renderServer(row);
+          setStatus("Loaded the seeded server list. Deploy the c0ld Servers Worker to enable live updates.", "info");
         } catch {
-          servers = [];
-          renderServers();
           setStatus(err?.message || String(err), "error");
         }
       }
     }
 
-    async function submitServer(event) {
-      event.preventDefault();
-
-      if (!submissionState.accepting) {
-        setStatus(submissionState.message || "Server submissions are currently closed.", "error");
-        applySubmissionStatus(submissionState);
-        return;
-      }
-
-      const submitBtn = document.getElementById("submit-btn");
-      submitBtn.disabled = true;
-
-      try {
-        const form = event.currentTarget;
-        const data = new FormData(form);
-
-        const res = await C0LD_AUTH.fetch(SERVERS_API_BASE, SERVERS_SUBMIT_PATH, {
-          method: "POST",
-          body: data
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          let message = text || `Submission failed. HTTP ${res.status}`;
-          try {
-            const json = JSON.parse(text);
-            message = json.message || message;
-          } catch {}
-          throw new Error(message);
-        }
-
-        form.reset();
-        const payload = await res.json().catch(() => ({}));
-        setStatus(payload.message || "Submission sent for review.", "ok");
-        await loadServers();
-        await loadSubmissionStatus();
-      } catch (err) {
-        console.error(err);
-        setStatus(err?.message || String(err), "error");
-        await loadSubmissionStatus();
-      } finally {
-        const currentSubmitBtn = document.getElementById("submit-btn");
-        currentSubmitBtn.disabled = !submissionState.accepting;
-      }
-    }
-
-    function wireEvents() {
-      document.getElementById("server-form").addEventListener("submit", submitServer);
-
-      document.getElementById("server-sort-control").addEventListener("change", event => {
-        sortKey = event.target.value;
-        sortAsc = sortKey !== "players" && sortKey !== "updated_at";
-        renderServers();
-      });
-
-      document.getElementById("servers-body").addEventListener("change", event => {
-        const target = event.target;
-        if (!target.classList.contains("server-check")) return;
-
-        const row = servers.find(item =>
-          serverCheckKey(item) === target.dataset.serverKey &&
-          serverRevision(item) === target.dataset.serverRevision
-        );
-
-        if (!row) {
-          target.checked = false;
-          return;
-        }
-
-        setServerChecked(row, target.checked);
-        if (sortKey === "checked") renderServers();
-      });
-
-      document.getElementById("refresh-btn").addEventListener("click", async () => {
-        await loadServers();
-        await loadSubmissionStatus();
-      });
-
-      document.querySelectorAll("th[data-sort]").forEach(th => {
-        th.addEventListener("click", () => {
-          const key = th.dataset.sort;
-
-          if (sortKey === key) {
-            sortAsc = !sortAsc;
-          } else {
-            sortKey = key;
-            sortAsc = key !== "players" && key !== "updated_at";
-          }
-
-          const sortControl = document.getElementById("server-sort-control");
-          if (sortControl && [...sortControl.options].some(option => option.value === sortKey)) {
-            sortControl.value = sortKey;
-          }
-
-          renderServers();
-        });
-      });
-    }
+    document.getElementById("refresh-btn").addEventListener("click", loadServers);
 
     async function initPage() {
-      applySubmissionStatus(submissionState);
-      wireEvents();
-
       const auth = await C0LD_AUTH.requireAccess({
         apiBase: PROTECTED_API_BASE,
         page: PAGE_KEY,
@@ -1172,10 +1034,7 @@
       });
 
       if (auth.allowed) {
-        currentDiscordUserId = String(auth.session?.user?.id || "");
-        loadCheckedServers();
         await loadServers();
-        await loadSubmissionStatus();
       }
     }
 
