@@ -3,9 +3,9 @@
   const HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/history";
 
   const RANGES = {
-    "1-4": { label: "Ranks 1–4", cutoffRank: 3, challengerRank: 4 },
-    "5-11": { label: "Ranks 5–11", cutoffRank: 10, challengerRank: 11 },
-    "12-51": { label: "Ranks 12–51", cutoffRank: 50, challengerRank: 51 }
+    "1-4": { label: "Ranks 1–4", min: 1, max: 4, cutoffRank: 3, challengerRank: 4 },
+    "5-11": { label: "Ranks 5–11", min: 5, max: 11, cutoffRank: 10, challengerRank: 11 },
+    "12-51": { label: "Ranks 12–51", min: 12, max: 51, cutoffRank: 50, challengerRank: 51 }
   };
 
   const PACES = {
@@ -21,7 +21,12 @@
     nong: "#f6ad55"
   };
 
-  const DEFAULT_COLORS = ["#58a6ff", "#d2a8ff", "#79c0ff", "#ffa657", "#a5d6ff"];
+  const DEFAULT_COLORS = [
+    "#58a6ff", "#d2a8ff", "#79c0ff", "#ffa657", "#a5d6ff",
+    "#ff7b72", "#3fb950", "#f2cc60", "#db61a2", "#56d4dd",
+    "#c9d1d9", "#7ee787", "#ffdf5d", "#bc8cff", "#f778ba",
+    "#91d7e3", "#f0a6ca", "#b5cea8", "#d7ba7d", "#9cdcfe"
+  ];
 
   let currentData = null;
   let historyData = null;
@@ -76,16 +81,16 @@
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   }
 
-  function clanColor(name, index = 0) {
-    return SPECIAL_COLORS[normalize(name)] || DEFAULT_COLORS[index % DEFAULT_COLORS.length];
-  }
-
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function clanColor(name, index = 0) {
+    return SPECIAL_COLORS[normalize(name)] || DEFAULT_COLORS[index % DEFAULT_COLORS.length];
   }
 
   async function fetchJson(url) {
@@ -100,143 +105,28 @@
     const style = document.createElement("style");
     style.id = "reward-threshold-chart-styles";
     style.textContent = `
-      .reward-threshold-section {
-        margin-bottom: 24px;
-      }
-
-      .reward-threshold-section .section-header {
-        justify-content: stretch;
-      }
-
-      .reward-threshold-controls {
-        display: flex;
-        justify-content: space-between;
-        gap: 14px;
-        flex-wrap: wrap;
-        align-items: center;
-        width: 100%;
-      }
-
-      .reward-threshold-ranges,
-      .reward-threshold-metrics {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-      }
-
-      .reward-range-btn {
-        white-space: nowrap;
-      }
-
-      .reward-range-btn.active {
-        border-color: var(--link);
-        color: var(--link);
-        background: rgba(88, 166, 255, 0.10);
-      }
-
-      body[data-clan="wmsy"] .reward-range-btn.active {
-        border-color: rgba(72, 187, 120, 0.78) !important;
-        color: #74d99f !important;
-        background: rgba(72, 187, 120, 0.14) !important;
-      }
-
-      .reward-threshold-body {
-        padding: 14px 16px 16px;
-      }
-
-      .reward-threshold-chart-shell {
-        position: relative;
-      }
-
-      #reward-threshold-chart {
-        width: 100%;
-        height: 330px;
-        display: block;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel-2);
-        cursor: crosshair;
-      }
-
-      .reward-threshold-tooltip {
-        position: absolute;
-        z-index: 10;
-        display: none;
-        pointer-events: none;
-        min-width: 240px;
-        max-width: 340px;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #0b0f14;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-        color: var(--text);
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .reward-threshold-tooltip strong {
-        display: block;
-        margin-bottom: 4px;
-      }
-
-      .reward-threshold-summary {
-        margin-top: 10px;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .reward-threshold-summary strong {
-        color: var(--text);
-      }
-
-      .reward-threshold-legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px 12px;
-        margin-top: 10px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .reward-threshold-legend-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-      }
-
-      .reward-threshold-legend-item::before {
-        content: "";
-        width: 11px;
-        height: 3px;
-        border-radius: 999px;
-        background: currentColor;
-      }
-
-      .reward-threshold-legend-item.forecast::before {
-        opacity: 0.75;
-        background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);
-      }
-
+      .reward-threshold-section { margin-bottom: 24px; }
+      .reward-threshold-section .section-header { justify-content: stretch; }
+      .reward-threshold-controls { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: center; width: 100%; }
+      .reward-threshold-ranges, .reward-threshold-metrics { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      .reward-range-btn { white-space: nowrap; }
+      .reward-range-btn.active { border-color: var(--link); color: var(--link); background: rgba(88, 166, 255, 0.10); }
+      body[data-clan="wmsy"] .reward-range-btn.active { border-color: rgba(72, 187, 120, 0.78) !important; color: #74d99f !important; background: rgba(72, 187, 120, 0.14) !important; }
+      .reward-threshold-body { padding: 14px 16px 16px; }
+      .reward-threshold-chart-shell { position: relative; }
+      #reward-threshold-chart { width: 100%; height: 370px; display: block; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: crosshair; }
+      .reward-threshold-tooltip { position: absolute; z-index: 10; display: none; pointer-events: none; min-width: 240px; max-width: 360px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0b0f14; box-shadow: 0 8px 24px rgba(0,0,0,.35); color: var(--text); font-size: 13px; line-height: 1.45; }
+      .reward-threshold-tooltip strong { display: block; margin-bottom: 4px; }
+      .reward-threshold-summary { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .reward-threshold-summary strong { color: var(--text); }
+      .reward-threshold-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+      .reward-threshold-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+      .reward-threshold-legend-item::before { content: ""; width: 11px; height: 3px; border-radius: 999px; background: currentColor; }
+      .reward-threshold-legend-item.forecast::before { opacity: .75; background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px); }
       @media (max-width: 700px) {
-        #reward-threshold-chart {
-          height: 280px;
-        }
-
-        .reward-threshold-controls,
-        .reward-threshold-ranges,
-        .reward-threshold-metrics,
-        #reward-threshold-pace {
-          width: 100%;
-        }
-
-        #reward-threshold-pace,
-        #reward-threshold-refresh {
-          min-width: 0;
-          width: 100%;
-        }
+        #reward-threshold-chart { height: 310px; }
+        .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics, #reward-threshold-pace { width: 100%; }
+        #reward-threshold-pace, #reward-threshold-refresh { min-width: 0; width: 100%; }
       }
     `;
 
@@ -245,7 +135,6 @@
 
   function ensurePanel() {
     if (!isClansPage()) return null;
-
     ensureStyles();
 
     let panel = document.getElementById("reward-threshold-section");
@@ -310,7 +199,7 @@
 
   function normalizeCurrentRow(row) {
     return {
-      fetched_at: row.fetched_at,
+      fetched_at: row.fetched_at || currentData?.snapshot_at || currentData?.generated_at,
       rank: finite(row.rank),
       clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
       points: finite(row.points ?? row.total_points),
@@ -356,15 +245,25 @@
   }
 
   function currentRows() {
-    return (currentData?.rows || []).map(normalizeCurrentRow).filter(row => row.clan_name && row.rank !== null && row.points !== null);
+    return (currentData?.rows || [])
+      .map(normalizeCurrentRow)
+      .filter(row => row.clan_name && row.rank !== null && row.points !== null)
+      .sort((a, b) => a.rank - b.rank);
+  }
+
+  function selectedRows() {
+    const range = RANGES[selectedRange] || RANGES["1-4"];
+    return currentRows().filter(row => row.rank >= range.min && row.rank <= range.max);
   }
 
   function boundaryPair() {
     const range = RANGES[selectedRange] || RANGES["1-4"];
     const rows = currentRows();
-    const holder = rows.find(row => row.rank === range.cutoffRank) || null;
-    const challenger = rows.find(row => row.rank === range.challengerRank) || null;
-    return { range, holder, challenger };
+    return {
+      range,
+      holder: rows.find(row => row.rank === range.cutoffRank) || null,
+      challenger: rows.find(row => row.rank === range.challengerRank) || null
+    };
   }
 
   function historyForClan(clanName) {
@@ -376,13 +275,12 @@
 
     const current = currentRows().find(row => normalize(row.clan_name) === key);
     if (current?.fetched_at && current.points !== null && !rows.some(row => row.fetched_at === current.fetched_at)) {
-      rows.push({
-        fetched_at: current.fetched_at,
-        rank: current.rank,
-        clan_name: current.clan_name,
-        points: current.points
-      });
+      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
       rows.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+    }
+
+    if (!rows.length && current) {
+      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
     }
 
     return rows;
@@ -390,7 +288,6 @@
 
   function findBase(rows, latest, hours) {
     if (!hours || !rows.length || !latest?.fetched_at) return null;
-
     const target = new Date(latest.fetched_at).getTime() - hours * 60 * 60 * 1000;
     if (!Number.isFinite(target)) return null;
 
@@ -418,12 +315,10 @@
 
     const fallbackGain = clanRow?.[`gain_${paceKey}`];
     if (finite(fallbackGain) !== null) return fallbackGain / pace.hours;
-
     return 0;
   }
 
   function projectionPoint(clanRow, rows) {
-    const pace = PACES[selectedPace] || PACES["12h"];
     const latest = rows[rows.length - 1] || null;
     if (!latest || selectedPace === "none") return null;
 
@@ -433,7 +328,6 @@
 
     const rate = rateFor(clanRow, rows, selectedPace);
     const remainingHours = Math.max(0, (endMs - latestMs) / (60 * 60 * 1000));
-
     return {
       t: endMs,
       rawT: new Date(endMs).toISOString(),
@@ -445,46 +339,42 @@
   }
 
   function buildSeries() {
-    const { holder, challenger } = boundaryPair();
-    if (!holder || !challenger) return [];
+    const range = RANGES[selectedRange] || RANGES["1-4"];
+    return selectedRows().map((row, index) => {
+      const solid = historyForClan(row.clan_name)
+        .map(item => ({
+          t: new Date(item.fetched_at).getTime(),
+          rawT: item.fetched_at,
+          points: item.points,
+          rank: item.rank,
+          projected: false
+        }))
+        .filter(item => Number.isFinite(item.t) && item.points !== null);
 
-    return [holder, challenger].map((row, index) => {
-      const rows = historyForClan(row.clan_name).map(item => ({
-        t: new Date(item.fetched_at).getTime(),
-        rawT: item.fetched_at,
-        points: item.points,
-        rank: item.rank,
-        projected: false
-      })).filter(item => Number.isFinite(item.t) && item.points !== null);
-
-      const forecast = projectionPoint(row, rows);
-
+      const forecast = projectionPoint(row, solid);
       return {
         clan_name: row.clan_name,
         rank: row.rank,
         color: clanColor(row.clan_name, index),
         current: row,
-        solid: rows,
-        forecast: forecast && rows.length ? [rows[rows.length - 1], forecast] : [],
-        projectedEnd: forecast?.points ?? rows[rows.length - 1]?.points ?? row.points,
-        rate: forecast?.rate ?? rateFor(row, rows, selectedPace)
+        solid,
+        forecast: forecast && solid.length ? [solid[solid.length - 1], forecast] : [],
+        projectedEnd: forecast?.points ?? solid[solid.length - 1]?.points ?? row.points,
+        rate: forecast?.rate ?? rateFor(row, solid, selectedPace),
+        isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
     }).filter(series => series.solid.length >= 1);
   }
 
   function drawLine(ctx, points, x, y, color, options = {}) {
     if (!points.length) return;
-
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = options.width || 2;
-    ctx.globalAlpha = options.alpha ?? 0.92;
+    ctx.globalAlpha = options.alpha ?? 0.86;
     if (options.dash) ctx.setLineDash(options.dash);
     ctx.beginPath();
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(x(point), y(point));
-      else ctx.lineTo(x(point), y(point));
-    });
+    points.forEach((point, index) => index === 0 ? ctx.moveTo(x(point), y(point)) : ctx.lineTo(x(point), y(point)));
     ctx.stroke();
 
     const last = points[points.length - 1];
@@ -492,7 +382,7 @@
     ctx.globalAlpha = 1;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(x(last), y(last), options.radius || 3.5, 0, Math.PI * 2);
+    ctx.arc(x(last), y(last), options.radius || 2.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -519,11 +409,11 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    if (!holder || !challenger || seriesList.length < 2) {
+    if (!seriesList.length) {
       ctx.fillStyle = "#8b949e";
       ctx.font = "13px Arial";
-      ctx.fillText("Not enough current or historical data is available for this cutoff yet.", 16, 28);
-      if (summary) summary.textContent = `${range.label}: not enough data for the cutoff pair.`;
+      ctx.fillText("Not enough current or historical data is available for this range yet.", 16, 28);
+      if (summary) summary.textContent = `${range.label}: not enough data for this range.`;
       if (legend) legend.innerHTML = "";
       canvas._rewardThresholdChart = null;
       return;
@@ -534,12 +424,13 @@
     const maxT = Math.max(...allPoints.map(point => point.t));
     const minYRaw = Math.min(...allPoints.map(point => point.points));
     const maxYRaw = Math.max(...allPoints.map(point => point.points));
-    const paddingY = Math.max((maxYRaw - minYRaw) * 0.12, 1_000_000);
+    const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 1_000_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
+    const crowded = seriesList.length > 12;
 
     const padLeft = 66;
-    const padRight = 120;
+    const padRight = crowded ? 26 : 116;
     const padTop = 18;
     const padBottom = 34;
     const width = rect.width - padLeft - padRight;
@@ -564,35 +455,46 @@
       ctx.fillText(fmtShort(value), 8, yy + 4);
     }
 
-    seriesList.forEach(series => {
-      drawLine(ctx, series.solid, x, y, series.color, { width: 2.35 });
-      drawLine(ctx, series.forecast, x, y, series.color, { width: 2.1, dash: [7, 5], alpha: 0.72, radius: 3 });
+    // Draw non-cutoff clans first so the two critical cutoff lines stay visible on top.
+    [...seriesList].sort((a, b) => Number(a.isCutoffPair) - Number(b.isCutoffPair)).forEach(series => {
+      drawLine(ctx, series.solid, x, y, series.color, {
+        width: series.isCutoffPair ? 2.7 : (crowded ? 1.1 : 1.8),
+        alpha: series.isCutoffPair ? 0.96 : (crowded ? 0.50 : 0.74),
+        radius: series.isCutoffPair ? 3.4 : 2.4
+      });
+      drawLine(ctx, series.forecast, x, y, series.color, {
+        width: series.isCutoffPair ? 2.25 : (crowded ? 1.0 : 1.5),
+        dash: [7, 5],
+        alpha: series.isCutoffPair ? 0.75 : (crowded ? 0.30 : 0.48),
+        radius: series.isCutoffPair ? 3 : 2.2
+      });
     });
 
-    ctx.save();
-    ctx.font = "12px Arial";
-    seriesList.forEach(series => {
-      const last = (series.forecast.length ? series.forecast[series.forecast.length - 1] : series.solid[series.solid.length - 1]);
-      ctx.fillStyle = series.color;
-      ctx.fillText(`#${series.rank} ${series.clan_name}`, x(last) + 7, Math.max(padTop + 10, Math.min(rect.height - padBottom - 3, y(last) + 4)));
-    });
-    ctx.restore();
+    if (!crowded) {
+      ctx.save();
+      ctx.font = "12px Arial";
+      seriesList.forEach(series => {
+        const last = series.forecast.length ? series.forecast[series.forecast.length - 1] : series.solid[series.solid.length - 1];
+        ctx.fillStyle = series.color;
+        ctx.fillText(`#${series.rank} ${series.clan_name}`, x(last) + 7, Math.max(padTop + 10, Math.min(rect.height - padBottom - 3, y(last) + 4)));
+      });
+      ctx.restore();
+    }
 
     const firstDate = new Date(minT);
     const lastDate = new Date(maxT);
     ctx.fillStyle = "#8b949e";
     ctx.fillText(firstDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }), padLeft, rect.height - 12);
-    const lastLabel = selectedPace === "none"
-      ? lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-      : "Battle End";
+    const lastLabel = selectedPace === "none" ? lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Battle End";
     ctx.fillText(lastLabel, rect.width - padRight - ctx.measureText(lastLabel).width, rect.height - 12);
 
-    const holderSeries = seriesList.find(series => series.rank === range.cutoffRank) || seriesList[0];
-    const challengerSeries = seriesList.find(series => series.rank === range.challengerRank) || seriesList[1];
-    const currentGap = Math.max(0, holder.points - challenger.points + 1);
-    const projectedGap = holderSeries.projectedEnd - challengerSeries.projectedEnd + 1;
+    const holderSeries = seriesList.find(series => series.rank === range.cutoffRank) || null;
+    const challengerSeries = seriesList.find(series => series.rank === range.challengerRank) || null;
 
-    if (summary) {
+    if (summary && holder && challenger && holderSeries && challengerSeries) {
+      const currentGap = Math.max(0, holder.points - challenger.points + 1);
+      const projectedGap = holderSeries.projectedEnd - challengerSeries.projectedEnd + 1;
+
       if (selectedPace === "none") {
         summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to make up <strong>${fmtShort(currentGap)}</strong> points to pass <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong>.`;
       } else if (projectedGap <= 0) {
@@ -600,13 +502,17 @@
       } else {
         summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to make up <strong>${fmtShort(currentGap)}</strong> points to pass <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong>. Using the selected <strong>${pace.short}</strong>, ${escapeHtml(challenger.clan_name)} <strong>is not projected to pass</strong> ${escapeHtml(holder.clan_name)} and finishes about <strong>${fmtShort(projectedGap)}</strong> points short.`;
       }
+    } else if (summary) {
+      summary.textContent = `${range.label}: not enough data for the cutoff pair.`;
     }
 
     if (legend) {
-      legend.innerHTML = seriesList.map(series => `
+      const cutoffItems = seriesList.filter(series => series.isCutoffPair);
+      const otherItems = seriesList.filter(series => !series.isCutoffPair);
+      const legendItems = [...cutoffItems, ...otherItems];
+      legend.innerHTML = legendItems.map(series => `
         <span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>
-        ${selectedPace === "none" ? "" : `<span class="reward-threshold-legend-item forecast" style="color:${series.color}">projected</span>`}
-      `).join("");
+      `).join("") + (selectedPace === "none" ? "" : `<span class="reward-threshold-legend-item forecast">dashed = projected to battle end</span>`);
     }
 
     canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect };
