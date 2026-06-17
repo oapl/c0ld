@@ -262,12 +262,86 @@
     }
   }
 
-  function applyClanHighlightStyles() {
-    if (document.getElementById("clan-row-highlight-styles")) return;
+  function ensureStyle(id, css) {
+    let style = document.getElementById(id);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = id;
+      document.head.appendChild(style);
+    }
+    style.textContent = css;
+  }
 
-    const style = document.createElement("style");
-    style.id = "clan-row-highlight-styles";
-    style.textContent = `
+  function removeStyle(id) {
+    const style = document.getElementById(id);
+    if (style) style.remove();
+  }
+
+  function applyWmsyTheme() {
+    if (!isWmsy()) {
+      removeStyle("wmsy-page-theme-styles");
+      return;
+    }
+
+    ensureStyle("wmsy-page-theme-styles", `
+      :root {
+        --link: #74d99f !important;
+        --accent: #74d99f !important;
+      }
+
+      a:not(.menu-btn):not(.site-logo-link),
+      .player-name,
+      .value,
+      .rank,
+      .num,
+      .projected {
+        text-shadow: none;
+      }
+
+      .menu-btn.active,
+      .menu-bar .menu-btn.active,
+      .tab-btn.active,
+      button.active,
+      [data-tab].active {
+        border-color: rgba(72, 187, 120, 0.78) !important;
+        color: #74d99f !important;
+        background: rgba(72, 187, 120, 0.14) !important;
+      }
+
+      .menu-btn:hover,
+      .menu-bar .menu-btn:hover,
+      .tab-btn:hover,
+      button:hover,
+      select:hover,
+      select:focus,
+      input:focus,
+      textarea:focus {
+        border-color: rgba(72, 187, 120, 0.78) !important;
+        color: #74d99f !important;
+      }
+
+      .menu-btn.active:hover,
+      .menu-bar .menu-btn.active:hover,
+      .tab-btn.active:hover,
+      button.active:hover,
+      [data-tab].active:hover {
+        background: rgba(72, 187, 120, 0.22) !important;
+      }
+
+      .menu-btn:focus-visible,
+      .tab-btn:focus-visible,
+      button:focus-visible,
+      select:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid rgba(72, 187, 120, 0.58) !important;
+        outline-offset: 2px;
+      }
+    `);
+  }
+
+  function applyClanHighlightStyles() {
+    ensureStyle("clan-row-highlight-styles", `
       .wmsy-row {
         background: rgba(72, 187, 120, 0.14) !important;
       }
@@ -284,8 +358,7 @@
         color: #74d99f !important;
         font-weight: 700 !important;
       }
-    `;
-    document.head.appendChild(style);
+    `);
   }
 
   function highlightTrackedClanRows() {
@@ -349,7 +422,7 @@
   }
 
   function applyProfileRedScheme() {
-    if (!isProfilePage() || document.getElementById("clan-profile-red-scheme")) return;
+    if (!isProfilePage() || isWmsy() || document.getElementById("clan-profile-red-scheme")) return;
 
     const style = document.createElement("style");
     style.id = "clan-profile-red-scheme";
@@ -408,6 +481,7 @@
   function applyClanSwitcher() {
     const clan = currentClan();
 
+    applyWmsyTheme();
     applyProfileRedScheme();
 
     const logo = document.querySelector("#site-mascot, .site-logo");
@@ -459,6 +533,7 @@
       renderWmsyLeaderboard();
       applyTrackedClanCards();
       highlightTrackedClanRows();
+      applyWmsyTheme();
     }, 100);
   });
 
