@@ -441,6 +441,12 @@
       color: #f2cc60;
     }
 
+    .clan-pill.full {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
     .clan-pill.offline {
       border-color: var(--disabled);
       background: var(--disabled-bg);
@@ -632,6 +638,7 @@
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const OFFLINE_LABEL = "Offline";
+    const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
     let servers = [];
     let sortKey = "rank";
@@ -639,6 +646,7 @@
     let discordConfig = {};
     let currentDiscordUserId = "";
     let checkedServers = {};
+    let refreshTimer = null;
     let submissionState = {
       accepting: false,
       disabled: true,
@@ -676,8 +684,7 @@
 
     function normalizeLocationLabel(value) {
       const text = String(value || "").trim();
-      if (!text || text.toLowerCase() === "unknown") return OFFLINE_LABEL;
-      return text;
+      return text || "Unknown";
     }
 
     function stableServerId(row, link) {
@@ -971,8 +978,21 @@
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
     }
 
+    function isOfflineServer(row) {
+      const players = getPlayerCount(row);
+      const status = String(row.compromise_status || "unknown").toLowerCase();
+      return players === 0 || status === "empty" || status === "offline";
+    }
+
+    function isFullServer(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      return players !== null && maxPlayers > 0 && players >= maxPlayers;
+    }
+
     function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "—" : (row.location || "—");
+      if (isOfflineServer(row)) return OFFLINE_LABEL;
+      return normalizeLocationLabel(row.location);
     }
 
     function clanStatusLabel(row) {
@@ -982,36 +1002,8 @@
       const wmsy = Number(counts.WMSY || counts.wmsy || 0);
       const other = Number(counts.other || counts.OTHER || 0);
 
-      if (status === "empty") return "Empty";
-      if (status === "possible_compromise") return "Review";
-      if (c0ld || wmsy || other) {
-        const parts = [];
-        if (c0ld) parts.push(`C0LD ${c0ld}`);
-        if (wmsy) parts.push(`WMSY ${wmsy}`);
-        if (other) parts.push(`Other ${other}`);
-        return parts.join(" · ");
-      }
-      return OFFLINE_LABEL;
-    }
-
-    function clanStatusClass(row) {
-      const status = String(row.compromise_status || "unknown");
-      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
-      return "offline";
-    }
-
-    function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? OFFLINE_LABEL : normalizeLocationLabel(row.location);
-    }
-
-    function clanStatusLabel(row) {
-      const status = String(row.compromise_status || "unknown");
-      const counts = row.clan_counts || {};
-      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
-      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
-      const other = Number(counts.other || counts.OTHER || 0);
-
-      if (status === "empty") return "Empty";
+      if (isOfflineServer(row)) return OFFLINE_LABEL;
+      if (isFullServer(row)) return "Full";
       if (status === "possible_compromise") return "Review";
       if (c0ld || wmsy || other) {
         const parts = [];
@@ -1020,13 +1012,15 @@
         if (other) parts.push(`Other ${other}`);
         return parts.join(" / ");
       }
-      return OFFLINE_LABEL;
+      return "Unknown";
     }
 
     function clanStatusClass(row) {
       const status = String(row.compromise_status || "unknown");
+      if (isOfflineServer(row)) return "offline";
+      if (isFullServer(row)) return "full";
       if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
-      return "offline";
+      return "unknown";
     }
 
     function fmtDateTime(value) {
@@ -1267,6 +1261,11 @@
         loadCheckedServers();
         await loadServers();
         await loadSubmissionStatus();
+
+        refreshTimer = setInterval(async () => {
+          await loadServers();
+          await loadSubmissionStatus();
+        }, AUTO_REFRESH_MS);
       }
     }
 

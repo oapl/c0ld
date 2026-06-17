@@ -501,6 +501,10 @@
             <span id="server-location" class="summary-value">-</span>
           </div>
           <div class="summary-item">
+            <span class="summary-label">Status</span>
+            <span id="server-status-value" class="summary-value">-</span>
+          </div>
+          <div class="summary-item">
             <span class="summary-label">Players</span>
             <span id="server-players" class="summary-value">-</span>
           </div>
@@ -553,6 +557,7 @@
     const SERVERS_DATA_PATH = "/api/servers";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
+    const AUTO_REFRESH_MS = 5 * 60 * 1000;
     const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
     const DEFAULT_AVATAR =
       "data:image/svg+xml;utf8," +
@@ -567,6 +572,7 @@
     let servers = [];
     let activeServer = null;
     let discordConfig = {};
+    let refreshTimer = null;
 
     function htmlEscape(value) {
       return String(value ?? "")
@@ -778,8 +784,37 @@
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
     }
 
+    function normalizeLocationLabel(value) {
+      const text = String(value || "").trim();
+      return text || "Unknown";
+    }
+
+    function isOfflineServer(row) {
+      const players = getPlayerCount(row);
+      const status = String(row.compromise_status || "unknown").toLowerCase();
+      return players === 0 || status === "empty" || status === "offline";
+    }
+
+    function isFullServer(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      return players !== null && maxPlayers > 0 && players >= maxPlayers;
+    }
+
     function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "-" : (row.location || "-");
+      if (isOfflineServer(row)) return "Offline";
+      return normalizeLocationLabel(row.location);
+    }
+
+    function displayServerStatus(row) {
+      const status = String(row.compromise_status || "unknown");
+
+      if (isOfflineServer(row)) return "Offline";
+      if (isFullServer(row)) return "Full";
+      if (status === "possible_compromise") return "Review";
+      if (status === "trusted") return "Trusted";
+      if (status === "mixed") return "Mixed";
+      return "Unknown";
     }
 
     function fmtDateTime(value) {
@@ -919,6 +954,7 @@
       document.getElementById("server-title").textContent = `Server ${row.rank}`;
       document.getElementById("server-id").textContent = `Server ${row.rank}`;
       document.getElementById("server-location").textContent = displayLocation(row);
+      document.getElementById("server-status-value").textContent = displayServerStatus(row);
       document.getElementById("server-players").textContent = fmtPlayers(row);
       document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at);
 
@@ -1009,6 +1045,7 @@
 
       if (auth.allowed) {
         await loadServers();
+        refreshTimer = setInterval(loadServers, AUTO_REFRESH_MS);
       }
     }
 
