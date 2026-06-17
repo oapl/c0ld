@@ -80,6 +80,23 @@
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   }
 
+  function fmtDuration(hours) {
+    if (!Number.isFinite(hours) || hours < 0) return "Won't pass";
+
+    const totalMinutes = Math.max(1, Math.round(hours * 60));
+    const days = Math.floor(totalMinutes / 1440);
+    const afterDays = totalMinutes % 1440;
+    const hrs = Math.floor(afterDays / 60);
+    const mins = afterDays % 60;
+    const parts = [];
+
+    if (days) parts.push(`${days}d`);
+    if (hrs) parts.push(`${hrs}h`);
+    if (mins || !parts.length) parts.push(`${mins}m`);
+
+    return parts.join(" ");
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -285,28 +302,15 @@
   }
 
   function latestTimestamp() {
-    const explicit = new Date(currentData?.snapshot_at || currentData?.generated_at || "").getTime();
-    if (Number.isFinite(explicit)) return explicit;
+    const times = [
+      new Date(currentData?.snapshot_at || currentData?.generated_at || "").getTime(),
+      ...currentRows().map(row => new Date(row.fetched_at || "").getTime())
+    ].filter(Number.isFinite);
 
-    const times = currentRows()
-      .map(row => new Date(row.fetched_at || "").getTime())
-      .filter(Number.isFinite);
     return times.length ? Math.max(...times) : Date.now();
   }
 
-  function rowAtOrBefore(rows, timestamp) {
-    let best = null;
-    for (const row of rows) {
-      const t = new Date(row.fetched_at).getTime();
-      if (Number.isFinite(t) && t <= timestamp) best = row;
-      if (Number.isFinite(t) && t > timestamp) break;
-    }
-    return best;
-  }
-
-  function interpolatedPointsAt(rows, timestamp) {
-    if (!rows.length) return null;
-
+  function pointAt(rows, timestamp) {
     const cleanRows = rows
       .map(row => ({ ...row, ms: new Date(row.fetched_at).getTime() }))
       .filter(row => Number.isFinite(row.ms) && finite(row.points) !== null)
@@ -339,54 +343,30 @@
     return { points: last.points, rank: last.rank };
   }
 
-  function rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs) {
-    const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
+  function preparedRowsForWindow(rows, clanRow, windowConfig, endMs) {
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
     const output = rows.slice();
-    const currentPoint = rowAtOrBefore(output, endMs) || {
-      fetched_at: new Date(endMs).toISOString(),
-      rank: clanRow.rank,
-      clan_name: clanRow.clan_name,
-      points: clanRow.points
-    };
+    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
+    const currentPoints = finite(clanRow.points);
 
-    if (!output.some(row => new Date(row.fetched_at).getTime() === endMs) && finite(clanRow.points) !== null) {
+    if (currentPoints !== null && !output.some(row => new Date(row.fetched_at).getTime() === endMs)) {
       output.push({
         fetched_at: new Date(endMs).toISOString(),
         rank: clanRow.rank,
         clan_name: clanRow.clan_name,
-        points: clanRow.points
+        points: currentPoints
       });
     }
 
     const earliestMs = Math.min(...output.map(row => new Date(row.fetched_at).getTime()).filter(Number.isFinite));
-    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
-    const endPoints = finite(currentPoint?.points) ?? finite(clanRow.points);
-
-    if ((output.length < 2 || !Number.isFinite(earliestMs) || earliestMs > startMs) && endPoints !== null) {
-      const startPoints = gainValue !== null ? Math.max(0, endPoints - gainValue) : endPoints;
+    if ((output.length < 2 || !Number.isFinite(earliestMs) || earliestMs > startMs) && currentPoints !== null) {
       output.push({
         fetched_at: new Date(startMs).toISOString(),
         rank: clanRow.rank,
         clan_name: clanRow.clan_name,
-        points: startPoints,
+        points: gainValue !== null ? Math.max(0, currentPoints - gainValue) : currentPoints,
         synthetic: true
       });
-    }
-
-    const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
-    for (let i = 0; i <= bucketCount; i += 1) {
-      const t = startMs + i * bucketMs;
-      const sample = interpolatedPointsAt(output, t);
-      if (sample) {
-        output.push({
-          fetched_at: new Date(t).toISOString(),
-          rank: sample.rank ?? clanRow.rank,
-          clan_name: clanRow.clan_name,
-          points: sample.points,
-          synthetic: true
-        });
-      }
     }
 
     return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
@@ -396,22 +376,27 @@
     const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
     const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
-    const preparedRows = rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs);
+    const preparedRows = preparedRowsForWindow(rows, clanRow, windowConfig, endMs);
     const points = [];
+    let cumulativeGain = 0;
 
     for (let bucketIndex = 1; bucketIndex <= bucketCount; bucketIndex += 1) {
       const bucketEnd = startMs + bucketIndex * bucketMs;
       const bucketStart = bucketEnd - bucketMs;
-      const startPoint = interpolatedPointsAt(preparedRows, bucketStart);
-      const endPoint = interpolatedPointsAt(preparedRows, bucketEnd);
+      const startPoint = pointAt(preparedRows, bucketStart);
+      const endPoint = pointAt(preparedRows, bucketEnd);
       const startPoints = finite(startPoint?.points);
       const endPoints = finite(endPoint?.points);
+      const intervalGain = startPoints === null || endPoints === null ? 0 : Math.max(0, endPoints - startPoints);
+
+      cumulativeGain += intervalGain;
 
       points.push({
         t: bucketEnd,
         rawT: new Date(bucketEnd).toISOString(),
         bucketStart: new Date(bucketStart).toISOString(),
-        gain: startPoints === null || endPoints === null ? 0 : Math.max(0, endPoints - startPoints),
+        gain: cumulativeGain,
+        intervalGain,
         rank: endPoint?.rank ?? clanRow.rank,
         bucketIndex,
         bucketCount
@@ -422,14 +407,8 @@
   }
 
   function totalGainOverWindow(rows, windowConfig, endMs, clanRow) {
-    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-    const preparedRows = rowsWithSyntheticWindowStart(rows, clanRow, windowConfig, endMs);
-    const startPoint = interpolatedPointsAt(preparedRows, startMs);
-    const endPoint = interpolatedPointsAt(preparedRows, endMs);
-    const startPoints = finite(startPoint?.points);
-    const endPoints = finite(endPoint?.points);
-    if (startPoints === null || endPoints === null) return 0;
-    return Math.max(0, endPoints - startPoints);
+    const points = buildIntervalPoints(rows, windowConfig, endMs, clanRow);
+    return points.length ? points[points.length - 1].gain : 0;
   }
 
   function buildSeries() {
@@ -440,13 +419,14 @@
     return selectedRows().map((row, index) => {
       const history = historyForClan(row.clan_name);
       const points = buildIntervalPoints(history, windowConfig, endMs, row);
+
       return {
         clan_name: row.clan_name,
         rank: row.rank,
         color: clanColor(row.clan_name, index),
         current: row,
         points,
-        totalWindowGain: totalGainOverWindow(history, windowConfig, endMs, row),
+        totalWindowGain: points.length ? points[points.length - 1].gain : totalGainOverWindow(history, windowConfig, endMs, row),
         isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
     }).filter(series => series.points.length >= 1);
@@ -489,9 +469,11 @@
     const endMs = new Date(currentData?.battle_end_iso || "").getTime();
     const nowMs = latestTimestamp();
     const remainingHours = Number.isFinite(endMs) ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000)) : 0;
-    const projectedToPass = closeRate > 0 && remainingHours > 0 && (pointsToGain / closeRate) <= remainingHours;
+    const hoursToPass = closeRate > 0 ? pointsToGain / closeRate : Infinity;
+    const projectedToPass = closeRate > 0 && remainingHours > 0 && hoursToPass <= remainingHours;
+    const timeToPass = projectedToPass ? fmtDuration(hoursToPass) : "Won't pass";
 
-    summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass <strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>${windowConfig.short}</strong> rate, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}.`;
+    summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass <strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>${windowConfig.short}</strong> rate, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}. Time to pass: <strong>${escapeHtml(timeToPass)}</strong>.`;
   }
 
   function draw() {
@@ -527,8 +509,6 @@
     }
 
     const allPoints = seriesList.flatMap(series => series.points);
-    const minT = Math.min(...allPoints.map(point => point.t));
-    const maxT = Math.max(...allPoints.map(point => point.t));
     const minYRaw = Math.min(...allPoints.map(point => point.gain));
     const maxYRaw = Math.max(...allPoints.map(point => point.gain));
     const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 100_000);
@@ -543,7 +523,7 @@
     const width = rect.width - padLeft - padRight;
     const height = rect.height - padTop - padBottom;
 
-    const x = point => maxT === minT ? padLeft : padLeft + ((point.t - minT) / (maxT - minT)) * width;
+    const x = point => point.bucketCount <= 1 ? padLeft : padLeft + ((point.bucketIndex - 1) / (point.bucketCount - 1)) * width;
     const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.gain - minY) / (maxY - minY))) * height;
 
     ctx.strokeStyle = "#30363d";
@@ -581,8 +561,10 @@
       ctx.restore();
     }
 
-    const firstDate = new Date(minT);
-    const lastDate = new Date(maxT);
+    const endMs = latestTimestamp();
+    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
+    const firstDate = new Date(startMs);
+    const lastDate = new Date(endMs);
     ctx.fillStyle = "#8b949e";
     ctx.fillText(firstDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), padLeft, rect.height - 12);
     const lastLabel = lastDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -596,7 +578,7 @@
       const legendItems = [...cutoffItems, ...otherItems];
       legend.innerHTML = legendItems.map(series => `
         <span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>
-      `).join("") + `<span>${seriesList[0]?.points?.length || 0} intervals · ${windowConfig.bucketMinutes}m gain each</span>`;
+      `).join("") + `<span>${seriesList[0]?.points?.length || 0} intervals · cumulative gain</span>`;
     }
 
     canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect, windowConfig };
@@ -656,7 +638,8 @@
       tooltip.innerHTML = `
         <strong style="color:${nearestSeries.color}">#${nearestSeries.rank} ${escapeHtml(nearestSeries.clan_name)}</strong>
         <div>Interval ${nearest.bucketIndex}/${nearest.bucketCount}</div>
-        <div>${fresh.windowConfig.bucketMinutes}m gain: ${fmtShort(nearest.gain)}</div>
+        <div>${fresh.windowConfig.bucketMinutes}m gain: ${fmtShort(nearest.intervalGain)}</div>
+        <div>Total window gain: ${fmtShort(nearest.gain)}</div>
         <div>Interval ending: ${fmtDateTime(nearest.rawT)}</div>
       `;
 
