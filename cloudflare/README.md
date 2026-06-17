@@ -133,7 +133,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `RETENTION_HOURS` | `336` |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
 | `INGEST_CLANS_LEADERBOARD` | `true` |
-| `CLAN_RANK_TOP_N` | `100` |
+| `CLAN_RANK_TOP_N` | `200` |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker chooses the active/latest battle object from the API and stores that battle key in `battle_key`.
 
@@ -218,92 +218,5 @@ server audit events in Supabase.
 Run this Supabase migration first:
 
 ```text
-supabase/migrations/008_c0ld_servers.sql
+supabase/migrations/008_servers.sql
 ```
-
-Then create/deploy a Worker such as:
-
-```text
-c0ld-servers
-```
-
-Paste in:
-
-```text
-cloudflare/c0ld-servers-worker.js
-```
-
-Required secrets:
-
-| Secret | Purpose |
-|---|---|
-| `SUPABASE_URL` | Supabase project URL. |
-| `SUPABASE_SERVICE_KEY` | Supabase service role key. |
-| `SESSION_SECRET` | Same exact value used by the `c0ldauth` Worker. Allows Discord-verified submissions. |
-| `SERVERS_ADMIN_TOKEN` | Separate long random string for approving/declining submissions. |
-
-Optional vars:
-
-| Variable | Purpose |
-|---|---|
-| `SITE_ORIGINS` | `https://oapl.github.io` |
-| `SERVER_SUBMISSION_WEBHOOK_URL` | Private review-channel webhook. Uploaded video files are posted there and the returned Discord attachment URL is stored with the submission. |
-| `SERVER_STATUS_WEBHOOK_URL` | Optional Discord webhook for the server status post. If blank, the Worker falls back to `SERVER_SUBMISSION_WEBHOOK_URL` for starter testing. |
-| `SERVER_STATUS_DISCORD_ENABLED` | Set to `true` to let the Worker scheduled handler publish/update the Discord status post. |
-| `SERVER_STATUS_SERVER_NUMBER` | Server to publish from the scheduled handler. Defaults to `20`. |
-| `SERVER_STATUS_DISCORD_DELAY_SECONDS` | Delay before scheduled publishing so the scraper has time to write Supabase. Defaults to `30`, capped at `120`. |
-
-To publish the Server 20 Discord status automatically at the same rough tempo as
-the scraper, add a cron trigger such as `*/10 * * * *`. The Worker waits
-`SERVER_STATUS_DISCORD_DELAY_SECONDS` before reading Supabase, then creates one
-webhook message with `wait=true` and edits that same message on later runs.
-
-Useful endpoints:
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/servers` | Public approved server rows for `servers.html` and `server.html`. |
-| `POST /api/servers/submit` | Discord-session-protected submission endpoint. |
-| `GET /api/admin/submissions?status=pending` | Admin list of pending submissions. |
-| `POST /api/admin/submissions/{id}/approve` | Admin approval. Updates the matching server row when the share code already exists. |
-| `POST /api/admin/submissions/{id}/decline` | Admin decline. |
-| `POST /api/admin/servers/{server_number}/players` | Admin/player-source endpoint to report current players. Logs `possible_compromised_server` when players are present but none match C0LD or WMSY. |
-| `POST /api/admin/servers/{server_number}/discord-status` | Admin test endpoint that creates or updates the persistent Discord status embed for that server. |
-| `POST /api/admin/discord/server-status?server=20` | Same as above, with the server selected by query/body/env. |
-
-Example approval:
-
-```powershell
-$token = "YOUR_SERVERS_ADMIN_TOKEN"
-$worker = "https://c0ld-servers.opal-dde.workers.dev"
-
-Invoke-RestMethod "$worker/api/admin/submissions?status=pending" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post "$worker/api/admin/submissions/SUBMISSION_ID/approve" `
-  -Headers @{ Authorization = "Bearer $token" } `
-  -ContentType "application/json" `
-  -Body '{"reviewed_by":"opal"}'
-```
-
-Roblox server share links do not, by themselves, expose a reliable current
-player list to the static page. The Worker has the storage and annotation path
-ready, but the live player list still needs a trusted reporter/source to call
-`/api/admin/servers/{server_number}/players`.
-
-## Live Clan Lookup Worker
-
-`live-clan-lookup-worker.js` is a replacement for the current live clan lookup
-Worker used by `live-clan.html`. It returns the same payload shape, but also
-stores the latest successful lookup in Supabase and falls back to that cache
-if the upstream API is temporarily unavailable.
-
-Run this Supabase migration:
-
-```text
-supabase/migrations/009_live_clan_lookup_cache.sql
-```
-
-Then paste `cloudflare/live-clan-lookup-worker.js` into the existing
-`ps99-live-clan` Worker, or deploy a new Worker and update `WORKER_URL` in
-`live-clan.html`.
