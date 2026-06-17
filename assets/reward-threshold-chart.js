@@ -14,12 +14,7 @@
     "24h": { label: "24 Hours — hourly gains", short: "24Hr", hours: 24, bucketMinutes: 60, gainKey: "gain_24h" }
   };
 
-  const SPECIAL_COLORS = {
-    c0ld: "#ff9b96",
-    wmsy: "#74d99f",
-    nong: "#f6ad55"
-  };
-
+  const SPECIAL_COLORS = { c0ld: "#ff9b96", wmsy: "#74d99f", nong: "#f6ad55" };
   const DEFAULT_COLORS = [
     "#58a6ff", "#d2a8ff", "#79c0ff", "#ffa657", "#a5d6ff",
     "#ff7b72", "#3fb950", "#f2cc60", "#db61a2", "#56d4dd",
@@ -56,7 +51,6 @@
   function fmtShort(value) {
     const n = finite(value);
     if (n === null) return "—";
-
     const tiers = [
       { value: 1e12, suffix: "T" },
       { value: 1e9, suffix: "B" },
@@ -80,20 +74,24 @@
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   }
 
-  function fmtDuration(hours) {
-    if (!Number.isFinite(hours) || hours < 0) return "Won't pass";
+  function fmtTime(value) {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
 
+  function fmtDuration(hours) {
+    if (!Number.isFinite(hours) || hours < 0) return "—";
     const totalMinutes = Math.max(1, Math.round(hours * 60));
     const days = Math.floor(totalMinutes / 1440);
-    const afterDays = totalMinutes % 1440;
-    const hrs = Math.floor(afterDays / 60);
-    const mins = afterDays % 60;
+    const rem = totalMinutes % 1440;
+    const hrs = Math.floor(rem / 60);
+    const mins = rem % 60;
     const parts = [];
-
     if (days) parts.push(`${days}d`);
     if (hrs) parts.push(`${hrs}h`);
     if (mins || !parts.length) parts.push(`${mins}m`);
-
     return parts.join(" ");
   }
 
@@ -131,8 +129,9 @@
       .reward-threshold-body { padding: 14px 16px 16px; }
       .reward-threshold-chart-shell { position: relative; }
       #reward-threshold-chart { width: 100%; height: 370px; display: block; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: crosshair; }
-      .reward-threshold-tooltip { position: absolute; z-index: 10; display: none; pointer-events: none; min-width: 240px; max-width: 360px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0b0f14; box-shadow: 0 8px 24px rgba(0,0,0,.35); color: var(--text); font-size: 13px; line-height: 1.45; }
-      .reward-threshold-tooltip strong { display: block; margin-bottom: 4px; }
+      .reward-threshold-tooltip { position: absolute; z-index: 10; display: none; pointer-events: none; min-width: 300px; max-width: 520px; max-height: 440px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0b0f14; box-shadow: 0 8px 24px rgba(0,0,0,.35); color: var(--text); font-size: 13px; line-height: 1.45; }
+      .reward-threshold-tooltip strong { display: block; margin-bottom: 5px; }
+      .reward-threshold-tooltip .tooltip-row { white-space: nowrap; margin-top: 3px; }
       .reward-threshold-summary { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
       .reward-threshold-summary strong { color: var(--text); }
       .reward-threshold-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; color: var(--muted); font-size: 12px; }
@@ -288,26 +287,32 @@
       .filter(row => normalize(row.clan_name) === key && row.points !== null && row.fetched_at)
       .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
 
+    if (rows.length) return rows;
+
     const current = currentRows().find(row => normalize(row.clan_name) === key);
-    if (current?.fetched_at && current.points !== null && !rows.some(row => row.fetched_at === current.fetched_at)) {
-      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
-      rows.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
-    }
-
-    if (!rows.length && current) {
-      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
-    }
-
-    return rows;
+    return current ? [{
+      fetched_at: current.fetched_at,
+      rank: current.rank,
+      clan_name: current.clan_name,
+      points: current.points
+    }] : [];
   }
 
   function latestTimestamp() {
-    const times = [
-      new Date(currentData?.snapshot_at || currentData?.generated_at || "").getTime(),
-      ...currentRows().map(row => new Date(row.fetched_at || "").getTime())
-    ].filter(Number.isFinite);
+    const selectedKeys = new Set(selectedRows().map(row => normalize(row.clan_name)));
+    const historyTimes = (historyData?.rows || [])
+      .map(normalizeHistoryRow)
+      .filter(row => selectedKeys.has(normalize(row.clan_name)))
+      .map(row => new Date(row.fetched_at || "").getTime())
+      .filter(Number.isFinite);
 
-    return times.length ? Math.max(...times) : Date.now();
+    if (historyTimes.length) return Math.max(...historyTimes);
+
+    const currentTimes = currentRows()
+      .map(row => new Date(row.fetched_at || "").getTime())
+      .filter(Number.isFinite);
+
+    return currentTimes.length ? Math.max(...currentTimes) : Date.now();
   }
 
   function pointAt(rows, timestamp) {
@@ -317,15 +322,10 @@
       .sort((a, b) => a.ms - b.ms);
 
     if (!cleanRows.length) return null;
-
-    if (timestamp <= cleanRows[0].ms) {
-      return { points: cleanRows[0].points, rank: cleanRows[0].rank };
-    }
+    if (timestamp < cleanRows[0].ms) return null;
 
     const last = cleanRows[cleanRows.length - 1];
-    if (timestamp >= last.ms) {
-      return { points: last.points, rank: last.rank };
-    }
+    if (timestamp >= last.ms) return { points: last.points, rank: last.rank };
 
     for (let i = 1; i < cleanRows.length; i += 1) {
       const prev = cleanRows[i - 1];
@@ -346,28 +346,32 @@
   function preparedRowsForWindow(rows, clanRow, windowConfig, endMs) {
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
     const output = rows.slice();
-    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
+    const hasHistoryInWindow = output.some(row => {
+      const ms = new Date(row.fetched_at).getTime();
+      return Number.isFinite(ms) && ms >= startMs && ms <= endMs;
+    });
+
+    if (hasHistoryInWindow) return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+
     const currentPoints = finite(clanRow.points);
+    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
+    if (currentPoints === null) return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
 
-    if (currentPoints !== null && !output.some(row => new Date(row.fetched_at).getTime() === endMs)) {
-      output.push({
-        fetched_at: new Date(endMs).toISOString(),
-        rank: clanRow.rank,
-        clan_name: clanRow.clan_name,
-        points: currentPoints
-      });
-    }
+    output.push({
+      fetched_at: new Date(startMs).toISOString(),
+      rank: clanRow.rank,
+      clan_name: clanRow.clan_name,
+      points: gainValue !== null ? Math.max(0, currentPoints - gainValue) : currentPoints,
+      synthetic: true
+    });
 
-    const earliestMs = Math.min(...output.map(row => new Date(row.fetched_at).getTime()).filter(Number.isFinite));
-    if ((output.length < 2 || !Number.isFinite(earliestMs) || earliestMs > startMs) && currentPoints !== null) {
-      output.push({
-        fetched_at: new Date(startMs).toISOString(),
-        rank: clanRow.rank,
-        clan_name: clanRow.clan_name,
-        points: gainValue !== null ? Math.max(0, currentPoints - gainValue) : currentPoints,
-        synthetic: true
-      });
-    }
+    output.push({
+      fetched_at: new Date(endMs).toISOString(),
+      rank: clanRow.rank,
+      clan_name: clanRow.clan_name,
+      points: currentPoints,
+      synthetic: true
+    });
 
     return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
   }
@@ -378,7 +382,6 @@
     const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
     const preparedRows = preparedRowsForWindow(rows, clanRow, windowConfig, endMs);
     const points = [];
-    let cumulativeGain = 0;
 
     for (let bucketIndex = 1; bucketIndex <= bucketCount; bucketIndex += 1) {
       const bucketEnd = startMs + bucketIndex * bucketMs;
@@ -387,16 +390,15 @@
       const endPoint = pointAt(preparedRows, bucketEnd);
       const startPoints = finite(startPoint?.points);
       const endPoints = finite(endPoint?.points);
-      const intervalGain = startPoints === null || endPoints === null ? 0 : Math.max(0, endPoints - startPoints);
-
-      cumulativeGain += intervalGain;
+      const pointsGained = startPoints === null || endPoints === null ? 0 : Math.max(0, endPoints - startPoints);
 
       points.push({
         t: bucketEnd,
         rawT: new Date(bucketEnd).toISOString(),
         bucketStart: new Date(bucketStart).toISOString(),
-        gain: cumulativeGain,
-        intervalGain,
+        gain: pointsGained,
+        pointsGained,
+        totalPoints: endPoints,
         rank: endPoint?.rank ?? clanRow.rank,
         bucketIndex,
         bucketCount
@@ -407,8 +409,8 @@
   }
 
   function totalGainOverWindow(rows, windowConfig, endMs, clanRow) {
-    const points = buildIntervalPoints(rows, windowConfig, endMs, clanRow);
-    return points.length ? points[points.length - 1].gain : 0;
+    return buildIntervalPoints(rows, windowConfig, endMs, clanRow)
+      .reduce((sum, point) => sum + (finite(point.pointsGained) || 0), 0);
   }
 
   function buildSeries() {
@@ -419,6 +421,7 @@
     return selectedRows().map((row, index) => {
       const history = historyForClan(row.clan_name);
       const points = buildIntervalPoints(history, windowConfig, endMs, row);
+      const totalWindowGain = points.reduce((sum, point) => sum + (finite(point.pointsGained) || 0), 0);
 
       return {
         clan_name: row.clan_name,
@@ -426,7 +429,7 @@
         color: clanColor(row.clan_name, index),
         current: row,
         points,
-        totalWindowGain: points.length ? points[points.length - 1].gain : totalGainOverWindow(history, windowConfig, endMs, row),
+        totalWindowGain,
         isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
     }).filter(series => series.points.length >= 1);
@@ -471,9 +474,9 @@
     const remainingHours = Number.isFinite(endMs) ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000)) : 0;
     const hoursToPass = closeRate > 0 ? pointsToGain / closeRate : Infinity;
     const projectedToPass = closeRate > 0 && remainingHours > 0 && hoursToPass <= remainingHours;
-    const timeToPass = projectedToPass ? fmtDuration(hoursToPass) : "Won't pass";
+    const timeText = projectedToPass ? ` Time to pass: <strong>${escapeHtml(fmtDuration(hoursToPass))}</strong>.` : "";
 
-    summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass <strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>${windowConfig.short}</strong> rate, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}. Time to pass: <strong>${escapeHtml(timeToPass)}</strong>.`;
+    summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass <strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>${windowConfig.short}</strong> rate, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}.${timeText}`;
   }
 
   function draw() {
@@ -509,8 +512,8 @@
     }
 
     const allPoints = seriesList.flatMap(series => series.points);
-    const minYRaw = Math.min(...allPoints.map(point => point.gain));
-    const maxYRaw = Math.max(...allPoints.map(point => point.gain));
+    const minYRaw = Math.min(...allPoints.map(point => point.pointsGained));
+    const maxYRaw = Math.max(...allPoints.map(point => point.pointsGained));
     const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 100_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
@@ -524,7 +527,7 @@
     const height = rect.height - padTop - padBottom;
 
     const x = point => point.bucketCount <= 1 ? padLeft : padLeft + ((point.bucketIndex - 1) / (point.bucketCount - 1)) * width;
-    const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.gain - minY) / (maxY - minY))) * height;
+    const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.pointsGained - minY) / (maxY - minY))) * height;
 
     ctx.strokeStyle = "#30363d";
     ctx.lineWidth = 1;
@@ -563,11 +566,9 @@
 
     const endMs = latestTimestamp();
     const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-    const firstDate = new Date(startMs);
-    const lastDate = new Date(endMs);
     ctx.fillStyle = "#8b949e";
-    ctx.fillText(firstDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), padLeft, rect.height - 12);
-    const lastLabel = lastDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    ctx.fillText(fmtTime(new Date(startMs).toISOString()), padLeft, rect.height - 12);
+    const lastLabel = fmtTime(new Date(endMs).toISOString());
     ctx.fillText(lastLabel, rect.width - padRight - ctx.measureText(lastLabel).width, rect.height - 12);
 
     cutoffSummary(seriesList, summary, holder, challenger, range, windowConfig);
@@ -578,7 +579,7 @@
       const legendItems = [...cutoffItems, ...otherItems];
       legend.innerHTML = legendItems.map(series => `
         <span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>
-      `).join("") + `<span>${seriesList[0]?.points?.length || 0} intervals · cumulative gain</span>`;
+      `).join("") + `<span>${seriesList[0]?.points?.length || 0} recent intervals · ${windowConfig.bucketMinutes}m gain each</span>`;
     }
 
     canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect, windowConfig };
@@ -599,28 +600,25 @@
 
       const rect = canvas.getBoundingClientRect();
       const mx = ev.clientX - rect.left;
-      let nearest = null;
-      let nearestSeries = null;
+      let nearestPoint = null;
       let nearestDist = Infinity;
 
       for (const series of chart.seriesList) {
         for (const point of series.points) {
           const dist = Math.abs(chart.x(point) - mx);
           if (dist < nearestDist) {
-            nearest = point;
-            nearestSeries = series;
+            nearestPoint = point;
             nearestDist = dist;
           }
         }
       }
 
-      if (!nearest || !nearestSeries) return;
+      if (!nearestPoint) return;
 
       draw();
       const fresh = canvas._rewardThresholdChart;
       const ctx = canvas.getContext("2d");
-      const px = fresh.x(nearest);
-      const py = fresh.y(nearest);
+      const px = fresh.x(nearestPoint);
 
       ctx.save();
       ctx.strokeStyle = "rgba(139, 148, 158, 0.55)";
@@ -629,18 +627,18 @@
       ctx.moveTo(px, fresh.padTop);
       ctx.lineTo(px, fresh.rect.height - fresh.padBottom);
       ctx.stroke();
-      ctx.fillStyle = "#e6edf3";
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
       ctx.restore();
 
+      const sameBucketRows = fresh.seriesList
+        .map(series => ({ series, point: series.points.find(point => point.bucketIndex === nearestPoint.bucketIndex) }))
+        .filter(item => item.point)
+        .sort((a, b) => a.series.rank - b.series.rank);
+
       tooltip.innerHTML = `
-        <strong style="color:${nearestSeries.color}">#${nearestSeries.rank} ${escapeHtml(nearestSeries.clan_name)}</strong>
-        <div>Interval ${nearest.bucketIndex}/${nearest.bucketCount}</div>
-        <div>${fresh.windowConfig.bucketMinutes}m gain: ${fmtShort(nearest.intervalGain)}</div>
-        <div>Total window gain: ${fmtShort(nearest.gain)}</div>
-        <div>Interval ending: ${fmtDateTime(nearest.rawT)}</div>
+        <strong>${escapeHtml(fmtDateTime(nearestPoint.rawT))}</strong>
+        ${sameBucketRows.map(({ series, point }) => `
+          <div class="tooltip-row" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)} Total Points: ${fmtShort(point.totalPoints)} / Points Gained: ${fmtShort(point.pointsGained)}</div>
+        `).join("")}
       `;
 
       tooltip.style.display = "block";
