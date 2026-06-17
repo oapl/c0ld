@@ -428,14 +428,13 @@
       font-size: 12px;
     }
 
-    .clan-pill.trusted {
+    .clan-pill.online {
       border-color: var(--ok);
       background: var(--ok-bg);
       color: #9be9a8;
     }
 
-    .clan-pill.mixed,
-    .clan-pill.unknown {
+    .clan-pill.full {
       border-color: var(--warn);
       background: var(--warn-bg);
       color: #f2cc60;
@@ -445,13 +444,6 @@
       border-color: var(--disabled);
       background: var(--disabled-bg);
       color: #c9d1d9;
-    }
-
-    .clan-pill.possible_compromise,
-    .clan-pill.review {
-      border-color: var(--danger);
-      background: var(--danger-bg);
-      color: #ffb4ad;
     }
 
     .link-cell {
@@ -589,6 +581,7 @@
               <option value="rank">Sort by ID</option>
               <option value="location">Sort by Location</option>
               <option value="players">Sort by Players</option>
+              <option value="status">Sort by Status</option>
               <option value="updated_at">Sort by Updated</option>
             </select>
             <button id="refresh-btn" type="button">Refresh</button>
@@ -631,6 +624,7 @@
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const OFFLINE_LABEL = "Offline";
+    const UNKNOWN_LABEL = "Unknown";
 
     let servers = [];
     let sortKey = "rank";
@@ -673,10 +667,19 @@
       return (hash >>> 0).toString(36);
     }
 
-    function normalizeLocationLabel(value) {
-      const text = String(value || "").trim();
-      if (!text || text.toLowerCase() === "unknown") return OFFLINE_LABEL;
-      return text;
+    function toNumberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      if (Array.isArray(value) || typeof value === "object") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function firstNumber(...values) {
+      for (const value of values) {
+        const n = toNumberOrNull(value);
+        if (n !== null) return n;
+      }
+      return null;
     }
 
     function stableServerId(row, link) {
@@ -685,29 +688,29 @@
       return `srv-${hashString(normalizeLink(link))}`;
     }
 
-    function toNumberOrNull(value) {
-      if (value === null || value === undefined || value === "") return null;
-      const n = Number(value);
-      return Number.isFinite(n) ? n : null;
+    function normalizeLocationLabel(value) {
+      const text = String(value || "").trim();
+      if (!text || text.toLowerCase() === "unknown") return UNKNOWN_LABEL;
+      return text;
     }
 
     function getPlayerCount(row) {
-      return toNumberOrNull(
-        row.players ??
-        row.player_count ??
-        row.players_current ??
-        row.member_count ??
+      return firstNumber(
+        row.players,
+        row.player_count,
+        row.players_current,
+        row.member_count,
         row.members_count
       );
     }
 
     function getMaxPlayers(row) {
-      return toNumberOrNull(
-        row.max_players ??
-        row.players_max ??
-        row.player_capacity ??
-        row.capacity ??
-        discordConfig.default_max_players ??
+      return firstNumber(
+        row.max_players,
+        row.players_max,
+        row.player_capacity,
+        row.capacity,
+        discordConfig.default_max_players,
         DEFAULT_MAX_PLAYERS
       ) || DEFAULT_MAX_PLAYERS;
     }
@@ -809,7 +812,7 @@
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
           clan_counts: row.clan_counts || {},
-          compromise_status: String(row.compromise_status || row.status || "unknown"),
+          compromise_status: String(row.compromise_status || row.status || row.server_status || "").trim(),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
           video_url: String(row.video_url || row.pathing_video_url || row.pathing_video || row.video || "").trim(),
@@ -896,62 +899,41 @@
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
     }
 
-    function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? "—" : (row.location || "—");
-    }
+    function serverAvailability(row) {
+      const players = getPlayerCount(row);
+      const maxPlayers = getMaxPlayers(row);
+      const status = String(row.compromise_status || row.status || row.server_status || "").trim().toLowerCase();
 
-    function clanStatusLabel(row) {
-      const status = String(row.compromise_status || "unknown");
-      const counts = row.clan_counts || {};
-      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
-      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
-      const other = Number(counts.other || counts.OTHER || 0);
+      if (status === "full") return "full";
+      if (status === "online") return "online";
+      if (status === "offline") return "offline";
 
-      if (status === "empty") return "Empty";
-      if (status === "possible_compromise") return "Review";
-      if (c0ld || wmsy || other) {
-        const parts = [];
-        if (c0ld) parts.push(`C0LD ${c0ld}`);
-        if (wmsy) parts.push(`WMSY ${wmsy}`);
-        if (other) parts.push(`Other ${other}`);
-        return parts.join(" · ");
-      }
-      return OFFLINE_LABEL;
-    }
+      if (players !== null && players >= maxPlayers) return "full";
+      if (players !== null && players > 0) return "online";
 
-    function clanStatusClass(row) {
-      const status = String(row.compromise_status || "unknown");
-      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
       return "offline";
     }
 
     function displayLocation(row) {
-      return getPlayerCount(row) === 0 ? OFFLINE_LABEL : normalizeLocationLabel(row.location);
+      const availability = serverAvailability(row);
+
+      if (availability === "offline") {
+        return OFFLINE_LABEL;
+      }
+
+      return normalizeLocationLabel(row.location || row.region || UNKNOWN_LABEL);
     }
 
     function clanStatusLabel(row) {
-      const status = String(row.compromise_status || "unknown");
-      const counts = row.clan_counts || {};
-      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
-      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
-      const other = Number(counts.other || counts.OTHER || 0);
+      const availability = serverAvailability(row);
 
-      if (status === "empty") return "Empty";
-      if (status === "possible_compromise") return "Review";
-      if (c0ld || wmsy || other) {
-        const parts = [];
-        if (c0ld) parts.push(`C0LD ${c0ld}`);
-        if (wmsy) parts.push(`WMSY ${wmsy}`);
-        if (other) parts.push(`Other ${other}`);
-        return parts.join(" / ");
-      }
-      return OFFLINE_LABEL;
+      if (availability === "full") return "Full";
+      if (availability === "online") return "Online";
+      return "Offline";
     }
 
     function clanStatusClass(row) {
-      const status = String(row.compromise_status || "unknown");
-      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
-      return "offline";
+      return serverAvailability(row);
     }
 
     function fmtDateTime(value) {
@@ -1016,6 +998,7 @@
         const video = row.video_url
           ? `<a href="${htmlEscape(row.video_url)}" target="_blank" rel="noopener">Open</a>`
           : "—";
+
         const players = getPlayerCount(row);
         const playerClass = players === 0 ? "player-pill empty" : "player-pill";
         const checkKey = htmlEscape(serverCheckKey(row));
@@ -1122,6 +1105,7 @@
 
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
+
       document.getElementById("server-sort-control").addEventListener("change", event => {
         sortKey = event.target.value;
         sortAsc = sortKey !== "players" && sortKey !== "updated_at";
