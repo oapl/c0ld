@@ -31,6 +31,9 @@ jobs:
           cp -R Data assets _site/
           touch _site/.nojekyll
 
+      - name: Generate individual clan pages
+        run: node scripts/generate-clan-pages.js _site
+
       - name: Add shared site scripts
         run: |
           python3 - <<'PY'
@@ -40,6 +43,7 @@ jobs:
               '  <script src="assets/clan-switcher.js"></script>\n',
               '  <script src="assets/site-enhancements.js"></script>\n',
               '  <script src="assets/site-enhancements-compat.js"></script>\n',
+              '  <script src="assets/clan-page-links.js"></script>\n',
           ]
 
           for path in Path('_site').glob('*.html'):
