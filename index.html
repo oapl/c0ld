@@ -155,6 +155,8 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
+      align-items: center;
+      text-align: center;
     }
 
     .label {
@@ -405,6 +407,7 @@
 
     <div class="menu-bar">
       <button class="menu-btn active" id="tab-btn-leaderboard" type="button">c0ld Leaderboard</button>
+      <a class="menu-btn" id="wmsy-leaderboard-link" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="servers.html">Servers</a>
@@ -417,7 +420,7 @@
 
     <section class="cards">
       <div class="card">
-        <div class="label">c0ld Current Rank</div>
+        <div class="label" id="tracked-rank-label">c0ld Current Rank</div>
         <div id="c0ld-rank-value" class="value">—</div>
       </div>
 
@@ -439,7 +442,7 @@
 
     <section id="view-leaderboard" class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">c0ld Leaderboard</h2>
+        <h2 class="panel-title" id="leaderboard-title">c0ld Leaderboard</h2>
 
         <div class="toolbar">
           <select id="battle-select">
@@ -475,6 +478,9 @@
     const AUTO_REFRESH_MS = 60 * 1000;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
     const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+    const TRACKED_CLAN = getRequestedClanName();
+    const TRACKED_CLAN_KEY = normalizeKey(TRACKED_CLAN);
+    const TRACKED_CLAN_DISPLAY = formatClanDisplayName(TRACKED_CLAN);
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -509,6 +515,83 @@
     let refreshTimer = null;
     let countdownTimer = null;
     let isLoading = false;
+
+    function getRequestedClanName() {
+      const raw = new URLSearchParams(window.location.search).get("clan") || "c0ld";
+      return String(raw).trim().replace(/[^a-z0-9_-]/gi, "") || "c0ld";
+    }
+
+    function formatClanDisplayName(clan) {
+      return normalizeKey(clan) === "c0ld" ? "c0ld" : String(clan || "").toUpperCase();
+    }
+
+    function isDefaultClan() {
+      return TRACKED_CLAN_KEY === "c0ld";
+    }
+
+    function withClanQuery(url, params = {}) {
+      const out = new URL(url, window.location.href);
+      out.searchParams.set("clan", TRACKED_CLAN);
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return out.toString();
+    }
+
+    function pageUrl(path, params = {}) {
+      const out = new URL(path, window.location.href);
+
+      if (!isDefaultClan()) {
+        out.searchParams.set("clan", TRACKED_CLAN);
+      }
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return `${out.pathname.split("/").pop()}${out.search}${out.hash}`;
+    }
+
+    function applyClanChrome() {
+      document.title = `${TRACKED_CLAN_DISPLAY} Leaderboard`;
+
+      const logoLink = document.querySelector(".site-logo-link");
+      if (logoLink) {
+        logoLink.href = pageUrl("index.html");
+        logoLink.setAttribute("aria-label", `${TRACKED_CLAN_DISPLAY} home`);
+      }
+
+      const logo = document.querySelector(".site-logo");
+      if (logo) {
+        logo.alt = TRACKED_CLAN_DISPLAY;
+      }
+
+      const leaderboardBtn = document.getElementById("tab-btn-leaderboard");
+      if (leaderboardBtn) {
+        leaderboardBtn.textContent = `${TRACKED_CLAN_DISPLAY} Leaderboard`;
+      }
+
+      const wmsyLink = document.getElementById("wmsy-leaderboard-link");
+      if (wmsyLink) {
+        wmsyLink.classList.toggle("hidden", TRACKED_CLAN_KEY === "wmsy");
+      }
+
+      const rankLabel = document.getElementById("tracked-rank-label");
+      if (rankLabel) {
+        rankLabel.textContent = `${TRACKED_CLAN_DISPLAY} Current Rank`;
+      }
+
+      const title = document.getElementById("leaderboard-title");
+      if (title) {
+        title.textContent = `${TRACKED_CLAN_DISPLAY} Leaderboard`;
+      }
+    }
 
     function escapeHtml(s) {
       return String(s ?? "")
@@ -669,7 +752,7 @@
         projected_rank: row.projected_rank ?? rankByClan.get(normalizeKey(row.clan_name)) ?? null
       }));
 
-      const tracked = rowsWithRanks.find(row => normalizeKey(row.clan_name) === "c0ld") || null;
+      const tracked = rowsWithRanks.find(row => normalizeKey(row.clan_name) === TRACKED_CLAN_KEY) || null;
 
       return {
         ...data,
@@ -850,7 +933,7 @@
         return label;
       }
 
-      return `<a href="?battle=${encodeURIComponent(battle.battle)}">${label}</a>`;
+      return `<a href="${escapeHtml(pageUrl("index.html", { battle: battle.battle }))}">${label}</a>`;
     }
 
     function getCurrentFetchedAt() {
@@ -1094,7 +1177,7 @@
 
       for (const row of visible) {
         const tr = document.createElement("tr");
-        const profileUrl = `profile.html?id=${encodeURIComponent(getProfileKey(row))}`;
+        const profileUrl = pageUrl("profile.html", { id: getProfileKey(row) });
 
         tr.innerHTML = `
           <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
@@ -1296,7 +1379,7 @@
 
       try {
         const [currentJson, clansJson] = await Promise.all([
-          fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld leaderboard"),
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`),
           fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard")
         ]);
 
@@ -1304,7 +1387,7 @@
         clansCurrentData = withClanProjections(clansJson);
 
         if (!currentData || !Array.isArray(currentData.rows)) {
-          throw new Error("Live c0ld leaderboard does not contain a rows array.");
+          throw new Error(`Live ${TRACKED_CLAN_DISPLAY} leaderboard does not contain a rows array.`);
         }
 
         if (clansCurrentData) {
@@ -1398,6 +1481,7 @@
     }
 
     async function init() {
+      applyClanChrome();
       wireEvents();
       updateView();
 

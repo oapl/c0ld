@@ -139,7 +139,7 @@
     .toolbar {
       margin-bottom: 18px;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 220px;
+      grid-template-columns: 180px minmax(0, 1fr) 220px;
       gap: 12px;
       align-items: center;
     }
@@ -335,6 +335,7 @@
 
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="servers.html">Servers</a>
@@ -345,6 +346,10 @@
 
   <main>
     <div class="toolbar">
+      <select id="clan-select" aria-label="Clan">
+        <option value="c0ld">c0ld Players</option>
+        <option value="WMSY">WMSY Players</option>
+      </select>
       <input id="search" placeholder="Search players..." autocomplete="off" />
       <select id="sort-by">
         <option value="rank">Sort by Rank</option>
@@ -380,6 +385,7 @@
   <script>
     const PREVIOUS_PAGE_SIZE = 25;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const CLAN_OPTIONS = ["c0ld", "WMSY"];
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -394,6 +400,7 @@
     let currentData = null;
     let currentKeys = new Set();
     let playerIndex = [];
+    let activeClan = getRequestedClanName();
 
     let playerIndexByUserId = new Map();
     let playerIndexByProfileKey = new Map();
@@ -401,6 +408,71 @@
 
     let previousPage = 1;
     let lastPreviousTotalPages = 1;
+
+    function normalizeClanKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function getRequestedClanName() {
+      const raw = new URLSearchParams(window.location.search).get("clan") || "c0ld";
+      const requested = String(raw).trim();
+      const matched = CLAN_OPTIONS.find(clan => normalizeClanKey(clan) === normalizeClanKey(requested));
+      return matched || "c0ld";
+    }
+
+    function formatClanDisplayName(clan) {
+      return normalizeClanKey(clan) === "c0ld" ? "c0ld" : String(clan || "").toUpperCase();
+    }
+
+    function isDefaultClan() {
+      return normalizeClanKey(activeClan) === "c0ld";
+    }
+
+    function withClanQuery(url) {
+      const out = new URL(url, window.location.href);
+      out.searchParams.set("clan", activeClan);
+      return out.toString();
+    }
+
+    function pageUrl(path, params = {}) {
+      const out = new URL(path, window.location.href);
+
+      if (!isDefaultClan()) {
+        out.searchParams.set("clan", activeClan);
+      }
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return `${out.pathname.split("/").pop()}${out.search}${out.hash}`;
+    }
+
+    function applyClanChrome() {
+      const display = formatClanDisplayName(activeClan);
+      document.title = `${display} Players`;
+
+      const logoLink = document.querySelector(".site-logo-link");
+      if (logoLink) {
+        logoLink.href = pageUrl("index.html");
+        logoLink.setAttribute("aria-label", `${display} home`);
+      }
+
+      const logo = document.querySelector(".site-logo");
+      if (logo) {
+        logo.alt = display;
+      }
+
+      const selector = document.getElementById("clan-select");
+      if (selector) {
+        selector.value = activeClan;
+      }
+    }
 
     function fmtNum(n) {
       if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "N/A";
@@ -479,10 +551,10 @@
     }
 
     function getProfileLink(player) {
-      if (player.user_id) return `profile.html?id=${encodeURIComponent(player.user_id)}`;
-      if (player.profile_key) return `profile.html?id=${encodeURIComponent(player.profile_key)}`;
-      if (player.username) return `profile.html?id=${encodeURIComponent(player.username)}`;
-      return "profile.html";
+      if (player.user_id) return pageUrl("profile.html", { id: player.user_id });
+      if (player.profile_key) return pageUrl("profile.html", { id: player.profile_key });
+      if (player.username) return pageUrl("profile.html", { id: player.username });
+      return pageUrl("profile.html");
     }
 
     function buildCurrentKeys() {
@@ -752,6 +824,14 @@
       renderPager(previous.length);
     }
 
+    function renderLoading() {
+      document.getElementById("current-count").textContent = "Loading...";
+      document.getElementById("previous-count").textContent = "Loading...";
+      document.getElementById("current-players").innerHTML = `<div class="empty">Loading players...</div>`;
+      document.getElementById("previous-players").innerHTML = `<div class="empty">Loading players...</div>`;
+      document.getElementById("previous-pager").classList.add("hidden");
+    }
+
     function wirePager() {
       document.getElementById("prev-page").addEventListener("click", () => {
         if (previousPage <= 1) return;
@@ -796,26 +876,65 @@
         .filter(row => row.username || row.user_id);
     }
 
+    function setClanUrl() {
+      const url = new URL(window.location.href);
+
+      if (isDefaultClan()) {
+        url.searchParams.delete("clan");
+      } else {
+        url.searchParams.set("clan", activeClan);
+      }
+
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+
+    async function loadPlayers() {
+      applyClanChrome();
+      renderLoading();
+
+      currentData = await fetchLiveJson(
+        withClanQuery(MEMBER_API_CURRENT_URL),
+        `live ${formatClanDisplayName(activeClan)} members`
+      );
+      allPlayers = normalizeCurrentRows(currentData.rows || []);
+      playerIndex = [];
+
+      rebuildPlayerIndexMaps();
+      buildCurrentKeys();
+      render();
+    }
+
+    function wireEvents() {
+      wirePager();
+
+      document.getElementById("search").addEventListener("input", () => {
+        previousPage = 1;
+        render();
+      });
+
+      document.getElementById("sort-by").addEventListener("change", () => {
+        previousPage = 1;
+        render();
+      });
+
+      document.getElementById("clan-select").addEventListener("change", async event => {
+        activeClan = event.target.value;
+        previousPage = 1;
+        setClanUrl();
+
+        try {
+          await loadPlayers();
+        } catch (err) {
+          console.error(err);
+          document.querySelector("main").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        }
+      });
+    }
+
     async function main() {
       try {
-        currentData = await fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld members");
-        allPlayers = normalizeCurrentRows(currentData.rows || []);
-        playerIndex = [];
-
-        rebuildPlayerIndexMaps();
-        buildCurrentKeys();
-        wirePager();
-        render();
-
-        document.getElementById("search").addEventListener("input", () => {
-          previousPage = 1;
-          render();
-        });
-
-        document.getElementById("sort-by").addEventListener("change", () => {
-          previousPage = 1;
-          render();
-        });
+        wireEvents();
+        await loadPlayers();
       } catch (err) {
         console.error(err);
         document.querySelector("main").innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;

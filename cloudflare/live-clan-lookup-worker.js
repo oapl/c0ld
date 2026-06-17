@@ -177,10 +177,21 @@ function getSpecificBattleData(clan, activeBattle) {
     battleNode = findBattleByAliases(clan, aliases);
   }
 
-  const rows = Array.isArray(battleNode?.PointContributions) ? battleNode.PointContributions : [];
+  const rows = collectContributionRows(clan, battleNode);
   for (const row of rows) {
-    const userId = String(row.UserID || "").trim();
-    if (userId) pointMap[userId] = Number(row.Points || 0);
+    const userId = String(firstDefined(row.UserID, row.UserId, row.user_id, row.userId, row.id) || "").trim();
+    if (userId) {
+      pointMap[userId] = Number(firstDefined(
+        row.Points,
+        row.points,
+        row.TotalPoints,
+        row.total_points,
+        row.Score,
+        row.score,
+        row.Value,
+        row.value
+      ) || 0);
+    }
   }
 
   return {
@@ -194,6 +205,28 @@ function getSpecificBattleData(clan, activeBattle) {
       activeBattle?.configName ||
       "Unknown"
   };
+}
+
+function collectContributionRows(clan, battleNode) {
+  return firstArray(
+    battleNode?.PointContributions,
+    battleNode?.pointContributions,
+    battleNode?.Contributions,
+    battleNode?.contributions,
+    battleNode?.Contribution,
+    battleNode?.contribution,
+    clan?.Contribution?.Battle,
+    clan?.contribution?.battle,
+    clan?.Contributions?.Battle,
+    clan?.contributions?.battle
+  );
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
 }
 
 function findBattleByAliases(obj, aliases) {
@@ -360,6 +393,10 @@ function normalizeBattleName(value) {
 function numberOrNull(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function firstDefined(...values) {
+  return values.find(value => value !== undefined && value !== null && value !== "");
 }
 
 function supabaseHeaders(env) {

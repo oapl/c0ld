@@ -25,8 +25,6 @@
       --ok-bg: rgba(63, 185, 80, 0.12);
       --warn: #d29922;
       --warn-bg: rgba(210, 153, 34, 0.12);
-      --disabled: #6e7681;
-      --disabled-bg: rgba(110, 118, 129, 0.12);
     }
 
     html, body {
@@ -317,7 +315,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 720px;
+      min-width: 620px;
     }
 
     th,
@@ -350,7 +348,44 @@
       text-align: center;
     }
 
-    .server-pill,
+    .player-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 240px;
+    }
+
+    .player-avatar {
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    .player-avatar.placeholder {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .player-name {
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .player-sub {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
     .clan-pill {
       display: inline-flex;
       align-items: center;
@@ -361,25 +396,6 @@
       border-radius: 999px;
       background: var(--panel-2);
       font-size: 12px;
-    }
-
-    .server-pill.online {
-      border-color: var(--ok);
-      background: var(--ok-bg);
-      color: #9be9a8;
-    }
-
-    .server-pill.full {
-      border-color: var(--warn);
-      background: var(--warn-bg);
-      color: #f2cc60;
-    }
-
-    .server-pill.offline,
-    .clan-pill.unknown {
-      border-color: var(--disabled);
-      background: var(--disabled-bg);
-      color: #c9d1d9;
     }
 
     .clan-pill.c0ld,
@@ -395,73 +411,10 @@
       color: #f2cc60;
     }
 
-    .player-cell {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 220px;
-    }
-
-    .player-avatar {
-      width: 34px;
-      height: 34px;
-      min-width: 34px;
-      border-radius: 50%;
-      border: 1px solid var(--border);
-      background: var(--panel-2);
-      object-fit: cover;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--muted);
-      font-weight: 700;
-      font-size: 13px;
-      overflow: hidden;
-    }
-
-    .player-avatar.unknown {
-      border-color: var(--disabled);
-      background:
-        radial-gradient(circle at 35% 32%, rgba(230, 237, 243, 0.20) 0 18%, transparent 19%),
-        radial-gradient(circle at 50% 78%, rgba(230, 237, 243, 0.16) 0 30%, transparent 31%),
-        var(--panel-2);
+    .clan-pill.unknown {
+      border-color: #6e7681;
+      background: rgba(110, 118, 129, 0.12);
       color: #c9d1d9;
-    }
-
-    .player-name-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-    }
-
-    .player-name {
-      font-weight: 700;
-      color: var(--text);
-      max-width: 280px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .player-name a {
-      color: var(--text);
-    }
-
-    .player-name a:hover {
-      color: var(--link);
-      text-decoration: underline;
-    }
-
-    .player-sub {
-      color: var(--muted);
-      font-size: 12px;
-      max-width: 280px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .muted {
-      color: var(--muted);
     }
 
     @media (max-width: 700px) {
@@ -505,6 +458,7 @@
 
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn active" href="servers.html">Servers</a>
@@ -541,10 +495,6 @@
           <div class="summary-item">
             <span class="summary-label">ID</span>
             <span id="server-id" class="summary-value">-</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Status</span>
-            <span id="server-status" class="summary-value">-</span>
           </div>
           <div class="summary-item">
             <span class="summary-label">Location</span>
@@ -603,8 +553,16 @@
     const SERVERS_DATA_PATH = "/api/servers";
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
-    const OFFLINE_LABEL = "Offline";
-    const UNKNOWN_LABEL = "Unknown";
+    const EMPTY_SERVER_EMOJI = ":mobile_phone_off:";
+    const DEFAULT_AVATAR =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+          <rect width="96" height="96" rx="48" fill="#21262d"/>
+          <circle cx="48" cy="37" r="17" fill="#6e7681"/>
+          <path d="M24 78c5-16 15-25 24-25s19 9 24 25" fill="#6e7681"/>
+        </svg>
+      `);
 
     let servers = [];
     let activeServer = null;
@@ -647,83 +605,116 @@
 
     function toNumberOrNull(value) {
       if (value === null || value === undefined || value === "") return null;
-      if (Array.isArray(value) || typeof value === "object") return null;
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
     }
 
-    function firstNumber(...values) {
+    function firstString(...values) {
       for (const value of values) {
-        const n = toNumberOrNull(value);
-        if (n !== null) return n;
+        if (value === undefined || value === null) continue;
+        const text = String(value).trim();
+        if (text) return text;
       }
-      return null;
+      return "";
+    }
+
+    function extractRobloxUserId(value) {
+      const text = firstString(value);
+      if (!text) return "";
+      const match = text.match(/(?:roblox\.com\/users\/|\/users\/)(\d+)(?:\/profile)?/i);
+      if (match) return match[1];
+      if (/^\d{4,}$/.test(text)) return text;
+      return "";
+    }
+
+    function normalizeProfileUrl(value, userId = "") {
+      const id = firstString(userId, extractRobloxUserId(value));
+      if (id) return `https://www.roblox.com/users/${encodeURIComponent(id)}/profile`;
+      return firstString(value);
+    }
+
+    function getRawPlayersList(row) {
+      const source =
+        row.players_list ||
+        row.current_players ||
+        row.members ||
+        row.player_list ||
+        row.players_roster ||
+        [];
+
+      if (Array.isArray(source)) return source;
+
+      if (source && typeof source === "object") {
+        for (const key of ["players", "current_players", "players_list", "members", "player_list"]) {
+          if (Array.isArray(source[key])) return source[key];
+        }
+      }
+
+      return [];
     }
 
     function getPlayerCount(row) {
-      return firstNumber(
-        row.players,
-        row.player_count,
-        row.players_current,
-        row.current_players,
-        row.member_count,
+      const explicit = toNumberOrNull(
+        row.players ??
+        row.player_count ??
+        row.players_current ??
+        row.current_players ??
+        row.member_count ??
         row.members_count
       );
+
+      if (explicit !== null) return explicit;
+
+      const list = getRawPlayersList(row);
+      return list.length ? list.length : null;
     }
 
     function getMaxPlayers(row) {
-      return firstNumber(
-        row.max_players,
-        row.players_max,
-        row.player_capacity,
-        row.capacity,
-        discordConfig.default_max_players,
+      return toNumberOrNull(
+        row.max_players ??
+        row.players_max ??
+        row.player_capacity ??
+        row.capacity ??
+        discordConfig.default_max_players ??
         DEFAULT_MAX_PLAYERS
       ) || DEFAULT_MAX_PLAYERS;
     }
 
-    function normalizePlayer(player, index) {
-      const userId = player.user_id || player.userId || player.id || null;
-      const unknown = Boolean(player.unknown || !userId);
-      const slot = Number(player.slot || index + 1);
-
-      return {
-        slot,
-        unknown,
-        username: String(player.username || player.name || player.displayName || (unknown ? `Unknown Player ${slot}` : `User ${userId}`)),
-        display_name: String(player.display_name || player.displayName || ""),
-        user_id: userId,
-        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
-        clan: String(player.clan || "")
-      };
-    }
-
     function normalizePlayersList(row) {
-      const list = row.players_list || row.members || row.player_list || [];
-      if (!Array.isArray(list)) return [];
-      return list.map(normalizePlayer);
-    }
+      const list = getRawPlayersList(row);
 
-    function completePlayersList(row) {
-      const expected = Math.max(0, getPlayerCount(row) || 0);
-      const maxPlayers = getMaxPlayers(row);
-      const target = expected || (serverAvailability(row) === "offline" ? 0 : maxPlayers);
-      const players = normalizePlayersList(row).slice(0, target);
+      return list.map((player, index) => {
+        const profileUrl = normalizeProfileUrl(firstString(
+          player.profile_url,
+          player.profileUrl,
+          player.profile,
+          player.profile_link,
+          player.profileLink,
+          player.href,
+          player.url
+        ));
+        const userId = firstString(
+          player.user_id,
+          player.userId,
+          player.roblox_user_id,
+          player.robloxUserId,
+          player.id,
+          extractRobloxUserId(profileUrl),
+          extractRobloxUserId(player.href),
+          extractRobloxUserId(player.url)
+        );
 
-      while (players.length < target) {
-        const slot = players.length + 1;
-        players.push({
-          slot,
-          unknown: true,
-          username: `Unknown Player ${slot}`,
-          display_name: "",
-          user_id: null,
-          avatar_url: "",
-          clan: ""
-        });
-      }
-
-      return players;
+        return {
+          username: firstString(player.username, player.name, player.userName, player.displayName, userId ? `user_${userId}` : `Unknown Player ${index + 1}`),
+          display_name: firstString(player.display_name, player.displayName, player.name_display),
+          user_id: userId || null,
+          avatar_url: firstString(player.avatar_url, player.avatarUrl, player.thumbnail_url, player.thumbnailUrl, player.image_url, player.imageUrl, player.src, player.avatar, player.thumbnail),
+          profile_url: normalizeProfileUrl(profileUrl, userId),
+          clan: firstString(player.clan),
+          slot: toNumberOrNull(player.slot) || index + 1,
+          visible: player.visible === undefined ? true : Boolean(player.visible)
+        };
+      });
     }
 
     function parseRows(payload) {
@@ -745,17 +736,17 @@
         const normalized = {
           id: stableServerId(row, link),
           rank: toNumberOrNull(row.rank ?? row.server_number),
-          location: String(row.location || row.region || "").trim() || UNKNOWN_LABEL,
+          location: String(row.location || row.region || "").trim() || "Unknown",
           link,
           players: getPlayerCount(row),
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
           clan_counts: row.clan_counts || {},
-          compromise_status: String(row.compromise_status || row.status || row.server_status || "").trim(),
+          compromise_status: String(row.compromise_status || row.status || "unknown"),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
-          video_url: String(row.video_url || row.pathing_video || row.pathing_video_url || row.video || "").trim(),
-          updated_at: row.updated_at || row.submitted_at || row.created_at || null
+          video_url: String(row.video_url || row.pathing_video_url || row.pathing_video || row.video || "").trim(),
+          updated_at: row.players_updated_at || row.updated_at || row.submitted_at || row.created_at || null
         };
 
         const existing = byLink.get(key);
@@ -780,42 +771,15 @@
       })).sort((a, b) => a.rank - b.rank);
     }
 
-    function serverAvailability(row) {
-      const players = getPlayerCount(row);
-      const maxPlayers = getMaxPlayers(row);
-      const status = String(row.compromise_status || row.status || row.server_status || "").trim().toLowerCase();
-
-      if (status === "full") return "full";
-      if (status === "online") return "online";
-      if (status === "offline") return "offline";
-
-      if (players !== null && players >= maxPlayers) return "full";
-      if (players !== null && players > 0) return "online";
-
-      return "offline";
-    }
-
-    function serverAvailabilityLabel(row) {
-      const availability = serverAvailability(row);
-      if (availability === "full") return "Full";
-      if (availability === "online") return "Online";
-      return "Offline";
-    }
-
-    function displayLocation(row) {
-      if (serverAvailability(row) === "offline") {
-        return OFFLINE_LABEL;
-      }
-
-      const location = String(row.location || row.region || "").trim();
-      return location || UNKNOWN_LABEL;
-    }
-
     function fmtPlayers(row) {
       const players = getPlayerCount(row);
       const maxPlayers = getMaxPlayers(row);
       const current = players === null ? "-" : players.toLocaleString("en-US");
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
+    }
+
+    function displayLocation(row) {
+      return getPlayerCount(row) === 0 ? "-" : (row.location || "-");
     }
 
     function fmtDateTime(value) {
@@ -868,71 +832,82 @@
     }
 
     function clanLabel(player) {
-      if (player.unknown || !player.user_id) return UNKNOWN_LABEL;
-
       const clan = String(player.clan || "").trim().toUpperCase();
       if (clan === "C0LD") return "C0LD";
       if (clan === "WMSY") return "WMSY";
+      if (!clan) return "Unknown";
       return "Other";
     }
 
     function clanClass(player) {
-      if (player.unknown || !player.user_id) return "unknown";
-
       const clan = String(player.clan || "").trim().toLowerCase();
+      if (!clan) return "unknown";
       return clan === "c0ld" || clan === "wmsy" ? clan : "other";
     }
 
     function playerProfileUrl(player) {
-      if (!player.user_id) return "";
-      return `https://www.roblox.com/users/${encodeURIComponent(player.user_id)}/profile`;
+      return normalizeProfileUrl(player.profile_url, player.user_id);
     }
 
-    function playerAvatarMarkup(player) {
-      if (player.avatar_url && !player.unknown) {
-        return `<img class="player-avatar" src="${htmlEscape(player.avatar_url)}" alt="${htmlEscape(player.username)}">`;
-      }
+    function buildDisplayPlayers(row) {
+      const known = (row.players_list || []).filter(Boolean);
+      const expected = getPlayerCount(row);
+      const missing = expected === null ? 0 : Math.max(0, expected - known.length);
+      const placeholders = Array.from({ length: missing }, (_, index) => ({
+        username: `Unknown Player ${known.length + index + 1}`,
+        display_name: "Profile unavailable",
+        user_id: null,
+        avatar_url: "",
+        profile_url: "",
+        clan: ""
+      }));
 
-      return `<span class="player-avatar unknown" aria-label="Unknown player">?</span>`;
+      return [...known, ...placeholders];
+    }
+
+    function renderPlayerCell(player) {
+      const profileUrl = playerProfileUrl(player);
+      const avatar = player.avatar_url || DEFAULT_AVATAR;
+      const name = htmlEscape(player.username || "Unknown Player");
+      const subtitle = htmlEscape(
+        player.display_name ||
+        (profileUrl ? "Roblox profile available" : "Profile unavailable")
+      );
+      const avatarClass = player.avatar_url ? "player-avatar" : "player-avatar placeholder";
+      const avatarHtml = player.avatar_url
+        ? `<img class="${avatarClass}" src="${htmlEscape(avatar)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${htmlEscape(DEFAULT_AVATAR)}';">`
+        : `<span class="${avatarClass}">?</span>`;
+      const nameHtml = profileUrl
+        ? `<a class="player-name" href="${htmlEscape(profileUrl)}" target="_blank" rel="noopener">${name}</a>`
+        : `<span class="player-name">${name}</span>`;
+
+      return `
+        <div class="player-cell">
+          ${avatarHtml}
+          <div>
+            ${nameHtml}
+            <div class="player-sub">${subtitle}</div>
+          </div>
+        </div>
+      `;
     }
 
     function renderPlayers(row) {
       const tbody = document.getElementById("players-body");
-      const players = completePlayersList(row);
+      const players = buildDisplayPlayers(row);
 
       if (!players.length) {
-        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No players detected.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No player list available.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = players.map(player => {
-        const profile = playerProfileUrl(player);
-        const name = htmlEscape(player.username || `Unknown Player ${player.slot}`);
-        const displayName = htmlEscape(player.display_name || (player.unknown ? "Profile unavailable" : ""));
-        const userId = player.user_id ? htmlEscape(player.user_id) : "-";
-
-        return `
-          <tr>
-            <td>
-              <div class="player-cell">
-                ${playerAvatarMarkup(player)}
-                <div class="player-name-wrap">
-                  <span class="player-name">
-                    ${
-                      profile
-                        ? `<a href="${htmlEscape(profile)}" target="_blank" rel="noopener">${name}</a>`
-                        : name
-                    }
-                  </span>
-                  <span class="player-sub">${displayName || " "}</span>
-                </div>
-              </div>
-            </td>
-            <td>${userId}</td>
-            <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
-          </tr>
-        `;
-      }).join("");
+      tbody.innerHTML = players.map(player => `
+        <tr>
+          <td>${renderPlayerCell(player)}</td>
+          <td>${htmlEscape(player.user_id || "-")}</td>
+          <td><span class="clan-pill ${htmlEscape(clanClass(player))}">${htmlEscape(clanLabel(player))}</span></td>
+        </tr>
+      `).join("");
     }
 
     function renderServer(row) {
@@ -943,10 +918,9 @@
       document.getElementById("players-panel").hidden = false;
       document.getElementById("server-title").textContent = `Server ${row.rank}`;
       document.getElementById("server-id").textContent = `Server ${row.rank}`;
-      document.getElementById("server-status").innerHTML = `<span class="server-pill ${htmlEscape(serverAvailability(row))}">${htmlEscape(serverAvailabilityLabel(row))}</span>`;
       document.getElementById("server-location").textContent = displayLocation(row);
       document.getElementById("server-players").textContent = fmtPlayers(row);
-      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at || row.players_updated_at);
+      document.getElementById("server-updated").textContent = fmtDateTime(row.updated_at);
 
       const joinLink = document.getElementById("join-link");
       joinLink.href = row.link;

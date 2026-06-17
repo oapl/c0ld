@@ -10,6 +10,18 @@ PUBLIC_CACHE_SECONDS = "20"
 # channel and the returned Discord attachment URL is stored with the submission.
 SERVER_SUBMISSION_WEBHOOK_URL = ""
 
+# Optional. If blank, the server status publisher falls back to
+# SERVER_SUBMISSION_WEBHOOK_URL for starter testing.
+SERVER_STATUS_WEBHOOK_URL = ""
+SERVER_STATUS_DISCORD_ENABLED = "false"
+SERVER_STATUS_SERVER_NUMBER = "20"
+SERVER_STATUS_DISCORD_DELAY_SECONDS = "30"
+
+# Optional Cloudflare cron for Discord server status updates. The Worker waits
+# SERVER_STATUS_DISCORD_DELAY_SECONDS before reading Supabase.
+# [triggers]
+# crons = ["*/10 * * * *"]
+
 # Secrets to add in Cloudflare:
 # SUPABASE_URL
 # SUPABASE_SERVICE_KEY

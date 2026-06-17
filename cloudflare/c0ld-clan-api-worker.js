@@ -25,6 +25,7 @@ export default {
           ok: true,
           service: "c0ld-clan-api",
           clan_name: clanName(env),
+          clan_names: clanNames(env),
           battle_key: battleKey(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
@@ -37,7 +38,7 @@ export default {
         response = await handleClansHistory(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
-        response = await handleIngest(env, "manual");
+        response = await handleIngest(env, "manual", url.searchParams.get("clan"));
       } else if (request.method === "POST" && url.pathname === "/api/clans/ingest") {
         requireAdmin(request, env);
         response = await handleClansIngest(env, "manual");
@@ -56,7 +57,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await handleIngest(env, "schedule");
+      for (const clan of clanNames(env)) {
+        await handleIngest(env, "schedule", clan);
+      }
 
       if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
         await handleClansIngest(env, "schedule");
@@ -65,11 +68,11 @@ export default {
   }
 };
 
-async function handleIngest(env, source) {
+async function handleIngest(env, source, requestedClan) {
   requireSupabase(env);
 
   const fetchedAt = new Date().toISOString();
-  const clan = clanName(env);
+  const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
   const configuredBattleKey = battleKey(env);
   const api = await fetchClanApi(clan);
   const battles = api.data?.Battles || {};
@@ -85,7 +88,7 @@ async function handleIngest(env, source) {
     );
   }
 
-  const members = normalizeMembers(api.data?.Members || [], battle);
+  const members = normalizeMembers(api.data || {}, battle);
   const usernameMap = await resolveRobloxUsernames(members.map(row => row.user_id), env);
   const ranked = members
     .map(row => ({
@@ -692,32 +695,9 @@ function extractClanImageId(iconValue) {
     .trim();
 }
 
-function normalizeMembers(members, battle) {
-  const contributionRows = Array.isArray(battle?.PointContributions)
-    ? battle.PointContributions
-    : [];
-
-  const contributions = new Map();
-  for (const item of contributionRows) {
-    const userId = toNumber(firstDefined(
-      item.UserID,
-      item.UserId,
-      item.user_id,
-      item.userId
-    ));
-
-    if (!userId) continue;
-
-    contributions.set(userId, {
-      points: toNumber(firstDefined(
-        item.Points,
-        item.points,
-        item.TotalPoints,
-        item.total_points
-      )) || 0,
-      raw: item
-    });
-  }
+function normalizeMembers(clan, battle) {
+  const members = collectClanMembersWithOwner(clan);
+  const contributions = buildContributionMap(clan, battle);
 
   return members
     .map(member => {
@@ -740,6 +720,81 @@ function normalizeMembers(members, battle) {
       };
     })
     .filter(Boolean);
+}
+
+function collectClanMembersWithOwner(clan) {
+  const members = Array.isArray(clan?.Members) ? clan.Members.slice() : [];
+  const ownerId = toNumber(firstDefined(clan?.Owner, clan?.owner, clan?.OwnerUserID, clan?.ownerUserId));
+
+  if (ownerId && !members.some(member => toNumber(firstDefined(
+    member?.UserID,
+    member?.UserId,
+    member?.user_id,
+    member?.userId
+  )) === ownerId)) {
+    members.unshift({
+      UserID: ownerId,
+      PermissionLevel: 100,
+      JoinTime: "",
+      OwnerInjected: true
+    });
+  }
+
+  return members;
+}
+
+function buildContributionMap(clan, battle) {
+  const contributions = new Map();
+
+  for (const item of collectContributionRows(clan, battle)) {
+    const userId = toNumber(firstDefined(
+      item.UserID,
+      item.UserId,
+      item.user_id,
+      item.userId,
+      item.id
+    ));
+
+    if (!userId) continue;
+
+    contributions.set(userId, {
+      points: toNumber(firstDefined(
+        item.Points,
+        item.points,
+        item.TotalPoints,
+        item.total_points,
+        item.Score,
+        item.score,
+        item.Value,
+        item.value
+      )) || 0,
+      raw: item
+    });
+  }
+
+  return contributions;
+}
+
+function collectContributionRows(clan, battle) {
+  return firstArray(
+    battle?.PointContributions,
+    battle?.pointContributions,
+    battle?.Contributions,
+    battle?.contributions,
+    battle?.Contribution,
+    battle?.contribution,
+    clan?.Contribution?.Battle,
+    clan?.contribution?.battle,
+    clan?.Contributions?.Battle,
+    clan?.contributions?.battle
+  );
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
 }
 
 async function resolveRobloxUsernames(userIds, env) {
@@ -1382,6 +1437,25 @@ function chooseBattleKey(battles) {
 
 function clanName(env) {
   return String(env.CLAN_NAME || DEFAULT_CLAN_NAME).trim() || DEFAULT_CLAN_NAME;
+}
+
+function clanNames(env) {
+  const raw = String(env.CLAN_NAMES || clanName(env));
+  const names = raw
+    .split(",")
+    .map(name => name.trim())
+    .filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+
+  for (const name of names.length ? names : [clanName(env)]) {
+    const key = normalizeText(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(name);
+  }
+
+  return unique.length ? unique : [clanName(env)];
 }
 
 function normalizeText(value) {

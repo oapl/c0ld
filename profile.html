@@ -284,10 +284,86 @@
       position: relative;
     }
 
+    .chart-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+
     .chart-title {
       color: var(--muted);
       font-size: 13px;
-      margin: 10px 0;
+      margin: 0;
+    }
+
+    .chart-toggles {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .chart-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chart-toggle:hover {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    .chart-toggle input {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: var(--link);
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      min-height: 18px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-dot {
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .legend-points {
+      color: #ff9b96;
+    }
+
+    .legend-rank {
+      color: #e6edf3;
     }
 
     .chart-box {
@@ -338,6 +414,10 @@
       border-color: var(--danger);
       background: var(--danger-bg);
       color: #ffb4ad;
+    }
+
+    .hidden {
+      display: none;
     }
 
     @media (max-width: 1000px) {
@@ -401,6 +481,16 @@
       .chart-box {
         height: 210px;
       }
+
+      .chart-head,
+      .chart-toggles {
+        align-items: stretch;
+      }
+
+      .chart-toggle {
+        flex: 1 1 130px;
+        justify-content: center;
+      }
     }
   </style>
 </head>
@@ -414,7 +504,8 @@
     </div>
 
     <div class="menu-bar">
-      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" id="home-leaderboard-link" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" id="wmsy-leaderboard-link" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="servers.html">Servers</a>
@@ -429,6 +520,9 @@
   <script>
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
     const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
+    const PROFILE_CLAN = getRequestedClanName();
+    const PROFILE_CLAN_KEY = normalizeClanKey(PROFILE_CLAN);
+    const PROFILE_CLAN_DISPLAY = formatClanDisplayName(PROFILE_CLAN);
     const DEFAULT_AVATAR_SVG =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -442,6 +536,83 @@
     let loadedProfile = null;
     let selectedBattleIndex = 0;
     let currentChart = null;
+    let chartOptions = {
+      points: true,
+      rank: false
+    };
+
+    function getRequestedClanName() {
+      const raw = new URLSearchParams(window.location.search).get("clan") || "c0ld";
+      return String(raw).trim().replace(/[^a-z0-9_-]/gi, "") || "c0ld";
+    }
+
+    function normalizeClanKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function formatClanDisplayName(clan) {
+      return normalizeClanKey(clan) === "c0ld" ? "c0ld" : String(clan || "").toUpperCase();
+    }
+
+    function isDefaultClan() {
+      return PROFILE_CLAN_KEY === "c0ld";
+    }
+
+    function withClanQuery(url, params = {}) {
+      const out = new URL(url, window.location.href);
+      out.searchParams.set("clan", PROFILE_CLAN);
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return out.toString();
+    }
+
+    function pageUrl(path, params = {}) {
+      const out = new URL(path, window.location.href);
+
+      if (!isDefaultClan()) {
+        out.searchParams.set("clan", PROFILE_CLAN);
+      }
+
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          out.searchParams.set(key, String(value));
+        }
+      }
+
+      return `${out.pathname.split("/").pop()}${out.search}${out.hash}`;
+    }
+
+    function applyClanChrome() {
+      const logoLink = document.querySelector(".site-logo-link");
+      if (logoLink) {
+        logoLink.href = pageUrl("index.html");
+        logoLink.setAttribute("aria-label", `${PROFILE_CLAN_DISPLAY} home`);
+      }
+
+      const logo = document.querySelector(".site-logo");
+      if (logo) {
+        logo.alt = PROFILE_CLAN_DISPLAY;
+      }
+
+      const homeLink = document.getElementById("home-leaderboard-link");
+      if (homeLink) {
+        homeLink.href = pageUrl("index.html");
+        homeLink.textContent = `${PROFILE_CLAN_DISPLAY} Leaderboard`;
+      }
+
+      const wmsyLink = document.getElementById("wmsy-leaderboard-link");
+      if (wmsyLink) {
+        wmsyLink.classList.toggle("hidden", PROFILE_CLAN_KEY === "wmsy");
+      }
+    }
 
     function escapeHtml(s) {
       return String(s ?? "")
@@ -454,6 +625,12 @@
     function fmtNum(n) {
       if (n === null || n === undefined || n === "" || Number.isNaN(Number(n))) return "—";
       return Number(n).toLocaleString("en-US");
+    }
+
+    function finiteNumber(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
     }
 
     function fmtDate(s) {
@@ -536,18 +713,34 @@
         .map(item => ({
           t: new Date(item.t).getTime(),
           rawT: item.t,
-          points: Number(item.points),
-          rank: item.rank === null || item.rank === undefined ? null : Number(item.rank)
+          points: finiteNumber(item.points),
+          rank: finiteNumber(item.rank)
         }))
-        .filter(item => !Number.isNaN(item.t) && !Number.isNaN(item.points));
+        .filter(item => !Number.isNaN(item.t) && (item.points !== null || item.rank !== null));
     }
 
-    function drawChart(canvas, tooltip, series) {
+    function chartRange(values) {
+      const numeric = values.filter(value => value !== null && Number.isFinite(value));
+      if (!numeric.length) return null;
+      return {
+        min: Math.min(...numeric),
+        max: Math.max(...numeric)
+      };
+    }
+
+    function drawChart(canvas, tooltip, series, options = chartOptions) {
       const ctx = canvas.getContext("2d");
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
 
-      const points = getChartPoints(series);
+      const chartPoints = getChartPoints(series);
+      const showPoints = options.points !== false;
+      const showRank = options.rank === true;
+      const visiblePoints = chartPoints.filter(p =>
+        (showPoints && p.points !== null) || (showRank && p.rank !== null)
+      );
+      const pointSeries = showPoints ? chartPoints.filter(p => p.points !== null) : [];
+      const rankSeries = showRank ? chartPoints.filter(p => p.rank !== null) : [];
 
       canvas.width = Math.floor(rect.width * dpr);
       canvas.height = Math.floor(rect.height * dpr);
@@ -555,21 +748,21 @@
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, rect.width, rect.height);
 
-      if (points.length < 2) {
+      if (visiblePoints.length < 2) {
         ctx.fillStyle = "#8b949e";
         ctx.font = "13px Arial";
-        ctx.fillText("Not enough points to chart.", 16, 28);
+        ctx.fillText("Not enough progression data to chart.", 16, 28);
         currentChart = null;
         return;
       }
 
-      const minT = Math.min(...points.map(p => p.t));
-      const maxT = Math.max(...points.map(p => p.t));
-      const minY = Math.min(...points.map(p => p.points));
-      const maxY = Math.max(...points.map(p => p.points));
+      const minT = Math.min(...visiblePoints.map(p => p.t));
+      const maxT = Math.max(...visiblePoints.map(p => p.t));
+      const pointsRange = chartRange(pointSeries.map(p => p.points));
+      const rankRange = chartRange(rankSeries.map(p => p.rank));
 
       const padLeft = 48;
-      const padRight = 18;
+      const padRight = showRank ? 48 : 18;
       const padTop = 18;
       const padBottom = 34;
 
@@ -581,9 +774,16 @@
         return padLeft + ((t - minT) / (maxT - minT)) * width;
       }
 
-      function y(v) {
-        if (maxY === minY) return padTop + height / 2;
-        return padTop + (1 - ((v - minY) / (maxY - minY))) * height;
+      function yPoints(v) {
+        if (!pointsRange) return padTop + height / 2;
+        if (pointsRange.max === pointsRange.min) return padTop + height / 2;
+        return padTop + (1 - ((v - pointsRange.min) / (pointsRange.max - pointsRange.min))) * height;
+      }
+
+      function yRank(v) {
+        if (!rankRange) return padTop + height / 2;
+        if (rankRange.max === rankRange.min) return padTop + height / 2;
+        return padTop + ((v - rankRange.min) / (rankRange.max - rankRange.min)) * height;
       }
 
       function niceLabel(v) {
@@ -603,6 +803,10 @@
         return String(Math.round(v));
       }
 
+      function rankLabel(v) {
+        return `#${Math.round(v)}`;
+      }
+
       ctx.strokeStyle = "#30363d";
       ctx.lineWidth = 1;
       ctx.font = "12px Arial";
@@ -613,38 +817,59 @@
       for (let i = 0; i <= gridLines; i++) {
         const pct = i / gridLines;
         const yy = padTop + pct * height;
-        const value = maxY - pct * (maxY - minY);
 
         ctx.beginPath();
         ctx.moveTo(padLeft, yy);
         ctx.lineTo(rect.width - padRight, yy);
         ctx.stroke();
 
-        ctx.fillText(niceLabel(value), 8, yy + 4);
+        if (pointsRange) {
+          const value = pointsRange.max - pct * (pointsRange.max - pointsRange.min);
+          ctx.textAlign = "left";
+          ctx.fillText(niceLabel(value), 8, yy + 4);
+        } else if (rankRange) {
+          const value = rankRange.min + pct * (rankRange.max - rankRange.min);
+          ctx.textAlign = "left";
+          ctx.fillText(rankLabel(value), 8, yy + 4);
+        }
+
+        if (pointsRange && rankRange) {
+          const rankValue = rankRange.min + pct * (rankRange.max - rankRange.min);
+          const label = rankLabel(rankValue);
+          ctx.textAlign = "right";
+          ctx.fillText(label, rect.width - 8, yy + 4);
+        }
       }
 
-      ctx.strokeStyle = "#ff9b96";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
+      function drawSeries(points, valueKey, yFn, color, widthPx = 2) {
+        if (points.length < 2) return;
 
-      points.forEach((p, i) => {
-        const px = x(p.t);
-        const py = y(p.points);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = widthPx;
+        ctx.beginPath();
 
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
+        points.forEach((p, i) => {
+          const px = x(p.t);
+          const py = yFn(p[valueKey]);
 
-      ctx.stroke();
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
 
-      ctx.fillStyle = "#ff9b96";
+        ctx.stroke();
 
-      const last = points[points.length - 1];
-      ctx.beginPath();
-      ctx.arc(x(last.t), y(last.points), 3, 0, Math.PI * 2);
-      ctx.fill();
+        const last = points[points.length - 1];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x(last.t), yFn(last[valueKey]), 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      drawSeries(pointSeries, "points", yPoints, "#ff9b96", 2);
+      drawSeries(rankSeries, "rank", yRank, "#e6edf3", 2);
 
       ctx.fillStyle = "#8b949e";
+      ctx.textAlign = "left";
 
       const firstDate = new Date(minT);
       const lastDate = new Date(maxT);
@@ -658,6 +883,7 @@
       const lastLabel = lastDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
       const labelWidth = ctx.measureText(lastLabel).width;
 
+      ctx.textAlign = "left";
       ctx.fillText(
         lastLabel,
         rect.width - padRight - labelWidth,
@@ -667,10 +893,15 @@
       currentChart = {
         canvas,
         tooltip,
-        points,
+        points: visiblePoints,
         x,
-        y,
-        rect
+        yPoints,
+        yRank,
+        showPoints: Boolean(pointsRange),
+        showRank: Boolean(rankRange),
+        rect,
+        padTop,
+        padBottom
       };
     }
 
@@ -687,7 +918,44 @@
 
       if (!canvas || !tooltip) return;
 
-      drawChart(canvas, tooltip, battle.series || []);
+      drawChart(canvas, tooltip, battle.series || [], chartOptions);
+    }
+
+    function updateChartLegend() {
+      const pointsLegend = document.querySelector(".legend-points");
+      const rankLegend = document.querySelector(".legend-rank");
+
+      if (pointsLegend) pointsLegend.hidden = !chartOptions.points;
+      if (rankLegend) rankLegend.hidden = !chartOptions.rank;
+    }
+
+    function bindChartControls() {
+      const pointsToggle = document.getElementById("chart-points-toggle");
+      const rankToggle = document.getElementById("chart-rank-toggle");
+
+      if (!pointsToggle || !rankToggle) return;
+
+      pointsToggle.checked = chartOptions.points;
+      rankToggle.checked = chartOptions.rank;
+      updateChartLegend();
+
+      function update(ev) {
+        if (!pointsToggle.checked && !rankToggle.checked) {
+          ev.target.checked = true;
+          return;
+        }
+
+        chartOptions = {
+          points: pointsToggle.checked,
+          rank: rankToggle.checked
+        };
+
+        updateChartLegend();
+        redrawActiveChart();
+      }
+
+      pointsToggle.addEventListener("change", update);
+      rankToggle.addEventListener("change", update);
     }
 
     function bindChartHover() {
@@ -721,26 +989,34 @@
 
         const ctx = canvas.getContext("2d");
         const px = currentChart.x(nearest.t);
-        const py = currentChart.y(nearest.points);
-
         ctx.save();
         ctx.strokeStyle = "rgba(248, 81, 73, 0.45)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(px, 18);
-        ctx.lineTo(px, currentChart.rect.height - 34);
+        ctx.moveTo(px, currentChart.padTop);
+        ctx.lineTo(px, currentChart.rect.height - currentChart.padBottom);
         ctx.stroke();
 
-        ctx.fillStyle = "#e6edf3";
-        ctx.beginPath();
-        ctx.arc(px, py, 4, 0, Math.PI * 2);
-        ctx.fill();
+        if (currentChart.showPoints && nearest.points !== null) {
+          ctx.fillStyle = "#ff9b96";
+          ctx.beginPath();
+          ctx.arc(px, currentChart.yPoints(nearest.points), 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        if (currentChart.showRank && nearest.rank !== null) {
+          ctx.fillStyle = "#e6edf3";
+          ctx.beginPath();
+          ctx.arc(px, currentChart.yRank(nearest.rank), 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
         ctx.restore();
 
         tooltip.innerHTML = `
           <strong>${fmtDateTime(nearest.rawT)}</strong>
-          <div>Points: ${fmtNum(nearest.points)}</div>
-          <div>Rank: ${nearest.rank === null || Number.isNaN(nearest.rank) ? "—" : fmtNum(nearest.rank)}</div>
+          ${currentChart.showPoints ? `<div>Points: ${fmtNum(nearest.points)}</div>` : ""}
+          ${currentChart.showRank ? `<div>Rank: ${nearest.rank === null ? "-" : fmtNum(nearest.rank)}</div>` : ""}
         `;
 
         tooltip.style.display = "block";
@@ -830,7 +1106,23 @@
             Array.isArray(battle.series) && battle.series.length > 1
               ? `
                 <div class="chart-wrap">
-                  <div class="chart-title">Points Progression</div>
+                  <div class="chart-head">
+                    <div class="chart-title">Progression</div>
+                    <div class="chart-toggles" role="group" aria-label="Progression series">
+                      <label class="chart-toggle">
+                        <input id="chart-points-toggle" type="checkbox" checked>
+                        <span>Points</span>
+                      </label>
+                      <label class="chart-toggle">
+                        <input id="chart-rank-toggle" type="checkbox">
+                        <span>Rank</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="chart-legend" aria-hidden="true">
+                    <span class="legend-item legend-points"><span class="legend-dot"></span>Points Progression</span>
+                    <span class="legend-item legend-rank"><span class="legend-dot"></span>Rank Progression</span>
+                  </div>
                   <canvas class="chart-box"></canvas>
                   <div class="tooltip"></div>
                 </div>
@@ -841,6 +1133,7 @@
       `;
 
       requestAnimationFrame(() => {
+        bindChartControls();
         redrawActiveChart();
         bindChartHover();
       });
@@ -966,7 +1259,7 @@
       }
 
       if (!rows.length && !currentRow) {
-        throw new Error(`No live c0ld profile data found for ${id}.`);
+        throw new Error(`No live ${PROFILE_CLAN_DISPLAY} profile data found for ${id}.`);
       }
 
       rows.sort((a, b) => new Date(a.fetched_at || 0) - new Date(b.fetched_at || 0));
@@ -1015,7 +1308,10 @@
     }
 
     async function loadLiveProfile(id) {
-      const current = await fetchLiveJson(MEMBER_API_CURRENT_URL, "live c0ld leaderboard");
+      const current = await fetchLiveJson(
+        withClanQuery(MEMBER_API_CURRENT_URL),
+        `live ${PROFILE_CLAN_DISPLAY} leaderboard`
+      );
       const currentRow = findCurrentRow(current, id);
       const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? id : "");
 
@@ -1023,16 +1319,20 @@
         return summarizeLiveProfile(current, { rows: [] }, id);
       }
 
-      const historyUrl = new URL(MEMBER_API_HISTORY_URL);
-      historyUrl.searchParams.set("user_id", String(userId));
-      historyUrl.searchParams.set("hours", "336");
-      historyUrl.searchParams.set("limit", "50000");
+      const historyUrl = withClanQuery(MEMBER_API_HISTORY_URL, {
+        user_id: String(userId),
+        battle: current.battle || undefined,
+        hours: "336",
+        limit: "50000"
+      });
 
-      const history = await fetchLiveJson(historyUrl.toString(), "live c0ld profile history");
+      const history = await fetchLiveJson(historyUrl, `live ${PROFILE_CLAN_DISPLAY} profile history`);
       return summarizeLiveProfile(current, history, userId);
     }
 
     async function main() {
+      applyClanChrome();
+
       const app = document.getElementById("app");
       const id = getProfileId();
 
@@ -1044,7 +1344,7 @@
       try {
         const profile = await loadLiveProfile(id);
 
-        document.title = `${profile.username || "Player"} - c0ld Profile`;
+        document.title = `${profile.username || "Player"} - ${PROFILE_CLAN_DISPLAY} Profile`;
         render(profile);
       } catch (err) {
         console.error(err);

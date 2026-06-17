@@ -129,6 +129,52 @@ async function resolveRobloxUsernames(userIds) {
   return result;
 }
 
+function firstDefined(...values) {
+  return values.find(value => value !== undefined && value !== null && value !== "");
+}
+
+function memberUserId(member) {
+  return Number(firstDefined(member?.UserID, member?.UserId, member?.user_id, member?.userId) || 0);
+}
+
+function collectClanMembersWithOwner(clan) {
+  const members = Array.isArray(clan?.Members) ? clan.Members.slice() : [];
+  const ownerId = Number(firstDefined(clan?.Owner, clan?.owner, clan?.OwnerUserID, clan?.ownerUserId) || 0);
+
+  if (Number.isFinite(ownerId) && ownerId > 0 && !members.some(member => memberUserId(member) === ownerId)) {
+    members.unshift({
+      UserID: ownerId,
+      PermissionLevel: 100,
+      JoinTime: "",
+      OwnerInjected: true
+    });
+  }
+
+  return members;
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function collectContributionRows(clan, battleData) {
+  return firstArray(
+    battleData?.PointContributions,
+    battleData?.pointContributions,
+    battleData?.Contributions,
+    battleData?.contributions,
+    battleData?.Contribution,
+    battleData?.contribution,
+    clan?.Contribution?.Battle,
+    clan?.contribution?.battle,
+    clan?.Contributions?.Battle,
+    clan?.contributions?.battle
+  );
+}
+
 async function fetchClanMembers() {
   const res = await fetch(BIG_GAMES_API, {
     headers: {
@@ -146,7 +192,8 @@ async function fetchClanMembers() {
     throw new Error(`Big Games API returned status: ${json.status}`);
   }
 
-  const members = json.data?.Members ?? [];
+  const clan = json.data || {};
+  const members = collectClanMembersWithOwner(clan);
 
   if (members.length === 0) {
     console.warn("WARNING: 0 members found. Raw API response:");
@@ -158,29 +205,31 @@ async function fetchClanMembers() {
     };
   }
 
-  const memberIdSet = new Set(members.map(m => m.UserID));
-
   const battleData =
-    json.data?.Battles?.[CURRENT_BATTLE_NAME] ??
+    clan?.Battles?.[CURRENT_BATTLE_NAME] ??
     null;
 
-  const pointData = battleData?.PointContributions ?? [];
+  const pointData = collectContributionRows(clan, battleData);
 
   const points = new Map(
     pointData
-      .filter(d => memberIdSet.has(d.UserID))
-      .map(d => [d.UserID, d.Points ?? 0])
+      .map(d => [
+        Number(firstDefined(d.UserID, d.UserId, d.user_id, d.userId, d.id) || 0),
+        Number(firstDefined(d.Points, d.points, d.TotalPoints, d.total_points, d.Score, d.score, d.Value, d.value) || 0)
+      ])
+      .filter(([userId]) => Number.isFinite(userId) && userId > 0)
   );
 
-  const userIds = members.map(m => m.UserID);
+  const userIds = members.map(memberUserId).filter(id => Number.isFinite(id) && id > 0);
   const usernameMap = await resolveRobloxUsernames(userIds);
 
   const ranked = members
     .map(m => ({
-      user_id: m.UserID,
-      username: usernameMap.get(m.UserID) ?? `user_${m.UserID}`,
-      total_points: points.get(m.UserID) ?? 0
+      user_id: memberUserId(m),
+      username: usernameMap.get(memberUserId(m)) ?? `user_${memberUserId(m)}`,
+      total_points: points.get(memberUserId(m)) ?? 0
     }))
+    .filter(row => Number.isFinite(row.user_id) && row.user_id > 0)
     .sort((a, b) => b.total_points - a.total_points)
     .map((m, i) => ({
       rank: i + 1,

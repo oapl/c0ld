@@ -428,13 +428,14 @@
       font-size: 12px;
     }
 
-    .clan-pill.online {
+    .clan-pill.trusted {
       border-color: var(--ok);
       background: var(--ok-bg);
       color: #9be9a8;
     }
 
-    .clan-pill.full {
+    .clan-pill.mixed,
+    .clan-pill.unknown {
       border-color: var(--warn);
       background: var(--warn-bg);
       color: #f2cc60;
@@ -444,6 +445,13 @@
       border-color: var(--disabled);
       background: var(--disabled-bg);
       color: #c9d1d9;
+    }
+
+    .clan-pill.possible_compromise,
+    .clan-pill.review {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
     }
 
     .link-cell {
@@ -513,6 +521,7 @@
 
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn active" href="servers.html">Servers</a>
@@ -581,7 +590,6 @@
               <option value="rank">Sort by ID</option>
               <option value="location">Sort by Location</option>
               <option value="players">Sort by Players</option>
-              <option value="status">Sort by Status</option>
               <option value="updated_at">Sort by Updated</option>
             </select>
             <button id="refresh-btn" type="button">Refresh</button>
@@ -624,7 +632,6 @@
     const SERVERS_STATIC_FALLBACK = "Data/servers.json";
     const DEFAULT_MAX_PLAYERS = 10;
     const OFFLINE_LABEL = "Offline";
-    const UNKNOWN_LABEL = "Unknown";
 
     let servers = [];
     let sortKey = "rank";
@@ -667,19 +674,10 @@
       return (hash >>> 0).toString(36);
     }
 
-    function toNumberOrNull(value) {
-      if (value === null || value === undefined || value === "") return null;
-      if (Array.isArray(value) || typeof value === "object") return null;
-      const n = Number(value);
-      return Number.isFinite(n) ? n : null;
-    }
-
-    function firstNumber(...values) {
-      for (const value of values) {
-        const n = toNumberOrNull(value);
-        if (n !== null) return n;
-      }
-      return null;
+    function normalizeLocationLabel(value) {
+      const text = String(value || "").trim();
+      if (!text || text.toLowerCase() === "unknown") return OFFLINE_LABEL;
+      return text;
     }
 
     function stableServerId(row, link) {
@@ -688,44 +686,118 @@
       return `srv-${hashString(normalizeLink(link))}`;
     }
 
-    function normalizeLocationLabel(value) {
-      const text = String(value || "").trim();
-      if (!text || text.toLowerCase() === "unknown") return UNKNOWN_LABEL;
-      return text;
+    function toNumberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function firstString(...values) {
+      for (const value of values) {
+        if (value === undefined || value === null) continue;
+        const text = String(value).trim();
+        if (text) return text;
+      }
+      return "";
+    }
+
+    function extractRobloxUserId(value) {
+      const text = firstString(value);
+      if (!text) return "";
+      const match = text.match(/(?:roblox\.com\/users\/|\/users\/)(\d+)(?:\/profile)?/i);
+      if (match) return match[1];
+      if (/^\d{4,}$/.test(text)) return text;
+      return "";
+    }
+
+    function normalizeProfileUrl(value, userId = "") {
+      const id = firstString(userId, extractRobloxUserId(value));
+      if (id) return `https://www.roblox.com/users/${encodeURIComponent(id)}/profile`;
+      return firstString(value);
+    }
+
+    function getRawPlayersList(row) {
+      const source =
+        row.players_list ||
+        row.current_players ||
+        row.members ||
+        row.player_list ||
+        row.players_roster ||
+        [];
+
+      if (Array.isArray(source)) return source;
+
+      if (source && typeof source === "object") {
+        for (const key of ["players", "current_players", "players_list", "members", "player_list"]) {
+          if (Array.isArray(source[key])) return source[key];
+        }
+      }
+
+      return [];
     }
 
     function getPlayerCount(row) {
-      return firstNumber(
-        row.players,
-        row.player_count,
-        row.players_current,
-        row.member_count,
+      const explicit = toNumberOrNull(
+        row.players ??
+        row.player_count ??
+        row.players_current ??
+        row.current_player_count ??
+        row.member_count ??
         row.members_count
       );
+
+      if (explicit !== null) return explicit;
+
+      const list = getRawPlayersList(row);
+      return list.length ? list.length : null;
     }
 
     function getMaxPlayers(row) {
-      return firstNumber(
-        row.max_players,
-        row.players_max,
-        row.player_capacity,
-        row.capacity,
-        discordConfig.default_max_players,
+      return toNumberOrNull(
+        row.max_players ??
+        row.players_max ??
+        row.player_capacity ??
+        row.capacity ??
+        discordConfig.default_max_players ??
         DEFAULT_MAX_PLAYERS
       ) || DEFAULT_MAX_PLAYERS;
     }
 
     function normalizePlayersList(row) {
-      const list = row.players_list || row.members || row.player_list || [];
-      if (!Array.isArray(list)) return [];
+      const list = getRawPlayersList(row);
 
-      return list.map(player => ({
-        username: String(player.username || player.name || player.displayName || OFFLINE_LABEL),
-        display_name: String(player.display_name || player.displayName || ""),
-        user_id: player.user_id || player.userId || player.id || null,
-        avatar_url: String(player.avatar_url || player.avatarUrl || ""),
-        clan: String(player.clan || "")
-      }));
+      return list.map((player, index) => {
+        const profileUrl = normalizeProfileUrl(firstString(
+          player.profile_url,
+          player.profileUrl,
+          player.profile,
+          player.profile_link,
+          player.profileLink,
+          player.href,
+          player.url
+        ));
+        const userId = firstString(
+          player.user_id,
+          player.userId,
+          player.roblox_user_id,
+          player.robloxUserId,
+          player.id,
+          extractRobloxUserId(profileUrl),
+          extractRobloxUserId(player.href),
+          extractRobloxUserId(player.url)
+        );
+
+        return {
+          username: firstString(player.username, player.name, player.userName, player.displayName, userId ? `user_${userId}` : `Unknown Player ${index + 1}`),
+          display_name: firstString(player.display_name, player.displayName, player.name_display),
+          user_id: userId || null,
+          avatar_url: firstString(player.avatar_url, player.avatarUrl, player.thumbnail_url, player.thumbnailUrl, player.image_url, player.imageUrl, player.src, player.avatar, player.thumbnail),
+          profile_url: normalizeProfileUrl(profileUrl, userId),
+          clan: firstString(player.clan),
+          slot: toNumberOrNull(player.slot) || index + 1,
+          visible: player.visible === undefined ? true : Boolean(player.visible)
+        };
+      });
     }
 
     function setStatus(message, kind = "info") {
@@ -812,11 +884,11 @@
           max_players: getMaxPlayers(row),
           players_list: normalizePlayersList(row),
           clan_counts: row.clan_counts || {},
-          compromise_status: String(row.compromise_status || row.status || row.server_status || "").trim(),
+          compromise_status: String(row.compromise_status || row.status || "unknown"),
           players_updated_at: row.players_updated_at || null,
           discord_emoji: String(row.discord_emoji || row.emoji || "").trim(),
           video_url: String(row.video_url || row.pathing_video_url || row.pathing_video || row.video || "").trim(),
-          updated_at: row.updated_at || row.submitted_at || row.created_at || null
+          updated_at: row.players_updated_at || row.updated_at || row.submitted_at || row.created_at || null
         };
 
         const existing = byLink.get(key);
@@ -899,41 +971,62 @@
       return `${current}/${maxPlayers.toLocaleString("en-US")}`;
     }
 
-    function serverAvailability(row) {
-      const players = getPlayerCount(row);
-      const maxPlayers = getMaxPlayers(row);
-      const status = String(row.compromise_status || row.status || row.server_status || "").trim().toLowerCase();
+    function displayLocation(row) {
+      return getPlayerCount(row) === 0 ? "—" : (row.location || "—");
+    }
 
-      if (status === "full") return "full";
-      if (status === "online") return "online";
-      if (status === "offline") return "offline";
+    function clanStatusLabel(row) {
+      const status = String(row.compromise_status || "unknown");
+      const counts = row.clan_counts || {};
+      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
+      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
+      const other = Number(counts.other || counts.OTHER || 0);
 
-      if (players !== null && players >= maxPlayers) return "full";
-      if (players !== null && players > 0) return "online";
+      if (status === "empty") return "Empty";
+      if (status === "possible_compromise") return "Review";
+      if (c0ld || wmsy || other) {
+        const parts = [];
+        if (c0ld) parts.push(`C0LD ${c0ld}`);
+        if (wmsy) parts.push(`WMSY ${wmsy}`);
+        if (other) parts.push(`Other ${other}`);
+        return parts.join(" · ");
+      }
+      return OFFLINE_LABEL;
+    }
 
+    function clanStatusClass(row) {
+      const status = String(row.compromise_status || "unknown");
+      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
       return "offline";
     }
 
     function displayLocation(row) {
-      const availability = serverAvailability(row);
-
-      if (availability === "offline") {
-        return OFFLINE_LABEL;
-      }
-
-      return normalizeLocationLabel(row.location || row.region || UNKNOWN_LABEL);
+      return getPlayerCount(row) === 0 ? OFFLINE_LABEL : normalizeLocationLabel(row.location);
     }
 
     function clanStatusLabel(row) {
-      const availability = serverAvailability(row);
+      const status = String(row.compromise_status || "unknown");
+      const counts = row.clan_counts || {};
+      const c0ld = Number(counts.C0LD || counts.c0ld || 0);
+      const wmsy = Number(counts.WMSY || counts.wmsy || 0);
+      const other = Number(counts.other || counts.OTHER || 0);
 
-      if (availability === "full") return "Full";
-      if (availability === "online") return "Online";
-      return "Offline";
+      if (status === "empty") return "Empty";
+      if (status === "possible_compromise") return "Review";
+      if (c0ld || wmsy || other) {
+        const parts = [];
+        if (c0ld) parts.push(`C0LD ${c0ld}`);
+        if (wmsy) parts.push(`WMSY ${wmsy}`);
+        if (other) parts.push(`Other ${other}`);
+        return parts.join(" / ");
+      }
+      return OFFLINE_LABEL;
     }
 
     function clanStatusClass(row) {
-      return serverAvailability(row);
+      const status = String(row.compromise_status || "unknown");
+      if (["trusted", "empty", "mixed", "possible_compromise"].includes(status)) return status;
+      return "offline";
     }
 
     function fmtDateTime(value) {
@@ -998,7 +1091,6 @@
         const video = row.video_url
           ? `<a href="${htmlEscape(row.video_url)}" target="_blank" rel="noopener">Open</a>`
           : "—";
-
         const players = getPlayerCount(row);
         const playerClass = players === 0 ? "player-pill empty" : "player-pill";
         const checkKey = htmlEscape(serverCheckKey(row));
@@ -1105,7 +1197,6 @@
 
     function wireEvents() {
       document.getElementById("server-form").addEventListener("submit", submitServer);
-
       document.getElementById("server-sort-control").addEventListener("change", event => {
         sortKey = event.target.value;
         sortAsc = sortKey !== "players" && sortKey !== "updated_at";

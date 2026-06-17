@@ -140,6 +140,12 @@
       flex-wrap: wrap;
     }
 
+    .search-panel .panel-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      align-items: center;
+    }
+
     .panel-title {
       margin: 0;
       font-size: 18px;
@@ -150,6 +156,16 @@
       gap: 10px;
       flex-wrap: wrap;
       align-items: center;
+    }
+
+    .lookup-controls {
+      grid-column: 2;
+      justify-content: center;
+    }
+
+    .search-refresh {
+      grid-column: 3;
+      justify-self: end;
     }
 
     input,
@@ -392,8 +408,19 @@
         width: 100%;
       }
 
+      .search-panel .panel-header {
+        grid-template-columns: 1fr;
+      }
+
+      .lookup-controls,
+      .search-refresh {
+        grid-column: 1;
+        justify-self: stretch;
+      }
+
       .controls input,
       .controls button,
+      .search-refresh,
       .toolbar input {
         width: 100%;
         min-width: 0;
@@ -415,6 +442,7 @@
 
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn active" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="servers.html">Servers</a>
@@ -427,13 +455,12 @@
 
     <section class="search-panel">
       <div class="panel-header">
-        <h2 class="panel-title">Lookup current clan</h2>
-
-        <div class="controls">
+        <div class="controls lookup-controls">
           <input id="clan-input" type="text" placeholder="Enter clan name, e.g. c0ld" autocomplete="off" />
           <button id="lookup-btn" type="button">Lookup</button>
-          <button id="refresh-btn" type="button" disabled>Refresh</button>
         </div>
+
+        <button id="refresh-btn" class="search-refresh" type="button" disabled>Refresh</button>
       </div>
     </section>
 
@@ -471,7 +498,7 @@
       </div>
 
       <div class="card">
-        <div class="label">Guild Level</div>
+        <div class="label">Clan Level</div>
         <div class="value" id="card-level">—</div>
       </div>
 

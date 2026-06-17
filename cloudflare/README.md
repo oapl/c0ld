@@ -248,6 +248,15 @@ Optional vars:
 |---|---|
 | `SITE_ORIGINS` | `https://oapl.github.io` |
 | `SERVER_SUBMISSION_WEBHOOK_URL` | Private review-channel webhook. Uploaded video files are posted there and the returned Discord attachment URL is stored with the submission. |
+| `SERVER_STATUS_WEBHOOK_URL` | Optional Discord webhook for the server status post. If blank, the Worker falls back to `SERVER_SUBMISSION_WEBHOOK_URL` for starter testing. |
+| `SERVER_STATUS_DISCORD_ENABLED` | Set to `true` to let the Worker scheduled handler publish/update the Discord status post. |
+| `SERVER_STATUS_SERVER_NUMBER` | Server to publish from the scheduled handler. Defaults to `20`. |
+| `SERVER_STATUS_DISCORD_DELAY_SECONDS` | Delay before scheduled publishing so the scraper has time to write Supabase. Defaults to `30`, capped at `120`. |
+
+To publish the Server 20 Discord status automatically at the same rough tempo as
+the scraper, add a cron trigger such as `*/10 * * * *`. The Worker waits
+`SERVER_STATUS_DISCORD_DELAY_SECONDS` before reading Supabase, then creates one
+webhook message with `wait=true` and edits that same message on later runs.
 
 Useful endpoints:
 
@@ -259,6 +268,8 @@ Useful endpoints:
 | `POST /api/admin/submissions/{id}/approve` | Admin approval. Updates the matching server row when the share code already exists. |
 | `POST /api/admin/submissions/{id}/decline` | Admin decline. |
 | `POST /api/admin/servers/{server_number}/players` | Admin/player-source endpoint to report current players. Logs `possible_compromised_server` when players are present but none match C0LD or WMSY. |
+| `POST /api/admin/servers/{server_number}/discord-status` | Admin test endpoint that creates or updates the persistent Discord status embed for that server. |
+| `POST /api/admin/discord/server-status?server=20` | Same as above, with the server selected by query/body/env. |
 
 Example approval:
 
