@@ -9,9 +9,9 @@
   };
 
   const WINDOWS = {
-    "1h": { label: "1 Hour — 5m gains", short: "1 Hour", hours: 1, bucketMinutes: 5, gainKey: "gain_1h" },
-    "12h": { label: "12 Hours — 30m gains", short: "12 Hour", hours: 12, bucketMinutes: 30, gainKey: "gain_12h" },
-    "24h": { label: "24 Hours — hourly gains", short: "24 Hour", hours: 24, bucketMinutes: 60, gainKey: "gain_24h" }
+    "1h": { label: "1 Hour — 5m gains", short: "1Hr", hours: 1, bucketMinutes: 5, gainKey: "gain_1h" },
+    "12h": { label: "12 Hours — 30m gains", short: "12Hr", hours: 12, bucketMinutes: 30, gainKey: "gain_12h" },
+    "24h": { label: "24 Hours — hourly gains", short: "24Hr", hours: 24, bucketMinutes: 60, gainKey: "gain_24h" }
   };
 
   const SPECIAL_COLORS = {
@@ -78,20 +78,6 @@
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "—";
     return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
-  }
-
-  function fmtDuration(hours) {
-    if (!Number.isFinite(hours) || hours < 0) return "—";
-    const totalMinutes = Math.round(hours * 60);
-    const days = Math.floor(totalMinutes / 1440);
-    const remAfterDays = totalMinutes % 1440;
-    const hrs = Math.floor(remAfterDays / 60);
-    const mins = remAfterDays % 60;
-    const parts = [];
-    if (days) parts.push(`${days}d`);
-    if (hrs) parts.push(`${hrs}h`);
-    if (mins || !parts.length) parts.push(`${mins}m`);
-    return parts.join(" ");
   }
 
   function escapeHtml(value) {
@@ -388,9 +374,6 @@
       });
     }
 
-    // Add anchor points on exact bucket boundaries by interpolation. This guarantees
-    // 12 points for 1h/5m, 24 points for 12h/30m, and 24 points for 24h/1h even
-    // when the API only has sparse snapshots inside the selected window.
     const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
     for (let i = 0; i <= bucketCount; i += 1) {
       const t = startMs + i * bucketMs;
@@ -506,14 +489,9 @@
     const endMs = new Date(currentData?.battle_end_iso || "").getTime();
     const nowMs = latestTimestamp();
     const remainingHours = Number.isFinite(endMs) ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000)) : 0;
+    const projectedToPass = closeRate > 0 && remainingHours > 0 && (pointsToGain / closeRate) <= remainingHours;
 
-    if (closeRate > 0) {
-      const hoursToPass = pointsToGain / closeRate;
-      const projectedToPass = remainingHours > 0 && hoursToPass <= remainingHours;
-      summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> more points than <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong> to pass. Based on the selected <strong>${windowConfig.short} rate</strong>, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}${projectedToPass ? ` in about <strong>${fmtDuration(hoursToPass)}</strong>` : ` before the battle ends; at this rate it would need about <strong>${fmtDuration(hoursToPass)}</strong>`}.`;
-    } else {
-      summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> more points than <strong>#${holder.rank} ${escapeHtml(holder.clan_name)}</strong> to pass. Based on the selected <strong>${windowConfig.short} rate</strong>, ${escapeHtml(challenger.clan_name)} <strong>is not projected to pass</strong> ${escapeHtml(holder.clan_name)} because it is not gaining faster in this window.`;
-    }
+    summary.innerHTML = `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass <strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>${windowConfig.short}</strong> rate, ${escapeHtml(challenger.clan_name)} <strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ${escapeHtml(holder.clan_name)}.`;
   }
 
   function draw() {
