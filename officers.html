@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Officers</title>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #ff9b96;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --ok: #3fb950;
+      --ok-bg: rgba(63, 185, 80, 0.12);
+      --warn: #d29922;
+      --warn-bg: rgba(210, 153, 34, 0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: none;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .site-logo-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+    }
+
+    .site-logo {
+      display: block;
+      width: 76px;
+      height: auto;
+      border-radius: 10px;
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn,
+    .auth-button,
+    button {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    }
+
+    .menu-btn {
+      padding: 7px 12px;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .menu-btn:hover,
+    .auth-button:hover,
+    button:hover {
+      background: var(--hover);
+      border-color: var(--link);
+      color: var(--link);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(248, 81, 73, 0.12);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .panel,
+    .status {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .panel[hidden],
+    .status[hidden],
+    .protected-content[hidden],
+    .auth-panel[hidden] {
+      display: none;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .panel-body,
+    .auth-panel {
+      padding: 18px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .auth-actions,
+    .panel-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .panel-actions {
+      margin-top: 0;
+    }
+
+    .auth-button,
+    button {
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .status {
+      padding: 14px 16px;
+    }
+
+    .status.info {
+      color: var(--text);
+    }
+
+    .status.ok {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .status.warn {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
+    .status.error {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .officer-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .officer-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      padding: 16px;
+      min-height: 132px;
+    }
+
+    .officer-card h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    .officer-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #0b1016;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tag.ready {
+      border-color: var(--ok);
+      background: var(--ok-bg);
+      color: #9be9a8;
+    }
+
+    .tag.pending {
+      border-color: var(--warn);
+      background: var(--warn-bg);
+      color: #f2cc60;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 740px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      padding: 28px 16px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .officer-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      header {
+        padding: 14px 16px 10px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .menu-bar {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="site-logo-link" href="index.html" aria-label="c0ld home">
+        <img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld">
+      </a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+<!--      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a> -->
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
+      <a class="menu-btn" href="macros.html">Macros</a>
+      <a class="menu-btn active" href="officers.html">Officers</a>
+    </div>
+  </header>
+
+  <main>
+    <section id="auth-panel" class="panel auth-panel">
+      <h2 class="panel-title">Officer Access Required</h2>
+      <p id="auth-status" class="muted">Checking Discord officer access...</p>
+      <div class="auth-actions">
+        <a id="discord-login-btn" class="auth-button" href="#">Sign in with Discord</a>
+        <button id="discord-logout-btn" type="button">Clear Session</button>
+        <span id="discord-user" class="muted"></span>
+      </div>
+    </section>
+
+    <div id="protected-content" class="protected-content" hidden>
+      <div id="status" class="status info" hidden></div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Officers</h2>
+          <div class="panel-actions">
+            <button id="refresh-btn" type="button">Refresh</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <p class="muted">
+            Officer-only area for C0LD management tools. The frontend is ready for the Officers role gate;
+            backend officer tools can be wired in after the auth Worker supports the <strong>officers</strong> page key.
+          </p>
+          <div class="tag-row">
+            <span class="tag ready">Page key: officers</span>
+            <span class="tag ready">Role ID: 1489032325009506456</span>
+            <span id="worker-rule-tag" class="tag pending">Worker role check pending</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Officer Tools</h2>
+        </div>
+        <div class="officer-grid">
+          <div class="officer-card">
+            <h3>Server Review</h3>
+            <p>Future home for reviewing submitted servers, pathing videos, and server categories.</p>
+            <div class="tag-row"><span class="tag pending">Backend pending</span></div>
+          </div>
+          <div class="officer-card">
+            <h3>Macro Review</h3>
+            <p>Future home for approving, denying, or retiring macro entries shown to members.</p>
+            <div class="tag-row"><span class="tag pending">Backend pending</span></div>
+          </div>
+          <div class="officer-card">
+            <h3>Officer Notes</h3>
+            <p>Future home for officer-only notes, SOPs, reminders, and internal links.</p>
+            <div class="tag-row"><span class="tag pending">Backend pending</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Status</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>State</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="officers-body">
+              <tr>
+                <td>Frontend page</td>
+                <td>Ready</td>
+                <td>officers.html is present and uses protected-access.js.</td>
+              </tr>
+              <tr>
+                <td>Officer role</td>
+                <td>Ready</td>
+                <td>Expected Discord role ID: 1489032325009506456.</td>
+              </tr>
+              <tr>
+                <td>Worker route</td>
+                <td>Pending</td>
+                <td>Add officers to the auth Worker later; no data Worker changes included here.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="assets/protected-access.js"></script>
+  <script>
+    const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev/auth/discord/callback";
+    const PAGE_KEY = "officers";
+    const OFFICERS_ROLE_ID = "1489032325009506456";
+
+    function setStatus(message, kind = "info") {
+      const el = document.getElementById("status");
+      el.hidden = false;
+      el.className = `status ${kind}`;
+      el.textContent = message;
+    }
+
+    function hideStatus() {
+      const el = document.getElementById("status");
+      el.hidden = true;
+      el.textContent = "";
+    }
+
+    function updateWorkerRuleTag(auth) {
+      const tag = document.getElementById("worker-rule-tag");
+      const requiredRoles = auth?.session?.required_roles || [];
+
+      if (requiredRoles.includes(OFFICERS_ROLE_ID)) {
+        tag.className = "tag ready";
+        tag.textContent = "Worker requiring Officers role";
+        return;
+      }
+
+      tag.className = "tag pending";
+      tag.textContent = "Worker not wired for Officers role yet";
+      setStatus(
+        "Frontend Officers page loaded. The auth Worker still needs the officers page key mapped to role 1489032325009506456 before this is a real officer-only gate.",
+        "warn"
+      );
+    }
+
+    async function refreshOfficers() {
+      hideStatus();
+      setStatus("Officer page frontend is ready. Backend officer tools are not wired yet.", "info");
+    }
+
+    async function initPage() {
+      document.getElementById("refresh-btn").addEventListener("click", refreshOfficers);
+
+      const auth = await C0LD_AUTH.requireAccess({
+        apiBase: PROTECTED_API_BASE,
+        page: PAGE_KEY,
+        panelId: "auth-panel",
+        contentId: "protected-content",
+        statusId: "auth-status",
+        loginId: "discord-login-btn",
+        logoutId: "discord-logout-btn",
+        userId: "discord-user"
+      });
+
+      if (auth.allowed) {
+        updateWorkerRuleTag(auth);
+      }
+    }
+
+    initPage();
+  </script>
+</body>
+</html>
