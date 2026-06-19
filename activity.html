@@ -25,6 +25,8 @@ body{
   background:var(--bg);
   color:var(--text);
   font-family:Arial,Helvetica,sans-serif;
+  height:100vh;
+  overflow:hidden;
 }
 
 a{
@@ -35,17 +37,18 @@ a{
 header{
   background:var(--panel);
   border-bottom:1px solid var(--border);
-  padding:10px 20px;
+  padding:9px 18px 8px;
   text-align:center;
 }
 
 .logo{
-  width:64px;
-  border-radius:9px;
+  width:56px;
+  border-radius:8px;
+  display:block;
+  margin:0 auto 7px;
 }
 
 .menu{
-  margin-top:8px;
   display:flex;
   gap:8px;
   justify-content:center;
@@ -60,6 +63,7 @@ header{
   background:var(--panel2);
   color:var(--text);
   font-size:13px;
+  line-height:1;
 }
 
 .btn.active,
@@ -70,10 +74,13 @@ header{
 }
 
 main{
-  width:100%;
-  max-width:1900px;
+  height:calc(100vh - 104px);
+  max-width:1600px;
   margin:0 auto;
-  padding:18px 22px;
+  padding:14px 18px 18px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
 .top{
@@ -82,24 +89,26 @@ main{
   align-items:flex-start;
   gap:14px;
   flex-wrap:wrap;
-  margin-bottom:12px;
 }
 
 h1{
-  margin:0 0 5px;
+  margin:0 0 4px;
   font-size:22px;
+  line-height:1.15;
 }
 
 .sub{
   color:var(--muted);
   font-size:13px;
+  line-height:1.35;
 }
 
 .tools{
   display:flex;
-  gap:9px;
+  gap:8px;
   flex-wrap:wrap;
   align-items:center;
+  justify-content:flex-end;
 }
 
 select,
@@ -111,19 +120,42 @@ button{
   color:var(--text);
   padding:8px 10px;
   font-size:14px;
+  outline:none;
 }
 
 input{
-  min-width:230px;
+  min-width:220px;
+}
+
+button{
+  cursor:pointer;
+}
+
+button:hover,
+select:hover,
+input:focus{
+  border-color:var(--link);
+}
+
+.summary{
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.35;
+}
+
+.summary strong{
+  color:var(--text);
 }
 
 .status{
   display:none;
   background:var(--panel);
   border:1px solid var(--border);
-  border-radius:9px;
-  padding:11px 13px;
-  margin-bottom:12px;
+  border-radius:8px;
+  padding:9px 11px;
   color:var(--muted);
   font-size:13px;
 }
@@ -138,151 +170,71 @@ input{
   background:rgba(248,81,73,.12);
 }
 
-.summary-line{
-  display:flex;
-  gap:14px;
-  flex-wrap:wrap;
-  color:var(--muted);
-  font-size:13px;
-  margin-bottom:12px;
-}
-
-.summary-line strong{
-  color:var(--text);
-}
-
-.panel{
+.chart-panel{
+  flex:1;
+  min-height:0;
   border:1px solid var(--border);
   border-radius:10px;
   background:var(--panel);
   overflow:hidden;
+  display:flex;
+  flex-direction:column;
 }
 
-.panel-head{
-  padding:12px 15px;
+.chart-head{
+  padding:10px 13px;
   border-bottom:1px solid var(--border);
   display:flex;
+  align-items:center;
   justify-content:space-between;
   gap:12px;
   flex-wrap:wrap;
+  font-size:13px;
 }
 
-.legend{
+.chart-note{
   color:var(--muted);
   font-size:12px;
 }
 
-.wrap{
-  overflow:auto;
-  height:calc(100vh - 210px);
-  min-height:560px;
+.chart-box{
+  flex:1;
+  min-height:0;
   background:var(--panel2);
+  position:relative;
 }
 
-.grid{
-  display:grid;
-  min-width:max-content;
-  font-size:12px;
+canvas{
+  display:block;
+  width:100%;
+  height:100%;
 }
 
-.cell{
-  border-right:1px solid rgba(48,54,61,.7);
-  border-bottom:1px solid rgba(48,54,61,.7);
-  min-height:28px;
-  display:flex;
-  align-items:center;
-  justify-content:flex-end;
-  padding:4px 6px;
-  white-space:nowrap;
-  font-variant-numeric:tabular-nums;
-}
+@media(max-width:850px){
+  body{
+    overflow:auto;
+    height:auto;
+  }
 
-.head{
-  position:sticky;
-  top:0;
-  z-index:5;
-  background:#111720;
-  color:var(--muted);
-  font-weight:bold;
-  justify-content:center;
-  text-align:center;
-  min-height:40px;
-}
+  main{
+    height:auto;
+    min-height:calc(100vh - 104px);
+  }
 
-.rank,
-.name,
-.total{
-  position:sticky;
-  background:#111720;
-  z-index:4;
-}
-
-.head.rank,
-.head.name,
-.head.total{
-  z-index:7;
-}
-
-.rank{
-  left:0;
-  width:64px;
-  justify-content:center;
-}
-
-.name{
-  left:64px;
-  width:230px;
-  justify-content:flex-start;
-  font-weight:bold;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-.total{
-  left:294px;
-  width:112px;
-  color:var(--good);
-}
-
-.bucket{
-  width:92px;
-  color:#fff;
-  text-shadow:0 1px 1px #000;
-}
-
-.zero{
-  color:var(--muted);
-  text-shadow:none;
-  justify-content:center;
-}
-
-.empty{
-  padding:36px;
-  color:var(--muted);
-  text-align:center;
-}
-
-@media(max-width:900px){
-  input,
-  select,
-  button{
-    width:100%;
-    min-width:0;
+  .chart-panel{
+    min-height:560px;
   }
 
   .tools{
     width:100%;
+    justify-content:flex-start;
   }
 
-  .wrap{
-    height:auto;
-    min-height:560px;
-  }
-}
-
-@media(max-width:560px){
-  main{
-    padding:14px;
+  select,
+  input,
+  button{
+    width:100%;
+    min-width:0;
   }
 }
 </style>
@@ -295,7 +247,7 @@ input{
   </a>
 
   <div class="menu">
-    <a class="btn" id="home" href="index.html">c0ld Leaderboard</a>
+    <a class="btn" id="home-link" href="index.html">c0ld Leaderboard</a>
     <a class="btn active" id="activity-link" href="activity.html">Activity Chart</a>
     <a class="btn" href="clans.html">Clans Leaderboard</a>
     <a class="btn" href="live-clan.html">Clan Lookup</a>
@@ -308,7 +260,7 @@ input{
   <div class="top">
     <div>
       <h1 id="title">c0ld Member Activity Chart</h1>
-      <div class="sub" id="sub">Loading activity...</div>
+      <div class="sub" id="subtitle">Line graph of member point gain from June 13, 2026 at 10:00 AM NM time onward.</div>
     </div>
 
     <div class="tools">
@@ -318,34 +270,39 @@ input{
         <option value="24">Daily</option>
       </select>
 
-      <select id="limit">
-        <option value="all">All Members</option>
-        <option value="25">Top 25</option>
-        <option value="50">Top 50</option>
+      <select id="line-count">
+        <option value="10" selected>Top 10 lines</option>
+        <option value="25">Top 25 lines</option>
+        <option value="all">All members</option>
       </select>
 
-      <input id="search" placeholder="Search members...">
+      <select id="mode">
+        <option value="gain" selected>Gain per period</option>
+        <option value="cumulative">Cumulative gain</option>
+      </select>
+
+      <input id="search" placeholder="Search member...">
       <button id="refresh" type="button">Refresh</button>
     </div>
   </div>
 
-  <div id="status" class="status show">Loading activity data...</div>
-
-  <div class="summary-line">
+  <div class="summary">
     <span>Battle: <strong id="battle">—</strong></span>
     <span>Range: <strong id="range">—</strong></span>
-    <span>Members: <strong id="members">—</strong></span>
-    <span>Total Gain: <strong id="activity">—</strong></span>
+    <span>Showing: <strong id="shown">—</strong></span>
+    <span>Total plotted gain: <strong id="total-gain">—</strong></span>
   </div>
 
-  <section class="panel">
-    <div class="panel-head">
-      <b>Activity by Member</b>
-      <div class="legend" id="legend">Darker cells = higher gain</div>
+  <div id="status" class="status show">Loading current leaderboard...</div>
+
+  <section class="chart-panel">
+    <div class="chart-head">
+      <strong id="chart-title">Member activity line graph</strong>
+      <span class="chart-note" id="chart-note">Loading...</span>
     </div>
 
-    <div class="wrap" id="wrap">
-      <div class="empty">Loading chart...</div>
+    <div class="chart-box">
+      <canvas id="chart"></canvas>
     </div>
   </section>
 </main>
@@ -354,22 +311,29 @@ input{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-const MAX_HISTORY_HOURS = 336;
-
-// Hard rule: the chart starts here no matter what the API says.
 const CHART_START_ISO = "2026-06-13T10:00:00-06:00";
-
-// Hard end for this CB window.
-// Set to "" if you want the API/end/current time to control the end later.
 const CHART_END_ISO = "2026-06-19T10:00:00-06:00";
 
-// This helps calculate the first gain after 10 AM by fetching a little before the start.
 const PRE_START_BUFFER_HOURS = 12;
+const MAX_HISTORY_HOURS = 336;
+const PER_USER_HISTORY_LIMIT = 5000;
+const HISTORY_FETCH_CONCURRENCY = 6;
+
+const LINE_COLORS = [
+  "#7ee787", "#58a6ff", "#ff9b96", "#d2a8ff", "#f2cc60",
+  "#56d4dd", "#ffa657", "#a5d6ff", "#ff7b72", "#b3f5bc",
+  "#79c0ff", "#e3b341", "#f778ba", "#8ddb8c", "#bc8cff",
+  "#39c5cf", "#ffdf5d", "#a371f7", "#3fb950", "#db6d28",
+  "#1f6feb", "#d29922", "#da3633", "#8957e5", "#238636"
+];
 
 let current = null;
-let historyRows = [];
+let rawHistoryRows = [];
 let members = [];
 let buckets = [];
+
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
 
 function getClan() {
   return (new URLSearchParams(location.search).get("clan") || "c0ld")
@@ -378,6 +342,16 @@ function getClan() {
 
 const CLAN = getClan();
 const DISPLAY = CLAN.toLowerCase() === "c0ld" ? "c0ld" : CLAN.toUpperCase();
+
+function pageUrl(path) {
+  const out = new URL(path, location.href);
+
+  if (CLAN.toLowerCase() !== "c0ld") {
+    out.searchParams.set("clan", CLAN);
+  }
+
+  return out.pathname.split("/").pop() + out.search;
+}
 
 function withQuery(url, params = {}) {
   const out = new URL(url, location.href);
@@ -393,22 +367,20 @@ function withQuery(url, params = {}) {
   return out.toString();
 }
 
-function pageUrl(path) {
-  const out = new URL(path, location.href);
-
-  if (CLAN.toLowerCase() !== "c0ld") {
-    out.searchParams.set("clan", CLAN);
-  }
-
-  return out.pathname.split("/").pop() + out.search;
+function setStatus(text, isError = false) {
+  const el = document.getElementById("status");
+  el.textContent = text || "";
+  el.className = "status " + (text ? "show " : "") + (isError ? "err" : "");
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+async function getJson(url, label) {
+  const res = await fetch(url, { cache: "no-store" });
+
+  if (!res.ok) {
+    throw new Error("Could not load " + label + ". HTTP " + res.status);
+  }
+
+  return res.json();
 }
 
 function toNumber(value) {
@@ -439,11 +411,6 @@ function shortNum(value) {
   return Math.round(n).toLocaleString("en-US");
 }
 
-function fullNum(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString("en-US") : "—";
-}
-
 function fmtDateTime(value) {
   const d = new Date(value);
 
@@ -458,10 +425,10 @@ function fmtDateTime(value) {
   });
 }
 
-function fmtBucketLabel(ms, hours) {
+function fmtTick(ms, bucketHours) {
   const d = new Date(ms);
 
-  if (hours >= 24) {
+  if (bucketHours >= 24) {
     return d.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
@@ -475,22 +442,6 @@ function fmtBucketLabel(ms, hours) {
     hour: "numeric",
     timeZone: "America/Denver"
   });
-}
-
-function setStatus(text, isError = false) {
-  const el = document.getElementById("status");
-  el.textContent = text || "";
-  el.className = "status " + (text ? "show " : "") + (isError ? "err" : "");
-}
-
-async function getJson(url, label) {
-  const response = await fetch(url, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error("Could not load " + label + ". HTTP " + response.status);
-  }
-
-  return response.json();
 }
 
 function getStartMs() {
@@ -520,7 +471,6 @@ function makeBuckets() {
   const end = Math.max(getEndMs(), start + step);
   const out = [];
 
-  // Starts exactly at June 13, 10 AM NM time.
   for (let cursor = start; cursor <= end; cursor += step) {
     out.push({
       key: String(cursor),
@@ -532,14 +482,81 @@ function makeBuckets() {
   buckets = out;
 }
 
-function getBucketKey(ms) {
-  for (const bucket of buckets) {
-    if (ms >= bucket.startMs && ms < bucket.endMs) {
-      return bucket.key;
+function getBucketIndex(ms) {
+  for (let i = 0; i < buckets.length; i++) {
+    if (ms >= buckets[i].startMs && ms < buckets[i].endMs) {
+      return i;
     }
   }
 
-  return null;
+  return -1;
+}
+
+function getMemberRows() {
+  return Array.isArray(current?.rows) ? current.rows : [];
+}
+
+function getMemberIds() {
+  const ids = [];
+
+  for (const row of getMemberRows()) {
+    const id = String(row.user_id || "").trim();
+
+    if (id) {
+      ids.push(id);
+    }
+  }
+
+  return [...new Set(ids)];
+}
+
+async function fetchAllMemberHistory() {
+  const ids = getMemberIds();
+  const start = getStartMs();
+  const oldestNeeded = start - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+  const hoursNeeded = Math.ceil((Date.now() - oldestNeeded) / (60 * 60 * 1000));
+  const hours = Math.min(MAX_HISTORY_HOURS, Math.max(1, hoursNeeded));
+  const battle = current?.battle || "current";
+
+  const rows = [];
+  let completed = 0;
+  const queue = ids.slice();
+
+  async function worker() {
+    while (queue.length) {
+      const id = queue.shift();
+
+      try {
+        const history = await getJson(
+          withQuery(HISTORY_API, {
+            battle,
+            user_id: id,
+            hours,
+            limit: PER_USER_HISTORY_LIMIT
+          }),
+          "history for user " + id
+        );
+
+        if (Array.isArray(history.rows)) {
+          rows.push(...history.rows);
+        }
+      } catch (error) {
+        console.warn("Could not load history for user", id, error);
+      } finally {
+        completed++;
+        setStatus("Loading player histories... " + completed + " / " + ids.length);
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(HISTORY_FETCH_CONCURRENCY, ids.length) },
+    worker
+  );
+
+  await Promise.all(workers);
+
+  return rows;
 }
 
 function buildActivityModel() {
@@ -548,12 +565,11 @@ function buildActivityModel() {
   const start = getStartMs();
   const end = getEndMs();
   const bufferMs = PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
-
   const memberMap = new Map();
   const seriesByUser = new Map();
 
-  for (const row of current?.rows || []) {
-    const id = String(row.user_id || "");
+  for (const row of getMemberRows()) {
+    const id = String(row.user_id || "").trim();
 
     if (!id) {
       continue;
@@ -564,13 +580,13 @@ function buildActivityModel() {
       name: row.username || id,
       rank: row.rank,
       currentTotal: toNumber(row.total_points) || 0,
-      activity: 0,
-      buckets: new Map()
+      bucketGains: buckets.map(() => 0),
+      totalGain: 0
     });
   }
 
-  for (const row of historyRows) {
-    const id = String(row.user_id || "");
+  for (const row of rawHistoryRows) {
+    const id = String(row.user_id || "").trim();
     const total = toNumber(row.total_points);
     const ms = new Date(row.fetched_at || "").getTime();
 
@@ -578,8 +594,6 @@ function buildActivityModel() {
       continue;
     }
 
-    // We never display before June 13 10 AM.
-    // The small pre-start buffer is only used to calculate the first delta.
     if (ms < start - bufferMs || ms > end + 60 * 60 * 1000) {
       continue;
     }
@@ -601,8 +615,8 @@ function buildActivityModel() {
         name: row.username || id,
         rank: row.rank,
         currentTotal: total,
-        activity: 0,
-        buckets: new Map()
+        bucketGains: buckets.map(() => 0),
+        totalGain: 0
       });
     }
   }
@@ -618,33 +632,32 @@ function buildActivityModel() {
 
     for (let i = 1; i < series.length; i++) {
       const previous = series[i - 1];
-      const currentPoint = series[i];
+      const next = series[i];
 
-      // Do not count or display gains before June 13 10 AM.
-      if (currentPoint.ms < start || currentPoint.ms > end) {
+      if (next.ms < start || next.ms > end) {
         continue;
       }
 
-      const gain = Math.max(0, currentPoint.total - previous.total);
+      const gain = Math.max(0, next.total - previous.total);
 
       if (!gain) {
         continue;
       }
 
-      const key = getBucketKey(currentPoint.ms);
+      const bucketIndex = getBucketIndex(next.ms);
 
-      if (!key) {
+      if (bucketIndex < 0) {
         continue;
       }
 
-      member.buckets.set(key, (member.buckets.get(key) || 0) + gain);
-      member.activity += gain;
+      member.bucketGains[bucketIndex] += gain;
+      member.totalGain += gain;
     }
   }
 
   members = Array.from(memberMap.values()).sort((a, b) => {
-    if (b.activity !== a.activity) {
-      return b.activity - a.activity;
+    if (b.totalGain !== a.totalGain) {
+      return b.totalGain - a.totalGain;
     }
 
     if (b.currentTotal !== a.currentTotal) {
@@ -655,40 +668,80 @@ function buildActivityModel() {
   });
 }
 
-function getFilteredMembers() {
+function getVisibleMembers() {
   const query = document.getElementById("search").value.toLowerCase().trim();
-  const limit = document.getElementById("limit").value;
+  const limit = document.getElementById("line-count").value;
 
-  let out = members.slice();
+  let list = members.slice();
 
   if (query) {
-    out = out.filter(member =>
+    list = list.filter(member =>
       member.name.toLowerCase().includes(query) ||
       member.id.includes(query)
     );
   }
 
   if (limit !== "all") {
-    out = out.slice(0, Number(limit));
+    list = list.slice(0, Number(limit));
   }
 
-  return out;
+  return list;
 }
 
-function renderChart() {
-  const wrap = document.getElementById("wrap");
-  const rows = getFilteredMembers();
+function getSeriesValues(member) {
+  const mode = document.getElementById("mode").value;
 
-  let totalActivity = 0;
-  let maxBucket = 0;
-
-  for (const member of rows) {
-    totalActivity += member.activity;
-
-    for (const value of member.buckets.values()) {
-      maxBucket = Math.max(maxBucket, value);
-    }
+  if (mode !== "cumulative") {
+    return member.bucketGains.slice();
   }
+
+  let running = 0;
+
+  return member.bucketGains.map(value => {
+    running += value;
+    return running;
+  });
+}
+
+function setupCanvas() {
+  const box = canvas.parentElement;
+  const rect = box.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  return {
+    width: rect.width,
+    height: rect.height
+  };
+}
+
+function drawText(text, x, y, options = {}) {
+  ctx.save();
+  ctx.fillStyle = options.color || "#e6edf3";
+  ctx.font = options.font || "12px Arial";
+  ctx.textAlign = options.align || "left";
+  ctx.textBaseline = options.baseline || "middle";
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawChart() {
+  const { width, height } = setupCanvas();
+  const visible = getVisibleMembers();
+  const bucketHours = Number(document.getElementById("bucket").value) || 12;
+  const mode = document.getElementById("mode").value;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(0, 0, width, height);
+
+  const totalGain = visible.reduce((sum, member) => sum + member.totalGain, 0);
 
   document.getElementById("battle").textContent =
     current?.display_name || current?.battle || "Current";
@@ -696,112 +749,203 @@ function renderChart() {
   document.getElementById("range").textContent =
     fmtDateTime(getStartMs()) + " → " + fmtDateTime(getEndMs());
 
-  document.getElementById("members").textContent =
-    rows.length.toLocaleString("en-US") + " / " + members.length.toLocaleString("en-US");
+  document.getElementById("shown").textContent =
+    visible.length.toLocaleString("en-US") + " / " + members.length.toLocaleString("en-US");
 
-  document.getElementById("activity").textContent = shortNum(totalActivity);
+  document.getElementById("total-gain").textContent = shortNum(totalGain);
 
-  document.getElementById("sub").textContent =
-    "Showing " + DISPLAY + " gains from June 13, 2026 at 10:00 AM NM time onward.";
+  document.getElementById("chart-title").textContent =
+    mode === "cumulative" ? "Cumulative member gain" : "Member gain by period";
 
-  document.getElementById("legend").textContent =
-    maxBucket
-      ? "Darker cells = higher gain. Max bucket: " + shortNum(maxBucket)
-      : "Darker cells = higher gain";
+  document.getElementById("chart-note").textContent =
+    visible.length + " line" + (visible.length === 1 ? "" : "s") +
+    " shown · " + document.getElementById("bucket").selectedOptions[0].text;
 
-  if (!rows.length) {
-    wrap.innerHTML = '<div class="empty">No activity found.</div>';
+  if (!visible.length || !buckets.length) {
+    drawText("No activity found for the current filters.", width / 2, height / 2, {
+      color: "#8b949e",
+      font: "14px Arial",
+      align: "center"
+    });
     return;
   }
 
-  const cols = [
-    "64px",
-    "230px",
-    "112px",
-    ...buckets.map(() => "92px")
-  ].join(" ");
+  const margin = {
+    left: 78,
+    right: 28,
+    top: 48,
+    bottom: 52
+  };
 
-  const html = [];
+  const plotX = margin.left;
+  const plotY = margin.top;
+  const plotW = Math.max(10, width - margin.left - margin.right);
+  const plotH = Math.max(10, height - margin.top - margin.bottom);
 
-  html.push('<div class="grid" style="grid-template-columns:' + cols + '">');
-  html.push('<div class="cell head rank">Rank</div>');
-  html.push('<div class="cell head name">Player</div>');
-  html.push('<div class="cell head total">Total</div>');
+  const series = visible.map((member, index) => ({
+    member,
+    color: LINE_COLORS[index % LINE_COLORS.length],
+    values: getSeriesValues(member)
+  }));
 
-  const bucketHours = Number(document.getElementById("bucket").value) || 12;
+  let maxY = 0;
 
-  for (const bucket of buckets) {
-    html.push(
-      '<div class="cell head bucket" title="' +
-      escapeHtml(fmtDateTime(bucket.startMs)) +
-      '">' +
-      escapeHtml(fmtBucketLabel(bucket.startMs, bucketHours)) +
-      '</div>'
-    );
+  for (const item of series) {
+    for (const value of item.values) {
+      if (value > maxY) {
+        maxY = value;
+      }
+    }
   }
 
-  rows.forEach((member, index) => {
-    html.push('<div class="cell rank">#' + escapeHtml(member.rank ?? index + 1) + '</div>');
-    html.push('<div class="cell name" title="' + escapeHtml(member.name) + '">' + escapeHtml(member.name) + '</div>');
-    html.push('<div class="cell total" title="' + fullNum(member.activity) + '">' + shortNum(member.activity) + '</div>');
+  if (!maxY) {
+    maxY = 1;
+  }
 
-    for (const bucket of buckets) {
-      const value = member.buckets.get(bucket.key) || 0;
-      const alpha = value
-        ? Math.max(0.08, Math.min(0.95, value / maxBucket))
-        : 0.03;
+  maxY *= 1.08;
 
-      const title =
-        member.name + "\n" +
-        fmtDateTime(bucket.startMs) + " → " + fmtDateTime(bucket.endMs) + "\n" +
-        "Gain: " + fullNum(value);
+  ctx.strokeStyle = "rgba(48,54,61,0.9)";
+  ctx.lineWidth = 1;
 
-      html.push(
-        '<div class="cell bucket ' + (value ? "" : "zero") + '" ' +
-        'style="background:rgba(255,155,150,' + alpha + ')" ' +
-        'title="' + escapeHtml(title) + '">' +
-        (value ? shortNum(value) : "—") +
-        '</div>'
-      );
+  const gridLines = 5;
+
+  for (let i = 0; i <= gridLines; i++) {
+    const t = i / gridLines;
+    const y = plotY + plotH - t * plotH;
+    const value = maxY * t;
+
+    ctx.beginPath();
+    ctx.moveTo(plotX, y);
+    ctx.lineTo(plotX + plotW, y);
+    ctx.stroke();
+
+    drawText(shortNum(value), plotX - 10, y, {
+      color: "#8b949e",
+      font: "11px Arial",
+      align: "right"
+    });
+  }
+
+  ctx.strokeStyle = "rgba(139,148,158,0.85)";
+  ctx.beginPath();
+  ctx.moveTo(plotX, plotY);
+  ctx.lineTo(plotX, plotY + plotH);
+  ctx.lineTo(plotX + plotW, plotY + plotH);
+  ctx.stroke();
+
+  const maxXTicks = Math.min(9, buckets.length);
+  const tickEvery = Math.max(1, Math.ceil(buckets.length / maxXTicks));
+
+  for (let i = 0; i < buckets.length; i += tickEvery) {
+    const x = buckets.length === 1
+      ? plotX
+      : plotX + (i / (buckets.length - 1)) * plotW;
+
+    ctx.strokeStyle = "rgba(48,54,61,0.65)";
+    ctx.beginPath();
+    ctx.moveTo(x, plotY);
+    ctx.lineTo(x, plotY + plotH);
+    ctx.stroke();
+
+    drawText(fmtTick(buckets[i].startMs, bucketHours), x, plotY + plotH + 18, {
+      color: "#8b949e",
+      font: "11px Arial",
+      align: "center"
+    });
+  }
+
+  drawText(
+    mode === "cumulative" ? "Cumulative gain" : "Gain per period",
+    12,
+    plotY + plotH / 2,
+    {
+      color: "#8b949e",
+      font: "12px Arial",
+      align: "left"
     }
-  });
+  );
 
-  html.push("</div>");
-  wrap.innerHTML = html.join("");
+  for (const item of series) {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = visible.length > 25 ? 1 : 2;
+    ctx.globalAlpha = visible.length > 25 ? 0.65 : 0.95;
+
+    ctx.beginPath();
+
+    item.values.forEach((value, index) => {
+      const x = item.values.length === 1
+        ? plotX
+        : plotX + (index / (item.values.length - 1)) * plotW;
+
+      const y = plotY + plotH - (value / maxY) * plotH;
+
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+
+  const legendX = plotX + 8;
+  let legendY = 18;
+  const maxLegendItems = Math.min(visible.length, Math.floor((width - plotX - 40) / 145), 10);
+
+  for (let i = 0; i < maxLegendItems; i++) {
+    const item = series[i];
+    const x = legendX + i * 145;
+
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, legendY);
+    ctx.lineTo(x + 18, legendY);
+    ctx.stroke();
+
+    drawText(item.member.name.slice(0, 15), x + 24, legendY, {
+      color: "#e6edf3",
+      font: "11px Arial"
+    });
+  }
+
+  if (visible.length > maxLegendItems) {
+    drawText("+" + (visible.length - maxLegendItems) + " more", legendX + maxLegendItems * 145, legendY, {
+      color: "#8b949e",
+      font: "11px Arial"
+    });
+  }
+}
+
+function render() {
+  buildActivityModel();
+  drawChart();
 }
 
 async function loadData() {
   try {
-    setStatus("Loading activity data...");
+    setStatus("Loading current leaderboard...");
 
     document.title = DISPLAY + " Activity Chart";
     document.getElementById("title").textContent = DISPLAY + " Member Activity Chart";
-    document.getElementById("home").href = pageUrl("index.html");
+    document.getElementById("home-link").href = pageUrl("index.html");
     document.getElementById("activity-link").href = pageUrl("activity.html");
 
-    current = await getJson(withQuery(CURRENT_API), DISPLAY + " current");
+    current = await getJson(withQuery(CURRENT_API), DISPLAY + " current leaderboard");
 
-    const start = getStartMs();
-    const oldestNeeded = start - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+    setStatus("Loading player histories...");
 
-    // The history API is relative: it returns now minus X hours.
-    // So the hours value must be based on now, not the chart end.
-    const hoursNeeded = Math.ceil((Date.now() - oldestNeeded) / (60 * 60 * 1000));
-    const hours = Math.min(MAX_HISTORY_HOURS, Math.max(1, hoursNeeded));
-
-    const history = await getJson(
-      withQuery(HISTORY_API, {
-        battle: current?.battle || "current",
-        hours,
-        limit: 50000
-      }),
-      DISPLAY + " history"
-    );
-
-    historyRows = Array.isArray(history.rows) ? history.rows : [];
+    rawHistoryRows = await fetchAllMemberHistory();
 
     buildActivityModel();
-    renderChart();
+    drawChart();
+
+    document.getElementById("subtitle").textContent =
+      "Line graph of " + DISPLAY + " member point gain from June 13, 2026 at 10:00 AM NM time onward.";
+
     setStatus("");
   } catch (error) {
     console.error(error);
@@ -809,14 +953,12 @@ async function loadData() {
   }
 }
 
-document.getElementById("bucket").addEventListener("change", () => {
-  buildActivityModel();
-  renderChart();
-});
-
-document.getElementById("limit").addEventListener("change", renderChart);
-document.getElementById("search").addEventListener("input", renderChart);
+document.getElementById("bucket").addEventListener("change", render);
+document.getElementById("line-count").addEventListener("change", drawChart);
+document.getElementById("mode").addEventListener("change", drawChart);
+document.getElementById("search").addEventListener("input", drawChart);
 document.getElementById("refresh").addEventListener("click", loadData);
+window.addEventListener("resize", drawChart);
 
 loadData();
 </script>
