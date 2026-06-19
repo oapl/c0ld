@@ -2,7 +2,8 @@
   const REMOVED_LABELS = new Set([
     "first active date",
     "worst rank",
-    "best rank"
+    "best rank",
+    "data pulls shown"
   ]);
 
   let running = false;
@@ -12,7 +13,7 @@
     running = true;
 
     document.querySelectorAll(".stat-row").forEach(row => {
-      const label = row.querySelector(".stat-label")?.textContent?.trim().toLowerCase();
+      const label = row.querySelector(".stat-label, .label")?.textContent?.trim().toLowerCase();
       if (label && REMOVED_LABELS.has(label)) {
         row.remove();
       }
