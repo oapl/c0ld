@@ -41,6 +41,7 @@ jobs:
 
           script_tags = [
               '  <script src="assets/clan-switcher.js"></script>\n',
+              '  <script src="assets/site-announcement.js"></script>\n',
               '  <script src="assets/site-enhancements.js"></script>\n',
               '  <script src="assets/site-enhancements-compat.js"></script>\n',
               '  <script src="assets/clan-page-links.js"></script>\n',
