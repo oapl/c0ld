@@ -48,7 +48,7 @@ jobs:
               '  <script src="assets/clan-page-links.js"></script>\n',
               '  <script src="assets/clan-row-final-links.js"></script>\n',
               '  <script src="assets/profile-stat-cleanup.js"></script>\n',
-              '  <script src="assets/reward-threshold-chart.js"></script>\n',
+              '  <script src="assets/reward-threshold-chart-v2.js"></script>\n',
           ]
 
           for path in Path('_site').glob('*.html'):
