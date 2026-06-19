@@ -305,9 +305,11 @@ canvas{
       </select>
 
       <select id="line-count">
-        <option value="10">Top 10 lines</option>
-        <option value="25">Top 25 lines</option>
+        <option value="top10">Top 10</option>
+        <option value="top25">Top 25</option>
         <option value="all" selected>All members</option>
+        <option value="bottom10">Bottom 10</option>
+        <option value="bottom25">Bottom 25</option>
       </select>
 
       <div class="toggles">
@@ -341,7 +343,7 @@ canvas{
     <span>Battle: <strong id="battle">—</strong></span>
     <span>Range: <strong id="range">—</strong></span>
     <span>Showing: <strong id="shown">—</strong></span>
-    <span>Total plotted gain: <strong id="total-gain">—</strong></span>
+    <span>Plotted gain: <strong id="total-gain">—</strong></span>
   </div>
 
   <div id="status" class="status show">Loading current leaderboard...</div>
@@ -464,6 +466,20 @@ function shortNum(value) {
   }
 
   return Math.round(n).toLocaleString("en-US");
+}
+
+function formatPercent(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) {
+    return "—";
+  }
+
+  if (Math.abs(n) < 0.1 && n !== 0) {
+    return n.toFixed(2).replace(/\.?0+$/, "") + "%";
+  }
+
+  return n.toFixed(1).replace(/\.0$/, "") + "%";
 }
 
 function fmtDateTime(value) {
@@ -825,7 +841,7 @@ function buildActivityModel() {
 
 function getVisibleMembers() {
   const query = document.getElementById("search").value.toLowerCase().trim();
-  const limit = document.getElementById("line-count").value;
+  const mode = document.getElementById("line-count").value;
 
   let list = members.slice();
 
@@ -836,8 +852,20 @@ function getVisibleMembers() {
     );
   }
 
-  if (limit !== "all") {
-    list = list.slice(0, Number(limit));
+  if (mode === "top10") {
+    return list.slice(0, 10);
+  }
+
+  if (mode === "top25") {
+    return list.slice(0, 25);
+  }
+
+  if (mode === "bottom10") {
+    return list.slice().reverse().slice(0, 10);
+  }
+
+  if (mode === "bottom25") {
+    return list.slice().reverse().slice(0, 25);
   }
 
   return list;
@@ -923,6 +951,13 @@ function drawChart() {
   ctx.fillRect(0, 0, width, height);
 
   const totalGain = visible.reduce((sum, member) => sum + member.totalGain, 0);
+  const visibleTotalPoints = visible.reduce((sum, member) => {
+    return sum + (Number(member.currentTotal) || 0);
+  }, 0);
+
+  const gainPercentOfTotal = visibleTotalPoints
+    ? (totalGain / visibleTotalPoints) * 100
+    : 0;
 
   document.getElementById("battle").textContent =
     current?.display_name || current?.battle || "Current";
@@ -933,7 +968,8 @@ function drawChart() {
   document.getElementById("shown").textContent =
     visible.length.toLocaleString("en-US") + " / " + members.length.toLocaleString("en-US");
 
-  document.getElementById("total-gain").textContent = shortNum(totalGain);
+  document.getElementById("total-gain").textContent =
+    shortNum(totalGain) + " (" + formatPercent(gainPercentOfTotal) + " of shown total points)";
 
   const titleParts = [];
 
@@ -956,6 +992,8 @@ function drawChart() {
     visible.length + " member" + (visible.length === 1 ? "" : "s") +
     " shown · " +
     document.getElementById("bucket").selectedOptions[0].text +
+    " · " +
+    document.getElementById("line-count").selectedOptions[0].text +
     " · " +
     (fullWindow ? "Full CB window" : "Fit to data pulls");
 
