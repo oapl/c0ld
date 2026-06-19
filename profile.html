@@ -504,6 +504,25 @@ function trackedChartPoints(battle){
     .sort((a,b)=>a.t-b.t);
 }
 
+function isDowntimeSegment(current,next){
+  const currentPoints=finite(current?.points);
+  const nextPoints=finite(next?.points);
+
+  if(currentPoints===null||nextPoints===null)return false;
+
+  if(currentPoints===0)return true;
+
+  return nextPoints<=currentPoints;
+}
+
+function segmentStatus(current,next){
+  if(!next)return current?.points===0?"0 points":"Scoring";
+
+  if(current?.points===0)return"0 points";
+
+  return isDowntimeSegment(current,next)?"No point gain":"Scoring";
+}
+
 function activitySummary(battle){
   const points=trackedPoints(battle);
 
@@ -519,7 +538,10 @@ function activitySummary(battle){
 
   for(let i=0;i<points.length-1;i++){
     const segment=Math.max(0,points[i+1].t-points[i].t);
-    if(points[i].points===0)downtime+=segment;
+
+    if(isDowntimeSegment(points[i],points[i+1])){
+      downtime+=segment;
+    }
   }
 
   const uptime=Math.max(0,trackedMs-downtime);
@@ -692,18 +714,24 @@ function drawActivityStrip(ctx,points,x,stripY){
   ctx.lineCap="round";
 
   for(let i=0;i<points.length-1;i++){
-    ctx.strokeStyle=points[i].points===0?"#f85149":"#3fb950";
+    ctx.strokeStyle=isDowntimeSegment(points[i],points[i+1])?"#f85149":"#3fb950";
     ctx.beginPath();
     ctx.moveTo(x(points[i]),stripY);
     ctx.lineTo(x(points[i+1]),stripY);
     ctx.stroke();
   }
 
-  for(const point of points){
-    if(point.points!==0)continue;
+  for(let i=0;i<points.length;i++){
+    const next=points[i+1];
+    const previous=points[i-1];
+    const startsDowntime=next&&isDowntimeSegment(points[i],next);
+    const endsDowntime=previous&&isDowntimeSegment(previous,points[i]);
+
+    if(!startsDowntime&&!endsDowntime)continue;
+
     ctx.fillStyle="#f85149";
     ctx.beginPath();
-    ctx.arc(x(point),stripY,4,0,Math.PI*2);
+    ctx.arc(x(points[i]),stripY,4,0,Math.PI*2);
     ctx.fill();
   }
 
@@ -720,6 +748,7 @@ function drawChart(){
   const dpr=devicePixelRatio||1;
   const battle=sortedBattles()[battleIndex];
   const all=trackedChartPoints(battle);
+  const strip=trackedPoints(battle);
   const pointSeries=showPoints?all.filter(point=>point.points!==null):[];
   const rankSeries=showRank?all.filter(point=>point.rank!==null):[];
   const visible=[...pointSeries,...rankSeries];
@@ -784,7 +813,7 @@ function drawChart(){
 
   drawLine(ctx,pointSeries,x,yp,clan().color);
   drawLine(ctx,rankSeries,x,yr,"#f2cc60");
-  drawActivityStrip(ctx,trackedPoints(battle),x,stripY);
+  drawActivityStrip(ctx,strip,x,stripY);
 
   ctx.fillStyle="#8b949e";
   ctx.fillText(
@@ -796,9 +825,40 @@ function drawChart(){
   const endLabel=new Date(maxT).toLocaleDateString(undefined,{month:"short",day:"numeric"});
   ctx.fillText(endLabel,rect.width-padRight-ctx.measureText(endLabel).width,rect.height-12);
 
-  chartCache={all,x,yp,yr,stripY,rect};
+  chartCache={all,strip,x,yp,yr,stripY,rect};
 
   bindTooltip(canvas,tooltip);
+}
+
+function tooltipStatusForPoint(point){
+  const strip=chartCache?.strip||[];
+  if(!strip.length)return point.points===0?"0 points":"Scoring";
+
+  let index=strip.findIndex(p=>p.t===point.t);
+
+  if(index<0){
+    let best=0;
+    let bestDistance=Math.abs(strip[0].t-point.t);
+
+    for(let i=1;i<strip.length;i++){
+      const distance=Math.abs(strip[i].t-point.t);
+      if(distance<bestDistance){
+        best=i;
+        bestDistance=distance;
+      }
+    }
+
+    index=best;
+  }
+
+  const current=strip[index];
+  const next=strip[index+1];
+  const previous=strip[index-1];
+
+  if(next)return segmentStatus(current,next);
+  if(previous&&isDowntimeSegment(previous,current))return current.points===0?"0 points":"No point gain";
+
+  return current.points===0?"0 points":"Scoring";
 }
 
 function bindTooltip(canvas,tooltip){
@@ -844,7 +904,7 @@ function bindTooltip(canvas,tooltip){
       <strong>${fmtDateTime(nearest.rawT)}</strong>
       <div>Points: ${fmt(nearest.points)}</div>
       <div>Rank: ${fmt(nearest.rank)}</div>
-      <div class="muted">${nearest.points===0?"0 points":"Scoring"}</div>
+      <div class="muted">${tooltipStatusForPoint(nearest)}</div>
     `;
 
     tooltip.style.display="block";
