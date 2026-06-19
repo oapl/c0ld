@@ -113,7 +113,7 @@ h1{
 }
 
 select,
-input,
+input:not([type="checkbox"]),
 button{
   border:1px solid var(--border);
   border-radius:6px;
@@ -124,8 +124,17 @@ button{
   outline:none;
 }
 
-input{
+input:not([type="checkbox"]){
   min-width:220px;
+}
+
+input[type="checkbox"]{
+  min-width:0;
+  width:14px;
+  height:14px;
+  padding:0;
+  margin:0;
+  accent-color:#238636;
 }
 
 button{
@@ -134,17 +143,27 @@ button{
 
 button:hover,
 select:hover,
-input:focus{
+input:not([type="checkbox"]):focus{
   border-color:var(--link);
 }
 
 .toggles{
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:12px;
   flex-wrap:wrap;
+  padding:7px 10px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--panel2);
   color:var(--muted);
   font-size:13px;
+}
+
+.toggle-title{
+  color:var(--muted);
+  font-weight:700;
+  margin-right:2px;
 }
 
 .toggle{
@@ -261,7 +280,7 @@ canvas{
   }
 
   select,
-  input,
+  input:not([type="checkbox"]),
   button{
     width:100%;
     min-width:0;
@@ -313,6 +332,8 @@ canvas{
       </select>
 
       <div class="toggles">
+        <span class="toggle-title">Show:</span>
+
         <label class="toggle gain-toggle">
           <input id="toggle-gain" type="checkbox">
           Gain
@@ -325,7 +346,7 @@ canvas{
 
         <label class="toggle status-toggle">
           <input id="toggle-status" type="checkbox">
-          Uptime / downtime
+          Active dots
         </label>
 
         <label class="toggle window-toggle">
@@ -527,9 +548,6 @@ function usingFullEventWindow() {
   return document.getElementById("toggle-full-window")?.checked || false;
 }
 
-// Visible graph start.
-// Default: first actual data pull inside the event.
-// Full CB window checked: hard event start.
 function getStartMs() {
   if (usingFullEventWindow()) {
     return getEventStartMs();
@@ -538,9 +556,6 @@ function getStartMs() {
   return Number.isFinite(dataStartMs) ? dataStartMs : getEventStartMs();
 }
 
-// Visible graph end.
-// Default: last actual data pull inside the event.
-// Full CB window checked: hard event end.
 function getEndMs() {
   if (usingFullEventWindow()) {
     return getEventEndMs();
@@ -927,7 +942,7 @@ function drawStatusStrip(visible, plotX, plotY, plotW, plotH) {
     ctx.stroke();
   }
 
-  drawText("Up/down", plotX - 10, stripY, {
+  drawText("Active", plotX - 10, stripY, {
     color: "#8b949e",
     font: "11px Arial",
     align: "right"
@@ -982,7 +997,7 @@ function drawChart() {
   }
 
   if (showStatus) {
-    titleParts.push("uptime / downtime");
+    titleParts.push("active dots");
   }
 
   document.getElementById("chart-title").textContent =
@@ -1180,13 +1195,21 @@ function drawChart() {
 
       if (showStatus) {
         member.bucketGains.forEach((value, index) => {
+          const active = Number(value || 0) > 0;
+
+          // If Gain + Rank + active dots are all enabled for multiple members,
+          // hide red zero-gain markers so the graph doesn't become a red wall.
+          if (showRank && !active && visible.length > 1) {
+            return;
+          }
+
           const x = xForIndex(index, member.bucketGains.length);
           const y = yForGain(value);
 
-          ctx.fillStyle = Number(value || 0) > 0 ? "#3fb950" : "#f85149";
-          ctx.globalAlpha = Number(value || 0) > 0 ? 0.88 : 0.72;
+          ctx.fillStyle = active ? "#3fb950" : "#f85149";
+          ctx.globalAlpha = active ? 0.9 : 0.65;
           ctx.beginPath();
-          ctx.arc(x, y, visible.length > 25 ? 2 : 3, 0, Math.PI * 2);
+          ctx.arc(x, y, visible.length > 10 ? 2 : 3, 0, Math.PI * 2);
           ctx.fill();
         });
       }
@@ -1237,14 +1260,14 @@ function drawChart() {
             return;
           }
 
+          const active = member.statusValues[index] > 0;
           const x = xForIndex(index, member.rankValues.length);
           const y = yForRank(rankValue);
-          const active = member.statusValues[index] > 0;
 
           ctx.fillStyle = active ? "#3fb950" : "#f85149";
-          ctx.globalAlpha = active ? 0.88 : 0.72;
+          ctx.globalAlpha = active ? 0.9 : 0.65;
           ctx.beginPath();
-          ctx.arc(x, y, visible.length > 25 ? 2 : 3, 0, Math.PI * 2);
+          ctx.arc(x, y, visible.length > 10 ? 2 : 3, 0, Math.PI * 2);
           ctx.fill();
         });
       }
