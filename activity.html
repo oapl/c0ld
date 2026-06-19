@@ -260,7 +260,7 @@ canvas{
   <div class="top">
     <div>
       <h1 id="title">c0ld Member Activity Chart</h1>
-      <div class="sub" id="subtitle">Line graph of member point gain from June 13, 2026 at 10:00 AM NM time onward.</div>
+      <div class="sub" id="subtitle">Line graph from the event start time onward.</div>
     </div>
 
     <div class="tools">
@@ -276,9 +276,10 @@ canvas{
         <option value="all">All members</option>
       </select>
 
-      <select id="mode">
+      <select id="metric">
         <option value="gain" selected>Gain per period</option>
-        <option value="cumulative">Cumulative gain</option>
+        <option value="rank">Rank over time</option>
+        <option value="status">Uptime / downtime</option>
       </select>
 
       <input id="search" placeholder="Search member...">
@@ -311,6 +312,8 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
+// Hard event window.
+// The chart never starts before this.
 const CHART_START_ISO = "2026-06-13T10:00:00-06:00";
 const CHART_END_ISO = "2026-06-19T10:00:00-06:00";
 
@@ -581,6 +584,8 @@ function buildActivityModel() {
       rank: row.rank,
       currentTotal: toNumber(row.total_points) || 0,
       bucketGains: buckets.map(() => 0),
+      rankValues: buckets.map(() => null),
+      statusValues: buckets.map(() => 0),
       totalGain: 0
     });
   }
@@ -588,6 +593,7 @@ function buildActivityModel() {
   for (const row of rawHistoryRows) {
     const id = String(row.user_id || "").trim();
     const total = toNumber(row.total_points);
+    const rank = toNumber(row.rank);
     const ms = new Date(row.fetched_at || "").getTime();
 
     if (!id || total === null || !Number.isFinite(ms)) {
@@ -605,17 +611,19 @@ function buildActivityModel() {
     seriesByUser.get(id).push({
       ms,
       total,
-      name: row.username || id,
-      rank: row.rank
+      rank,
+      name: row.username || id
     });
 
     if (!memberMap.has(id)) {
       memberMap.set(id, {
         id,
         name: row.username || id,
-        rank: row.rank,
+        rank,
         currentTotal: total,
         bucketGains: buckets.map(() => 0),
+        rankValues: buckets.map(() => null),
+        statusValues: buckets.map(() => 0),
         totalGain: 0
       });
     }
@@ -630,6 +638,7 @@ function buildActivityModel() {
       continue;
     }
 
+    // Gains and uptime/downtime.
     for (let i = 1; i < series.length; i++) {
       const previous = series[i - 1];
       const next = series[i];
@@ -651,7 +660,35 @@ function buildActivityModel() {
       }
 
       member.bucketGains[bucketIndex] += gain;
+      member.statusValues[bucketIndex] = 1;
       member.totalGain += gain;
+    }
+
+    // Rank over time.
+    // We carry the latest known rank forward, but the chart still starts at event start.
+    let pointer = 0;
+    let lastRank = null;
+
+    while (pointer < series.length && series[pointer].ms < start) {
+      if (Number.isFinite(series[pointer].rank)) {
+        lastRank = series[pointer].rank;
+      }
+
+      pointer++;
+    }
+
+    for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
+      const bucket = buckets[bucketIndex];
+
+      while (pointer < series.length && series[pointer].ms < bucket.endMs) {
+        if (series[pointer].ms >= start && Number.isFinite(series[pointer].rank)) {
+          lastRank = series[pointer].rank;
+        }
+
+        pointer++;
+      }
+
+      member.rankValues[bucketIndex] = lastRank;
     }
   }
 
@@ -689,18 +726,17 @@ function getVisibleMembers() {
 }
 
 function getSeriesValues(member) {
-  const mode = document.getElementById("mode").value;
+  const metric = document.getElementById("metric").value;
 
-  if (mode !== "cumulative") {
-    return member.bucketGains.slice();
+  if (metric === "rank") {
+    return member.rankValues.slice();
   }
 
-  let running = 0;
+  if (metric === "status") {
+    return member.statusValues.slice();
+  }
 
-  return member.bucketGains.map(value => {
-    running += value;
-    return running;
-  });
+  return member.bucketGains.slice();
 }
 
 function setupCanvas() {
@@ -731,11 +767,35 @@ function drawText(text, x, y, options = {}) {
   ctx.restore();
 }
 
+function getMetricTitle(metric) {
+  if (metric === "rank") {
+    return "Rank over time";
+  }
+
+  if (metric === "status") {
+    return "Uptime / downtime";
+  }
+
+  return "Gain per period";
+}
+
+function getMetricAxisLabel(metric) {
+  if (metric === "rank") {
+    return "Rank";
+  }
+
+  if (metric === "status") {
+    return "Status";
+  }
+
+  return "Gain";
+}
+
 function drawChart() {
   const { width, height } = setupCanvas();
   const visible = getVisibleMembers();
   const bucketHours = Number(document.getElementById("bucket").value) || 12;
-  const mode = document.getElementById("mode").value;
+  const metric = document.getElementById("metric").value;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0d1117";
@@ -754,8 +814,7 @@ function drawChart() {
 
   document.getElementById("total-gain").textContent = shortNum(totalGain);
 
-  document.getElementById("chart-title").textContent =
-    mode === "cumulative" ? "Cumulative member gain" : "Member gain by period";
+  document.getElementById("chart-title").textContent = getMetricTitle(metric);
 
   document.getElementById("chart-note").textContent =
     visible.length + " line" + (visible.length === 1 ? "" : "s") +
@@ -788,38 +847,81 @@ function drawChart() {
     values: getSeriesValues(member)
   }));
 
-  let maxY = 0;
+  let minY = metric === "status" ? 0 : Infinity;
+  let maxY = metric === "status" ? 1 : -Infinity;
 
   for (const item of series) {
     for (const value of item.values) {
-      if (value > maxY) {
-        maxY = value;
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+        continue;
       }
+
+      minY = Math.min(minY, Number(value));
+      maxY = Math.max(maxY, Number(value));
     }
   }
 
-  if (!maxY) {
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    minY = 0;
     maxY = 1;
   }
 
-  maxY *= 1.08;
+  if (metric === "gain") {
+    minY = 0;
+    maxY = maxY || 1;
+    maxY *= 1.08;
+  }
+
+  if (metric === "rank") {
+    // Lower rank is better, so #1 appears higher.
+    minY = Math.max(1, Math.floor(minY));
+    maxY = Math.ceil(maxY);
+
+    if (minY === maxY) {
+      maxY = minY + 1;
+    }
+  }
+
+  if (metric === "status") {
+    minY = 0;
+    maxY = 1;
+  }
+
+  function yForValue(value) {
+    if (metric === "rank") {
+      return plotY + ((value - minY) / (maxY - minY)) * plotH;
+    }
+
+    return plotY + plotH - ((value - minY) / (maxY - minY)) * plotH;
+  }
 
   ctx.strokeStyle = "rgba(48,54,61,0.9)";
   ctx.lineWidth = 1;
 
-  const gridLines = 5;
+  const gridLines = metric === "status" ? 1 : 5;
 
   for (let i = 0; i <= gridLines; i++) {
-    const t = i / gridLines;
+    const t = gridLines === 0 ? 0 : i / gridLines;
     const y = plotY + plotH - t * plotH;
-    const value = maxY * t;
+
+    let label;
+
+    if (metric === "status") {
+      label = i === 0 ? "Down" : "Up";
+    } else if (metric === "rank") {
+      const rankValue = minY + (maxY - minY) * (i / gridLines);
+      label = "#" + Math.round(rankValue);
+    } else {
+      const gainValue = minY + (maxY - minY) * (i / gridLines);
+      label = shortNum(gainValue);
+    }
 
     ctx.beginPath();
     ctx.moveTo(plotX, y);
     ctx.lineTo(plotX + plotW, y);
     ctx.stroke();
 
-    drawText(shortNum(value), plotX - 10, y, {
+    drawText(label, plotX - 10, y, {
       color: "#8b949e",
       font: "11px Arial",
       align: "right"
@@ -854,33 +956,36 @@ function drawChart() {
     });
   }
 
-  drawText(
-    mode === "cumulative" ? "Cumulative gain" : "Gain per period",
-    12,
-    plotY + plotH / 2,
-    {
-      color: "#8b949e",
-      font: "12px Arial",
-      align: "left"
-    }
-  );
+  drawText(getMetricAxisLabel(metric), 12, plotY + plotH / 2, {
+    color: "#8b949e",
+    font: "12px Arial",
+    align: "left"
+  });
 
   for (const item of series) {
     ctx.strokeStyle = item.color;
     ctx.lineWidth = visible.length > 25 ? 1 : 2;
     ctx.globalAlpha = visible.length > 25 ? 0.65 : 0.95;
 
+    let started = false;
+
     ctx.beginPath();
 
     item.values.forEach((value, index) => {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+        started = false;
+        return;
+      }
+
       const x = item.values.length === 1
         ? plotX
         : plotX + (index / (item.values.length - 1)) * plotW;
 
-      const y = plotY + plotH - (value / maxY) * plotH;
+      const y = yForValue(Number(value));
 
-      if (index === 0) {
+      if (!started) {
         ctx.moveTo(x, y);
+        started = true;
       } else {
         ctx.lineTo(x, y);
       }
@@ -892,8 +997,12 @@ function drawChart() {
   ctx.globalAlpha = 1;
 
   const legendX = plotX + 8;
-  let legendY = 18;
-  const maxLegendItems = Math.min(visible.length, Math.floor((width - plotX - 40) / 145), 10);
+  const legendY = 18;
+  const maxLegendItems = Math.min(
+    visible.length,
+    Math.floor((width - plotX - 40) / 145),
+    10
+  );
 
   for (let i = 0; i < maxLegendItems; i++) {
     const item = series[i];
@@ -944,7 +1053,7 @@ async function loadData() {
     drawChart();
 
     document.getElementById("subtitle").textContent =
-      "Line graph of " + DISPLAY + " member point gain from June 13, 2026 at 10:00 AM NM time onward.";
+      "Line graph from " + fmtDateTime(getStartMs()) + " onward.";
 
     setStatus("");
   } catch (error) {
@@ -955,7 +1064,7 @@ async function loadData() {
 
 document.getElementById("bucket").addEventListener("change", render);
 document.getElementById("line-count").addEventListener("change", drawChart);
-document.getElementById("mode").addEventListener("change", drawChart);
+document.getElementById("metric").addEventListener("change", drawChart);
 document.getElementById("search").addEventListener("input", drawChart);
 document.getElementById("refresh").addEventListener("click", loadData);
 window.addEventListener("resize", drawChart);
