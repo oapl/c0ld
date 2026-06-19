@@ -162,7 +162,8 @@ input:focus{
   color:var(--rank);
 }
 
-.status-toggle{
+.status-toggle,
+.window-toggle{
   color:var(--muted);
 }
 
@@ -293,7 +294,7 @@ canvas{
   <div class="top">
     <div>
       <h1 id="title">c0ld Member Activity Chart</h1>
-      <div class="sub" id="subtitle">Line graph from the event start time onward.</div>
+      <div class="sub" id="subtitle">Line graph using the first and last available data pull by default.</div>
     </div>
 
     <div class="tools">
@@ -304,25 +305,30 @@ canvas{
       </select>
 
       <select id="line-count">
-        <option value="10" selected>Top 10 lines</option>
+        <option value="10">Top 10 lines</option>
         <option value="25">Top 25 lines</option>
-        <option value="all">All members</option>
+        <option value="all" selected>All members</option>
       </select>
 
       <div class="toggles">
         <label class="toggle gain-toggle">
-          <input id="toggle-gain" type="checkbox" checked>
+          <input id="toggle-gain" type="checkbox">
           Gain
         </label>
 
         <label class="toggle rank-toggle">
-          <input id="toggle-rank" type="checkbox">
+          <input id="toggle-rank" type="checkbox" checked>
           Rank
         </label>
 
         <label class="toggle status-toggle">
           <input id="toggle-status" type="checkbox">
           Uptime / downtime
+        </label>
+
+        <label class="toggle window-toggle">
+          <input id="toggle-full-window" type="checkbox">
+          Full CB window
         </label>
       </div>
 
@@ -356,8 +362,10 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-const CHART_START_ISO = "2026-06-13T10:00:00-06:00";
-const CHART_END_ISO = "2026-06-19T10:00:00-06:00";
+// Hard clan battle boundaries.
+// Data outside this range is never plotted.
+const EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
+const EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
 
 const PRE_START_BUFFER_HOURS = 12;
 const MAX_HISTORY_HOURS = 336;
@@ -376,6 +384,8 @@ let current = null;
 let rawHistoryRows = [];
 let members = [];
 let buckets = [];
+let dataStartMs = null;
+let dataEndMs = null;
 
 const canvas = document.getElementById("chart");
 const ctx = canvas.getContext("2d");
@@ -489,24 +499,83 @@ function fmtTick(ms, bucketHours) {
   });
 }
 
-function getStartMs() {
-  return new Date(CHART_START_ISO).getTime();
+function getEventStartMs() {
+  return new Date(EVENT_START_ISO).getTime();
 }
 
+function getEventEndMs() {
+  return new Date(EVENT_END_ISO).getTime();
+}
+
+function usingFullEventWindow() {
+  return document.getElementById("toggle-full-window")?.checked || false;
+}
+
+// Visible graph start.
+// Default: first actual data pull inside the event.
+// Full CB window checked: hard event start.
+function getStartMs() {
+  if (usingFullEventWindow()) {
+    return getEventStartMs();
+  }
+
+  return Number.isFinite(dataStartMs) ? dataStartMs : getEventStartMs();
+}
+
+// Visible graph end.
+// Default: last actual data pull inside the event.
+// Full CB window checked: hard event end.
 function getEndMs() {
-  const fixedEnd = new Date(CHART_END_ISO || "").getTime();
-
-  if (Number.isFinite(fixedEnd)) {
-    return fixedEnd;
+  if (usingFullEventWindow()) {
+    return getEventEndMs();
   }
 
-  const apiEnd = new Date(current?.battle_end_iso || "").getTime();
+  return Number.isFinite(dataEndMs) ? dataEndMs : getEventEndMs();
+}
 
-  if (Number.isFinite(apiEnd)) {
-    return Math.min(apiEnd, Date.now());
+function deriveDataWindow() {
+  const eventStart = getEventStartMs();
+  const eventEnd = getEventEndMs();
+
+  let first = Infinity;
+  let last = -Infinity;
+
+  for (const row of rawHistoryRows) {
+    const ms = new Date(row.fetched_at || "").getTime();
+
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+
+    if (ms < eventStart || ms > eventEnd) {
+      continue;
+    }
+
+    first = Math.min(first, ms);
+    last = Math.max(last, ms);
   }
 
-  return Date.now();
+  for (const row of current?.rows || []) {
+    const ms = new Date(row.fetched_at || current?.snapshot_at || current?.generated_at || "").getTime();
+
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+
+    if (ms < eventStart || ms > eventEnd) {
+      continue;
+    }
+
+    first = Math.min(first, ms);
+    last = Math.max(last, ms);
+  }
+
+  dataStartMs = Number.isFinite(first) ? first : eventStart;
+  dataEndMs = Number.isFinite(last) ? last : eventEnd;
+
+  if (dataEndMs < dataStartMs) {
+    dataEndMs = dataStartMs;
+  }
 }
 
 function makeBuckets() {
@@ -557,8 +626,8 @@ function getMemberIds() {
 
 async function fetchAllMemberHistory() {
   const ids = getMemberIds();
-  const start = getStartMs();
-  const oldestNeeded = start - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+  const eventStart = getEventStartMs();
+  const oldestNeeded = eventStart - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
   const hoursNeeded = Math.ceil((Date.now() - oldestNeeded) / (60 * 60 * 1000));
   const hours = Math.min(MAX_HISTORY_HOURS, Math.max(1, hoursNeeded));
   const battle = current?.battle || "current";
@@ -607,9 +676,13 @@ async function fetchAllMemberHistory() {
 function buildActivityModel() {
   makeBuckets();
 
-  const start = getStartMs();
-  const end = getEndMs();
+  const eventStart = getEventStartMs();
+  const eventEnd = getEventEndMs();
+  const displayStart = getStartMs();
+  const displayEnd = getEndMs();
   const bufferMs = PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+  const fullEventWindow = usingFullEventWindow();
+
   const memberMap = new Map();
   const seriesByUser = new Map();
 
@@ -642,7 +715,7 @@ function buildActivityModel() {
       continue;
     }
 
-    if (ms < start - bufferMs || ms > end + 60 * 60 * 1000) {
+    if (ms < eventStart - bufferMs || ms > eventEnd + 60 * 60 * 1000) {
       continue;
     }
 
@@ -684,7 +757,11 @@ function buildActivityModel() {
       const previous = series[i - 1];
       const next = series[i];
 
-      if (next.ms < start || next.ms > end) {
+      if (next.ms < displayStart || next.ms > displayEnd) {
+        continue;
+      }
+
+      if (!fullEventWindow && previous.ms < displayStart) {
         continue;
       }
 
@@ -708,7 +785,7 @@ function buildActivityModel() {
     let pointer = 0;
     let lastRank = null;
 
-    while (pointer < series.length && series[pointer].ms < start) {
+    while (pointer < series.length && series[pointer].ms < displayStart) {
       if (Number.isFinite(series[pointer].rank)) {
         lastRank = series[pointer].rank;
       }
@@ -720,7 +797,7 @@ function buildActivityModel() {
       const bucket = buckets[bucketIndex];
 
       while (pointer < series.length && series[pointer].ms < bucket.endMs) {
-        if (Number.isFinite(series[pointer].rank)) {
+        if (series[pointer].ms >= displayStart && Number.isFinite(series[pointer].rank)) {
           lastRank = series[pointer].rank;
         }
 
@@ -839,6 +916,7 @@ function drawChart() {
   const showGain = document.getElementById("toggle-gain").checked;
   const showRank = document.getElementById("toggle-rank").checked;
   const showStatus = document.getElementById("toggle-status").checked;
+  const fullWindow = usingFullEventWindow();
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0d1117";
@@ -876,7 +954,15 @@ function drawChart() {
 
   document.getElementById("chart-note").textContent =
     visible.length + " member" + (visible.length === 1 ? "" : "s") +
-    " shown · " + document.getElementById("bucket").selectedOptions[0].text;
+    " shown · " +
+    document.getElementById("bucket").selectedOptions[0].text +
+    " · " +
+    (fullWindow ? "Full CB window" : "Fit to data pulls");
+
+  document.getElementById("subtitle").textContent =
+    fullWindow
+      ? "Full event window shown. Data is still limited to available pulls."
+      : "Visible range is fit to the first and last available data pull inside the event.";
 
   if (!visible.length || !buckets.length) {
     drawText("No activity found for the current filters.", width / 2, height / 2, {
@@ -1200,12 +1286,10 @@ async function loadData() {
     setStatus("Loading player histories...");
 
     rawHistoryRows = await fetchAllMemberHistory();
+    deriveDataWindow();
 
     buildActivityModel();
     drawChart();
-
-    document.getElementById("subtitle").textContent =
-      "Line graph from " + fmtDateTime(getStartMs()) + " onward.";
 
     setStatus("");
   } catch (error) {
@@ -1230,6 +1314,7 @@ document.getElementById("toggle-rank").addEventListener("change", () => {
 });
 
 document.getElementById("toggle-status").addEventListener("change", drawChart);
+document.getElementById("toggle-full-window").addEventListener("change", render);
 
 window.addEventListener("resize", () => {
   clearTimeout(window.__activityResize);
