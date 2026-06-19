@@ -8,11 +8,10 @@
     "12-51": { label: "Ranks 12–51", min: 12, max: 51, cutoffRank: 50, challengerRank: 51 }
   };
 
-  const WINDOWS = {
-    "1h": { label: "1 Hour — 5m gains", short: "1Hr", hours: 1, bucketMinutes: 5, gainKey: "gain_1h" },
-    "12h": { label: "12 Hours — 30m gains", short: "12Hr", hours: 12, bucketMinutes: 30, gainKey: "gain_12h" },
-    "24h": { label: "24 Hours — hourly gains", short: "24Hr", hours: 24, bucketMinutes: 60, gainKey: "gain_24h" }
-  };
+  const LOOKBACK_HOURS = 1;
+  const EXPECTED_PULL_MINUTES = 5;
+  const PRIOR_PULL_TOLERANCE_MINUTES = 12;
+  const LARGE_GAP_BREAK_MINUTES = 25;
 
   const SPECIAL_COLORS = { c0ld: "#ff9b96", wmsy: "#74d99f", nong: "#f6ad55" };
   const DEFAULT_COLORS = [
@@ -26,7 +25,6 @@
   let historyData = null;
   let historyKey = "";
   let selectedRange = "1-4";
-  let selectedWindow = "12h";
   let loading = false;
   let chartBound = false;
   let resizeTimer = null;
@@ -52,20 +50,15 @@
   function fmtShort(value) {
     const n = finite(value);
     if (n === null) return "—";
-
     const tiers = [
       { value: 1e12, suffix: "T" },
       { value: 1e9, suffix: "B" },
       { value: 1e6, suffix: "M" },
       { value: 1e3, suffix: "K" }
     ];
-
     for (const tier of tiers) {
-      if (Math.abs(n) >= tier.value) {
-        return (n / tier.value).toFixed(2).replace(/\.?0+$/, "") + tier.suffix;
-      }
+      if (Math.abs(n) >= tier.value) return (n / tier.value).toFixed(2).replace(/\.?0+$/, "") + tier.suffix;
     }
-
     return Math.round(n).toLocaleString("en-US");
   }
 
@@ -84,18 +77,15 @@
 
   function fmtDuration(hours) {
     if (!Number.isFinite(hours) || hours < 0) return "—";
-
     const totalMinutes = Math.max(1, Math.round(hours * 60));
     const days = Math.floor(totalMinutes / 1440);
     const rem = totalMinutes % 1440;
     const hrs = Math.floor(rem / 60);
     const mins = rem % 60;
     const parts = [];
-
     if (days) parts.push(`${days}d`);
     if (hrs) parts.push(`${hrs}h`);
     if (mins || !parts.length) parts.push(`${mins}m`);
-
     return parts.join(" ");
   }
 
@@ -123,10 +113,7 @@
   }
 
   async function fetchJson(url) {
-    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-      cache: "no-store"
-    });
-
+    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
@@ -138,15 +125,10 @@
 
   function clampChartFetchedAt(value) {
     if (!value) return value;
-
     const rowMs = new Date(value).getTime();
     const endMs = battleEndMs();
-
     if (!Number.isFinite(rowMs)) return value;
-    if (endMs !== null && rowMs > endMs) {
-      return new Date(endMs).toISOString();
-    }
-
+    if (endMs !== null && rowMs > endMs) return new Date(endMs).toISOString();
     return value;
   }
 
@@ -191,8 +173,8 @@
       .reward-threshold-legend-item::before { content: ""; width: 11px; height: 3px; border-radius: 999px; background: currentColor; }
       @media (max-width: 700px) {
         #reward-threshold-chart { height: 310px; }
-        .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics, #reward-threshold-window { width: 100%; }
-        #reward-threshold-window, #reward-threshold-refresh { min-width: 0; width: 100%; }
+        .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics { width: 100%; }
+        #reward-threshold-refresh { min-width: 0; width: 100%; }
       }
     `;
     document.head.appendChild(style);
@@ -200,7 +182,6 @@
 
   function ensurePanel() {
     if (!isClansPage()) return null;
-
     ensureStyles();
 
     let panel = document.getElementById("reward-threshold-section");
@@ -217,18 +198,9 @@
       <div class="section-header">
         <div class="reward-threshold-controls">
           <div class="reward-threshold-ranges">
-            ${Object.entries(RANGES).map(([key, range]) => `
-              <button type="button" class="reward-range-btn${key === selectedRange ? " active" : ""}" data-range="${key}">
-                ${range.label}
-              </button>
-            `).join("")}
+            ${Object.entries(RANGES).map(([key, range]) => `<button type="button" class="reward-range-btn${key === selectedRange ? " active" : ""}" data-range="${key}">${range.label}</button>`).join("")}
           </div>
           <div class="reward-threshold-metrics">
-            <select id="reward-threshold-window" aria-label="Growth interval window">
-              ${Object.entries(WINDOWS).map(([key, option]) => `
-                <option value="${key}"${key === selectedWindow ? " selected" : ""}>${option.label}</option>
-              `).join("")}
-            </select>
             <button id="reward-threshold-refresh" type="button">Refresh Chart</button>
           </div>
         </div>
@@ -238,14 +210,13 @@
           <canvas id="reward-threshold-chart"></canvas>
           <div class="reward-threshold-tooltip" id="reward-threshold-tooltip"></div>
         </div>
-        <div class="reward-threshold-summary" id="reward-threshold-summary">Loading cutoff risk...</div>
+        <div class="reward-threshold-summary" id="reward-threshold-summary">Loading hourly gains...</div>
         <div class="reward-threshold-legend" id="reward-threshold-legend"></div>
       </div>
     `;
 
     main.insertBefore(panel, leaderboard);
     wireControls(panel);
-
     return panel;
   }
 
@@ -253,25 +224,13 @@
     panel.querySelectorAll(".reward-range-btn").forEach(button => {
       button.addEventListener("click", () => {
         selectedRange = button.dataset.range || selectedRange;
-        panel.querySelectorAll(".reward-range-btn").forEach(item => {
-          item.classList.toggle("active", item === button);
-        });
+        panel.querySelectorAll(".reward-range-btn").forEach(item => item.classList.toggle("active", item === button));
         loadData(true);
       });
     });
 
-    panel.querySelector("#reward-threshold-window")?.addEventListener("change", event => {
-      selectedWindow = event.target.value || selectedWindow;
-      loadData(true);
-    });
-
-    panel.querySelector("#reward-threshold-refresh")?.addEventListener("click", () => {
-      loadData(true);
-    });
-
-    document.getElementById("battle-select")?.addEventListener("change", () => {
-      loadData(true);
-    });
+    panel.querySelector("#reward-threshold-refresh")?.addEventListener("click", () => loadData(true));
+    document.getElementById("battle-select")?.addEventListener("change", () => loadData(true));
   }
 
   function normalizeCurrentRow(row) {
@@ -295,6 +254,49 @@
     };
   }
 
+  async function loadData(force = false) {
+    if (!isClansPage() || loading) return;
+    ensurePanel();
+
+    const range = RANGES[selectedRange] || RANGES["1-4"];
+    const selectedBattle = selectedBattleValue();
+    const currentUrl = withBattle(CURRENT_URL, selectedBattle);
+    const key = `${selectedRange}:actual-hourly:${selectedBattle}`;
+
+    if (currentData && historyData && historyKey === key && !force) {
+      draw();
+      return;
+    }
+
+    loading = true;
+    const summary = document.getElementById("reward-threshold-summary");
+    if (summary) summary.textContent = "Loading hourly gains...";
+
+    try {
+      currentData = await fetchJson(currentUrl);
+      const battle = currentData?.battle || selectedBattle || "current";
+      const historyHours = historyHoursForBattle();
+
+      historyData = await fetchJson(
+        `${HISTORY_URL}?battle=${encodeURIComponent(battle)}` +
+        `&hours=${historyHours}` +
+        `&rank_min=${range.min}` +
+        `&rank_max=${range.max}` +
+        `&bucket_minutes=${EXPECTED_PULL_MINUTES}` +
+        `&include_baseline=1` +
+        `&limit=50000`
+      ).catch(() => ({ rows: [] }));
+
+      historyKey = key;
+      draw();
+    } catch (err) {
+      console.warn("Hourly gains chart failed", err);
+      if (summary) summary.textContent = `Could not load hourly gains chart. ${err.message || err}`;
+    } finally {
+      loading = false;
+    }
+  }
+
   function currentRows() {
     return (currentData?.rows || [])
       .map(normalizeCurrentRow)
@@ -310,7 +312,6 @@
   function boundaryPair() {
     const range = RANGES[selectedRange] || RANGES["1-4"];
     const rows = currentRows();
-
     return {
       range,
       holder: rows.find(row => row.rank === range.cutoffRank) || null,
@@ -326,139 +327,79 @@
       .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
 
     const current = currentRows().find(row => normalize(row.clan_name) === key);
-
     if (current && current.fetched_at && !rows.some(row => row.fetched_at === current.fetched_at)) {
-      rows.push({
-        fetched_at: current.fetched_at,
-        rank: current.rank,
-        clan_name: current.clan_name,
-        points: current.points
-      });
+      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
       rows.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
     }
 
-    return rows;
+    return dedupePullRows(rows);
   }
 
-  function latestTimestamp() {
-    const selectedKeys = new Set(selectedRows().map(row => normalize(row.clan_name)));
+  function dedupePullRows(rows) {
+    const byTime = new Map();
 
-    const historyTimes = (historyData?.rows || [])
-      .map(normalizeHistoryRow)
-      .filter(row => selectedKeys.has(normalize(row.clan_name)))
-      .map(row => new Date(row.fetched_at || "").getTime())
-      .filter(Number.isFinite);
+    for (const row of rows) {
+      const ms = new Date(row.fetched_at || "").getTime();
+      const points = finite(row.points);
+      if (!Number.isFinite(ms) || points === null) continue;
 
-    const currentTimes = currentRows()
-      .filter(row => selectedKeys.has(normalize(row.clan_name)))
-      .map(row => new Date(row.fetched_at || "").getTime())
-      .filter(Number.isFinite);
-
-    const times = [...historyTimes, ...currentTimes];
-    const latest = times.length ? Math.max(...times) : Date.now();
-    const endMs = battleEndMs();
-
-    return endMs !== null ? Math.min(latest, endMs) : latest;
-  }
-
-  function pointAt(rows, timestamp) {
-    const cleanRows = rows
-      .map(row => ({ ...row, ms: new Date(row.fetched_at).getTime() }))
-      .filter(row => Number.isFinite(row.ms) && finite(row.points) !== null)
-      .sort((a, b) => a.ms - b.ms);
-
-    if (!cleanRows.length || timestamp < cleanRows[0].ms) return null;
-
-    const last = cleanRows[cleanRows.length - 1];
-    if (timestamp >= last.ms) {
-      return { points: last.points, rank: last.rank };
-    }
-
-    for (let i = 1; i < cleanRows.length; i += 1) {
-      const prev = cleanRows[i - 1];
-      const next = cleanRows[i];
-
-      if (timestamp <= next.ms) {
-        const span = Math.max(1, next.ms - prev.ms);
-        const pct = Math.max(0, Math.min(1, (timestamp - prev.ms) / span));
-
-        return {
-          points: prev.points + (next.points - prev.points) * pct,
-          rank: next.rank ?? prev.rank
-        };
+      const existing = byTime.get(ms);
+      if (!existing || points >= existing.points) {
+        byTime.set(ms, { ...row, ms, points });
       }
     }
 
-    return { points: last.points, rank: last.rank };
+    return [...byTime.values()].sort((a, b) => a.ms - b.ms);
   }
 
-  function fallbackStartPoint(clanRow, windowConfig, endMs) {
-    const gainValue = finite(clanRow?.[windowConfig.gainKey]);
-    const currentPoints = finite(clanRow.points);
+  function latestTimestamp() {
+    const times = selectedRows()
+      .flatMap(row => historyForClan(row.clan_name))
+      .map(row => row.ms)
+      .filter(Number.isFinite);
 
-    if (gainValue === null || currentPoints === null) return null;
-
-    return {
-      fetched_at: new Date(endMs - windowConfig.hours * 60 * 60 * 1000).toISOString(),
-      rank: clanRow.rank,
-      clan_name: clanRow.clan_name,
-      points: Math.max(0, currentPoints - gainValue),
-      synthetic: true
-    };
+    const latest = times.length ? Math.max(...times) : Date.now();
+    const endMs = battleEndMs();
+    return endMs !== null ? Math.min(latest, endMs) : latest;
   }
 
-  function preparedRowsForWindow(rows, clanRow, windowConfig, endMs) {
-    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-    const output = rows.slice();
+  function findPriorHourPoint(rows, targetMs) {
+    const targetPriorMs = targetMs - LOOKBACK_HOURS * 60 * 60 * 1000;
+    const toleranceMs = PRIOR_PULL_TOLERANCE_MINUTES * 60 * 1000;
+    let best = null;
 
-    const startPoint = fallbackStartPoint(clanRow, windowConfig, endMs);
-    if (startPoint && !pointAt(output, startMs)) {
-      output.push(startPoint);
+    for (const row of rows) {
+      const diff = Math.abs(row.ms - targetPriorMs);
+      if (diff > toleranceMs) continue;
+      if (!best || diff < best.diff) best = { row, diff };
     }
 
-    if (finite(clanRow.points) !== null && !output.some(row => row.fetched_at === clanRow.fetched_at)) {
-      output.push({
-        fetched_at: clanRow.fetched_at || new Date(endMs).toISOString(),
-        rank: clanRow.rank,
-        clan_name: clanRow.clan_name,
-        points: clanRow.points
-      });
-    }
-
-    return output.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+    return best?.row || null;
   }
 
-  function buildIntervalPoints(rows, windowConfig, endMs, clanRow) {
-    const bucketMs = windowConfig.bucketMinutes * 60 * 1000;
-    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-    const bucketCount = Math.round((windowConfig.hours * 60) / windowConfig.bucketMinutes);
-    const preparedRows = preparedRowsForWindow(rows, clanRow, windowConfig, endMs);
+  function buildHourlyPoints(rows, clanRow) {
+    const cleanRows = dedupePullRows(rows);
     const points = [];
 
-    for (let bucketIndex = 1; bucketIndex <= bucketCount; bucketIndex += 1) {
-      const bucketEnd = startMs + bucketIndex * bucketMs;
-      const bucketStart = bucketEnd - bucketMs;
+    for (const current of cleanRows) {
+      const prior = findPriorHourPoint(cleanRows, current.ms);
+      if (!prior) continue;
 
-      const startPoint = pointAt(preparedRows, bucketStart);
-      const endPoint = pointAt(preparedRows, bucketEnd);
+      const gain = current.points - prior.points;
+      if (!Number.isFinite(gain) || gain < 0) continue;
 
-      const startPoints = finite(startPoint?.points);
-      const endPoints = finite(endPoint?.points);
-
-      const pointsGained =
-        startPoints === null || endPoints === null
-          ? 0
-          : Math.max(0, endPoints - startPoints);
+      const prevPoint = points[points.length - 1];
+      const gapMinutes = prevPoint ? (current.ms - prevPoint.t) / 60000 : EXPECTED_PULL_MINUTES;
+      const breakBefore = gapMinutes > LARGE_GAP_BREAK_MINUTES;
 
       points.push({
-        t: bucketEnd,
-        rawT: new Date(bucketEnd).toISOString(),
-        bucketStart: new Date(bucketStart).toISOString(),
-        pointsGained,
-        totalPoints: endPoints,
-        rank: endPoint?.rank ?? clanRow.rank,
-        bucketIndex,
-        bucketCount
+        t: current.ms,
+        rawT: new Date(current.ms).toISOString(),
+        priorT: new Date(prior.ms).toISOString(),
+        pointsGained: gain,
+        totalPoints: current.points,
+        rank: current.rank ?? clanRow.rank,
+        breakBefore
       });
     }
 
@@ -467,16 +408,14 @@
 
   function buildSeries() {
     const range = RANGES[selectedRange] || RANGES["1-4"];
-    const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
-    const endMs = latestTimestamp();
 
     return selectedRows().map((row, index) => {
-      const points = buildIntervalPoints(
-        historyForClan(row.clan_name),
-        windowConfig,
-        endMs,
-        row
-      );
+      const points = buildHourlyPoints(historyForClan(row.clan_name), row);
+      const recentPoints = points.slice(-12);
+      const latestPoint = points[points.length - 1] || null;
+      const averageRecentHourlyGain = recentPoints.length
+        ? recentPoints.reduce((sum, point) => sum + point.pointsGained, 0) / recentPoints.length
+        : 0;
 
       return {
         clan_name: row.clan_name,
@@ -484,74 +423,35 @@
         color: clanColor(row.clan_name, index),
         current: row,
         points,
-        totalWindowGain: points.reduce((sum, point) => sum + (finite(point.pointsGained) || 0), 0),
+        latestHourlyGain: latestPoint?.pointsGained ?? null,
+        averageRecentHourlyGain,
         isCutoffPair: row.rank === range.cutoffRank || row.rank === range.challengerRank
       };
     }).filter(series => series.points.length >= 1);
   }
 
-  async function loadData(force = false) {
-    if (!isClansPage() || loading) return;
-
-    ensurePanel();
-
-    const range = RANGES[selectedRange] || RANGES["1-4"];
-    const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
-    const selectedBattle = selectedBattleValue();
-    const currentUrl = withBattle(CURRENT_URL, selectedBattle);
-    const key = `${selectedRange}:${selectedWindow}:${selectedBattle}`;
-
-    if (currentData && historyData && historyKey === key && !force) {
-      draw();
-      return;
-    }
-
-    loading = true;
-
-    const summary = document.getElementById("reward-threshold-summary");
-    if (summary) summary.textContent = "Loading cutoff risk...";
-
-    try {
-      currentData = await fetchJson(currentUrl);
-
-      const battle = currentData?.battle || selectedBattle || "current";
-      const historyHours = historyHoursForBattle();
-
-      const historyUrl =
-        `${HISTORY_URL}?battle=${encodeURIComponent(battle)}` +
-        `&hours=${historyHours}` +
-        `&rank_min=${range.min}` +
-        `&rank_max=${range.max}` +
-        `&bucket_minutes=${windowConfig.bucketMinutes}` +
-        `&include_baseline=1` +
-        `&limit=50000`;
-
-      historyData = await fetchJson(historyUrl).catch(() => ({ rows: [] }));
-      historyKey = key;
-      draw();
-    } catch (err) {
-      console.warn("Cutoff risk chart failed", err);
-      if (summary) summary.textContent = `Could not load cutoff risk chart. ${err.message || err}`;
-    } finally {
-      loading = false;
-    }
-  }
-
   function drawLine(ctx, points, x, y, color, options = {}) {
     if (!points.length) return;
-
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = options.width || 2;
     ctx.globalAlpha = options.alpha ?? 0.86;
+
+    let started = false;
     ctx.beginPath();
 
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(x(point), y(point));
-      else ctx.lineTo(x(point), y(point));
+    points.forEach(point => {
+      if (!started || point.breakBefore) {
+        if (started) ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x(point), y(point));
+        started = true;
+      } else {
+        ctx.lineTo(x(point), y(point));
+      }
     });
 
-    ctx.stroke();
+    if (started) ctx.stroke();
 
     const last = points[points.length - 1];
     ctx.globalAlpha = 1;
@@ -559,11 +459,10 @@
     ctx.beginPath();
     ctx.arc(x(last), y(last), options.radius || 2.8, 0, Math.PI * 2);
     ctx.fill();
-
     ctx.restore();
   }
 
-  function cutoffSummary(seriesList, summary, holder, challenger, range, windowConfig) {
+  function cutoffSummary(seriesList, summary, holder, challenger, range) {
     if (!summary) return;
 
     const holderSeries = seriesList.find(series => series.rank === range.cutoffRank) || null;
@@ -575,27 +474,20 @@
     }
 
     const pointsToGain = Math.max(0, holder.points - challenger.points + 1);
-    const holderRate = holderSeries.totalWindowGain / windowConfig.hours;
-    const challengerRate = challengerSeries.totalWindowGain / windowConfig.hours;
+    const holderRate = holderSeries.averageRecentHourlyGain || 0;
+    const challengerRate = challengerSeries.averageRecentHourlyGain || 0;
     const closeRate = challengerRate - holderRate;
-
     const endMs = new Date(currentData?.battle_end_iso || "").getTime();
     const nowMs = latestTimestamp();
-    const remainingHours = Number.isFinite(endMs)
-      ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000))
-      : 0;
-
+    const remainingHours = Number.isFinite(endMs) ? Math.max(0, (endMs - nowMs) / (60 * 60 * 1000)) : 0;
     const hoursToPass = closeRate > 0 ? pointsToGain / closeRate : Infinity;
     const projectedToPass = closeRate > 0 && remainingHours > 0 && hoursToPass <= remainingHours;
-    const timeText = projectedToPass
-      ? ` Time to pass: <strong>${escapeHtml(fmtDuration(hoursToPass))}</strong>.`
-      : "";
+    const timeText = projectedToPass ? ` Time to pass: <strong>${escapeHtml(fmtDuration(hoursToPass))}</strong>.` : "";
 
     summary.innerHTML =
-      `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> ` +
-      `needs to gain <strong>${fmtShort(pointsToGain)}</strong> points to pass ` +
-      `<strong>${escapeHtml(holder.clan_name)}</strong>. ` +
-      `At the <strong>${windowConfig.short}</strong> rate, ` +
+      `<strong>#${challenger.rank} ${escapeHtml(challenger.clan_name)}</strong> needs to gain ` +
+      `<strong>${fmtShort(pointsToGain)}</strong> points to pass ` +
+      `<strong>${escapeHtml(holder.clan_name)}</strong>. At the <strong>recent hourly</strong> rate, ` +
       `${escapeHtml(challenger.clan_name)} ` +
       `<strong>${projectedToPass ? "is" : "is not"} projected to pass</strong> ` +
       `${escapeHtml(holder.clan_name)}.${timeText}`;
@@ -609,7 +501,6 @@
     const tooltip = document.getElementById("reward-threshold-tooltip");
     const summary = document.getElementById("reward-threshold-summary");
     const legend = document.getElementById("reward-threshold-legend");
-
     if (!canvas || !tooltip) return;
 
     const ctx = canvas.getContext("2d");
@@ -617,7 +508,6 @@
     const dpr = window.devicePixelRatio || 1;
     const seriesList = buildSeries();
     const { range, holder, challenger } = boundaryPair();
-    const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
 
     canvas.width = Math.floor(rect.width * dpr);
     canvas.height = Math.floor(rect.height * dpr);
@@ -627,37 +517,28 @@
     if (!seriesList.length) {
       ctx.fillStyle = "#8b949e";
       ctx.font = "13px Arial";
-      ctx.fillText("Not enough interval data is available for this range yet.", 16, 28);
-      if (summary) summary.textContent = `${range.label}: not enough interval data for this window.`;
+      ctx.fillText("Not enough actual hourly gain data is available for this range yet.", 16, 28);
+      if (summary) summary.textContent = `${range.label}: not enough actual hourly gain data.`;
       if (legend) legend.innerHTML = "";
       canvas._rewardThresholdChart = null;
       return;
     }
 
     const allPoints = seriesList.flatMap(series => series.points);
+    const minT = Math.min(...allPoints.map(point => point.t));
+    const maxT = Math.max(...allPoints.map(point => point.t));
     const minYRaw = Math.min(...allPoints.map(point => point.pointsGained));
     const maxYRaw = Math.max(...allPoints.map(point => point.pointsGained));
     const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 100_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
-
     const crowded = seriesList.length > 12;
-    const padLeft = 66;
-    const padRight = crowded ? 26 : 116;
-    const padTop = 18;
-    const padBottom = 34;
+    const padLeft = 66, padRight = crowded ? 26 : 116, padTop = 18, padBottom = 34;
     const width = rect.width - padLeft - padRight;
     const height = rect.height - padTop - padBottom;
 
-    const x = point =>
-      point.bucketCount <= 1
-        ? padLeft
-        : padLeft + ((point.bucketIndex - 1) / (point.bucketCount - 1)) * width;
-
-    const y = point =>
-      maxY === minY
-        ? padTop + height / 2
-        : padTop + (1 - ((point.pointsGained - minY) / (maxY - minY))) * height;
+    const x = point => maxT === minT ? padLeft : padLeft + ((point.t - minT) / (maxT - minT)) * width;
+    const y = point => maxY === minY ? padTop + height / 2 : padTop + (1 - ((point.pointsGained - minY) / (maxY - minY))) * height;
 
     ctx.strokeStyle = "#30363d";
     ctx.lineWidth = 1;
@@ -668,7 +549,6 @@
       const pct = i / 4;
       const yy = padTop + pct * height;
       const value = maxY - pct * (maxY - minY);
-
       ctx.beginPath();
       ctx.moveTo(padLeft, yy);
       ctx.lineTo(rect.width - padRight, yy);
@@ -676,70 +556,40 @@
       ctx.fillText(fmtShort(value), 8, yy + 4);
     }
 
-    [...seriesList]
-      .sort((a, b) => Number(a.isCutoffPair) - Number(b.isCutoffPair))
-      .forEach(series => {
-        drawLine(ctx, series.points, x, y, series.color, {
-          width: series.isCutoffPair ? 2.7 : (crowded ? 1.1 : 1.8),
-          alpha: series.isCutoffPair ? 0.96 : (crowded ? 0.50 : 0.74),
-          radius: series.isCutoffPair ? 3.4 : 2.4
-        });
+    [...seriesList].sort((a, b) => Number(a.isCutoffPair) - Number(b.isCutoffPair)).forEach(series => {
+      drawLine(ctx, series.points, x, y, series.color, {
+        width: series.isCutoffPair ? 2.7 : (crowded ? 1.1 : 1.8),
+        alpha: series.isCutoffPair ? 0.96 : (crowded ? 0.50 : 0.74),
+        radius: series.isCutoffPair ? 3.4 : 2.4
       });
+    });
 
     if (!crowded) {
       ctx.save();
       ctx.font = "12px Arial";
-
       seriesList.forEach(series => {
         const last = series.points[series.points.length - 1];
         ctx.fillStyle = series.color;
-        ctx.fillText(
-          `#${series.rank} ${series.clan_name}`,
-          x(last) + 7,
-          Math.max(padTop + 10, Math.min(rect.height - padBottom - 3, y(last) + 4))
-        );
+        ctx.fillText(`#${series.rank} ${series.clan_name}`, x(last) + 7, Math.max(padTop + 10, Math.min(rect.height - padBottom - 3, y(last) + 4)));
       });
-
       ctx.restore();
     }
 
-    const endMs = latestTimestamp();
-    const startMs = endMs - windowConfig.hours * 60 * 60 * 1000;
-
     ctx.fillStyle = "#8b949e";
-    ctx.fillText(fmtTime(startMs), padLeft, rect.height - 12);
+    ctx.fillText(fmtTime(minT), padLeft, rect.height - 12);
+    const lastLabel = fmtTime(maxT);
+    ctx.fillText(lastLabel, rect.width - padRight - ctx.measureText(lastLabel).width, rect.height - 12);
 
-    const lastLabel = fmtTime(endMs);
-    ctx.fillText(
-      lastLabel,
-      rect.width - padRight - ctx.measureText(lastLabel).width,
-      rect.height - 12
-    );
-
-    cutoffSummary(seriesList, summary, holder, challenger, range, windowConfig);
+    cutoffSummary(seriesList, summary, holder, challenger, range);
 
     if (legend) {
       const cutoffItems = seriesList.filter(series => series.isCutoffPair);
       const otherItems = seriesList.filter(series => !series.isCutoffPair);
       const legendItems = [...cutoffItems, ...otherItems];
-
-      legend.innerHTML =
-        legendItems.map(series =>
-          `<span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>`
-        ).join("") +
-        `<span>${seriesList[0]?.points?.length || 0} recent intervals · ${windowConfig.bucketMinutes}m gain each</span>`;
+      legend.innerHTML = legendItems.map(series => `<span class="reward-threshold-legend-item" style="color:${series.color}">#${series.rank} ${escapeHtml(series.clan_name)}</span>`).join("") + `<span>Actual hourly gains · ${allPoints.length} plotted points</span>`;
     }
 
-    canvas._rewardThresholdChart = {
-      seriesList,
-      x,
-      y,
-      padTop,
-      padBottom,
-      rect,
-      windowConfig
-    };
-
+    canvas._rewardThresholdChart = { seriesList, x, y, padTop, padBottom, rect };
     bindTooltip(canvas, tooltip);
   }
 
@@ -788,19 +638,23 @@
       ctx.stroke();
       ctx.restore();
 
-      const sameBucketRows = fresh.seriesList
-        .map(series => ({
-          series,
-          point: series.points.find(point => point.bucketIndex === nearestPoint.bucketIndex)
-        }))
-        .filter(item => item.point)
+      const sameTimeRows = fresh.seriesList
+        .map(series => {
+          let best = null;
+          for (const point of series.points) {
+            const diff = Math.abs(point.t - nearestPoint.t);
+            if (!best || diff < best.diff) best = { point, diff };
+          }
+          return best && best.diff <= 8 * 60 * 1000 ? { series, point: best.point } : null;
+        })
+        .filter(Boolean)
         .sort((a, b) => a.series.rank - b.series.rank);
 
       tooltip.innerHTML =
         `<strong>${escapeHtml(fmtDateTime(nearestPoint.rawT))}</strong>` +
-        sameBucketRows.map(({ series, point }) =>
+        sameTimeRows.map(({ series, point }) =>
           `<div class="tooltip-row" style="color:${series.color}">` +
-          `${escapeHtml(series.clan_name)} Total Points: ${fmtShort(point.totalPoints)} / Points Gained: ${fmtShort(point.pointsGained)}` +
+          `${escapeHtml(series.clan_name)} Total Points: ${fmtShort(point.totalPoints)} / Hourly Gain: ${fmtShort(point.pointsGained)}` +
           `</div>`
         ).join("");
 
@@ -826,23 +680,15 @@
 
   function init() {
     if (!isClansPage()) return;
-
     ensurePanel();
     loadData(false);
-
-    [750, 1800, 3600].forEach(delay => {
-      window.setTimeout(() => loadData(false), delay);
-    });
+    [750, 1800, 3600].forEach(delay => window.setTimeout(() => loadData(false), delay));
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 
   window.addEventListener("pageshow", init);
-
   window.addEventListener("resize", () => {
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(draw, 120);
