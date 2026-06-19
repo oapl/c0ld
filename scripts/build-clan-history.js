@@ -3,72 +3,28 @@ const path = require("path");
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
-
 const DATA_DIR = path.join(process.cwd(), "Data");
 const MANUAL_BATTLES_FILE = path.join(DATA_DIR, "manual-battles.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "clans-history.json");
-
 const PAGE_SIZE = 1000;
 
 if (!SUPABASE_URL) throw new Error("Missing required env var: SUPABASE_URL");
 if (!SUPABASE_KEY) throw new Error("Missing required env var: SUPABASE_SERVICE_KEY");
 
-function normalizeKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function clanKey(name) {
-  return normalizeKey(name);
-}
-
-function numberOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function stringOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  return String(value);
-}
-
-function dateOrNull(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    if (value !== null && value !== undefined && value !== "") {
-      return value;
-    }
-  }
-  return null;
-}
-
-function extractClanImageId(iconValue) {
-  return String(iconValue || "")
-    .trim()
-    .replace(/^rbxassetid:\/\//i, "")
-    .replace(/^rbxasset:\/\//i, "")
-    .trim();
-}
-
-function buildClanIconUrl(iconId) {
-  return iconId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(iconId)}` : null;
-}
+function normalizeKey(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function clanKey(name) { return normalizeKey(name); }
+function numberOrNull(value) { if (value === null || value === undefined || value === "") return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
+function stringOrNull(value) { if (value === null || value === undefined || value === "") return null; return String(value); }
+function dateOrNull(value) { if (!value) return null; const d = new Date(value); return Number.isNaN(d.getTime()) ? null : d.toISOString(); }
+function firstNonEmpty(...values) { return values.find(value => value !== null && value !== undefined && value !== "") ?? null; }
+function extractClanImageId(iconValue) { return String(iconValue || "").trim().replace(/^rbxassetid:\/\//i, "").replace(/^rbxasset:\/\//i, "").trim(); }
+function buildClanIconUrl(iconId) { return iconId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(iconId)}` : null; }
 
 async function readJsonArray(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new Error(`${filePath} must contain a JSON array.`);
-    }
+    if (!Array.isArray(parsed)) throw new Error(`${filePath} must contain a JSON array.`);
     return parsed;
   } catch (err) {
     if (err.code === "ENOENT") return [];
@@ -80,283 +36,149 @@ async function supabaseSelectAll(tableName) {
   const rows = [];
   let from = 0;
   let orderClause = "fetched_at.desc";
-
   while (true) {
     const to = from + PAGE_SIZE - 1;
-
-    let url =
-      `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
-      `?select=*` +
-      `&order=${encodeURIComponent(orderClause)}`;
-
-    let res = await fetch(url, {
-      method: "GET",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        Range: `${from}-${to}`,
-        Prefer: "count=exact"
-      }
-    });
-
+    let url = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}?select=*&order=${encodeURIComponent(orderClause)}`;
+    let res = await fetch(url, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, Range: `${from}-${to}`, Prefer: "count=exact" } });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-
       if (res.status === 404 || text.includes("PGRST205")) {
         console.warn(`Skipping missing historical clan table: ${tableName}`);
         return null;
       }
-
-      const missingFetchedAt =
-        res.status === 400 &&
-        text.toLowerCase().includes("fetched_at") &&
-        text.toLowerCase().includes("does not exist");
-
+      const missingFetchedAt = res.status === 400 && text.toLowerCase().includes("fetched_at") && text.toLowerCase().includes("does not exist");
       if (missingFetchedAt && orderClause === "fetched_at.desc") {
         orderClause = "rank.asc.nullslast";
-        url =
-          `${SUPABASE_URL}/rest/v1/${encodeURIComponent(tableName)}` +
-          `?select=*` +
-          `&order=${encodeURIComponent(orderClause)}`;
-
-        res = await fetch(url, {
-          method: "GET",
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            Range: `${from}-${to}`,
-            Prefer: "count=exact"
-          }
-        });
-
-        if (!res.ok) {
-          const retryText = await res.text().catch(() => "");
-          throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${retryText}`);
-        }
-      } else {
-        throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
+        continue;
       }
+      throw new Error(`Supabase query failed for ${tableName}: HTTP ${res.status} ${text}`);
     }
-
     const batch = await res.json();
-
-    if (!Array.isArray(batch)) {
-      throw new Error(`Supabase response for ${tableName} was not an array.`);
-    }
-
+    if (!Array.isArray(batch)) throw new Error(`Supabase response for ${tableName} was not an array.`);
     rows.push(...batch);
-
     if (batch.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
-
   return rows;
 }
 
 function normalizeClanRow(row) {
   return {
-    fetched_at: dateOrNull(
-      firstNonEmpty(
-        row.fetched_at,
-        row.created_at,
-        row.snapshot_at,
-        row.updated_at,
-        row.inserted_at
-      )
-    ),
+    fetched_at: dateOrNull(firstNonEmpty(row.fetched_at, row.created_at, row.snapshot_at, row.updated_at, row.inserted_at)),
     rank: numberOrNull(row.rank),
-    clan_name: stringOrNull(
-      firstNonEmpty(row.clan_name, row.clan, row.name, row.tag)
-    ),
+    clan_name: stringOrNull(firstNonEmpty(row.clan_name, row.clan, row.name, row.tag)),
     points: numberOrNull(firstNonEmpty(row.points, row.total_points))
   };
 }
 
 function groupRowsByTimestamp(rows) {
   const map = new Map();
-
   for (const row of rows) {
     const ts = row.fetched_at || "__no_timestamp__";
     if (!map.has(ts)) map.set(ts, []);
     map.get(ts).push(row);
   }
-
   return map;
+}
+
+function sortRows(rows) {
+  return rows.slice().sort((a, b) => {
+    const ar = Number(a.rank), br = Number(b.rank);
+    if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) return ar - br;
+    const ap = Number(a.points || 0), bp = Number(b.points || 0);
+    if (ap !== bp) return bp - ap;
+    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
+  });
 }
 
 function getLatestSnapshotRows(rows) {
   if (!rows.length) return [];
-
   const timestamped = rows.filter(row => row.fetched_at);
-
-  if (!timestamped.length) {
-    return rows.slice().sort((a, b) => {
-      const ar = Number(a.rank ?? 999999);
-      const br = Number(b.rank ?? 999999);
-      if (ar !== br) return ar - br;
-
-      const ap = Number(a.points || 0);
-      const bp = Number(b.points || 0);
-      if (ap !== bp) return bp - ap;
-
-      return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
-    });
-  }
-
-  const latestMs = Math.max(
-    ...timestamped
-      .map(row => new Date(row.fetched_at).getTime())
-      .filter(ms => !Number.isNaN(ms))
-  );
-
+  if (!timestamped.length) return sortRows(rows);
+  const latestMs = Math.max(...timestamped.map(row => new Date(row.fetched_at).getTime()).filter(ms => !Number.isNaN(ms)));
   if (!Number.isFinite(latestMs)) return [];
-
-  return timestamped
-    .filter(row => new Date(row.fetched_at).getTime() === latestMs)
-    .sort((a, b) => Number(a.rank || 999999) - Number(b.rank || 999999));
+  return sortRows(timestamped.filter(row => new Date(row.fetched_at).getTime() === latestMs));
 }
 
 function getNearestSnapshotRows(rows, targetMs, toleranceMin) {
   const grouped = groupRowsByTimestamp(rows);
   let best = null;
-
   for (const [ts, batch] of grouped.entries()) {
     if (ts === "__no_timestamp__") continue;
-
     const ms = new Date(ts).getTime();
     if (Number.isNaN(ms)) continue;
-
     const diff = Math.abs(ms - targetMs);
-
-    if (!best || diff < best.diff) {
-      best = { ts, batch, diff };
-    }
+    if (!best || diff < best.diff) best = { ts, batch, diff };
   }
-
   if (!best) return [];
-
-  const toleranceMs = toleranceMin * 60 * 1000;
-  if (best.diff > toleranceMs) return [];
-
-  return best.batch;
+  return best.diff <= toleranceMin * 60 * 1000 ? best.batch : [];
 }
 
-function buildPointMap(rows) {
-  return new Map(
-    rows.map(row => [clanKey(row.clan_name), Number(row.points || 0)])
-  );
-}
-
+function buildPointMap(rows) { return new Map(rows.map(row => [clanKey(row.clan_name), Number(row.points || 0)])); }
 function getGain(currentRow, allRows, latestMs, hours, toleranceMin) {
   if (!Number.isFinite(latestMs)) return null;
-
-  const targetMs = latestMs - hours * 60 * 60 * 1000;
-  const oldRows = getNearestSnapshotRows(allRows, targetMs, toleranceMin);
-  const oldMap = buildPointMap(oldRows);
-  const oldPoints = oldMap.get(clanKey(currentRow.clan_name));
-
-  if (oldPoints === undefined) return null;
-  return Number(currentRow.points || 0) - oldPoints;
+  const oldRows = getNearestSnapshotRows(allRows, latestMs - hours * 60 * 60 * 1000, toleranceMin);
+  const oldPoints = buildPointMap(oldRows).get(clanKey(currentRow.clan_name));
+  return oldPoints === undefined ? null : Number(currentRow.points || 0) - oldPoints;
 }
 
 async function fetchClanIconMap(clanNames) {
   const map = new Map();
   const unique = [...new Set(clanNames.filter(Boolean))];
-
   for (const clanName of unique) {
     try {
-      const res = await fetch(`https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clanName)}`, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "c0ld-Leaderboard-Clan-Icons"
-        }
-      });
-
-      if (!res.ok) {
-        map.set(clanKey(clanName), { icon_id: null, icon_url: null });
-        continue;
-      }
-
+      const res = await fetch(`https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clanName)}`, { headers: { Accept: "application/json", "User-Agent": "c0ld-Leaderboard-Clan-Icons" } });
+      if (!res.ok) { map.set(clanKey(clanName), { icon_id: null, icon_url: null }); continue; }
       const json = await res.json();
       const iconId = extractClanImageId(json?.data?.Icon || json?.data?.icon);
-
-      map.set(clanKey(clanName), {
-        icon_id: iconId || null,
-        icon_url: buildClanIconUrl(iconId)
-      });
+      map.set(clanKey(clanName), { icon_id: iconId || null, icon_url: buildClanIconUrl(iconId) });
     } catch {
       map.set(clanKey(clanName), { icon_id: null, icon_url: null });
     }
   }
-
   return map;
 }
 
-function sortRows(rows) {
-  rows.sort((a, b) => {
-    const ar = Number(a.rank);
-    const br = Number(b.rank);
+function decorateRow(row, iconMap, extra = {}) {
+  const icon = iconMap.get(clanKey(row.clan_name)) || { icon_id: null, icon_url: null };
+  return {
+    rank: numberOrNull(row.rank),
+    clan_name: row.clan_name,
+    points: numberOrNull(row.points),
+    icon_id: icon.icon_id,
+    icon_url: icon.icon_url,
+    ...extra
+  };
+}
 
-    if (Number.isFinite(ar) && Number.isFinite(br) && ar !== br) {
-      return ar - br;
-    }
-
-    const ap = Number(a.points || 0);
-    const bp = Number(b.points || 0);
-    if (ap !== bp) return bp - ap;
-
-    return String(a.clan_name || "").localeCompare(String(b.clan_name || ""));
-  });
-
-  return rows;
+function buildSnapshots(snapshotRows, iconMap) {
+  return [...groupRowsByTimestamp(snapshotRows).entries()]
+    .filter(([ts]) => ts !== "__no_timestamp__")
+    .sort((a, b) => new Date(a[0]) - new Date(b[0]))
+    .map(([ts, batch]) => ({
+      snapshot_at: ts,
+      rows: sortRows(batch).map(row => decorateRow(row, iconMap))
+    }));
 }
 
 function calculateBattleRows(snapshotRows, iconMap) {
   const latestRows = getLatestSnapshotRows(snapshotRows);
-
-  if (!latestRows.length) {
-    return {
-      snapshot_at: null,
-      rows: []
-    };
-  }
-
-  const latestMs = Math.max(
-    ...latestRows
-      .map(row => row.fetched_at ? new Date(row.fetched_at).getTime() : NaN)
-      .filter(ms => !Number.isNaN(ms))
-  );
-
+  const snapshots = buildSnapshots(snapshotRows, iconMap);
+  if (!latestRows.length) return { snapshot_at: null, rows: [], snapshots };
+  const latestMs = Math.max(...latestRows.map(row => row.fetched_at ? new Date(row.fetched_at).getTime() : NaN).filter(ms => !Number.isNaN(ms)));
   const hasHistoricalTimestamps = Number.isFinite(latestMs);
-
-  const projectedRows = latestRows.map(row => {
-    const icon = iconMap.get(clanKey(row.clan_name)) || { icon_id: null, icon_url: null };
-
-    return {
-      rank: numberOrNull(row.rank),
-      clan_name: row.clan_name,
-      points: numberOrNull(row.points),
-      gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
-      gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
-      gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
-      gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null,
-      projected_rank: null,
-      icon_id: icon.icon_id,
-      icon_url: icon.icon_url
-    };
-  });
-
-  const rows = sortRows(projectedRows);
-
-  return {
-    snapshot_at: latestRows[0]?.fetched_at || null,
-    rows
-  };
+  const rows = sortRows(latestRows).map(row => decorateRow(row, iconMap, {
+    gain_5m: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 5 / 60, 4) : null,
+    gain_1h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 1, 15) : null,
+    gain_12h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 12, 45) : null,
+    gain_24h: hasHistoricalTimestamps ? getGain(row, snapshotRows, latestMs, 24, 90) : null,
+    projected_rank: null
+  }));
+  return { snapshot_at: latestRows[0]?.fetched_at || null, rows, snapshots };
 }
 
 async function main() {
   const manualBattles = await readJsonArray(MANUAL_BATTLES_FILE);
-
   const declared = manualBattles
     .filter(battle => battle.battle && battle.display_name && battle.clan_results_table)
     .map(battle => ({
@@ -366,60 +188,39 @@ async function main() {
       update_number: battle.update_number ?? null,
       last_snapshot: battle.last_snapshot ?? null,
       snapshot_at: battle.snapshot_at ?? null,
-      generated_at: battle.generated_at ?? null
+      generated_at: battle.generated_at ?? null,
+      api_battle_key: battle.api_battle_key ?? null
     }));
-
   const deduped = new Map();
-  for (const item of declared) {
-    deduped.set(normalizeKey(item.battle), item);
-  }
-
+  for (const item of declared) deduped.set(normalizeKey(item.battle), item);
   const output = [];
-
   for (const item of deduped.values()) {
     console.log(`Reading historical clan table: ${item.source_table} -> ${item.battle}`);
-
     const rawRows = await supabaseSelectAll(item.source_table);
     if (rawRows === null) continue;
-
-    const normalizedRows = rawRows
-      .map(normalizeClanRow)
-      .filter(row => row.clan_name && row.points !== null);
-
+    const normalizedRows = rawRows.map(normalizeClanRow).filter(row => row.clan_name && row.points !== null);
     const latestRows = getLatestSnapshotRows(normalizedRows);
-    const iconMap = await fetchClanIconMap(latestRows.map(row => row.clan_name));
+    const allClanNames = [...new Set([...latestRows, ...normalizedRows].map(row => row.clan_name).filter(Boolean))];
+    const iconMap = await fetchClanIconMap(allClanNames);
     const calculated = calculateBattleRows(normalizedRows, iconMap);
-
+    const snapshotTimes = [...new Set(normalizedRows.map(row => row.fetched_at).filter(Boolean))].sort((a, b) => new Date(a) - new Date(b));
     output.push({
       battle: item.battle,
       display_name: item.display_name,
       source_table: item.source_table,
       update_number: item.update_number,
-      last_snapshot: item.last_snapshot,
+      first_snapshot: snapshotTimes[0] || item.snapshot_at || item.generated_at || null,
+      last_snapshot: snapshotTimes[snapshotTimes.length - 1] || item.last_snapshot || calculated.snapshot_at || null,
       generated_at: new Date().toISOString(),
-      snapshot_at: calculated.snapshot_at,
-      rows: calculated.rows
+      snapshot_at: calculated.snapshot_at || item.snapshot_at || null,
+      total_snapshots: calculated.snapshots.length,
+      rows: calculated.rows,
+      snapshots: calculated.snapshots
     });
   }
-
-  output.sort((a, b) => {
-    const au = Number(a.update_number);
-    const bu = Number(b.update_number);
-
-    if (Number.isFinite(au) && Number.isFinite(bu) && au !== bu) {
-      return bu - au;
-    }
-
-    const ad = new Date(a.last_snapshot || a.snapshot_at || 0).getTime() || 0;
-    const bd = new Date(b.last_snapshot || b.snapshot_at || 0).getTime() || 0;
-    return bd - ad;
-  });
-
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(OUTPUT_FILE, JSON.stringify(output, null, 2) + "\n", "utf8");
+  console.log(`Wrote ${output.length} clan battle histories with full snapshot timelines to ${OUTPUT_FILE}.`);
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(err => { console.error(err); process.exit(1); });
