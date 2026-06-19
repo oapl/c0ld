@@ -325,10 +325,10 @@ canvas{
 
       <select id="line-count">
         <option value="top10">Top 10</option>
-        <option value="top25">Top 25</option>
+        <option value="top15">Top 15</option>
         <option value="all" selected>All members</option>
         <option value="bottom10">Bottom 10</option>
-        <option value="bottom25">Bottom 25</option>
+        <option value="bottom15">Bottom 15</option>
       </select>
 
       <div class="toggles">
@@ -871,16 +871,16 @@ function getVisibleMembers() {
     return list.slice(0, 10);
   }
 
-  if (mode === "top25") {
-    return list.slice(0, 25);
+  if (mode === "top15") {
+    return list.slice(0, 15);
   }
 
   if (mode === "bottom10") {
     return list.slice().reverse().slice(0, 10);
   }
 
-  if (mode === "bottom25") {
-    return list.slice().reverse().slice(0, 25);
+  if (mode === "bottom15") {
+    return list.slice().reverse().slice(0, 15);
   }
 
   return list;
@@ -912,6 +912,18 @@ function drawText(text, x, y, options = {}) {
   ctx.textBaseline = options.baseline || "middle";
   ctx.fillText(text, x, y);
   ctx.restore();
+}
+
+function activeDotRadius(bucketHours, visibleCount) {
+  if (bucketHours >= 24) {
+    return visibleCount > 15 ? 4 : 5;
+  }
+
+  if (bucketHours >= 12) {
+    return visibleCount > 15 ? 3.5 : 4.5;
+  }
+
+  return visibleCount > 15 ? 2 : 3;
 }
 
 function drawStatusStrip(visible, plotX, plotY, plotW, plotH) {
@@ -955,6 +967,7 @@ function drawChart() {
   const { width, height } = setupCanvas();
   const visible = getVisibleMembers();
   const bucketHours = Number(document.getElementById("bucket").value) || 12;
+  const dotRadius = activeDotRadius(bucketHours, visible.length);
 
   const showGain = document.getElementById("toggle-gain").checked;
   const showRank = document.getElementById("toggle-rank").checked;
@@ -1209,7 +1222,7 @@ function drawChart() {
           ctx.fillStyle = active ? "#3fb950" : "#f85149";
           ctx.globalAlpha = active ? 0.9 : 0.65;
           ctx.beginPath();
-          ctx.arc(x, y, visible.length > 10 ? 2 : 3, 0, Math.PI * 2);
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
           ctx.fill();
         });
       }
@@ -1267,7 +1280,7 @@ function drawChart() {
           ctx.fillStyle = active ? "#3fb950" : "#f85149";
           ctx.globalAlpha = active ? 0.9 : 0.65;
           ctx.beginPath();
-          ctx.arc(x, y, visible.length > 10 ? 2 : 3, 0, Math.PI * 2);
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
           ctx.fill();
         });
       }
