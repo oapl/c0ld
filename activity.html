@@ -15,6 +15,7 @@
   --muted:#8b949e;
   --link:#ff9b96;
   --good:#7ee787;
+  --rank:#f2cc60;
   --danger:#f85149;
 }
 
@@ -137,6 +138,34 @@ input:focus{
   border-color:var(--link);
 }
 
+.toggles{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+}
+
+.gain-toggle{
+  color:var(--good);
+}
+
+.rank-toggle{
+  color:var(--rank);
+}
+
+.status-toggle{
+  color:var(--muted);
+}
+
 .summary{
   display:flex;
   gap:14px;
@@ -236,6 +265,10 @@ canvas{
     width:100%;
     min-width:0;
   }
+
+  .toggles{
+    width:100%;
+  }
 }
 </style>
 </head>
@@ -276,11 +309,22 @@ canvas{
         <option value="all">All members</option>
       </select>
 
-      <select id="metric">
-        <option value="gain" selected>Gain per period</option>
-        <option value="rank">Rank over time</option>
-        <option value="status">Uptime / downtime</option>
-      </select>
+      <div class="toggles">
+        <label class="toggle gain-toggle">
+          <input id="toggle-gain" type="checkbox" checked>
+          Gain
+        </label>
+
+        <label class="toggle rank-toggle">
+          <input id="toggle-rank" type="checkbox">
+          Rank
+        </label>
+
+        <label class="toggle status-toggle">
+          <input id="toggle-status" type="checkbox">
+          Uptime / downtime
+        </label>
+      </div>
 
       <input id="search" placeholder="Search member...">
       <button id="refresh" type="button">Refresh</button>
@@ -312,8 +356,6 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-// Hard event window.
-// The chart never starts before this.
 const CHART_START_ISO = "2026-06-13T10:00:00-06:00";
 const CHART_END_ISO = "2026-06-19T10:00:00-06:00";
 
@@ -638,7 +680,6 @@ function buildActivityModel() {
       continue;
     }
 
-    // Gains and uptime/downtime.
     for (let i = 1; i < series.length; i++) {
       const previous = series[i - 1];
       const next = series[i];
@@ -664,8 +705,6 @@ function buildActivityModel() {
       member.totalGain += gain;
     }
 
-    // Rank over time.
-    // We carry the latest known rank forward, but the chart still starts at event start.
     let pointer = 0;
     let lastRank = null;
 
@@ -681,7 +720,7 @@ function buildActivityModel() {
       const bucket = buckets[bucketIndex];
 
       while (pointer < series.length && series[pointer].ms < bucket.endMs) {
-        if (series[pointer].ms >= start && Number.isFinite(series[pointer].rank)) {
+        if (Number.isFinite(series[pointer].rank)) {
           lastRank = series[pointer].rank;
         }
 
@@ -690,6 +729,8 @@ function buildActivityModel() {
 
       member.rankValues[bucketIndex] = lastRank;
     }
+
+    member.statusValues = member.bucketGains.map(value => value > 0 ? 1 : 0);
   }
 
   members = Array.from(memberMap.values()).sort((a, b) => {
@@ -725,20 +766,6 @@ function getVisibleMembers() {
   return list;
 }
 
-function getSeriesValues(member) {
-  const metric = document.getElementById("metric").value;
-
-  if (metric === "rank") {
-    return member.rankValues.slice();
-  }
-
-  if (metric === "status") {
-    return member.statusValues.slice();
-  }
-
-  return member.bucketGains.slice();
-}
-
 function setupCanvas() {
   const box = canvas.parentElement;
   const rect = box.getBoundingClientRect();
@@ -767,35 +794,51 @@ function drawText(text, x, y, options = {}) {
   ctx.restore();
 }
 
-function getMetricTitle(metric) {
-  if (metric === "rank") {
-    return "Rank over time";
+function drawStatusStrip(visible, plotX, plotY, plotW, plotH) {
+  if (visible.length !== 1) {
+    return;
   }
 
-  if (metric === "status") {
-    return "Uptime / downtime";
+  const member = visible[0];
+  const stripY = plotY + plotH + 16;
+
+  ctx.save();
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+
+  for (let i = 0; i < member.statusValues.length - 1; i++) {
+    const x1 = member.statusValues.length === 1
+      ? plotX
+      : plotX + (i / (member.statusValues.length - 1)) * plotW;
+
+    const x2 = member.statusValues.length === 1
+      ? plotX
+      : plotX + ((i + 1) / (member.statusValues.length - 1)) * plotW;
+
+    ctx.strokeStyle = member.statusValues[i] ? "#3fb950" : "#f85149";
+    ctx.beginPath();
+    ctx.moveTo(x1, stripY);
+    ctx.lineTo(x2, stripY);
+    ctx.stroke();
   }
 
-  return "Gain per period";
-}
+  drawText("Up/down", plotX - 10, stripY, {
+    color: "#8b949e",
+    font: "11px Arial",
+    align: "right"
+  });
 
-function getMetricAxisLabel(metric) {
-  if (metric === "rank") {
-    return "Rank";
-  }
-
-  if (metric === "status") {
-    return "Status";
-  }
-
-  return "Gain";
+  ctx.restore();
 }
 
 function drawChart() {
   const { width, height } = setupCanvas();
   const visible = getVisibleMembers();
   const bucketHours = Number(document.getElementById("bucket").value) || 12;
-  const metric = document.getElementById("metric").value;
+
+  const showGain = document.getElementById("toggle-gain").checked;
+  const showRank = document.getElementById("toggle-rank").checked;
+  const showStatus = document.getElementById("toggle-status").checked;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0d1117";
@@ -814,10 +857,25 @@ function drawChart() {
 
   document.getElementById("total-gain").textContent = shortNum(totalGain);
 
-  document.getElementById("chart-title").textContent = getMetricTitle(metric);
+  const titleParts = [];
+
+  if (showGain) {
+    titleParts.push("gain");
+  }
+
+  if (showRank) {
+    titleParts.push("rank");
+  }
+
+  if (showStatus) {
+    titleParts.push("uptime / downtime");
+  }
+
+  document.getElementById("chart-title").textContent =
+    "Member " + titleParts.join(" + ");
 
   document.getElementById("chart-note").textContent =
-    visible.length + " line" + (visible.length === 1 ? "" : "s") +
+    visible.length + " member" + (visible.length === 1 ? "" : "s") +
     " shown · " + document.getElementById("bucket").selectedOptions[0].text;
 
   if (!visible.length || !buckets.length) {
@@ -831,9 +889,9 @@ function drawChart() {
 
   const margin = {
     left: 78,
-    right: 28,
+    right: showRank ? 70 : 28,
     top: 48,
-    bottom: 52
+    bottom: showStatus && visible.length === 1 ? 70 : 52
   };
 
   const plotX = margin.left;
@@ -841,91 +899,103 @@ function drawChart() {
   const plotW = Math.max(10, width - margin.left - margin.right);
   const plotH = Math.max(10, height - margin.top - margin.bottom);
 
-  const series = visible.map((member, index) => ({
-    member,
-    color: LINE_COLORS[index % LINE_COLORS.length],
-    values: getSeriesValues(member)
-  }));
+  let maxGain = 0;
 
-  let minY = metric === "status" ? 0 : Infinity;
-  let maxY = metric === "status" ? 1 : -Infinity;
-
-  for (const item of series) {
-    for (const value of item.values) {
-      if (value === null || value === undefined || !Number.isFinite(Number(value))) {
-        continue;
+  for (const member of visible) {
+    for (const value of member.bucketGains) {
+      if (Number.isFinite(Number(value))) {
+        maxGain = Math.max(maxGain, Number(value));
       }
-
-      minY = Math.min(minY, Number(value));
-      maxY = Math.max(maxY, Number(value));
     }
   }
 
-  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
-    minY = 0;
-    maxY = 1;
+  if (!maxGain) {
+    maxGain = 1;
   }
 
-  if (metric === "gain") {
-    minY = 0;
-    maxY = maxY || 1;
-    maxY *= 1.08;
-  }
+  maxGain *= 1.08;
 
-  if (metric === "rank") {
-    // Lower rank is better, so #1 appears higher.
-    minY = Math.max(1, Math.floor(minY));
-    maxY = Math.ceil(maxY);
+  let minRank = Infinity;
+  let maxRank = -Infinity;
 
-    if (minY === maxY) {
-      maxY = minY + 1;
+  for (const member of visible) {
+    for (const value of member.rankValues) {
+      if (Number.isFinite(Number(value))) {
+        minRank = Math.min(minRank, Number(value));
+        maxRank = Math.max(maxRank, Number(value));
+      }
     }
   }
 
-  if (metric === "status") {
-    minY = 0;
-    maxY = 1;
+  if (!Number.isFinite(minRank) || !Number.isFinite(maxRank)) {
+    minRank = 1;
+    maxRank = 75;
   }
 
-  function yForValue(value) {
-    if (metric === "rank") {
-      return plotY + ((value - minY) / (maxY - minY)) * plotH;
-    }
+  minRank = Math.max(1, Math.floor(minRank));
+  maxRank = Math.ceil(maxRank);
 
-    return plotY + plotH - ((value - minY) / (maxY - minY)) * plotH;
+  if (minRank === maxRank) {
+    maxRank = minRank + 1;
+  }
+
+  function xForIndex(index, count) {
+    return count === 1
+      ? plotX
+      : plotX + (index / (count - 1)) * plotW;
+  }
+
+  function yForGain(value) {
+    return plotY + plotH - (Number(value || 0) / maxGain) * plotH;
+  }
+
+  function yForRank(value) {
+    return plotY + ((Number(value) - minRank) / (maxRank - minRank)) * plotH;
   }
 
   ctx.strokeStyle = "rgba(48,54,61,0.9)";
   ctx.lineWidth = 1;
 
-  const gridLines = metric === "status" ? 1 : 5;
+  const gridLines = 5;
 
   for (let i = 0; i <= gridLines; i++) {
-    const t = gridLines === 0 ? 0 : i / gridLines;
+    const t = i / gridLines;
     const y = plotY + plotH - t * plotH;
-
-    let label;
-
-    if (metric === "status") {
-      label = i === 0 ? "Down" : "Up";
-    } else if (metric === "rank") {
-      const rankValue = minY + (maxY - minY) * (i / gridLines);
-      label = "#" + Math.round(rankValue);
-    } else {
-      const gainValue = minY + (maxY - minY) * (i / gridLines);
-      label = shortNum(gainValue);
-    }
 
     ctx.beginPath();
     ctx.moveTo(plotX, y);
     ctx.lineTo(plotX + plotW, y);
     ctx.stroke();
 
-    drawText(label, plotX - 10, y, {
-      color: "#8b949e",
-      font: "11px Arial",
-      align: "right"
-    });
+    if (showGain) {
+      drawText(shortNum(maxGain * t), plotX - 10, y, {
+        color: "#8b949e",
+        font: "11px Arial",
+        align: "right"
+      });
+    } else {
+      const rankValue = minRank + (maxRank - minRank) * (1 - t);
+
+      drawText("#" + Math.round(rankValue), plotX - 10, y, {
+        color: "#8b949e",
+        font: "11px Arial",
+        align: "right"
+      });
+    }
+  }
+
+  if (showRank && showGain) {
+    for (let i = 0; i <= gridLines; i++) {
+      const t = i / gridLines;
+      const y = plotY + t * plotH;
+      const rankValue = minRank + (maxRank - minRank) * t;
+
+      drawText("#" + Math.round(rankValue), plotX + plotW + 8, y, {
+        color: "#f2cc60",
+        font: "11px Arial",
+        align: "left"
+      });
+    }
   }
 
   ctx.strokeStyle = "rgba(139,148,158,0.85)";
@@ -939,9 +1009,7 @@ function drawChart() {
   const tickEvery = Math.max(1, Math.ceil(buckets.length / maxXTicks));
 
   for (let i = 0; i < buckets.length; i += tickEvery) {
-    const x = buckets.length === 1
-      ? plotX
-      : plotX + (i / (buckets.length - 1)) * plotW;
+    const x = xForIndex(i, buckets.length);
 
     ctx.strokeStyle = "rgba(48,54,61,0.65)";
     ctx.beginPath();
@@ -956,45 +1024,115 @@ function drawChart() {
     });
   }
 
-  drawText(getMetricAxisLabel(metric), 12, plotY + plotH / 2, {
+  drawText(showGain ? "Gain" : "Rank", 12, plotY + plotH / 2, {
     color: "#8b949e",
     font: "12px Arial",
     align: "left"
   });
 
-  for (const item of series) {
-    ctx.strokeStyle = item.color;
-    ctx.lineWidth = visible.length > 25 ? 1 : 2;
-    ctx.globalAlpha = visible.length > 25 ? 0.65 : 0.95;
+  if (showGain) {
+    visible.forEach((member, memberIndex) => {
+      const color = LINE_COLORS[memberIndex % LINE_COLORS.length];
 
-    let started = false;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = visible.length > 25 ? 1 : 2;
+      ctx.globalAlpha = visible.length > 25 ? 0.65 : 0.95;
+      ctx.setLineDash([]);
 
-    ctx.beginPath();
+      ctx.beginPath();
 
-    item.values.forEach((value, index) => {
-      if (value === null || value === undefined || !Number.isFinite(Number(value))) {
-        started = false;
-        return;
-      }
+      member.bucketGains.forEach((value, index) => {
+        const x = xForIndex(index, member.bucketGains.length);
+        const y = yForGain(value);
 
-      const x = item.values.length === 1
-        ? plotX
-        : plotX + (index / (item.values.length - 1)) * plotW;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
 
-      const y = yForValue(Number(value));
+      ctx.stroke();
 
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
+      if (showStatus) {
+        member.bucketGains.forEach((value, index) => {
+          const x = xForIndex(index, member.bucketGains.length);
+          const y = yForGain(value);
+
+          ctx.fillStyle = Number(value || 0) > 0 ? "#3fb950" : "#f85149";
+          ctx.globalAlpha = Number(value || 0) > 0 ? 0.88 : 0.72;
+          ctx.beginPath();
+          ctx.arc(x, y, visible.length > 25 ? 2 : 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
       }
     });
+  }
 
-    ctx.stroke();
+  if (showRank) {
+    visible.forEach((member, memberIndex) => {
+      const color = showGain
+        ? "#f2cc60"
+        : LINE_COLORS[memberIndex % LINE_COLORS.length];
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = visible.length > 10 ? 1 : 1.5;
+      ctx.globalAlpha = showGain
+        ? (visible.length > 10 ? 0.28 : 0.58)
+        : (visible.length > 25 ? 0.65 : 0.95);
+
+      ctx.setLineDash(showGain ? [5, 5] : []);
+
+      let started = false;
+
+      ctx.beginPath();
+
+      member.rankValues.forEach((value, index) => {
+        if (!Number.isFinite(Number(value))) {
+          started = false;
+          return;
+        }
+
+        const x = xForIndex(index, member.rankValues.length);
+        const y = yForRank(value);
+
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (showStatus && !showGain) {
+        member.rankValues.forEach((rankValue, index) => {
+          if (!Number.isFinite(Number(rankValue))) {
+            return;
+          }
+
+          const x = xForIndex(index, member.rankValues.length);
+          const y = yForRank(rankValue);
+          const active = member.statusValues[index] > 0;
+
+          ctx.fillStyle = active ? "#3fb950" : "#f85149";
+          ctx.globalAlpha = active ? 0.88 : 0.72;
+          ctx.beginPath();
+          ctx.arc(x, y, visible.length > 25 ? 2 : 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+    });
   }
 
   ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+
+  if (showStatus && visible.length === 1) {
+    drawStatusStrip(visible, plotX, plotY, plotW, plotH);
+  }
 
   const legendX = plotX + 8;
   const legendY = 18;
@@ -1005,17 +1143,18 @@ function drawChart() {
   );
 
   for (let i = 0; i < maxLegendItems; i++) {
-    const item = series[i];
+    const member = visible[i];
+    const color = LINE_COLORS[i % LINE_COLORS.length];
     const x = legendX + i * 145;
 
-    ctx.strokeStyle = item.color;
+    ctx.strokeStyle = color;
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(x, legendY);
     ctx.lineTo(x + 18, legendY);
     ctx.stroke();
 
-    drawText(item.member.name.slice(0, 15), x + 24, legendY, {
+    drawText(member.name.slice(0, 15), x + 24, legendY, {
       color: "#e6edf3",
       font: "11px Arial"
     });
@@ -1032,6 +1171,19 @@ function drawChart() {
 function render() {
   buildActivityModel();
   drawChart();
+}
+
+function enforceAtLeastOneMainToggle(preferred) {
+  const gain = document.getElementById("toggle-gain");
+  const rank = document.getElementById("toggle-rank");
+
+  if (!gain.checked && !rank.checked) {
+    if (preferred === "rank") {
+      rank.checked = true;
+    } else {
+      gain.checked = true;
+    }
+  }
 }
 
 async function loadData() {
@@ -1064,10 +1216,25 @@ async function loadData() {
 
 document.getElementById("bucket").addEventListener("change", render);
 document.getElementById("line-count").addEventListener("change", drawChart);
-document.getElementById("metric").addEventListener("change", drawChart);
 document.getElementById("search").addEventListener("input", drawChart);
 document.getElementById("refresh").addEventListener("click", loadData);
-window.addEventListener("resize", drawChart);
+
+document.getElementById("toggle-gain").addEventListener("change", () => {
+  enforceAtLeastOneMainToggle("gain");
+  drawChart();
+});
+
+document.getElementById("toggle-rank").addEventListener("change", () => {
+  enforceAtLeastOneMainToggle("rank");
+  drawChart();
+});
+
+document.getElementById("toggle-status").addEventListener("change", drawChart);
+
+window.addEventListener("resize", () => {
+  clearTimeout(window.__activityResize);
+  window.__activityResize = setTimeout(drawChart, 100);
+});
 
 loadData();
 </script>
