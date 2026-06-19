@@ -103,10 +103,55 @@
     return SPECIAL_COLORS[normalize(name)] || DEFAULT_COLORS[index % DEFAULT_COLORS.length];
   }
 
+  function selectedBattleValue() {
+    const select = document.getElementById("battle-select");
+    const params = new URLSearchParams(window.location.search);
+    return String(select?.value || params.get("battle") || "current").trim() || "current";
+  }
+
+  function withBattle(url, battle) {
+    if (!battle || ["current", "auto"].includes(String(battle).toLowerCase())) return url;
+    return `${url}${url.includes("?") ? "&" : "?"}battle=${encodeURIComponent(battle)}`;
+  }
+
   async function fetchJson(url) {
     const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
+  }
+
+  function battleEndMs() {
+    const ms = new Date(currentData?.battle_end_iso || "").getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function clampChartFetchedAt(value) {
+    if (!value) return value;
+
+    const rowMs = new Date(value).getTime();
+    const endMs = battleEndMs();
+
+    if (!Number.isFinite(rowMs)) return value;
+    if (endMs !== null && rowMs > endMs) {
+      return new Date(endMs).toISOString();
+    }
+
+    return value;
+  }
+
+  function historyHoursForBattle() {
+    const start = new Date(currentData?.battle_start_iso || "").getTime();
+    const end =
+      new Date(currentData?.snapshot_at || "").getTime() ||
+      new Date(currentData?.generated_at || "").getTime() ||
+      Date.now();
+
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      const hours = Math.ceil((end - start) / (60 * 60 * 1000)) + 6;
+      return Math.max(24, Math.min(336, hours));
+    }
+
+    return 168;
   }
 
   function ensureStyles() {
@@ -194,11 +239,15 @@
       loadData(true);
     });
     panel.querySelector("#reward-threshold-refresh")?.addEventListener("click", () => loadData(true));
+
+    document.getElementById("battle-select")?.addEventListener("change", () => {
+      loadData(true);
+    });
   }
 
   function normalizeCurrentRow(row) {
     return {
-      fetched_at: row.fetched_at || currentData?.snapshot_at || currentData?.generated_at,
+      fetched_at: clampChartFetchedAt(row.fetched_at || currentData?.snapshot_at || currentData?.generated_at),
       rank: finite(row.rank),
       clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
       points: finite(row.points ?? row.total_points),
@@ -210,7 +259,7 @@
 
   function normalizeHistoryRow(row) {
     return {
-      fetched_at: row.fetched_at,
+      fetched_at: clampChartFetchedAt(row.fetched_at),
       rank: finite(row.rank),
       clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
       points: finite(row.points ?? row.total_points)
@@ -220,8 +269,12 @@
   async function loadData(force = false) {
     if (!isClansPage() || loading) return;
     ensurePanel();
+
+    const range = RANGES[selectedRange] || RANGES["1-4"];
     const windowConfig = WINDOWS[selectedWindow] || WINDOWS["12h"];
-    const key = `${selectedRange}:${selectedWindow}:${currentData?.battle || ""}`;
+    const selectedBattle = selectedBattleValue();
+    const currentUrl = withBattle(CURRENT_URL, selectedBattle);
+    const key = `${selectedRange}:${selectedWindow}:${selectedBattle}`;
 
     if (currentData && historyData && historyKey === key && !force) {
       draw();
@@ -233,11 +286,21 @@
     if (summary) summary.textContent = "Loading cutoff risk...";
 
     try {
-      if (!currentData || force) currentData = await fetchJson(CURRENT_URL);
-      const battle = currentData?.battle || "current";
-      const nextKey = `${selectedRange}:${selectedWindow}:${battle}`;
-      historyData = await fetchJson(`${HISTORY_URL}?battle=${encodeURIComponent(battle)}&hours=${windowConfig.hours}&limit=50000`).catch(() => ({ rows: [] }));
-      historyKey = nextKey;
+      currentData = await fetchJson(currentUrl);
+      const battle = currentData?.battle || selectedBattle || "current";
+      const historyHours = historyHoursForBattle();
+
+      historyData = await fetchJson(
+        `${HISTORY_URL}?battle=${encodeURIComponent(battle)}` +
+        `&hours=${historyHours}` +
+        `&rank_min=${range.min}` +
+        `&rank_max=${range.max}` +
+        `&bucket_minutes=${windowConfig.bucketMinutes}` +
+        `&include_baseline=1` +
+        `&limit=50000`
+      ).catch(() => ({ rows: [] }));
+
+      historyKey = key;
       draw();
     } catch (err) {
       console.warn("Cutoff risk chart failed", err);
@@ -297,7 +360,9 @@
       .map(row => new Date(row.fetched_at || "").getTime())
       .filter(Number.isFinite);
     const times = [...historyTimes, ...currentTimes];
-    return times.length ? Math.max(...times) : Date.now();
+    const latest = times.length ? Math.max(...times) : Date.now();
+    const endMs = battleEndMs();
+    return endMs !== null ? Math.min(latest, endMs) : latest;
   }
 
   function pointAt(rows, timestamp) {
