@@ -86,6 +86,11 @@ function mergeRows(primaryRows, fallbackRows) {
   return rows;
 }
 
+function ensureScript(html, scriptPath) {
+  if (html.includes(scriptPath)) return html;
+  return html.replace("</body>", `  <script src="${scriptPath}"></script>\n</body>`);
+}
+
 async function main() {
   if (!fs.existsSync(templatePath)) {
     console.log(`No clan-profile template found at ${templatePath}; skipping clan page generation.`);
@@ -129,9 +134,8 @@ async function main() {
       `function viewedClanName() {\n      return ${JSON.stringify(clanName)};\n    }`
     );
 
-    if (!html.includes("assets/profile-stat-cleanup.js")) {
-      html = html.replace("</body>", "  <script src=\"assets/profile-stat-cleanup.js\"></script>\n</body>");
-    }
+    html = ensureScript(html, "assets/site-announcement.js");
+    html = ensureScript(html, "assets/profile-stat-cleanup.js");
 
     const dir = path.join(outputRoot, slug);
     fs.mkdirSync(dir, { recursive: true });
