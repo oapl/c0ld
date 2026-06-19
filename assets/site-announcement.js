@@ -19,15 +19,18 @@
     style.textContent = `
       #${BANNER_ID} {
         max-width: 1200px;
-        margin: 4px auto 0;
-        height: 10px;
-        line-height: 10px;
-        font-size: 10px;
+        margin: 8px auto 0;
+        padding: 5px 0 7px;
+        min-height: 22px;
+        line-height: 14px;
+        font-size: 12px;
         text-align: center;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
         color: var(--muted, #8b949e);
+        border-top: 1px solid var(--border, #30363d);
+        border-bottom: 1px solid var(--border, #30363d);
       }
       #${BANNER_ID}.announcement-info { color: var(--muted, #8b949e); }
       #${BANNER_ID}.announcement-warning { color: #f2cc60; }
