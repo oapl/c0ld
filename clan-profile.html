@@ -1,160 +1,59 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Clan Profile</title>
   <style>
-    *, *::before, *::after { box-sizing:border-box; }
-    :root { --bg:#0d1117; --panel:#161b22; --panel-2:#0d1117; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --link:#58a6ff; --hover:#1f2630; --danger:#f85149; --danger-bg:rgba(248,81,73,.12); }
-    body { margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
-    a { color:var(--link); text-decoration:none; } a:hover { text-decoration:none; }
-    header { background:var(--panel); border-bottom:1px solid var(--border); padding:10px 22px; position:relative; z-index:1; }
-    .header-inner { max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:center; }
-    .site-logo-link { display:inline-flex; align-items:center; justify-content:center; line-height:0; border-radius:10px; transition:transform .12s ease, filter .15s ease; }
-    .site-logo-link:hover { transform:translateY(-1px); filter:brightness(1.12); }
-    .site-logo { display:block; width:76px; height:auto; border-radius:10px; object-fit:contain; }
-    .menu-bar { max-width:1200px; margin:9px auto 0; display:flex; justify-content:center; gap:8px; flex-wrap:wrap; }
-    .menu-btn { display:inline-block; padding:7px 12px; border:1px solid var(--border); border-radius:5px; background:var(--panel-2); color:var(--text); cursor:pointer; font-size:13px; line-height:1; transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease; }
-    .menu-btn:hover { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
-    main { max-width:1200px; margin:0 auto; padding:22px 24px 24px; }
-    .profile-header { display:flex; align-items:center; gap:18px; border:1px solid var(--border); border-radius:10px; background:var(--panel); padding:18px; margin-bottom:24px; }
-    .clan-icon { width:96px; height:96px; border-radius:10px; background:#21262d; object-fit:cover; flex:0 0 auto; }
-    .profile-name { margin:0 0 6px; font-size:34px; line-height:1.05; }
-    .profile-meta { color:var(--muted); font-size:14px; line-height:1.45; }
-    .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:24px; }
-    .card { padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--panel); min-height:82px; display:flex; flex-direction:column; justify-content:center; }
-    .label { color:var(--muted); font-size:13px; margin-bottom:6px; }
-    .value { font-size:21px; font-weight:bold; line-height:1.25; word-break:break-word; }
-    .section-title-row { margin:24px 0 14px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
-    .section-title { margin:0; font-size:24px; }
-    .battle-card { border:1px solid var(--border); border-radius:10px; background:var(--panel); margin-bottom:18px; overflow:hidden; }
-    .battle-header { padding:16px; border-bottom:1px solid var(--border); }
-    .battle-title { margin:0 0 10px; font-size:20px; }
-    .battle-dates { color:var(--muted); font-size:13px; }
-    .stats { padding:8px 16px 16px; }
-    .stat-row { display:grid; grid-template-columns:minmax(190px,1fr) minmax(100px,1fr); gap:16px; padding:8px; border-bottom:1px solid var(--border); }
-    .stat-row:last-child { border-bottom:0; }
-    .stat-label { color:var(--muted); } .stat-value { text-align:right; font-variant-numeric:tabular-nums; }
-    .chart-wrap { padding:0 16px 16px; position:relative; }
-    .chart-title { color:var(--muted); font-size:13px; margin:10px 0; }
-    .chart-controls { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin:8px 0 10px; color:var(--muted); font-size:13px; }
-    .chart-control-group { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-    .chart-controls label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
-    .chart-controls input { accent-color:var(--link); }
-    .chart-legend-pill { display:inline-flex; align-items:center; gap:5px; }
-    .chart-legend-pill::before { content:""; width:10px; height:3px; border-radius:999px; background:currentColor; }
-    .chart-box { width:100%; height:280px; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); display:block; cursor:crosshair; }
-    .tooltip { position:absolute; z-index:5; pointer-events:none; display:none; min-width:230px; max-width:320px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:#0b0f14; box-shadow:0 8px 24px rgba(0,0,0,.35); color:var(--text); font-size:13px; line-height:1.45; }
-    .tooltip strong { display:block; margin-bottom:4px; }
-    .empty,.error { border:1px solid var(--border); border-radius:10px; background:var(--panel); padding:18px; color:var(--muted); }
-    .error { border-color:var(--danger); background:var(--danger-bg); color:#ffb4ad; }
-    @media (max-width:1000px) { .cards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media (max-width:700px) { main{padding:16px;} .menu-bar{justify-content:flex-start;} .site-logo{width:64px;} .profile-header{align-items:flex-start;} .profile-name{font-size:26px;} .clan-icon{width:76px;height:76px;} .cards{grid-template-columns:1fr;} .stat-row{grid-template-columns:1fr;gap:4px;} .stat-value{text-align:left;} .chart-box{height:230px;} }
+    *{box-sizing:border-box}:root{--bg:#0d1117;--panel:#161b22;--panel2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#58a6ff;--rank:#f2cc60}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}a{color:var(--link);text-decoration:none}header{background:var(--panel);border-bottom:1px solid var(--border);padding:10px 22px}.header-inner{max-width:1200px;margin:auto;display:flex;justify-content:center}.site-logo{width:76px;border-radius:10px}.menu-bar{max-width:1200px;margin:9px auto 0;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.menu-btn{padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel2);color:var(--text);font-size:13px}.menu-btn:hover{border-color:var(--link);background:#1f2630}main{max-width:1200px;margin:auto;padding:22px 24px}.box,.profile-header,.card,.battle-card{border:1px solid var(--border);border-radius:10px;background:var(--panel)}.profile-header{display:flex;gap:18px;align-items:center;padding:18px;margin-bottom:24px}.clan-icon{width:96px;height:96px;border-radius:10px;background:#21262d;object-fit:cover}.profile-name{margin:0 0 6px;font-size:34px}.meta,.label,.dates,.chart-title,.note{color:var(--muted);font-size:13px;line-height:1.45}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}.card{padding:16px;min-height:82px}.value{font-size:21px;font-weight:700}.battle-card{overflow:hidden}.battle-head{padding:16px;border-bottom:1px solid var(--border)}.battle-title{margin:0 0 10px}.stats{padding:8px 16px 16px}.stat-row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(100px,1fr);gap:16px;padding:8px;border-bottom:1px solid var(--border)}.stat-row:last-child{border-bottom:0}.stat-value{text-align:right;font-variant-numeric:tabular-nums}.chart-wrap{position:relative;padding:0 16px 16px}.controls{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:8px 0 10px}.controls label{display:inline-flex;gap:6px;align-items:center}.chart{width:100%;height:280px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);cursor:crosshair}.tip{position:absolute;display:none;pointer-events:none;z-index:5;min-width:220px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#0b0f14;box-shadow:0 8px 24px #0008;font-size:13px;line-height:1.45}.error,.empty{padding:18px}.error{border-color:#f85149;background:rgba(248,81,73,.12);color:#ffb4ad}@media(max-width:700px){main{padding:16px}.menu-bar{justify-content:flex-start}.cards{grid-template-columns:1fr}.stat-row{grid-template-columns:1fr}.stat-value{text-align:left}.chart{height:230px}}
   </style>
 </head>
 <body>
-  <header>
-    <div class="header-inner"><a id="clan-mascot-link" class="site-logo-link" href="index.html?clan=WMSY" aria-label="Switch clan view" title="Switch clan view"><img id="site-mascot" class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
-    <div class="menu-bar">
-      <a class="menu-btn" data-clan-link data-page="index.html" href="index.html">c0ld Leaderboard</a>
-      <a class="menu-btn" data-clan-link data-page="players.html" href="players.html">Players</a>
-      <a class="menu-btn" data-clan-link data-page="clans.html" href="clans.html">Clans Leaderboard</a>
-      <a class="menu-btn" data-clan-link data-page="live-clan.html" href="live-clan.html">Clan Lookup</a>
-      <a class="menu-btn" data-clan-link data-page="servers.html" href="servers.html">Servers</a>
-      <a class="menu-btn" data-clan-link data-page="macros.html" href="macros.html">Macros</a>
-    </div>
-  </header>
-  <main id="app"><div class="empty">Loading clan profile...</div></main>
-  <script>
-    const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
-    const CLANS_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/history";
-    const STATIC_CLANS_HISTORY_URL = "Data/clans-history.json";
-    const SPECIAL_CLANS = { c0ld:{label:"c0ld",color:"#ff9b96"}, wmsy:{label:"WMSY",color:"#74d99f"}, nong:{label:"NONG",color:"#f6ad55"} };
-    const COLORS = { defaultPoints:"#58a6ff", rank:"#f2cc60" };
-    const DEFAULT_CLAN_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150"><rect width="150" height="150" rx="16" fill="#21262d"/><path d="M46 98V52l29-15 29 15v46l-29 15-29-15z" fill="#6e7681"/></svg>`);
-    let currentData = null, historyData = { rows:[] }, selectedClan = null, selectedRow = null;
-    let chartState = { points:true, rank:true, compare:{} };
-
-    function normalize(value){ return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g,""); }
-    function displayName(value){ const key=normalize(value); return SPECIAL_CLANS[key]?.label || String(value || "").trim(); }
-    function viewedClanName() { const params = new URLSearchParams(window.location.search); return params.get("name") || params.get("target") || params.get("clanName") || params.get("clan") || "c0ld"; }
-    function clanColor(name){ return SPECIAL_CLANS[normalize(name)]?.color || COLORS.defaultPoints; }
-    function escapeHtml(value){ return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-    function finiteNumber(value){ if(value===null||value===undefined||value==="") return null; const n=Number(value); return Number.isFinite(n)?n:null; }
-    function fmtNum(value){ const n=finiteNumber(value); return n===null?"—":n.toLocaleString("en-US"); }
-    function fmtShortNum(value){ const n=finiteNumber(value); if(n===null) return "—"; const tiers=[{v:1e12,s:"T"},{v:1e9,s:"B"},{v:1e6,s:"M"},{v:1e3,s:"K"}]; for(const t of tiers) if(Math.abs(n)>=t.v) return (n/t.v).toFixed(2).replace(/\.?0+$/,"")+t.s; return String(n); }
-    function fmtRank(value){ const n=finiteNumber(value); return n===null?"—":`#${n.toLocaleString("en-US")}`; }
-    function fmtDate(value){ if(!value) return "—"; const d=new Date(value); if(Number.isNaN(d.getTime())) return "—"; return d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }
-    function fmtDateTime(value){ if(!value) return "—"; const d=new Date(value); if(Number.isNaN(d.getTime())) return "—"; return d.toLocaleString(undefined,{dateStyle:"short",timeStyle:"medium"}); }
-    async function fetchJson(url){ const res=await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`,{cache:"no-store"}); if(!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); }
-    async function fetchOptionalJson(url,fallback){ try{return await fetchJson(url);}catch{return fallback;} }
-    function findClanRow(rows,name){ const key=normalize(name); return (rows || []).find(row=>normalize(row.clan_name || row.clan || row.name || row.tag)===key) || null; }
-    function rowTime(row, fallback=null){ return row?.fetched_at || row?.snapshot_at || row?.generated_at || row?.created_at || row?.updated_at || fallback || null; }
-    function normalizeHistoryRow(row, fallbackTime=null){ const t=rowTime(row,fallbackTime); return { t, rank:finiteNumber(row.rank), points:finiteNumber(row.points ?? row.total_points), clan_name:row.clan_name || row.clan || row.name || row.tag, icon_url:row.icon_url || null, icon_id:row.icon_id || null }; }
-
-    function flattenHistoryRows(data){
-      const out=[];
-      if(Array.isArray(data)) { data.forEach(item=>out.push(...flattenHistoryRows(item))); return out; }
-      if(!data || typeof data !== "object") return out;
-      if(Array.isArray(data.snapshots)) {
-        for(const snap of data.snapshots){ const ts=rowTime(snap); for(const row of snap.rows || []) out.push(normalizeHistoryRow(row, ts)); }
-      }
-      if(Array.isArray(data.history)) {
-        for(const snap of data.history){ const ts=rowTime(snap); for(const row of snap.rows || []) out.push(normalizeHistoryRow(row, ts)); }
-      }
-      if(Array.isArray(data.rows)) {
-        const fallback=rowTime(data);
-        for(const row of data.rows) out.push(normalizeHistoryRow(row, fallback));
-      }
-      return out.filter(row=>row.t && row.clan_name && row.points !== null).sort((a,b)=>new Date(a.t)-new Date(b.t));
-    }
-
-    function findStaticBattle(staticList, battleName){ const key=normalize(battleName); return (Array.isArray(staticList) ? staticList : []).find(item => normalize(item.battle)===key || normalize(item.display_name)===key || normalize(item.api_battle_key)===key) || null; }
-    async function loadAllHistory(){
-      const battleKey=currentData?.battle || "current";
-      const apiUrl=`${CLANS_API_HISTORY_URL}?battle=${encodeURIComponent(battleKey)}&hours=10000&limit=50000`;
-      const [apiHistory, staticList] = await Promise.all([fetchOptionalJson(apiUrl,{rows:[]}), fetchOptionalJson(STATIC_CLANS_HISTORY_URL,[])]);
-      const staticBattle=findStaticBattle(staticList,battleKey);
-      const merged=new Map();
-      for(const row of [...flattenHistoryRows(staticBattle), ...flattenHistoryRows(apiHistory)]) {
-        const key=`${normalize(row.clan_name)}:${new Date(row.t).toISOString()}`;
-        merged.set(key,row);
-      }
-      return { rows:[...merged.values()].sort((a,b)=>new Date(a.t)-new Date(b.t)) };
-    }
-
-    function historyRowsFor(name){ const key=normalize(name); return flattenHistoryRows(historyData).filter(row=>normalize(row.clan_name)===key).sort((a,b)=>new Date(a.t)-new Date(b.t)); }
-    function seriesFor(name){
-      let rows=historyRowsFor(name); const currentRow=findClanRow(currentData?.rows,name); const currentTime=currentData?.snapshot_at || currentData?.generated_at || currentRow?.fetched_at || null;
-      if(currentRow && currentTime && !rows.some(row=>new Date(row.t).getTime()===new Date(currentTime).getTime())) rows.push(normalizeHistoryRow(currentRow,currentTime));
-      if(!rows.length && currentRow) rows=[normalizeHistoryRow(currentRow,currentTime)].filter(row=>row.t);
-      return rows.sort((a,b)=>new Date(a.t)-new Date(b.t));
-    }
-    function snapshotCount(){ return new Set(flattenHistoryRows(historyData).map(row=>new Date(row.t).toISOString())).size; }
-    function battleStats(rows){ const ranks=rows.map(r=>r.rank).filter(Number.isFinite), first=rows[0]||{}, last=rows[rows.length-1]||{}; return { firstActive:first.t || null, startingRank:first.rank ?? null, worstRank:ranks.length?Math.max(...ranks):null, bestRank:ranks.length?Math.min(...ranks):null, endRank:selectedRow?.rank ?? last.rank ?? null, endingPoints:selectedRow?.points ?? selectedRow?.total_points ?? last.points ?? null, firstSnapshot:first.t || null, lastSnapshot:last.t || null, pulls:rows.length }; }
-    function comparisonOptions(){ const selectedKey=normalize(selectedClan); return Object.entries(SPECIAL_CLANS).filter(([key])=>key!==selectedKey).map(([key,meta])=>({key,...meta})).filter(item=>seriesFor(item.label).length>1 || findClanRow(currentData?.rows,item.label)); }
-    function updateThemeColor(){ document.documentElement.style.setProperty("--link", clanColor(selectedClan)); }
-
-    function renderShell(){
-      const app=document.getElementById("app"), row=selectedRow, rows=seriesFor(selectedClan), stats=battleStats(rows), icon=row?.icon_url || rows.find(item=>item.icon_url)?.icon_url || DEFAULT_CLAN_ICON, battleName=currentData?.display_name || currentData?.battle || "Current Clan Battle", start=currentData?.battle_start_iso || stats.firstSnapshot, end=currentData?.battle_end_iso || stats.lastSnapshot;
-      app.innerHTML=`<section class="profile-header"><img class="clan-icon" src="${escapeHtml(icon)}" alt="" onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';"><div><h2 class="profile-name">${escapeHtml(displayName(selectedClan))}</h2><div class="profile-meta">Current Battle: ${escapeHtml(battleName)}<br>${row ? `Top 200 clan profile · Rank ${fmtRank(row.rank)}` : "Clan not currently in top 200"}<br>Loaded data pulls: ${fmtNum(snapshotCount())}</div></div></section><section class="cards"><div class="card"><div class="label">Current Rank</div><div class="value">${fmtRank(row?.rank)}</div></div><div class="card"><div class="label">Projected Rank</div><div class="value">${fmtRank(row?.projected_rank)}</div></div><div class="card"><div class="label">Current Points</div><div class="value">${fmtNum(row?.points ?? row?.total_points)}</div></div><div class="card"><div class="label">Latest Seen</div><div class="value">${fmtDateTime(currentData?.snapshot_at || currentData?.generated_at)}</div></div></section><div class="section-title-row"><h2 class="section-title">Battle History</h2></div><article class="battle-card"><div class="battle-header"><h3 class="battle-title">${escapeHtml(battleName)}</h3><div class="battle-dates">${fmtDate(start)} → ${fmtDate(end)}</div></div><div class="stats"><div class="stat-row"><div class="stat-label">First Active Date</div><div class="stat-value">${fmtDate(stats.firstActive)}</div></div><div class="stat-row"><div class="stat-label">Starting Rank</div><div class="stat-value">${fmtRank(stats.startingRank)}</div></div><div class="stat-row"><div class="stat-label">Worst Rank</div><div class="stat-value">${fmtRank(stats.worstRank)}</div></div><div class="stat-row"><div class="stat-label">Best Rank</div><div class="stat-value">${fmtRank(stats.bestRank)}</div></div><div class="stat-row"><div class="stat-label">End Rank</div><div class="stat-value">${fmtRank(stats.endRank)}</div></div><div class="stat-row"><div class="stat-label">Ending Points</div><div class="stat-value">${fmtNum(stats.endingPoints)}</div></div><div class="stat-row"><div class="stat-label">Data Pulls Shown</div><div class="stat-value">${fmtNum(stats.pulls)}</div></div></div><div class="chart-wrap"><div class="chart-title">Progression</div><div class="chart-controls"><div class="chart-control-group"><label style="color:${clanColor(selectedClan)}"><input id="toggle-points" type="checkbox" ${chartState.points?"checked":""}> <span class="chart-legend-pill">Points</span></label><label style="color:${COLORS.rank}"><input id="toggle-rank" type="checkbox" ${chartState.rank?"checked":""}> <span class="chart-legend-pill">Rank</span></label></div><div class="chart-control-group" id="compare-controls">${comparisonOptions().map(item=>`<label style="color:${item.color}"><input class="compare-toggle" type="checkbox" data-clan="${escapeHtml(item.label)}" ${chartState.compare[normalize(item.label)]?"checked":""}> <span class="chart-legend-pill">${escapeHtml(item.label)}</span></label>`).join("")}</div></div><canvas class="chart-box" id="progress-chart"></canvas><div class="tooltip" id="chart-tooltip"></div></div></article>`;
-      wireControls(); requestAnimationFrame(drawChart);
-    }
-
-    function visibleSeries(){ const viewed=seriesFor(selectedClan); const comparisons=comparisonOptions().filter(item=>chartState.compare[normalize(item.label)]).map(item=>({...item, series:seriesFor(item.label)})).filter(item=>item.series.length>1); return { viewed, comparisons }; }
-    function yScale(value,min,max,top,height,type){ if(max===min) return top+height/2; const pct=(value-min)/(max-min); return type==="rank" ? top+pct*height : top+(1-pct)*height; }
-    function drawLine(ctx, rows, x, y, color){ if(!rows.length) return; ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); rows.forEach((row,index)=>index?ctx.lineTo(x(row),y(row)):ctx.moveTo(x(row),y(row))); ctx.stroke(); const last=rows[rows.length-1]; ctx.fillStyle=color; ctx.beginPath(); ctx.arc(x(last),y(last),3.5,0,Math.PI*2); ctx.fill(); ctx.restore(); }
-    function drawChart(){ const canvas=document.getElementById("progress-chart"), tooltip=document.getElementById("chart-tooltip"); if(!canvas||!tooltip) return; const ctx=canvas.getContext("2d"), rect=canvas.getBoundingClientRect(), dpr=devicePixelRatio||1; const {viewed,comparisons}=visibleSeries(); const viewedPoints=chartState.points?viewed.filter(row=>row.points!==null):[], viewedRanks=chartState.rank?viewed.filter(row=>row.rank!==null):[], compareRows=comparisons.flatMap(item=>item.series.filter(row=>row.points!==null)), visible=[...viewedPoints,...viewedRanks,...compareRows]; canvas.width=Math.floor(rect.width*dpr); canvas.height=Math.floor(rect.height*dpr); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,rect.width,rect.height); if(visible.length<2){ ctx.fillStyle="#8b949e"; ctx.font="13px Arial"; ctx.fillText("Not enough points to chart.",16,28); return; }
-      const padLeft=58,padRight=18,padTop=18,padBottom=34,width=rect.width-padLeft-padRight,height=rect.height-padTop-padBottom; const minT=Math.min(...visible.map(row=>new Date(row.t).getTime())), maxT=Math.max(...visible.map(row=>new Date(row.t).getTime())); const pointValues=[...viewedPoints,...compareRows].map(row=>row.points).filter(Number.isFinite), rankValues=viewedRanks.map(row=>row.rank).filter(Number.isFinite); const minPoints=pointValues.length?Math.min(...pointValues):0, maxPoints=pointValues.length?Math.max(...pointValues):0, minRank=rankValues.length?Math.min(...rankValues):0, maxRank=rankValues.length?Math.max(...rankValues):0; const x=row=>maxT===minT?padLeft:padLeft+((new Date(row.t).getTime()-minT)/(maxT-minT))*width; const yPoints=row=>yScale(row.points,minPoints,maxPoints,padTop,height,"points"); const yRank=row=>yScale(row.rank,minRank,maxRank,padTop,height,"rank"); ctx.strokeStyle="#30363d"; ctx.lineWidth=1; ctx.font="12px Arial"; ctx.fillStyle="#8b949e"; const grid=pointValues.length?{min:minPoints,max:maxPoints,type:"points"}:{min:minRank,max:maxRank,type:"rank"}; for(let i=0;i<=4;i++){ const pct=i/4, yy=padTop+pct*height, val=grid.type==="rank"?grid.min+pct*(grid.max-grid.min):grid.max-pct*(grid.max-grid.min); ctx.beginPath(); ctx.moveTo(padLeft,yy); ctx.lineTo(rect.width-padRight,yy); ctx.stroke(); ctx.fillText(grid.type==="rank"?`#${Math.round(val)}`:fmtShortNum(val),8,yy+4); }
-      drawLine(ctx, viewedPoints, x, yPoints, clanColor(selectedClan)); drawLine(ctx, viewedRanks, x, yRank, COLORS.rank); for(const item of comparisons) drawLine(ctx, item.series.filter(row=>row.points!==null), x, yPoints, item.color); const firstDate=new Date(minT), lastDate=new Date(maxT); ctx.fillStyle="#8b949e"; ctx.fillText(firstDate.toLocaleDateString(undefined,{month:"short",day:"numeric"}),padLeft,rect.height-12); const lastLabel=lastDate.toLocaleDateString(undefined,{month:"short",day:"numeric"}), lastWidth=ctx.measureText(lastLabel).width; ctx.fillText(lastLabel,rect.width-padRight-lastWidth,rect.height-12); canvas._chart={viewed,comparisons,x,yPoints,yRank,padTop,padBottom,rect}; bindTooltip(canvas,tooltip); }
-    function bindTooltip(canvas,tooltip){ if(canvas.dataset.tooltipBound==="1") return; canvas.dataset.tooltipBound="1"; function hide(){tooltip.style.display="none";} function move(ev){ const chart=canvas._chart; if(!chart?.viewed?.length) return; const rect=canvas.getBoundingClientRect(), mx=ev.clientX-rect.left; let nearest=chart.viewed[0], nearestDist=Math.abs(chart.x(nearest)-mx); for(const row of chart.viewed){ const dist=Math.abs(chart.x(row)-mx); if(dist<nearestDist){ nearest=row; nearestDist=dist; } } drawChart(); const fresh=canvas._chart, ctx=canvas.getContext("2d"), px=fresh.x(nearest), py=chartState.points&&nearest.points!==null?fresh.yPoints(nearest):fresh.yRank(nearest); ctx.save(); ctx.strokeStyle="rgba(139,148,158,.55)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,fresh.padTop); ctx.lineTo(px,fresh.rect.height-fresh.padBottom); ctx.stroke(); ctx.fillStyle="#e6edf3"; ctx.beginPath(); ctx.arc(px,py,4,0,Math.PI*2); ctx.fill(); ctx.restore(); const compareRows=fresh.comparisons.map(item=>{ const close=item.series.reduce((best,row)=>{ const dist=Math.abs(new Date(row.t)-new Date(nearest.t)); return !best||dist<best.dist?{row,dist}:best; },null)?.row; return `<div style="color:${item.color}">${escapeHtml(item.label)} Points: ${fmtNum(close?.points)}</div>`; }).join(""); tooltip.innerHTML=`<strong>${fmtDateTime(nearest.t)}</strong><div>Points: ${fmtNum(nearest.points)}</div><div>Rank: ${fmtRank(nearest.rank)}</div>${compareRows}`; tooltip.style.display="block"; const tr=tooltip.getBoundingClientRect(); let left=ev.clientX-rect.left+14, top=ev.clientY-rect.top+14; if(left+tr.width>rect.width) left=ev.clientX-rect.left-tr.width-14; if(top+tr.height>rect.height) top=ev.clientY-rect.top-tr.height-14; tooltip.style.left=`${Math.max(8,left)}px`; tooltip.style.top=`${Math.max(8,top)}px`; } canvas.addEventListener("mousemove",move); canvas.addEventListener("mouseleave",hide); canvas.addEventListener("touchstart",ev=>ev.touches?.[0]&&move(ev.touches[0]),{passive:true}); canvas.addEventListener("touchmove",ev=>ev.touches?.[0]&&move(ev.touches[0]),{passive:true}); canvas.addEventListener("touchend",hide); }
-    function wireControls(){ document.getElementById("toggle-points")?.addEventListener("change",ev=>{ if(!ev.target.checked&&!chartState.rank) ev.target.checked=true; chartState.points=ev.target.checked; drawChart(); }); document.getElementById("toggle-rank")?.addEventListener("change",ev=>{ if(!ev.target.checked&&!chartState.points) ev.target.checked=true; chartState.rank=ev.target.checked; drawChart(); }); document.querySelectorAll(".compare-toggle").forEach(input=>input.addEventListener("change",ev=>{ chartState.compare[normalize(ev.target.dataset.clan)]=ev.target.checked; drawChart(); })); }
-
-    async function loadData(){ selectedClan=displayName(viewedClanName()); const app=document.getElementById("app"); try{ currentData=await fetchJson(CLANS_API_CURRENT_URL); selectedRow=findClanRow(currentData.rows,selectedClan); if(!selectedRow){ app.innerHTML=`<div class="error">${escapeHtml(selectedClan)} is not currently in the top 200 clans list.</div>`; return; } historyData=await loadAllHistory(); document.title=`${displayName(selectedClan)} - Clan Profile`; updateThemeColor(); renderShell(); }catch(err){ console.error(err); app.innerHTML=`<div class="error">Could not load clan profile. ${escapeHtml(err.message)}</div>`; } }
-    window.addEventListener("resize",()=>{ clearTimeout(window.__clanProfileResize); window.__clanProfileResize=setTimeout(drawChart,100); });
-    loadData();
-  </script>
-  <script src="assets/clan-switcher.js"></script>
+<header>
+  <div class="header-inner"><a id="clan-mascot-link" class="site-logo-link" href="index.html?clan=WMSY" aria-label="Switch clan view" title="Switch clan view"><img id="site-mascot" class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu-bar">
+    <a class="menu-btn" data-clan-link data-page="index.html" href="index.html">c0ld Leaderboard</a><a class="menu-btn" data-clan-link data-page="players.html" href="players.html">Players</a><a class="menu-btn" data-clan-link data-page="clans.html" href="clans.html">Clans Leaderboard</a><a class="menu-btn" data-clan-link data-page="live-clan.html" href="live-clan.html">Clan Lookup</a><a class="menu-btn" data-clan-link data-page="servers.html" href="servers.html">Servers</a><a class="menu-btn" data-clan-link data-page="macros.html" href="macros.html">Macros</a>
+  </div>
+</header>
+<main id="app"><div class="box empty">Loading clan profile...</div></main>
+<script>
+const CLANS_API_CURRENT_URL="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+const CLANS_API_HISTORY_URL="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/history";
+const STATIC_HISTORY_URL="Data/clans-history.json";
+const SPECIAL={c0ld:{label:"c0ld",color:"#ff9b96"},wmsy:{label:"WMSY",color:"#74d99f"},nong:{label:"NONG",color:"#f6ad55"}};
+const DEFAULT_ICON="data:image/svg+xml;utf8,"+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150"><rect width="150" height="150" rx="16" fill="#21262d"/><path d="M46 98V52l29-15 29 15v46l-29 15-29-15z" fill="#6e7681"/></svg>`);
+let currentData=null, historyData={rows:[]}, selectedClan="", selectedRow=null, showPoints=true, showRank=true, chartCache=null;
+function norm(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
+function displayName(v){return SPECIAL[norm(v)]?.label||String(v||"").trim()}
+function viewedClanName() { const params = new URLSearchParams(window.location.search); return params.get("name") || params.get("target") || params.get("clanName") || params.get("clan") || "c0ld"; }
+function color(v){return SPECIAL[norm(v)]?.color||"#58a6ff"}
+function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function num(v){if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null}
+function fmt(v){const n=num(v);return n===null?"—":n.toLocaleString("en-US")}
+function short(v){const n=num(v);if(n===null)return"—";for(const t of[{v:1e12,s:"T"},{v:1e9,s:"B"},{v:1e6,s:"M"},{v:1e3,s:"K"}])if(Math.abs(n)>=t.v)return(n/t.v).toFixed(2).replace(/\.?0+$/,'')+t.s;return String(n)}
+function rank(v){const n=num(v);return n===null?"—":`#${n.toLocaleString("en-US")}`}
+function date(v){if(!v)return"—";const d=new Date(v);return Number.isNaN(d)?"—":d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
+function dt(v){if(!v)return"—";const d=new Date(v);return Number.isNaN(d)?"—":d.toLocaleString(undefined,{dateStyle:"short",timeStyle:"medium"})}
+async function fetchJson(url){const r=await fetch(`${url}${url.includes("?")?"&":"?"}v=${Date.now()}`,{cache:"no-store"});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
+async function opt(url,fb){try{return await fetchJson(url)}catch{return fb}}
+function rowName(r){return r?.clan_name||r?.clan||r?.name||r?.tag||""}
+function findClan(rows,name){const k=norm(name);return(rows||[]).find(r=>norm(rowName(r))===k)||null}
+function rowTime(r,f=null){return r?.t||r?.fetched_at||r?.snapshot_at||r?.generated_at||r?.created_at||r?.updated_at||f||null}
+function histRow(r,f=null){return{t:rowTime(r,f),rank:num(r.rank),points:num(r.points??r.total_points),clan_name:rowName(r),icon_url:r.icon_url||null}}
+function flatten(data){const out=[];if(Array.isArray(data)){data.forEach(x=>out.push(...flatten(x)));return out}if(!data||typeof data!=="object")return out;if(Array.isArray(data.snapshots))for(const s of data.snapshots){const t=rowTime(s);for(const r of s.rows||[])out.push(histRow(r,t))}if(Array.isArray(data.history))for(const s of data.history){const t=rowTime(s);for(const r of s.rows||[])out.push(histRow(r,t))}if(Array.isArray(data.rows)){const t=rowTime(data);for(const r of data.rows)out.push(histRow(r,t))}return out.filter(r=>r.t&&r.clan_name&&r.points!==null).sort((a,b)=>new Date(a.t)-new Date(b.t))}
+function staticBattle(list,battle){const k=norm(battle);return(Array.isArray(list)?list:[]).find(x=>norm(x.battle)===k||norm(x.display_name)===k||norm(x.api_battle_key)===k)||null}
+async function loadHistory(){const battle=currentData?.battle||"current";const api=`${CLANS_API_HISTORY_URL}?battle=${encodeURIComponent(battle)}&hours=10000&limit=50000`;const[apiHist,stat]=await Promise.all([opt(api,{rows:[]}),opt(STATIC_HISTORY_URL,[])]);const merged=new Map();for(const r of[...flatten(staticBattle(stat,battle)),...flatten(apiHist)])merged.set(`${norm(r.clan_name)}:${new Date(r.t).toISOString()}`,r);return{rows:[...merged.values()].sort((a,b)=>new Date(a.t)-new Date(b.t))}}
+function rowsFor(name){const k=norm(name);return flatten(historyData).filter(r=>norm(r.clan_name)===k).sort((a,b)=>new Date(a.t)-new Date(b.t))}
+function seriesFor(name){let rows=rowsFor(name);const cur=findClan(currentData?.rows,name);const t=currentData?.snapshot_at||currentData?.generated_at||cur?.fetched_at;if(cur&&t&&!rows.some(r=>new Date(r.t).getTime()===new Date(t).getTime()))rows.push(histRow(cur,t));return rows.sort((a,b)=>new Date(a.t)-new Date(b.t))}
+function pullCount(){return new Set(flatten(historyData).map(r=>new Date(r.t).toISOString())).size}
+function stats(rows){const ranks=rows.map(r=>r.rank).filter(Number.isFinite),f=rows[0]||{},l=rows[rows.length-1]||{};return{start:f.t,end:l.t,firstRank:f.rank,worst:ranks.length?Math.max(...ranks):null,best:ranks.length?Math.min(...ranks):null,endRank:selectedRow?.rank??l.rank,endPoints:selectedRow?.points??selectedRow?.total_points??l.points,pulls:rows.length}}
+function render(){const app=document.getElementById("app"),rows=seriesFor(selectedClan),s=stats(rows),battle=currentData?.display_name||currentData?.battle||"Current Clan Battle",icon=selectedRow?.icon_url||rows.find(r=>r.icon_url)?.icon_url||DEFAULT_ICON;document.documentElement.style.setProperty("--link",color(selectedClan));app.innerHTML=`<section class="profile-header"><img class="clan-icon" src="${esc(icon)}" onerror="this.onerror=null;this.src='${DEFAULT_ICON}'" alt=""><div><h1 class="profile-name">${esc(displayName(selectedClan))}</h1><div class="meta">Current Battle: ${esc(battle)}<br>${selectedRow?`Top 200 clan profile · Rank ${rank(selectedRow.rank)}`:"Clan not currently in top 200"}<br>Loaded data pulls: ${fmt(pullCount())}</div></div></section><section class="cards"><div class="card"><div class="label">Current Rank</div><div class="value">${rank(selectedRow?.rank)}</div></div><div class="card"><div class="label">Projected Rank</div><div class="value">${rank(selectedRow?.projected_rank)}</div></div><div class="card"><div class="label">Current Points</div><div class="value">${fmt(selectedRow?.points??selectedRow?.total_points)}</div></div><div class="card"><div class="label">Latest Seen</div><div class="value">${dt(currentData?.snapshot_at||currentData?.generated_at)}</div></div></section><article class="battle-card"><div class="battle-head"><h2 class="battle-title">${esc(battle)}</h2><div class="dates">${date(currentData?.battle_start_iso||s.start)} → ${date(currentData?.battle_end_iso||s.end)}</div></div><div class="stats"><div class="stat-row"><div class="label">Starting Rank</div><div class="stat-value">${rank(s.firstRank)}</div></div><div class="stat-row"><div class="label">Worst Rank</div><div class="stat-value">${rank(s.worst)}</div></div><div class="stat-row"><div class="label">Best Rank</div><div class="stat-value">${rank(s.best)}</div></div><div class="stat-row"><div class="label">End Rank</div><div class="stat-value">${rank(s.endRank)}</div></div><div class="stat-row"><div class="label">Ending Points</div><div class="stat-value">${fmt(s.endPoints)}</div></div><div class="stat-row"><div class="label">Data Pulls Shown</div><div class="stat-value">${fmt(s.pulls)}</div></div></div><div class="chart-wrap"><div class="chart-title">Progression</div><div class="controls"><label style="color:${color(selectedClan)}"><input id="points" type="checkbox" ${showPoints?"checked":""}> Points</label><label style="color:var(--rank)"><input id="rank" type="checkbox" ${showRank?"checked":""}> Rank</label></div><canvas class="chart" id="chart"></canvas><div class="tip" id="tip"></div></div></article>`;document.getElementById("points").onchange=e=>{if(!e.target.checked&&!showRank)e.target.checked=true;showPoints=e.target.checked;draw()};document.getElementById("rank").onchange=e=>{if(!e.target.checked&&!showPoints)e.target.checked=true;showRank=e.target.checked;draw()};requestAnimationFrame(draw)}
+function y(v,min,max,top,h,type){if(max===min)return top+h/2;const p=(v-min)/(max-min);return type==="rank"?top+p*h:top+(1-p)*h}
+function line(ctx,rows,x,yy,c){if(!rows.length)return;ctx.save();ctx.strokeStyle=c;ctx.lineWidth=2;ctx.beginPath();rows.forEach((r,i)=>i?ctx.lineTo(x(r),yy(r)):ctx.moveTo(x(r),yy(r)));ctx.stroke();ctx.restore()}
+function draw(){const c=document.getElementById("chart"),tip=document.getElementById("tip");if(!c)return;const ctx=c.getContext("2d"),rect=c.getBoundingClientRect(),dpr=devicePixelRatio||1,rows=seriesFor(selectedClan),pr=showPoints?rows.filter(r=>r.points!==null):[],rr=showRank?rows.filter(r=>r.rank!==null):[],vis=[...pr,...rr];c.width=Math.floor(rect.width*dpr);c.height=Math.floor(rect.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);if(vis.length<2){ctx.fillStyle="#8b949e";ctx.font="13px Arial";ctx.fillText("Not enough points to chart.",16,28);return}const pl=58,prg=18,pt=18,pb=34,w=rect.width-pl-prg,h=rect.height-pt-pb,minT=Math.min(...vis.map(r=>new Date(r.t))),maxT=Math.max(...vis.map(r=>new Date(r.t))),pv=pr.map(r=>r.points),rv=rr.map(r=>r.rank),minP=pv.length?Math.min(...pv):0,maxP=pv.length?Math.max(...pv):0,minR=rv.length?Math.min(...rv):0,maxR=rv.length?Math.max(...rv):0,x=r=>maxT===minT?pl:pl+((new Date(r.t)-minT)/(maxT-minT))*w,yp=r=>y(r.points,minP,maxP,pt,h,"points"),yr=r=>y(r.rank,minR,maxR,pt,h,"rank");ctx.strokeStyle="#30363d";ctx.font="12px Arial";ctx.fillStyle="#8b949e";const grid=pv.length?{min:minP,max:maxP,type:"points"}:{min:minR,max:maxR,type:"rank"};for(let i=0;i<=4;i++){const p=i/4,yy=pt+p*h,val=grid.type==="rank"?grid.min+p*(grid.max-grid.min):grid.max-p*(grid.max-grid.min);ctx.beginPath();ctx.moveTo(pl,yy);ctx.lineTo(rect.width-prg,yy);ctx.stroke();ctx.fillText(grid.type==="rank"?`#${Math.round(val)}`:short(val),8,yy+4)}line(ctx,pr,x,yp,color(selectedClan));line(ctx,rr,x,yr,"#f2cc60");chartCache={rows,x,yp,yr,pt,pb,rect};bindTip(c,tip)}
+function bindTip(c,tip){if(c.dataset.bound)return;c.dataset.bound=1;c.onmouseleave=()=>tip.style.display="none";c.onmousemove=e=>{if(!chartCache)return;const rect=c.getBoundingClientRect(),mx=e.clientX-rect.left;let near=chartCache.rows[0],dist=Math.abs(chartCache.x(near)-mx);for(const r of chartCache.rows){const d=Math.abs(chartCache.x(r)-mx);if(d<dist){near=r;dist=d}}draw();const fresh=chartCache,ctx=c.getContext("2d"),px=fresh.x(near),py=showPoints?fresh.yp(near):fresh.yr(near);ctx.fillStyle="#e6edf3";ctx.beginPath();ctx.arc(px,py,4,0,Math.PI*2);ctx.fill();tip.innerHTML=`<strong>${dt(near.t)}</strong><div>Points: ${fmt(near.points)}</div><div>Rank: ${rank(near.rank)}</div>`;tip.style.display="block";tip.style.left=Math.max(8,e.clientX-rect.left+14)+"px";tip.style.top=Math.max(8,e.clientY-rect.top+14)+"px"}}
+async function loadData(){selectedClan=displayName(viewedClanName());const app=document.getElementById("app");try{currentData=await fetchJson(CLANS_API_CURRENT_URL);selectedRow=findClan(currentData.rows,selectedClan);if(!selectedRow){app.innerHTML=`<div class="box error">${esc(selectedClan)} is not currently in the top 200 clans list.</div>`;return}historyData=await loadHistory();document.title=`${displayName(selectedClan)} - Clan Profile`;render()}catch(e){console.error(e);app.innerHTML=`<div class="box error">Could not load clan profile. ${esc(e.message)}</div>`}}
+window.addEventListener("resize",()=>{clearTimeout(window.__r);window.__r=setTimeout(draw,100)});loadData();
+</script>
+<script src="assets/clan-switcher.js"></script>
 </body>
 </html>
