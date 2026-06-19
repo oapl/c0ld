@@ -35,17 +35,17 @@ a{
 header{
   background:var(--panel);
   border-bottom:1px solid var(--border);
-  padding:12px 22px 10px;
+  padding:10px 20px;
   text-align:center;
 }
 
 .logo{
-  width:76px;
-  border-radius:10px;
+  width:64px;
+  border-radius:9px;
 }
 
 .menu{
-  margin-top:9px;
+  margin-top:8px;
   display:flex;
   gap:8px;
   justify-content:center;
@@ -70,23 +70,24 @@ header{
 }
 
 main{
-  max-width:1800px;
+  width:100%;
+  max-width:1900px;
   margin:0 auto;
-  padding:22px 24px;
+  padding:18px 22px;
 }
 
 .top{
   display:flex;
   justify-content:space-between;
-  gap:14px;
   align-items:flex-start;
+  gap:14px;
   flex-wrap:wrap;
-  margin-bottom:16px;
+  margin-bottom:12px;
 }
 
 h1{
-  margin:0 0 6px;
-  font-size:24px;
+  margin:0 0 5px;
+  font-size:22px;
 }
 
 .sub{
@@ -96,8 +97,9 @@ h1{
 
 .tools{
   display:flex;
-  gap:10px;
+  gap:9px;
   flex-wrap:wrap;
+  align-items:center;
 }
 
 select,
@@ -107,7 +109,7 @@ button{
   border-radius:6px;
   background:var(--panel2);
   color:var(--text);
-  padding:9px 11px;
+  padding:8px 10px;
   font-size:14px;
 }
 
@@ -115,39 +117,15 @@ input{
   min-width:230px;
 }
 
-.cards{
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:12px;
-  margin-bottom:16px;
-}
-
-.card{
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:13px;
-}
-
-.label{
-  color:var(--muted);
-  font-size:12px;
-  margin-bottom:6px;
-}
-
-.value{
-  font-weight:bold;
-  font-size:18px;
-}
-
 .status{
   display:none;
   background:var(--panel);
   border:1px solid var(--border);
-  border-radius:10px;
-  padding:14px;
-  margin-bottom:16px;
+  border-radius:9px;
+  padding:11px 13px;
+  margin-bottom:12px;
   color:var(--muted);
+  font-size:13px;
 }
 
 .status.show{
@@ -160,6 +138,19 @@ input{
   background:rgba(248,81,73,.12);
 }
 
+.summary-line{
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:13px;
+  margin-bottom:12px;
+}
+
+.summary-line strong{
+  color:var(--text);
+}
+
 .panel{
   border:1px solid var(--border);
   border-radius:10px;
@@ -168,7 +159,7 @@ input{
 }
 
 .panel-head{
-  padding:13px 16px;
+  padding:12px 15px;
   border-bottom:1px solid var(--border);
   display:flex;
   justify-content:space-between;
@@ -183,8 +174,8 @@ input{
 
 .wrap{
   overflow:auto;
-  max-height:calc(100vh - 285px);
-  min-height:520px;
+  height:calc(100vh - 210px);
+  min-height:560px;
   background:var(--panel2);
 }
 
@@ -215,7 +206,7 @@ input{
   font-weight:bold;
   justify-content:center;
   text-align:center;
-  min-height:42px;
+  min-height:40px;
 }
 
 .rank,
@@ -272,10 +263,6 @@ input{
 }
 
 @media(max-width:900px){
-  .cards{
-    grid-template-columns:repeat(2,1fr);
-  }
-
   input,
   select,
   button{
@@ -286,15 +273,16 @@ input{
   .tools{
     width:100%;
   }
+
+  .wrap{
+    height:auto;
+    min-height:560px;
+  }
 }
 
 @media(max-width:560px){
   main{
-    padding:16px;
-  }
-
-  .cards{
-    grid-template-columns:1fr;
+    padding:14px;
   }
 }
 </style>
@@ -320,13 +308,13 @@ input{
   <div class="top">
     <div>
       <h1 id="title">c0ld Member Activity Chart</h1>
-      <div class="sub" id="sub">Loading current clan battle activity...</div>
+      <div class="sub" id="sub">Loading activity...</div>
     </div>
 
     <div class="tools">
       <select id="bucket">
         <option value="1">Hourly</option>
-        <option value="12">12 Hours</option>
+        <option value="12" selected>12 Hours</option>
         <option value="24">Daily</option>
       </select>
 
@@ -343,27 +331,12 @@ input{
 
   <div id="status" class="status show">Loading activity data...</div>
 
-  <section class="cards">
-    <div class="card">
-      <div class="label">Battle</div>
-      <div class="value" id="battle">—</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Time Range</div>
-      <div class="value" id="range">—</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Members Charted</div>
-      <div class="value" id="members">—</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Total Activity</div>
-      <div class="value" id="activity">—</div>
-    </div>
-  </section>
+  <div class="summary-line">
+    <span>Battle: <strong id="battle">—</strong></span>
+    <span>Range: <strong id="range">—</strong></span>
+    <span>Members: <strong id="members">—</strong></span>
+    <span>Total Gain: <strong id="activity">—</strong></span>
+  </div>
 
   <section class="panel">
     <div class="panel-head">
@@ -381,16 +354,17 @@ input{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-const RETENTION_HOURS = 336;
+const MAX_HISTORY_HOURS = 336;
 
-// This is the important correction.
-// June 13, 2026 at 10:00 AM New Mexico time.
-// In June, New Mexico is MDT, UTC-06:00.
-const CLAN_BATTLE_START_OVERRIDE_ISO = "2026-06-13T10:00:00-06:00";
+// Hard rule: the chart starts here no matter what the API says.
+const CHART_START_ISO = "2026-06-13T10:00:00-06:00";
 
-// Optional safety: only apply this override to this known current battle.
-// Leave blank to force the override regardless of battle key.
-const CLAN_BATTLE_START_OVERRIDE_BATTLE = "AngelBattle2026";
+// Hard end for this CB window.
+// Set to "" if you want the API/end/current time to control the end later.
+const CHART_END_ISO = "2026-06-19T10:00:00-06:00";
+
+// This helps calculate the first gain after 10 AM by fetching a little before the start.
+const PRE_START_BUFFER_HOURS = 12;
 
 let current = null;
 let historyRows = [];
@@ -519,67 +493,37 @@ async function getJson(url, label) {
   return response.json();
 }
 
-function shouldUseStartOverride() {
-  if (!CLAN_BATTLE_START_OVERRIDE_ISO) {
-    return false;
-  }
-
-  if (!CLAN_BATTLE_START_OVERRIDE_BATTLE) {
-    return true;
-  }
-
-  const battle = String(current?.battle || current?.battle_key || "").trim();
-  return battle === CLAN_BATTLE_START_OVERRIDE_BATTLE;
-}
-
 function getStartMs() {
-  if (shouldUseStartOverride()) {
-    const overrideMs = new Date(CLAN_BATTLE_START_OVERRIDE_ISO).getTime();
-
-    if (Number.isFinite(overrideMs)) {
-      return overrideMs;
-    }
-  }
-
-  const apiStart = current?.battle_start_iso;
-  const apiStartMs = new Date(apiStart || "").getTime();
-
-  if (Number.isFinite(apiStartMs)) {
-    return apiStartMs;
-  }
-
-  const fallback = current?.snapshot_at || current?.generated_at;
-  const fallbackMs = new Date(fallback || "").getTime();
-
-  if (Number.isFinite(fallbackMs)) {
-    return fallbackMs;
-  }
-
-  return Date.now() - 24 * 60 * 60 * 1000;
+  return new Date(CHART_START_ISO).getTime();
 }
 
 function getEndMs() {
-  const apiEndMs = new Date(current?.battle_end_iso || "").getTime();
+  const fixedEnd = new Date(CHART_END_ISO || "").getTime();
 
-  if (Number.isFinite(apiEndMs)) {
-    return Math.min(apiEndMs, Date.now());
+  if (Number.isFinite(fixedEnd)) {
+    return fixedEnd;
+  }
+
+  const apiEnd = new Date(current?.battle_end_iso || "").getTime();
+
+  if (Number.isFinite(apiEnd)) {
+    return Math.min(apiEnd, Date.now());
   }
 
   return Date.now();
 }
 
 function makeBuckets() {
-  const bucketHours = Number(document.getElementById("bucket").value) || 1;
+  const bucketHours = Number(document.getElementById("bucket").value) || 12;
   const step = bucketHours * 60 * 60 * 1000;
   const start = getStartMs();
   const end = Math.max(getEndMs(), start + step);
   const out = [];
 
-  // Important: starts exactly at battle start, not midnight.
+  // Starts exactly at June 13, 10 AM NM time.
   for (let cursor = start; cursor <= end; cursor += step) {
     out.push({
       key: String(cursor),
-      start,
       startMs: cursor,
       endMs: cursor + step
     });
@@ -603,6 +547,8 @@ function buildActivityModel() {
 
   const start = getStartMs();
   const end = getEndMs();
+  const bufferMs = PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+
   const memberMap = new Map();
   const seriesByUser = new Map();
 
@@ -632,8 +578,9 @@ function buildActivityModel() {
       continue;
     }
 
-    // Keep a little pre-start data so the first post-start delta can be calculated.
-    if (ms < start - 12 * 60 * 60 * 1000 || ms > end + 60 * 60 * 1000) {
+    // We never display before June 13 10 AM.
+    // The small pre-start buffer is only used to calculate the first delta.
+    if (ms < start - bufferMs || ms > end + 60 * 60 * 1000) {
       continue;
     }
 
@@ -670,21 +617,21 @@ function buildActivityModel() {
     }
 
     for (let i = 1; i < series.length; i++) {
-      const prev = series[i - 1];
-      const curr = series[i];
+      const previous = series[i - 1];
+      const currentPoint = series[i];
 
-      // Only count gains whose newer snapshot lands inside the battle window.
-      if (curr.ms < start || curr.ms > end) {
+      // Do not count or display gains before June 13 10 AM.
+      if (currentPoint.ms < start || currentPoint.ms > end) {
         continue;
       }
 
-      const gain = Math.max(0, curr.total - prev.total);
+      const gain = Math.max(0, currentPoint.total - previous.total);
 
       if (!gain) {
         continue;
       }
 
-      const key = getBucketKey(curr.ms);
+      const key = getBucketKey(currentPoint.ms);
 
       if (!key) {
         continue;
@@ -755,9 +702,7 @@ function renderChart() {
   document.getElementById("activity").textContent = shortNum(totalActivity);
 
   document.getElementById("sub").textContent =
-    "Showing " + DISPLAY + " member point gains by " +
-    document.getElementById("bucket").selectedOptions[0].text.toLowerCase() +
-    ". Start locked to June 13, 2026 at 10:00 AM NM time.";
+    "Showing " + DISPLAY + " gains from June 13, 2026 at 10:00 AM NM time onward.";
 
   document.getElementById("legend").textContent =
     maxBucket
@@ -783,7 +728,7 @@ function renderChart() {
   html.push('<div class="cell head name">Player</div>');
   html.push('<div class="cell head total">Total</div>');
 
-  const bucketHours = Number(document.getElementById("bucket").value) || 1;
+  const bucketHours = Number(document.getElementById("bucket").value) || 12;
 
   for (const bucket of buckets) {
     html.push(
@@ -837,12 +782,12 @@ async function loadData() {
     current = await getJson(withQuery(CURRENT_API), DISPLAY + " current");
 
     const start = getStartMs();
-    const end = getEndMs();
+    const oldestNeeded = start - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
 
-    // Pull enough data to reach the corrected start time, plus a small buffer
-    // so the first delta can compare against the snapshot before start.
-    const hoursNeeded = Math.ceil((end - start) / (60 * 60 * 1000)) + 12;
-    const hours = Math.min(RETENTION_HOURS, Math.max(1, hoursNeeded));
+    // The history API is relative: it returns now minus X hours.
+    // So the hours value must be based on now, not the chart end.
+    const hoursNeeded = Math.ceil((Date.now() - oldestNeeded) / (60 * 60 * 1000));
+    const hours = Math.min(MAX_HISTORY_HOURS, Math.max(1, hoursNeeded));
 
     const history = await getJson(
       withQuery(HISTORY_API, {
