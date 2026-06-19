@@ -326,6 +326,8 @@ canvas{
       <select id="line-count">
         <option value="top10">Top 10</option>
         <option value="top15">Top 15</option>
+        <option value="middle10">Middle 10</option>
+        <option value="middle25">Middle 25</option>
         <option value="all" selected>All members</option>
         <option value="bottom10">Bottom 10</option>
         <option value="bottom15">Bottom 15</option>
@@ -854,6 +856,15 @@ function buildActivityModel() {
   });
 }
 
+function middleSlice(list, count) {
+  if (count >= list.length) {
+    return list;
+  }
+
+  const start = Math.max(0, Math.floor((list.length - count) / 2));
+  return list.slice(start, start + count);
+}
+
 function getVisibleMembers() {
   const query = document.getElementById("search").value.toLowerCase().trim();
   const mode = document.getElementById("line-count").value;
@@ -873,6 +884,14 @@ function getVisibleMembers() {
 
   if (mode === "top15") {
     return list.slice(0, 15);
+  }
+
+  if (mode === "middle10") {
+    return middleSlice(list, 10);
+  }
+
+  if (mode === "middle25") {
+    return middleSlice(list, 25);
   }
 
   if (mode === "bottom10") {
@@ -1210,8 +1229,6 @@ function drawChart() {
         member.bucketGains.forEach((value, index) => {
           const active = Number(value || 0) > 0;
 
-          // If Gain + Rank + active dots are all enabled for multiple members,
-          // hide red zero-gain markers so the graph doesn't become a red wall.
           if (showRank && !active && visible.length > 1) {
             return;
           }
