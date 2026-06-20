@@ -1,0 +1,21 @@
+name = "c0ld-league-api-worker"
+main = "yamo-league-api-worker.js"
+compatibility_date = "2026-06-20"
+
+[vars]
+LEAGUE_NAME = "YAMO"
+# Optional comma-separated list if you later track more than one league.
+# LEAGUE_NAMES = "YAMO,OTHER"
+SITE_ORIGINS = "https://oapl.github.io"
+PUBLIC_CACHE_SECONDS = "5"
+RETENTION_HOURS = "336"
+INGEST_LEAGUES = "true"
+ROBLOX_AVATAR_LOOKUPS = "true"
+SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Required secrets:
+# wrangler secret put SUPABASE_SERVICE_KEY
+# wrangler secret put INGEST_ADMIN_TOKEN
