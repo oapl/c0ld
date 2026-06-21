@@ -1,4 +1,4 @@
-name = "c0ld-league-api-worker"
+name = "yamo-league-api-worker"
 main = "yamo-league-api-worker.js"
 compatibility_date = "2026-06-20"
 
@@ -6,10 +6,11 @@ compatibility_date = "2026-06-20"
 LEAGUE_NAME = "YAMO"
 # Optional comma-separated list if you later track more than one league.
 # LEAGUE_NAMES = "YAMO,OTHER"
-SITE_ORIGINS = "https://oapl.github.io"
+SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
-RETENTION_HOURS = "336"
 INGEST_LEAGUES = "true"
+INGEST_TOP_LEAGUES = "true"
+ROBLOX_USERNAME_LOOKUPS = "true"
 ROBLOX_AVATAR_LOOKUPS = "true"
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 
