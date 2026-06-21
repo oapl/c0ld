@@ -1,88 +1,82 @@
 # YAMO League API Worker
 
-This stores BIG Games `/v1/leagues/YAMO` snapshots in Supabase and exposes the stored data to `yamo.html`.
+This Worker stores YAMO league snapshots and global Top 100 League snapshots in Supabase.
 
-## 1. Run the Supabase migration
-
-Run this in the Supabase SQL Editor:
-
-```sql
-supabase/migrations/010_ps99_league_snapshots.sql
-```
-
-It creates:
-
-- `ps99_league_snapshots` — append-only history.
-- `ps99_league_current` — latest rows for each league/member.
-
-## 2. Deploy the Worker
-
-Create a Worker named:
+Current Worker URL:
 
 ```text
-c0ld-league-api-worker
+https://yamo-league-api-worker.opal-dde.workers.dev
 ```
 
-Paste/deploy:
+Worker source file:
 
 ```text
 cloudflare/yamo-league-api-worker.js
 ```
 
-Use this file as the Wrangler reference:
+Wrangler reference:
 
 ```text
 cloudflare/wrangler-league-api.toml.example
 ```
 
-Required variables/secrets:
+Required Cloudflare variables:
 
 ```text
 LEAGUE_NAME=YAMO
-SITE_ORIGINS=https://oapl.github.io
+SITE_ORIGINS=https://oapl.github.io,*
 PUBLIC_CACHE_SECONDS=5
-RETENTION_HOURS=336
 INGEST_LEAGUES=true
+INGEST_TOP_LEAGUES=true
+ROBLOX_USERNAME_LOOKUPS=true
+ROBLOX_AVATAR_LOOKUPS=true
 SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-SUPABASE_SERVICE_KEY=<secret>
-INGEST_ADMIN_TOKEN=<secret>
 ```
 
-Add this cron trigger:
+Required Cloudflare secrets:
+
+```text
+SUPABASE_SERVICE_KEY
+INGEST_ADMIN_TOKEN
+```
+
+Cron trigger:
 
 ```text
 */5 * * * *
 ```
 
-## 3. Test one manual ingest
+Useful endpoints:
+
+```text
+GET  /api/health
+GET  /api/leagues/current?league=YAMO
+GET  /api/leagues/history?league=YAMO&hours=24
+GET  /api/leagues/top-leagues?limit=100
+POST /api/leagues/ingest?league=YAMO
+POST /api/leagues/top-leagues/ingest
+```
+
+PowerShell test:
 
 ```powershell
-$token = "YOUR_INGEST_ADMIN_TOKEN"
-$worker = "https://c0ld-league-api-worker.opal-dde.workers.dev"
-
-Invoke-RestMethod -Method Post "$worker/api/leagues/ingest?league=YAMO" `
-  -Headers @{ Authorization = "Bearer $token" }
+$worker = "https://yamo-league-api-worker.opal-dde.workers.dev"
+Invoke-RestMethod -Method Get "$worker/api/health"
 ```
 
-Then test the public current endpoint:
+Manual ingest examples:
+
+```powershell
+$token = "YOUR_CURRENT_TOKEN"
+$worker = "https://yamo-league-api-worker.opal-dde.workers.dev"
+
+Invoke-RestMethod -Method Post "$worker/api/leagues/ingest?league=YAMO" -Headers @{ Authorization = "Bearer $token" }
+Invoke-RestMethod -Method Post "$worker/api/leagues/top-leagues/ingest" -Headers @{ Authorization = "Bearer $token" }
+```
+
+GitHub Pages files currently point at the yamo Worker URL:
 
 ```text
-https://c0ld-league-api-worker.opal-dde.workers.dev/api/leagues/current?league=YAMO
+yamo.html
+top-leagues.html
 ```
-
-## Endpoints
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/health` | Worker health check. |
-| `POST /api/leagues/ingest?league=YAMO` | Protected manual ingest. |
-| `GET /api/leagues/current?league=YAMO` | Latest stored YAMO data with 5m/1h/6h/12h/24h gains. |
-| `GET /api/leagues/history?league=YAMO&hours=24` | Raw stored rows for export/debugging. |
-
-`yamo.html` currently points at:
-
-```text
-https://c0ld-league-api-worker.opal-dde.workers.dev
-```
-
-If the deployed Worker uses a different URL, update `LEAGUE_API_BASE` in `yamo.html`.
