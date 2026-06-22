@@ -44,12 +44,12 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 .rank-log-item{display:grid;grid-template-columns:185px 1fr auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #30363d}
 .rank-log-time{color:#8b949e}
 .rank-log-main{color:#c9d1d9}
-.rank-log-points{color:#8b949e;font-variant-numeric:tabular-nums}
+.rank-log-rank{color:#8b949e;font-variant-numeric:tabular-nums}
 .rank-log-empty{color:#8b949e;padding:12px 0}
 .rank-log-item.positive .rank-log-main strong:last-child{color:#3fb950}
 .rank-log-item.negative .rank-log-main strong:last-child{color:#f85149}
 @media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}
-@media(max-width:750px){.rank-log-item{grid-template-columns:1fr}.rank-log-time,.rank-log-points{font-size:12px}}
+@media(max-width:750px){.rank-log-item{grid-template-columns:1fr}.rank-log-time,.rank-log-rank{font-size:12px}}
 @media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}button{width:100%}}</style>
 </head>
 <body>
@@ -58,7 +58,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <section class="hero"><img id="league-icon" class="league-main-icon" src="" alt="" hidden><h1 id="page-title">YAMO League Tracker</h1></section>
 <section class="cards"><div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div><div class="card"><div class="label">Members</div><div class="value" id="member-count">—</div></div><div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div><div class="card"><div class="label">League Rank</div><div class="value" id="league-rank">—</div></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">YAMO Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">Last 5m</th><th data-sort="rate_1h" class="numeric">Rate / Hr</th><th data-sort="avg_6h" class="numeric">6h Avg / Hr</th><th data-sort="avg_12h" class="numeric">12h Avg / Hr</th><th data-sort="avg_24h" class="numeric">24h Avg / Hr</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading YAMO league data...</td></tr></tbody></table></div></section>
-<section class="section rank-log-section"><div class="section-header"><h2 class="section-title">Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading rank movement history...</div></div></section>
+<section class="section rank-log-section"><div class="section-header"><h2 class="section-title">League Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading league rank movement history...</div></div></section>
 </main>
 <script>window.LEAGUE_CONFIG={league:'YAMO',title:'YAMO League Tracker'};</script>
 <script src="assets/league-tracker.js"></script>
