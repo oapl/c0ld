@@ -133,7 +133,7 @@ th{color:var(--muted);font-size:13px;text-align:left}
     <div class="card">
       <div class="label">Pet Requirement</div>
       <div class="value" id="pet-status">0 / 15</div>
-      <div class="small">Eligible: Rainbow Huge+ estimate.</div>
+      <div class="small">Eligible: Shiny/Rainbow Huge or better. Normal/Golden Huges do not count.</div>
       <div class="progress"><div class="bar" id="pet-bar"></div></div>
     </div>
     <div class="card">
@@ -149,7 +149,7 @@ th{color:var(--muted);font-size:13px;text-align:left}
   </section>
 
   <section class="section">
-    <div class="section-header"><h2 class="section-title">Pet Team</h2><span class="small">15 Rainbow Huges or better required.</span></div>
+    <div class="section-header"><h2 class="section-title">Pet Team</h2><span class="small">15 eligible Huges or better required. Normal/Golden Huges do not count.</span></div>
     <div class="section-body table-wrap">
       <table class="pet-table">
         <thead><tr><th>Category</th><th class="numeric">Normal</th><th class="numeric">Golden</th><th class="numeric">Shiny</th><th class="numeric">Rainbow</th><th class="numeric">Golden Shiny</th><th class="numeric">Rainbow Shiny</th></tr></thead>
@@ -212,7 +212,7 @@ const PET_VARIANTS=["Normal","Golden","Shiny","Rainbow","Golden Shiny","Rainbow 
 const GAMEPASSES=["Huge Hunter","Super Shiny Hunter","Super Drops","Double Stars","Daycare Slots","Lucky","Ultra Lucky","Auto Farm","Auto Tap","+15 Hatch","+3 Enchant Slots","VIP","Magic Eggs"];
 const REQUIRED_GAMEPASSES=["Auto Farm","Auto Tap","+3 Enchant Slots","+15 Hatch","Lucky","Ultra Lucky"];
 const REQUIRED_MASTERIES=["Eggs","Enchants","Potions","Fruits"];
-const OPTIONAL_MASTERIES=["Breakables","Economy","Fishing","Digging","Pets","Keys","Superior Chest","Fusing","Boost Exchange","Other"];
+const OPTIONAL_MASTERIES=["Breakables","Economy","Fishing","Digging","Pets","Keys","Superior Chest","Fusing","Boost Exchange","Gifts"];
 
 function esc(v){
   return String(v ?? "").replace(/[&<>"']/g,function(c){
@@ -255,7 +255,7 @@ function eligiblePetCount(){
     const variant=input.dataset.petVar;
     const count=num(input.value);
     if(cat==="Gargantuans"||cat==="Titanics") total+=count;
-    else if(cat==="Huges"&&(variant==="Rainbow"||variant==="Rainbow Shiny")) total+=count;
+    else if(cat==="Huges"&&variant!=="Normal"&&variant!=="Golden") total+=count;
   });
   return total;
 }
@@ -409,10 +409,10 @@ function rapFailed(){
 
 function requirementsNotMet(){
   const misses=[];
-  if(radio("rank30")!=="yes")misses.push("Rank 30 requirement not confirmed.");
+  if(radio("rank30")!=="yes")misses.push("Below Rank 30.");
   if(rapFailed())misses.push("Player RAP: FAILED TO PROVIDE.");
   const pets=eligiblePetCount();
-  if(pets<15)misses.push("Pet team below 15 eligible Rainbow Huge+ estimate ("+pets+"/15).");
+  if(pets<15)misses.push("Pet team below 15 eligible Shiny/Rainbow Huge+ estimate ("+pets+"/15).");
 
   const ownedPasses=checked("gamepass");
   const missingRequiredPasses=REQUIRED_GAMEPASSES.filter(pass=>!ownedPasses.includes(pass));
@@ -438,7 +438,7 @@ function updateSummary(){
     "Rank 30: "+(radio("rank30")==="unknown"?"—":radio("rank30")),
     "Player RAP: "+normalizedRap(),
     "",
-    "Pet Team: "+pets+"/15 eligible Rainbow Huge+ estimate",
+    "Pet Team: "+pets+"/15 eligible Shiny/Rainbow Huge+ estimate",
     "Gamepasses: "+passes.length+"/"+GAMEPASSES.length+(REQUIRED_GAMEPASSES.filter(pass=>!passes.includes(pass)).length?" (Missing Required: "+REQUIRED_GAMEPASSES.filter(pass=>!passes.includes(pass)).join(", ")+")":""),
     "Masteries: "+masteryLine,
     "",
@@ -448,9 +448,9 @@ function updateSummary(){
     "",
     "----------------------",
     "",
-    "Requirements NOT Met:"
+    "Deficiencies:"
   ];
-  lines=lines.concat(misses.length?misses.map(x=>"X "+x):["None"]);
+  lines=lines.concat(misses.length?misses.map(x=>"- "+x):["None"]);
   if(misses.length)lines.push("","Please improve/correct the above and re-apply after!");
   document.getElementById("summary-box").textContent=lines.join("\n");
 }
