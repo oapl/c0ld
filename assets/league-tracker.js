@@ -2,7 +2,10 @@
   const API = "https://yamo-league-api-worker.opal-dde.workers.dev";
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
+
   let rows = [];
+  let historyRows = [];
+  let rankLog = [];
   let sortKey = "rank";
   let sortAsc = true;
   let loading = false;
@@ -18,6 +21,18 @@
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
   function profileHref(r){return "league-profile.html?league="+encodeURIComponent(LEAGUE)+"&id="+encodeURIComponent(r.user_id||"")}
   function visible(){const list=rows.slice();list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
+  function nameForUser(userId, fallback){
+    const cur=rows.find(r=>String(r.user_id)===String(userId));
+    return cur?.username||cur?.display_name||fallback||userId;
+  }
+
+  async function getJson(url){
+    url.searchParams.set("v",Date.now());
+    const r=await fetch(url,{cache:"no-store"});
+    const data=await r.json();
+    if(!r.ok||data.ok===false)throw new Error(data.message||"HTTP "+r.status);
+    return data;
+  }
 
   function renderCards(data){
     const list=data.rows||[];
@@ -40,22 +55,92 @@
     tbody.innerHTML=list.map(r=>{
       const name=r.username||r.display_name||r.user_id;
       return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
-    }).join("")
+    }).join("");
+    renderRankLog();
   }
 
   function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>'}
 
+  function buildRankLog(){
+    const byUser=new Map();
+    for(const r of historyRows){
+      if(!r || r.user_id==null || r.rank==null || !r.fetched_at)continue;
+      const t=new Date(r.fetched_at).getTime();
+      if(!Number.isFinite(t))continue;
+      const key=String(r.user_id);
+      if(!byUser.has(key))byUser.set(key,[]);
+      byUser.get(key).push({
+        t,
+        fetched_at:r.fetched_at,
+        user_id:key,
+        rank:Number(r.rank),
+        points:Number(r.points),
+        display_name:r.display_name
+      });
+    }
+
+    const events=[];
+    for(const [userId,list] of byUser){
+      list.sort((a,b)=>a.t-b.t);
+      let last=null;
+      for(const item of list){
+        if(!last){last=item;continue}
+        if(item.rank!==last.rank){
+          const direction=item.rank<last.rank?"up":"down";
+          events.push({
+            t:item.t,
+            fetched_at:item.fetched_at,
+            user_id:userId,
+            display_name:nameForUser(userId,item.display_name),
+            from:last.rank,
+            to:item.rank,
+            direction,
+            points:Number.isFinite(item.points)?item.points:null
+          });
+        }
+        last=item;
+      }
+    }
+
+    events.sort((a,b)=>b.t-a.t);
+    return events;
+  }
+
+  function renderRankLog(){
+    const box=document.getElementById("rank-log-list");
+    const count=document.getElementById("rank-log-count");
+    if(!box)return;
+
+    rankLog=buildRankLog();
+    if(count)count.textContent=rankLog.length?rankLog.length.toLocaleString("en-US")+" rank changes":"No rank changes";
+
+    if(!rankLog.length){
+      box.innerHTML='<div class="rank-log-empty">No rank up/down changes found in stored history yet.</div>';
+      return;
+    }
+
+    box.innerHTML=rankLog.slice(0,80).map(ev=>{
+      const cls=ev.direction==="up"?"positive":"negative";
+      const word=ev.direction==="up"?"moved up":"moved down";
+      const arrow=ev.direction==="up"?"↑":"↓";
+      return '<div class="rank-log-item '+cls+'"><span class="rank-log-time">'+esc(dt(ev.fetched_at))+'</span><span class="rank-log-main"><strong>'+esc(ev.display_name)+'</strong> '+word+' <strong>#'+esc(ev.from)+' → #'+esc(ev.to)+'</strong> '+arrow+'</span><span class="rank-log-points">'+esc(ev.points==null?"":shortNum(ev.points))+'</span></div>';
+    }).join("");
+  }
+
   async function loadData(){
     if(loading)return;loading=true;
     try{
-      const u=new URL(API+"/api/leagues/current");
-      u.searchParams.set("league",LEAGUE);
-      u.searchParams.set("v",Date.now());
-      const r=await fetch(u,{cache:"no-store"});
-      const data=await r.json();
-      if(!r.ok||data.ok===false)throw new Error(data.message||"HTTP "+r.status);
-      rows=data.rows||[];
-      renderCards(data);
+      const currentUrl=new URL(API+"/api/leagues/current");
+      currentUrl.searchParams.set("league",LEAGUE);
+      const historyUrl=new URL(API+"/api/leagues/history");
+      historyUrl.searchParams.set("league",LEAGUE);
+      historyUrl.searchParams.set("hours","all");
+      historyUrl.searchParams.set("limit","50000");
+
+      const [current,history]=await Promise.all([getJson(currentUrl),getJson(historyUrl)]);
+      rows=current.rows||[];
+      historyRows=history.rows||[];
+      renderCards(current);
       render();
     }catch(e){console.error(e);showError(e.message||String(e))}
     finally{loading=false}

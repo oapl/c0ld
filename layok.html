@@ -27,7 +27,18 @@ button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6ed
 .avatar{width:36px;height:36px;border-radius:8px;background:#21262d;color:#c9d1d9;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;object-fit:cover}.meta{color:#8b949e;font-size:12px;margin-top:2px}
 .positive{color:#3fb950;font-weight:700}.negative{color:#f85149;font-weight:700}.zero,.unknown{color:#8b949e}.empty,.error{padding:20px}.error{color:#ffb4ad;background:rgba(248,81,73,.12)}tbody tr:hover{background:rgba(255,255,255,.02)}
 .profile-hero{padding:18px;margin-bottom:18px;display:flex;gap:18px;align-items:center}.profile-avatar{width:76px;height:76px;border-radius:12px;background:#21262d;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;overflow:hidden}.profile-avatar img{width:100%;height:100%;object-fit:cover}.profile-hero h1{margin:0 0 6px;font-size:30px}.subtitle{color:#8b949e;margin-bottom:6px}.stat-line{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;border-bottom:1px solid #30363d}.stat-line span{color:#8b949e}.chart-controls{display:flex;gap:14px;flex-wrap:wrap;padding:0 0 10px}.chart-wrap{padding:16px}.chart-wrap canvas{width:100%;height:340px;display:block;border:1px solid #30363d;border-radius:8px;background:#0f141b}
-@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}</style>
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}
+.rank-log-list{padding:8px 16px 16px;max-height:360px;overflow:auto;font-size:13px}
+.rank-log-item{display:grid;grid-template-columns:185px 1fr auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #30363d}
+.rank-log-time{color:#8b949e}
+.rank-log-main{color:#c9d1d9}
+.rank-log-points{color:#8b949e;font-variant-numeric:tabular-nums}
+.rank-log-empty{color:#8b949e;padding:12px 0}
+.rank-log-item.positive .rank-log-main strong:last-child{color:#3fb950}
+.rank-log-item.negative .rank-log-main strong:last-child{color:#f85149}
+@media(max-width:750px){.rank-log-item{grid-template-columns:1fr}.rank-log-time,.rank-log-points{font-size:12px}}
+
+</style>
 </head>
 <body>
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">c0ld Leaderboard</a><a href="yamo.html">YAMO League</a><a class="active" href="layok.html">LAYOK League</a><a href="top-leagues.html">Top 100 Leagues</a><a href="clans.html">Clans Leaderboard</a><a href="live-clan.html">Clan Lookup</a><a href="servers.html">Servers</a><a href="macros.html">Macros</a></div></header>
@@ -35,6 +46,8 @@ button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6ed
 <section class="hero"><img id="league-icon" class="league-main-icon" src="" alt="" hidden><h1 id="page-title">LAYOK League Tracker</h1></section>
 <section class="cards"><div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div><div class="card"><div class="label">Members</div><div class="value" id="member-count">—</div></div><div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div><div class="card"><div class="label">League Rank</div><div class="value" id="league-rank">—</div></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">LAYOK Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">5 Minutes</th><th data-sort="gain_1h" class="numeric">1 Hour</th><th data-sort="gain_6h" class="numeric">6 Hours</th><th data-sort="gain_12h" class="numeric">12 Hours</th><th data-sort="gain_24h" class="numeric">Daily</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading LAYOK league data...</td></tr></tbody></table></div></section>
+
+<section class="section rank-log-section"><div class="section-header"><h2 class="section-title">Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading rank movement history...</div></div></section>
 </main>
 <script>window.LEAGUE_CONFIG={league:'layok',title:'LAYOK League Tracker'};</script>
 <script src="assets/league-tracker.js"></script>
