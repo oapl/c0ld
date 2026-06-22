@@ -138,7 +138,7 @@ th{color:var(--muted);font-size:13px;text-align:left}
     </div>
     <div class="card">
       <div class="label">Gamepasses</div>
-      <div class="value" id="gamepass-count">0 / 12</div>
+      <div class="value" id="gamepass-count">0 / 13</div>
       <div class="progress"><div class="bar" id="gamepass-bar"></div></div>
     </div>
     <div class="card">
@@ -162,7 +162,7 @@ th{color:var(--muted);font-size:13px;text-align:left}
     <div class="section-header"><h2 class="section-title">Gamepasses</h2><span class="small">Check off owned PS99 gamepasses.</span></div>
     <div class="section-body">
       <div class="checklist" id="gamepass-list"></div>
-      <div class="small" id="gamepass-total" style="margin-top:12px">0/12 gamepasses selected</div>
+      <div class="small" id="gamepass-total" style="margin-top:12px">0/13 gamepasses selected</div>
     </div>
   </section>
 
@@ -209,9 +209,9 @@ th{color:var(--muted);font-size:13px;text-align:left}
 <script>
 const PET_CATEGORIES=["Gargantuans","Titanics","Huges"];
 const PET_VARIANTS=["Normal","Golden","Shiny","Rainbow","Golden Shiny","Rainbow Shiny"];
-const GAMEPASSES=["Huge Hunter","Super Shiny Hunter","Super Drops","Double Stars","Daycare Slots","Lucky","Ultra Lucky","Auto Farm","Auto Tap","+15 Pets","VIP","Magic Eggs"];
+const GAMEPASSES=["Huge Hunter","Super Shiny Hunter","Super Drops","Double Stars","Daycare Slots","Lucky","Ultra Lucky","Auto Farm","Auto Tap","+15 Pets","+3 Enchant Slots","VIP","Magic Eggs"];
 const REQUIRED_MASTERIES=["Eggs","Enchants","Potions","Fruits"];
-const OPTIONAL_MASTERIES=["Breakables","Economy","Fishing","Digging","Pets","Keys","Superior Chest","Other"];
+const OPTIONAL_MASTERIES=["Breakables","Economy","Fishing","Digging","Pets","Keys","Superior Chest","Fusing","Boost Exchange","Other"];
 
 function esc(v){
   return String(v ?? "").replace(/[&<>"']/g,function(c){
