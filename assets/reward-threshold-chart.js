@@ -9,8 +9,8 @@
   };
 
   const LOOKBACK_HOURS = 1;
-  const EXPECTED_PULL_MINUTES = 5;
   const PRIOR_PULL_TOLERANCE_MINUTES = 12;
+  const SAME_TIME_TOOLTIP_TOLERANCE_MINUTES = 8;
   const LARGE_GAP_BREAK_MINUTES = 25;
 
   const SPECIAL_COLORS = { c0ld: "#ff9b96", wmsy: "#74d99f", nong: "#f6ad55" };
@@ -72,7 +72,7 @@
   function fmtTime(value) {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return d.toLocaleTimeString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   }
 
   function fmtDuration(hours) {
@@ -127,8 +127,10 @@
     if (!value) return value;
     const rowMs = new Date(value).getTime();
     const endMs = battleEndMs();
+
     if (!Number.isFinite(rowMs)) return value;
     if (endMs !== null && rowMs > endMs) return new Date(endMs).toISOString();
+
     return value;
   }
 
@@ -210,7 +212,7 @@
           <canvas id="reward-threshold-chart"></canvas>
           <div class="reward-threshold-tooltip" id="reward-threshold-tooltip"></div>
         </div>
-        <div class="reward-threshold-summary" id="reward-threshold-summary">Loading hourly gains...</div>
+        <div class="reward-threshold-summary" id="reward-threshold-summary">Loading actual hourly gains...</div>
         <div class="reward-threshold-legend" id="reward-threshold-legend"></div>
       </div>
     `;
@@ -238,10 +240,7 @@
       fetched_at: clampChartFetchedAt(row.fetched_at || currentData?.snapshot_at || currentData?.generated_at),
       rank: finite(row.rank),
       clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
-      points: finite(row.points ?? row.total_points),
-      gain_1h: finite(row.gain_1h),
-      gain_12h: finite(row.gain_12h),
-      gain_24h: finite(row.gain_24h)
+      points: finite(row.points ?? row.total_points)
     };
   }
 
@@ -270,7 +269,7 @@
 
     loading = true;
     const summary = document.getElementById("reward-threshold-summary");
-    if (summary) summary.textContent = "Loading hourly gains...";
+    if (summary) summary.textContent = "Loading actual hourly gains...";
 
     try {
       currentData = await fetchJson(currentUrl);
@@ -282,7 +281,7 @@
         `&hours=${historyHours}` +
         `&rank_min=${range.min}` +
         `&rank_max=${range.max}` +
-        `&bucket_minutes=${EXPECTED_PULL_MINUTES}` +
+        `&bucket_minutes=5` +
         `&include_baseline=1` +
         `&limit=50000`
       ).catch(() => ({ rows: [] }));
@@ -290,8 +289,8 @@
       historyKey = key;
       draw();
     } catch (err) {
-      console.warn("Hourly gains chart failed", err);
-      if (summary) summary.textContent = `Could not load hourly gains chart. ${err.message || err}`;
+      console.warn("Actual hourly gains chart failed", err);
+      if (summary) summary.textContent = `Could not load actual hourly gains chart. ${err.message || err}`;
     } finally {
       loading = false;
     }
@@ -319,22 +318,6 @@
     };
   }
 
-  function historyForClan(clanName) {
-    const key = normalize(clanName);
-    const rows = (historyData?.rows || [])
-      .map(normalizeHistoryRow)
-      .filter(row => normalize(row.clan_name) === key && row.points !== null && row.fetched_at)
-      .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
-
-    const current = currentRows().find(row => normalize(row.clan_name) === key);
-    if (current && current.fetched_at && !rows.some(row => row.fetched_at === current.fetched_at)) {
-      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
-      rows.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
-    }
-
-    return dedupePullRows(rows);
-  }
-
   function dedupePullRows(rows) {
     const byTime = new Map();
 
@@ -350,6 +333,22 @@
     }
 
     return [...byTime.values()].sort((a, b) => a.ms - b.ms);
+  }
+
+  function historyForClan(clanName) {
+    const key = normalize(clanName);
+    const rows = (historyData?.rows || [])
+      .map(normalizeHistoryRow)
+      .filter(row => normalize(row.clan_name) === key && row.points !== null && row.fetched_at)
+      .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+
+    const current = currentRows().find(row => normalize(row.clan_name) === key);
+    if (current && current.fetched_at && !rows.some(row => row.fetched_at === current.fetched_at)) {
+      rows.push({ fetched_at: current.fetched_at, rank: current.rank, clan_name: current.clan_name, points: current.points });
+      rows.sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+    }
+
+    return dedupePullRows(rows);
   }
 
   function latestTimestamp() {
@@ -389,7 +388,7 @@
       if (!Number.isFinite(gain) || gain < 0) continue;
 
       const prevPoint = points[points.length - 1];
-      const gapMinutes = prevPoint ? (current.ms - prevPoint.t) / 60000 : EXPECTED_PULL_MINUTES;
+      const gapMinutes = prevPoint ? (current.ms - prevPoint.t) / 60000 : 5;
       const breakBefore = gapMinutes > LARGE_GAP_BREAK_MINUTES;
 
       points.push({
@@ -532,6 +531,7 @@
     const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 100_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
+
     const crowded = seriesList.length > 12;
     const padLeft = 66, padRight = crowded ? 26 : 116, padTop = 18, padBottom = 34;
     const width = rect.width - padLeft - padRight;
@@ -645,7 +645,7 @@
             const diff = Math.abs(point.t - nearestPoint.t);
             if (!best || diff < best.diff) best = { point, diff };
           }
-          return best && best.diff <= 8 * 60 * 1000 ? { series, point: best.point } : null;
+          return best && best.diff <= SAME_TIME_TOOLTIP_TOLERANCE_MINUTES * 60 * 1000 ? { series, point: best.point } : null;
         })
         .filter(Boolean)
         .sort((a, b) => a.series.rank - b.series.rank);
