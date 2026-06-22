@@ -56,7 +56,12 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">c0ld Leaderboard</a><a href="yamo.html">YAMO League</a><a class="active" href="layok.html">LAYOK League</a><a href="top-leagues.html">Top 100 Leagues</a><a href="clans.html">Clans Leaderboard</a><a href="live-clan.html">Clan Lookup</a><a href="servers.html">Servers</a><a href="macros.html">Macros</a></div></header>
 <main>
 <section class="hero"><img id="league-icon" class="league-main-icon" src="" alt="" hidden><h1 id="page-title">LAYOK League Tracker</h1></section>
-<section class="cards"><div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div><div class="card"><div class="label">Members</div><div class="value" id="member-count">—</div></div><div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div><div class="card"><div class="label">League Rank</div><div class="value" id="league-rank">—</div></div></section>
+<section class="cards">
+  <div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div>
+  <div class="card"><div class="label">Current Rank</div><div class="value" id="league-rank">—</div></div>
+  <div class="card"><div class="label">Projected Rank</div><div class="value" id="projected-rank">—</div></div>
+  <div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div>
+</section>
 <section class="section"><div class="section-header"><h2 class="section-title">LAYOK Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">Last 5m</th><th data-sort="gain_1h" class="numeric">1 Hour</th><th data-sort="gain_6h" class="numeric">6 Hours</th><th data-sort="gain_12h" class="numeric">12 Hours</th><th data-sort="gain_24h" class="numeric">24 Hours</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading LAYOK league data...</td></tr></tbody></table></div></section>
 <section class="section rank-log-section"><div class="section-header"><h2 class="section-title">League Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading league rank movement history...</div></div></section>
 </main>

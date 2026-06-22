@@ -6,6 +6,7 @@
 
   let rows = [];
   let currentData = null;
+  let topLeagueRow = null;
   let leagueRankHistoryRows = [];
   let sortKey = "rank";
   let sortAsc = true;
@@ -22,6 +23,7 @@
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
   function profileHref(r){return "league-profile.html?league="+encodeURIComponent(LEAGUE)+"&id="+encodeURIComponent(r.user_id||"")}
   function visible(){const list=rows.slice();list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
+  function norm(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
 
   function stableLeagueUserId(value){
     let h=2166136261;
@@ -38,6 +40,18 @@
     return data;
   }
 
+  async function fetchTopLeagueRow(){
+    const url=new URL(API+"/api/leagues/top-leagues");
+    url.searchParams.set("limit","100");
+    const data=await getJson(url);
+    const targetName=norm(currentData?.league_name||LEAGUE);
+    const targetId=String(currentData?.league_id||"").trim();
+    return (data.rows||[]).find(r =>
+      (targetId && String(r.league_id||"").trim()===targetId) ||
+      norm(r.league_name||r.display_name)===targetName
+    ) || null;
+  }
+
   function renderCards(data){
     const list=data.rows||[];
     const leagueName=data.league_name||LEAGUE;
@@ -45,10 +59,12 @@
     document.title=leagueName+" League Tracker";
     document.getElementById("league-points").textContent=shortNum(data.league_points);
     document.getElementById("league-points").title=fullNum(data.league_points);
-    document.getElementById("member-count").textContent=list.length+"/"+(data.member_capacity||"—");
     document.getElementById("last-db-update").textContent=data.snapshot_at?dt(data.snapshot_at):"—";
     document.getElementById("page-title").textContent=leagueName+" League Tracker";
-    document.getElementById("league-rank").textContent=data.league_rank?"#"+data.league_rank:"—";
+    const currentRank=topLeagueRow?.rank||data.league_rank;
+    const projectedRank=topLeagueRow?.projected_rank_1h;
+    document.getElementById("league-rank").textContent=currentRank?"#"+currentRank:"—";
+    document.getElementById("projected-rank").textContent=projectedRank?"#"+projectedRank:"—";
     const img=document.getElementById("league-icon"),src=iconUrl(data.league_icon);
     if(src){img.src=src;img.hidden=false}else img.hidden=true;
   }
@@ -127,6 +143,8 @@
       currentUrl.searchParams.set("league",LEAGUE);
       const current=await getJson(currentUrl);
       rows=current.rows||[];
+      currentData=current;
+      topLeagueRow=await fetchTopLeagueRow().catch(err=>{console.warn("Projected rank unavailable",err);return null});
       renderCards(current);
       leagueRankHistoryRows=await fetchLeagueRankHistory().catch(err=>{console.warn("League rank history unavailable",err);return []});
       render();
