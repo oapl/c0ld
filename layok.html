@@ -13,21 +13,33 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:12px 22px 10px
 .menu a{display:inline-block;padding:7px 12px;border:1px solid #30363d;border-radius:5px;background:#0f141b;color:#e6edf3;font-size:13px}
 .menu a.active{border-color:#ff9b96;color:#ff9b96;background:rgba(248,81,73,.12)}
 main{max-width:1280px;margin:0 auto;padding:22px 24px 28px}
-.hero,.section,.card,.profile-hero{background:#161b22;border:1px solid #30363d;border-radius:10px}
+.hero,.section,.card{background:#161b22;border:1px solid #30363d;border-radius:10px}
 .hero{padding:18px;margin-bottom:18px;display:flex;align-items:center;gap:12px}
 .league-main-icon{width:52px;height:52px;border-radius:12px;background:#21262d;object-fit:cover}
 .hero h1{margin:0;font-size:26px}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
 .card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
 .label{color:#8b949e;font-size:13px}.value{font-size:20px;font-weight:700;margin-top:6px}
-.section{overflow:hidden;margin-bottom:18px}.section-header{padding:16px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.section-title{margin:0;font-size:18px}
+.section{overflow:hidden;margin-bottom:18px}
+.section-header{padding:16px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.section-title{margin:0;font-size:18px}
 button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6edf3;padding:9px 11px;font-size:14px;cursor:pointer}
-.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:1000px}th,td{padding:12px 14px;border-bottom:1px solid #30363d;white-space:nowrap;vertical-align:middle}th{color:#8b949e;font-size:13px;font-weight:500;text-align:left;cursor:pointer}.numeric{text-align:right;font-variant-numeric:tabular-nums}.rank{font-weight:700}
-.player-cell{display:flex;align-items:center;gap:10px;font-weight:700}.player-link{display:inline-flex;align-items:center;gap:10px;color:#e6edf3}.roblox-link{font-size:12px;color:#ff9b96;margin-left:6px}
-.avatar{width:36px;height:36px;border-radius:8px;background:#21262d;color:#c9d1d9;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;object-fit:cover}.meta{color:#8b949e;font-size:12px;margin-top:2px}
-.positive{color:#3fb950;font-weight:700}.negative{color:#f85149;font-weight:700}.zero,.unknown{color:#8b949e}.empty,.error{padding:20px}.error{color:#ffb4ad;background:rgba(248,81,73,.12)}tbody tr:hover{background:rgba(255,255,255,.02)}
-.profile-hero{padding:18px;margin-bottom:18px;display:flex;gap:18px;align-items:center}.profile-avatar{width:76px;height:76px;border-radius:12px;background:#21262d;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;overflow:hidden}.profile-avatar img{width:100%;height:100%;object-fit:cover}.profile-hero h1{margin:0 0 6px;font-size:30px}.subtitle{color:#8b949e;margin-bottom:6px}.stat-line{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;border-bottom:1px solid #30363d}.stat-line span{color:#8b949e}.chart-controls{display:flex;gap:14px;flex-wrap:wrap;padding:0 0 10px}.chart-wrap{padding:16px}.chart-wrap canvas{width:100%;height:340px;display:block;border:1px solid #30363d;border-radius:8px;background:#0f141b}
-@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:1000px}
+th,td{padding:12px 14px;border-bottom:1px solid #30363d;white-space:nowrap;vertical-align:middle}
+th{color:#8b949e;font-size:13px;font-weight:500;text-align:left;cursor:pointer}
+.numeric{text-align:right;font-variant-numeric:tabular-nums}
+.rank{font-weight:700}
+.player-cell{display:flex;align-items:center;gap:10px;font-weight:700}
+.player-link{display:inline-flex;align-items:center;gap:10px;color:#e6edf3}
+.avatar{width:36px;height:36px;border-radius:8px;background:#21262d;color:#c9d1d9;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;object-fit:cover}
+.meta{color:#8b949e;font-size:12px;margin-top:2px}
+.positive{color:#3fb950;font-weight:700}
+.negative{color:#f85149;font-weight:700}
+.zero,.unknown{color:#8b949e}
+.empty,.error{padding:20px}
+.error{color:#ffb4ad;background:rgba(248,81,73,.12)}
+tbody tr:hover{background:rgba(255,255,255,.02)}
 .rank-log-list{padding:8px 16px 16px;max-height:360px;overflow:auto;font-size:13px}
 .rank-log-item{display:grid;grid-template-columns:185px 1fr auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #30363d}
 .rank-log-time{color:#8b949e}
@@ -36,17 +48,16 @@ button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6ed
 .rank-log-empty{color:#8b949e;padding:12px 0}
 .rank-log-item.positive .rank-log-main strong:last-child{color:#3fb950}
 .rank-log-item.negative .rank-log-main strong:last-child{color:#f85149}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}
 @media(max-width:750px){.rank-log-item{grid-template-columns:1fr}.rank-log-time,.rank-log-points{font-size:12px}}
-
-</style>
+@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}button{width:100%}}</style>
 </head>
 <body>
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">c0ld Leaderboard</a><a href="yamo.html">YAMO League</a><a class="active" href="layok.html">LAYOK League</a><a href="top-leagues.html">Top 100 Leagues</a><a href="clans.html">Clans Leaderboard</a><a href="live-clan.html">Clan Lookup</a><a href="servers.html">Servers</a><a href="macros.html">Macros</a></div></header>
 <main>
 <section class="hero"><img id="league-icon" class="league-main-icon" src="" alt="" hidden><h1 id="page-title">LAYOK League Tracker</h1></section>
 <section class="cards"><div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div><div class="card"><div class="label">Members</div><div class="value" id="member-count">—</div></div><div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div><div class="card"><div class="label">League Rank</div><div class="value" id="league-rank">—</div></div></section>
-<section class="section"><div class="section-header"><h2 class="section-title">LAYOK Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">5 Minutes</th><th data-sort="gain_1h" class="numeric">1 Hour</th><th data-sort="gain_6h" class="numeric">6 Hours</th><th data-sort="gain_12h" class="numeric">12 Hours</th><th data-sort="gain_24h" class="numeric">Daily</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading LAYOK league data...</td></tr></tbody></table></div></section>
-
+<section class="section"><div class="section-header"><h2 class="section-title">LAYOK Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">Last 5m</th><th data-sort="rate_1h" class="numeric">Rate / Hr</th><th data-sort="avg_6h" class="numeric">6h Avg / Hr</th><th data-sort="avg_12h" class="numeric">12h Avg / Hr</th><th data-sort="avg_24h" class="numeric">24h Avg / Hr</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading LAYOK league data...</td></tr></tbody></table></div></section>
 <section class="section rank-log-section"><div class="section-header"><h2 class="section-title">Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading rank movement history...</div></div></section>
 </main>
 <script>window.LEAGUE_CONFIG={league:'layok',title:'LAYOK League Tracker'};</script>
