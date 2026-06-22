@@ -396,7 +396,10 @@ function requirementsNotMet(){
   const pets=eligiblePetCount();
   if(pets<15)misses.push("Pet team below 15 eligible Rainbow Huge+ estimate ("+pets+"/15).");
   const passes=checked("gamepass").length;
-  if(passes<GAMEPASSES.length)misses.push("Gamepasses incomplete ("+passes+"/"+GAMEPASSES.length+").");
+  
+  const ownedPasses=checked("gamepass");
+  const missingPasses=GAMEPASSES.filter(pass=>!ownedPasses.includes(pass));
+  if(missingPasses.length)misses.push("Gamepasses incomplete ("+ownedPasses.length+"/"+GAMEPASSES.length+"). Missing: "+missingPasses.join(", ")+".");
   REQUIRED_MASTERIES.forEach(name=>{
     const level=masteryLevel(name);
     if(level<99)misses.push(name+" mastery below 99 ("+level+"/99).");
@@ -416,7 +419,7 @@ function updateSummary(){
     "Player RAP: "+(val("rap-notes")||""),
     "",
     "Pet Team: "+pets+"/15 eligible Rainbow Huge+ estimate",
-    "Gamepasses: "+passes.length+"/"+GAMEPASSES.length,
+    "Gamepasses: "+passes.length+"/"+GAMEPASSES.length+(GAMEPASSES.filter(pass=>!passes.includes(pass)).length?" (Missing: "+GAMEPASSES.filter(pass=>!passes.includes(pass)).join(", ")+")":""),
     "Masteries: "+masteryLine,
     "",
     "AFK/Macros: "+val("afk-macros")+(val("afk-details")?" - "+val("afk-details"):""),
