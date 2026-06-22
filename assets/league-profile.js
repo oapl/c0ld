@@ -73,7 +73,7 @@
 
   function renderCards(stats){
     document.getElementById("card-snapshots").textContent=historyRows.length.toLocaleString("en-US");
-    document.getElementById("card-rank").textContent=stats?.last?.rank!=null?"#"+stats.last.rank:"—";
+    document.getElementById("card-league").textContent=currentData?.league_name||LEAGUE;
     document.getElementById("card-points").textContent=full(stats?.last?.points);
     document.getElementById("card-seen").textContent=stats?.last?.fetched_at?dt(stats.last.fetched_at):"—";
   }
@@ -82,19 +82,6 @@
     const title=document.getElementById("history-title");
     title.textContent=(currentData?.league_name||LEAGUE)+" League Performance";
     document.getElementById("date-range").textContent=(stats?dateOnly(stats.first.fetched_at)+" — "+dateOnly(stats.last.fetched_at):"—");
-    const rows=[
-      ["Starting Rank",stats?.first?.rank!=null?"#"+stats.first.rank:"—"],
-      ["Ending Rank",stats?.last?.rank!=null?"#"+stats.last.rank:"—"],
-      ["Best Rank",stats?.bestRank!=null?"#"+stats.bestRank:"—"],
-      ["Worst Rank",stats?.worstRank!=null?"#"+stats.worstRank:"—"],
-      ["Starting Points",full(stats?.first?.points)],
-      ["Ending Points",full(stats?.last?.points)],
-      ["Points Gained",full(stats?.gained)],
-      ["Tracked Time",duration(stats?.trackedMs)],
-      ["Time Gaining Points",duration(stats?.activeMs)],
-      ["Flat / No Gain Time",duration(stats?.flatMs)]
-    ];
-    document.getElementById("summary-rows").innerHTML=rows.map(([k,v])=>'<div class="stat-line"><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></div>').join("");
   }
 
   function drawChart(){
