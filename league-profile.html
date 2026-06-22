@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>YAMO League Tracker</title>
+<title>League Player Profile</title>
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Arial,Helvetica,sans-serif}
 a{color:#ff9b96;text-decoration:none}
 header{background:#161b22;border-bottom:1px solid #30363d;padding:12px 22px 10px}
@@ -30,14 +30,15 @@ button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6ed
 @media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}</style>
 </head>
 <body>
-<header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">c0ld Leaderboard</a><a class="active" href="yamo.html">YAMO League</a><a href="layok.html">LAYOK League</a><a href="top-leagues.html">Top 100 Leagues</a><a href="clans.html">Clans Leaderboard</a><a href="live-clan.html">Clan Lookup</a><a href="servers.html">Servers</a><a href="macros.html">Macros</a></div></header>
+<header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">c0ld Leaderboard</a><a href="yamo.html">YAMO League</a><a href="layok.html">LAYOK League</a><a href="top-leagues.html">Top 100 Leagues</a><a href="clans.html">Clans Leaderboard</a><a href="live-clan.html">Clan Lookup</a><a href="servers.html">Servers</a><a href="macros.html">Macros</a></div></header>
 <main>
-<section class="hero"><img id="league-icon" class="league-main-icon" src="" alt="" hidden><h1 id="page-title">YAMO League Tracker</h1></section>
-<section class="cards"><div class="card"><div class="label">League Points</div><div class="value" id="league-points">—</div></div><div class="card"><div class="label">Members</div><div class="value" id="member-count">—</div></div><div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div><div class="card"><div class="label">League Rank</div><div class="value" id="league-rank">—</div></div></section>
-<section class="section"><div class="section-header"><h2 class="section-title">YAMO Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">5 Minutes</th><th data-sort="gain_1h" class="numeric">1 Hour</th><th data-sort="gain_6h" class="numeric">6 Hours</th><th data-sort="gain_12h" class="numeric">12 Hours</th><th data-sort="gain_24h" class="numeric">Daily</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading YAMO league data...</td></tr></tbody></table></div></section>
+<div id="error" class="error" style="display:block;min-height:0;padding:0;background:transparent"></div>
+<section class="profile-hero"><div class="profile-avatar" id="profile-avatar">?</div><div><h1 id="profile-name">Loading...</h1><div class="subtitle" id="profile-subtitle">—</div><a id="roblox-link" href="#" target="_blank" rel="noopener">Open Roblox Profile</a></div></section>
+<section class="cards"><div class="card"><div class="label">Snapshots</div><div class="value" id="card-snapshots">—</div></div><div class="card"><div class="label">Latest Rank</div><div class="value" id="card-rank">—</div></div><div class="card"><div class="label">Latest Points</div><div class="value" id="card-points">—</div></div><div class="card"><div class="label">Latest Seen</div><div class="value" id="card-seen">—</div></div></section>
+<h2>League History</h2>
+<section class="section"><div class="section-header"><div><h2 class="section-title" id="history-title">League Performance</h2><div class="meta" id="date-range">—</div></div></div><div class="chart-wrap"><div class="chart-controls"><label><input id="points-toggle" type="checkbox" checked> Points</label><label><input id="rank-toggle" type="checkbox" checked> Rank</label></div><canvas id="progress-chart"></canvas></div><div id="summary-rows"></div></section>
 </main>
-<script>window.LEAGUE_CONFIG={league:'YAMO',title:'YAMO League Tracker'};</script>
-<script src="assets/league-tracker.js"></script>
+<script src="assets/league-profile.js"></script>
 <script src="assets/site-announcement.js"></script>
 </body>
 </html>
