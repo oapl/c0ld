@@ -5,367 +5,267 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cinnamowopal Inventory Test</title>
   <style>
-    :root{
-      --bg:#0b1020;
-      --panel:#121936;
-      --panel2:#172047;
-      --line:#2a3564;
-      --text:#eef3ff;
-      --muted:#9eabd5;
-      --good:#42e6a4;
-      --bad:#ff6b8f;
-      --warn:#ffd36a;
-      --accent:#73a7ff;
-      --chip:#24305e;
-      --shadow:0 18px 45px rgba(0,0,0,.35);
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg:#0d1117;
+      --panel:#161b22;
+      --panel-2:#0d1117;
+      --border:#30363d;
+      --text:#e6edf3;
+      --muted:#8b949e;
+      --link:#ff9b96;
+      --hover:#1f2630;
+      --danger:#f85149;
+      --danger-bg:rgba(248,81,73,.12);
+      --success:#3fb950;
+      --success-bg:rgba(63,185,80,.12);
+      --warning:#d29922;
+      --warning-bg:rgba(210,153,34,.13);
     }
-    *{box-sizing:border-box}
-    body{margin:0;background:radial-gradient(circle at top,#16215a 0,#0b1020 42%,#070a13 100%);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh}
-    .wrap{max-width:1280px;margin:0 auto;padding:28px 18px 56px}
-    .hero{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
-    h1{font-size:clamp(26px,4vw,42px);line-height:1.05;margin:0 0 8px}
-    .sub{color:var(--muted);max-width:850px;line-height:1.55}
-    .panel{background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
-    .toolbar{padding:16px;display:grid;grid-template-columns:minmax(180px,320px) 1fr auto auto;gap:10px;align-items:end;margin-bottom:14px}
-    label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
-    input,select,button,textarea{font:inherit;border:1px solid var(--line);border-radius:12px;background:#0d1430;color:var(--text);padding:11px 12px;outline:none}
-    textarea{width:100%;min-height:160px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
-    input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(115,167,255,.16)}
-    button{cursor:pointer;background:linear-gradient(180deg,#3568ff,#214bd2);border-color:#4c78ff;font-weight:800;white-space:nowrap}
-    button.secondary{background:#101936;border-color:var(--line);font-weight:700}
-    button:disabled{opacity:.55;cursor:not-allowed}
-    .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0}
-    .stat{padding:14px;border-radius:16px;background:rgba(18,25,54,.78);border:1px solid var(--line)}
-    .stat .k{font-size:12px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.02em}
-    .stat .v{font-size:22px;margin-top:6px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .notice{padding:12px 14px;border-radius:14px;border:1px solid rgba(255,211,106,.35);background:rgba(255,211,106,.09);color:#ffe7a8;margin:14px 0;line-height:1.45}
-    .notice.bad{border-color:rgba(255,107,143,.35);background:rgba(255,107,143,.09);color:#ffc7d5}
-    .notice.good{border-color:rgba(66,230,164,.35);background:rgba(66,230,164,.09);color:#bcffdf}
-    .results-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:18px 0 10px;flex-wrap:wrap}
-    .chips{display:flex;gap:8px;flex-wrap:wrap}
-    .chip{border:1px solid var(--line);background:var(--chip);border-radius:999px;padding:7px 10px;color:var(--muted);font-size:13px;font-weight:800;cursor:pointer;user-select:none}
-    .chip.active{color:#fff;background:#3159d8;border-color:#668bff}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px}
-    .card{background:rgba(18,25,54,.88);border:1px solid var(--line);border-radius:16px;padding:14px;min-width:0}
-    .card-title{font-weight:900;font-size:16px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;color:var(--muted)}
-    .meta b{display:block;color:var(--text);font-size:15px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .badges{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
-    .badge{background:#101936;border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:12px;color:var(--muted);font-weight:800}
-    .badge.good{color:var(--good);border-color:rgba(66,230,164,.45);background:rgba(66,230,164,.08)}
-    .badge.warn{color:var(--warn);border-color:rgba(255,211,106,.45);background:rgba(255,211,106,.08)}
-    details{margin-top:10px}
-    summary{color:var(--accent);font-size:13px;cursor:pointer;font-weight:800}
-    pre{white-space:pre-wrap;word-break:break-word;background:#070b19;border:1px solid var(--line);border-radius:12px;padding:10px;max-height:260px;overflow:auto;color:#dce6ff;font-size:12px}
-    .manual{padding:16px;margin-top:14px}
-    .hidden{display:none!important}
-    .loader{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:7px}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    @media (max-width:820px){.toolbar{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.stat .v{font-size:18px}}
-    @media (max-width:520px){.stats{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    a { color:var(--link); text-decoration:none; }
+    a:hover { text-decoration:none; }
+    code { color:#ffa198; }
+    header { background:var(--panel); border-bottom:1px solid var(--border); padding:12px 22px 10px; }
+    .header-inner { max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:center; gap:18px; flex-wrap:wrap; }
+    .site-logo-link { display:inline-flex; align-items:center; justify-content:center; line-height:0; }
+    .site-logo { display:block; width:76px; height:auto; border-radius:10px; }
+    .menu-bar { max-width:1200px; margin:9px auto 0; display:flex; justify-content:center; gap:8px; flex-wrap:wrap; }
+    .menu-btn { display:inline-block; padding:7px 12px; border:1px solid var(--border); border-radius:5px; background:var(--panel-2); color:var(--text); cursor:pointer; font-size:13px; line-height:1; transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease; }
+    .menu-btn:hover { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
+    .menu-btn.active { border-color:var(--link); color:var(--link); background:rgba(248,81,73,.12); }
+    main { max-width:1200px; margin:0 auto; padding:22px 24px 32px; }
+    .page-head { margin-bottom:18px; display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+    h1 { margin:0 0 6px; font-size:28px; line-height:1.1; }
+    .subtitle { color:var(--muted); font-size:13px; line-height:1.45; max-width:820px; }
+    .section { border:1px solid var(--border); border-radius:10px; background:var(--panel); overflow:hidden; margin-bottom:16px; }
+    .section-header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .section-title { margin:0; font-size:18px; }
+    .section-note { color:var(--muted); font-size:12px; }
+    .section-body { padding:16px; }
+    .toolbar { display:grid; grid-template-columns:200px minmax(0,1fr) 180px auto; gap:12px; align-items:end; }
+    label { display:block; color:var(--muted); font-size:12px; font-weight:bold; margin:0 0 6px; }
+    input, select, textarea { width:100%; border:1px solid var(--border); border-radius:6px; background:var(--panel-2); color:var(--text); padding:11px 12px; font-size:14px; outline:none; transition:background .15s ease,border-color .15s ease; }
+    textarea { min-height:150px; resize:vertical; font-family:Consolas, Monaco, monospace; font-size:12px; line-height:1.45; }
+    input:focus, select:focus, textarea:focus { border-color:var(--link); background:var(--hover); }
+    button { border:1px solid var(--border); border-radius:5px; background:var(--panel-2); color:var(--text); padding:10px 12px; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease; font-weight:bold; white-space:nowrap; }
+    button:hover:not(:disabled) { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
+    button.primary { border-color:var(--link); color:var(--link); background:rgba(248,81,73,.12); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .notice { border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:10px; padding:13px 16px; margin-bottom:16px; line-height:1.45; font-size:13px; }
+    .notice.error { border-color:var(--danger); background:var(--danger-bg); color:#ffb4ad; }
+    .notice.good { border-color:var(--success); background:var(--success-bg); color:#b6f5c2; }
+    .notice.warn { border-color:var(--warning); background:var(--warning-bg); color:#f5d78e; }
+    .stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .stat { border:1px solid var(--border); background:var(--panel); border-radius:10px; padding:14px; }
+    .stat .k { color:var(--muted); font-size:12px; font-weight:bold; margin-bottom:7px; }
+    .stat .v { font-size:20px; font-weight:bold; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .chips { display:flex; gap:8px; flex-wrap:wrap; }
+    .chip { display:inline-block; border:1px solid var(--border); border-radius:5px; background:var(--panel-2); color:var(--text); padding:7px 10px; cursor:pointer; font-size:12px; line-height:1; transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease; }
+    .chip:hover { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
+    .chip.active { border-color:var(--link); color:var(--link); background:rgba(248,81,73,.12); font-weight:bold; }
+    .results-meta { color:var(--muted); font-size:13px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+    .card { padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--panel-2); transition:background .15s ease,border-color .15s ease,transform .12s ease; min-height:120px; }
+    .card:hover { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
+    .card-title { font-weight:bold; font-size:16px; margin-bottom:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:8px; color:var(--muted); font-size:12px; line-height:1.35; }
+    .meta b { display:block; color:var(--text); font-size:13px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+    .badge { border:1px solid var(--border); border-radius:5px; background:var(--panel); color:var(--muted); font-size:11px; padding:4px 6px; font-weight:bold; }
+    .badge.good { border-color:var(--success); background:var(--success-bg); color:#b6f5c2; }
+    .badge.warn { border-color:var(--warning); background:var(--warning-bg); color:#f5d78e; }
+    .empty { color:var(--muted); padding:24px; }
+    .error { border:1px solid var(--danger); background:var(--danger-bg); color:#ffb4ad; border-radius:10px; padding:16px; }
+    details { margin-top:10px; }
+    summary { color:var(--link); font-size:12px; cursor:pointer; font-weight:bold; }
+    pre { margin:8px 0 0; border:1px solid var(--border); border-radius:8px; background:#010409; color:#c9d1d9; padding:10px; max-height:320px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.4; }
+    .hidden { display:none !important; }
+    @media (max-width:800px) { header{padding:14px 16px 10px;} main{padding:16px;} .menu-bar,.chips{justify-content:flex-start;} .toolbar{grid-template-columns:1fr;} .stats{grid-template-columns:1fr 1fr;} }
+    @media (max-width:500px) { .stats{grid-template-columns:1fr;} .grid{grid-template-columns:1fr;} }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="hero">
+  <header>
+    <div class="header-inner"><a class="site-logo-link" href="index.html" aria-label="c0ld home"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="players.html">Players</a>
+      <a class="menu-btn" href="top100.html">Top 100 Leagues</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
+      <a class="menu-btn" href="macros.html">Macros</a>
+      <a class="menu-btn active" href="Cinnamowopal.html">Inventory Test</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
       <div>
         <h1>Cinnamowopal Inventory Test</h1>
-        <div class="sub">Public Big Games API test page for <b>Cinnamowopal</b> / Roblox ID <b>109818</b>. It loads the public <code>/v1/players/:slug?include=inventory</code> view, then lets you search and filter the returned inventory.</div>
+        <div class="subtitle">Tests the new Big Games public player views for <b>Cinnamowopal</b> / Roblox ID <b>109818</b>. Search/filter works on whatever inventory JSON can be loaded or manually pasted.</div>
       </div>
-      <button class="secondary" id="rawToggle">Show raw response</button>
+      <button id="rawToggle" type="button">Show raw response</button>
     </div>
 
-    <div class="notice" id="apiNotice">This page does not use OAuth and does not store tokens. It only works if your public inventory view is enabled in Big Games. Use the manual JSON box below to test a private <code>/v1/account/inventory</code> response from PowerShell/curl.</div>
+    <div id="notice" class="notice warn">Browser fetch to Big Games can be blocked by CORS. This page now tries direct fetch first, then public CORS proxy fallbacks. A proper Cloudflare Worker proxy will be cleaner if this becomes a real tool.</div>
 
-    <section class="panel toolbar">
-      <div>
-        <label for="slug">Player</label>
-        <input id="slug" value="Cinnamowopal" autocomplete="off" />
-      </div>
-      <div>
-        <label for="search">Search inventory</label>
-        <input id="search" placeholder="Huge, Titanic, shiny, enchant, gift, rainbow, etc." autocomplete="off" />
-      </div>
-      <div>
-        <label for="sortBy">Sort</label>
-        <select id="sortBy">
-          <option value="name">Name</option>
-          <option value="class">Class</option>
-          <option value="count">Count</option>
-          <option value="rap">RAP / value</option>
-        </select>
-      </div>
-      <div>
-        <button id="loadBtn">Load public inventory</button>
+    <section class="section">
+      <div class="section-header"><h2 class="section-title">Lookup</h2><div class="section-note">Public lookup only; OAuth account inventory can be pasted below.</div></div>
+      <div class="section-body toolbar">
+        <div><label for="slug">Player</label><input id="slug" value="Cinnamowopal" autocomplete="off"></div>
+        <div><label for="search">Search inventory</label><input id="search" placeholder="Huge, Titanic, Shiny, Rainbow, Gift, Booth, Enchant..."></div>
+        <div><label for="sortBy">Sort</label><select id="sortBy"><option value="name">Name</option><option value="class">Class</option><option value="count">Count</option><option value="rap">RAP / value</option></select></div>
+        <button id="loadBtn" class="primary" type="button">Load Inventory</button>
       </div>
     </section>
 
     <section class="stats">
       <div class="stat"><div class="k">Account</div><div class="v" id="statAccount">—</div></div>
+      <div class="stat"><div class="k">Source</div><div class="v" id="statSource">—</div></div>
       <div class="stat"><div class="k">Inventory View</div><div class="v" id="statInventory">—</div></div>
       <div class="stat"><div class="k">Total Stacks</div><div class="v" id="statStacks">0</div></div>
       <div class="stat"><div class="k">Shown</div><div class="v" id="statShown">0</div></div>
-      <div class="stat"><div class="k">Fetched</div><div class="v" id="statFetched">—</div></div>
     </section>
 
     <pre id="rawBox" class="hidden"></pre>
 
-    <div class="results-head">
-      <div class="chips" id="chips">
-        <span class="chip active" data-filter="all">All</span>
-        <span class="chip" data-filter="pet">Pets</span>
-        <span class="chip" data-filter="huge">Huge/Titanic/Gargantuan</span>
-        <span class="chip" data-filter="gamepass">Gamepass-ish</span>
-        <span class="chip" data-filter="valuable">Has RAP/value</span>
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">Inventory Results</h2>
+        <div class="results-meta" id="resultLabel">No inventory loaded yet.</div>
+        <div class="chips" id="chips">
+          <span class="chip active" data-filter="all">All</span>
+          <span class="chip" data-filter="pet">Pets</span>
+          <span class="chip" data-filter="huge">Huge / Titanic / Gargantuan</span>
+          <span class="chip" data-filter="valuable">Has RAP/value</span>
+        </div>
       </div>
-      <div style="color:var(--muted);font-weight:800" id="resultLabel">No inventory loaded yet.</div>
-    </div>
+      <div class="section-body"><div class="grid" id="grid"><div class="empty">Load inventory or paste JSON below.</div></div></div>
+    </section>
 
-    <section class="grid" id="grid"></section>
-
-    <section class="panel manual">
-      <h2 style="margin:0 0 8px">Manual JSON test</h2>
-      <div class="sub" style="margin-bottom:12px">Paste JSON from <code>/v1/account/inventory</code> or <code>/v1/players/Cinnamowopal?include=inventory</code>, then use the same search/filter UI.</div>
-      <textarea id="manualJson" placeholder="Paste JSON response here..."></textarea>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-        <button id="parseManual">Parse pasted JSON</button>
-        <button class="secondary" id="clearManual">Clear</button>
+    <section class="section">
+      <div class="section-header"><h2 class="section-title">Manual JSON Test</h2><div class="section-note">Paste JSON from <code>/v1/account/inventory</code> or <code>/v1/players/Cinnamowopal?include=inventory</code>.</div></div>
+      <div class="section-body">
+        <textarea id="manualJson" placeholder="Paste JSON response here..."></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button id="parseManual" class="primary" type="button">Parse Pasted JSON</button><button id="clearManual" type="button">Clear</button></div>
       </div>
     </section>
-  </div>
+  </main>
 
   <script>
-    const API_BASE = "https://ps99.biggamesapi.io";
-    let rawResponse = null;
-    let allItems = [];
-    let activeFilter = "all";
+    const API_BASE="https://ps99.biggamesapi.io";
+    let rawResponse=null;
+    let allItems=[];
+    let activeFilter="all";
+    const $=id=>document.getElementById(id);
+    const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const fmt=n=>Number.isFinite(Number(n))?Number(n).toLocaleString("en-US"):"—";
+    const compact=n=>Number.isFinite(Number(n))?Number(n).toLocaleString("en-US",{notation:"compact",maximumFractionDigits:2}):"—";
+    const asText=v=>{try{return JSON.stringify(v).toLowerCase()}catch{return String(v).toLowerCase()}};
 
-    const $ = (id) => document.getElementById(id);
-    const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-    const nfmt = (n) => new Intl.NumberFormat().format(Number(n || 0));
-    const compact = (n) => {
-      const num = Number(n);
-      if (!Number.isFinite(num)) return "—";
-      return new Intl.NumberFormat(undefined,{notation:"compact",maximumFractionDigits:2}).format(num);
-    };
+    function setNotice(text,type="warn"){const el=$("notice");el.className="notice "+type;el.innerHTML=text}
+    function displayRaw(obj){rawResponse=obj;$("rawBox").textContent=JSON.stringify(obj,null,2)}
+    function withCacheBust(url){const u=new URL(url);u.searchParams.set("v",Date.now());return u.toString()}
+    function proxyUrls(url){return [url,"https://api.allorigins.win/raw?url="+encodeURIComponent(url),"https://corsproxy.io/?"+encodeURIComponent(url)]}
 
-    function notice(text, type="") {
-      const el = $("apiNotice");
-      el.className = "notice" + (type ? " " + type : "");
-      el.innerHTML = text;
-    }
-
-    function stringify(v) {
-      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
-    }
-
-    function getInventoryEnvelope(json) {
-      const data = json?.data ?? json;
-      const publicInv = data?.views?.inventory;
-      if (publicInv) {
-        return {
-          source: "public",
-          available: publicInv.available,
-          reason: publicInv.reason,
-          data: publicInv.data || {},
-          fetchedAt: publicInv.fetchedAt || publicInv.data?.fetchedAt,
-          cached: publicInv.data?.cached
-        };
+    async function fetchJson(url){
+      const errors=[];
+      for(const attempt of proxyUrls(withCacheBust(url))){
+        try{
+          const res=await fetch(attempt,{cache:"no-store"});
+          const text=await res.text();
+          let json;
+          try{json=JSON.parse(text)}catch(e){throw new Error("Non-JSON response from "+attempt)}
+          if(!res.ok || json.status==="error") throw new Error((json.error&&json.error.message)||("HTTP "+res.status));
+          return {json,source:attempt===url?"direct":"proxy"};
+        }catch(e){errors.push(e.message||String(e))}
       }
-      if (data?.items || data?.equipped) {
-        return { source: "account", available: true, data, fetchedAt: data.fetchedAt, cached: data.cached };
+      throw new Error(errors.join(" | "));
+    }
+
+    function deepGetArrays(obj,path=[],out=[]){
+      if(!obj||typeof obj!=="object")return out;
+      if(Array.isArray(obj)){out.push({path:path.join("."),arr:obj});obj.forEach((v,i)=>deepGetArrays(v,path.concat(String(i)),out));return out}
+      Object.entries(obj).forEach(([k,v])=>deepGetArrays(v,path.concat(k),out));
+      return out;
+    }
+    function scoreArray(path,arr){
+      if(!Array.isArray(arr)||!arr.length||typeof arr[0]!=="object")return 0;
+      let score=0;
+      const p=path.toLowerCase();
+      if(p.includes("items")||p.includes("inventory"))score+=20;
+      for(const item of arr.slice(0,20)){
+        const keys=Object.keys(item||{}).map(k=>k.toLowerCase());
+        if(keys.includes("id"))score+=3;
+        if(keys.includes("class"))score+=5;
+        if(keys.includes("count")||keys.includes("amount")||keys.includes("quantity"))score+=3;
+        if(keys.includes("stackkey")||keys.includes("stack_key"))score+=2;
+        const text=asText(item);
+        if(text.includes("huge")||text.includes("titanic")||text.includes("pet"))score+=2;
       }
-      if (json?.items || json?.equipped) {
-        return { source: "raw", available: true, data: json, fetchedAt: json.fetchedAt, cached: json.cached };
-      }
-      return { source: "unknown", available: false, reason: "inventory_not_found", data: {} };
+      return score;
     }
-
-    function itemName(item) {
-      return item.displayName || item.name || item.id || item.stackKey || "Unknown item";
+    function findBestItems(json){
+      const arrays=deepGetArrays(json).map(x=>({...x,score:scoreArray(x.path,x.arr)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||b.arr.length-a.arr.length);
+      return arrays[0] ? arrays[0] : {path:"",arr:[],score:0};
     }
-
-    function itemCount(item) {
-      const c = Number(item.count ?? item.amount ?? item.quantity ?? 1);
-      return Number.isFinite(c) ? c : 1;
+    function getAccountLabel(json){
+      const data=json&&json.data?json.data:json;
+      const acc=data&&data.account?data.account:null;
+      return acc ? (acc.username||acc.displayName||acc.robloxUserId||"Loaded") : "Cinnamowopal";
     }
-
-    function itemRap(item) {
-      const candidates = [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap, item.rawData?.RAP];
-      for (const v of candidates) {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      return 0;
+    function getInventoryStatus(json){
+      const data=json&&json.data?json.data:json;
+      const inv=data&&data.views&&data.views.inventory?data.views.inventory:null;
+      if(inv&&!inv.available)return inv.reason||"not_public";
+      return "loaded";
     }
+    function itemName(item){return item.displayName||item.name||item.id||item.itemId||item.stackKey||item.configName||"Unknown item"}
+    function itemClass(item){return item.class||item.category||item.type||item.Type||"—"}
+    function itemCount(item){const n=Number(item.count??item.amount??item.quantity??item.qty??1);return Number.isFinite(n)?n:1}
+    function itemRap(item){for(const v of [item.rap,item.RAP,item.value,item.Value,item.recentAveragePrice,item.rawData&&item.rawData.rap]){const n=Number(v);if(Number.isFinite(n)&&n>0)return n}return 0}
+    function itemRawText(item){return (itemName(item)+" "+itemClass(item)+" "+asText(item)).toLowerCase()}
+    function isPet(item){return String(itemClass(item)).toLowerCase()==="pet"||itemRawText(item).includes('"class":"pet"')}
+    function isHugeFamily(item){const t=itemRawText(item);return isPet(item)&&(t.includes("huge")||t.includes("titanic")||t.includes("gargantuan"))}
+    function badges(item){const t=itemRawText(item),out=[];if(t.includes("titanic"))out.push(["Titanic","good"]);if(t.includes("gargantuan"))out.push(["Gargantuan","good"]);if(t.includes("huge"))out.push(["Huge","good"]);if(t.includes("rainbow"))out.push(["Rainbow","warn"]);if(t.includes("shiny"))out.push(["Shiny","warn"]);if(t.includes("golden")||t.includes('"pt":1'))out.push(["Golden",""]);return out}
 
-    function rawText(item) {
-      return (itemName(item) + " " + (item.class || "") + " " + (item.id || "") + " " + stringify(item.rawData || {}) + " " + stringify(item)).toLowerCase();
+    function loadItemsFromJson(json,source){
+      displayRaw(json);
+      const found=findBestItems(json);
+      allItems=found.arr||[];
+      $("statAccount").textContent=getAccountLabel(json);
+      $("statSource").textContent=source||"manual";
+      $("statInventory").textContent=getInventoryStatus(json);
+      $("statStacks").textContent=fmt(allItems.length);
+      if(!allItems.length)setNotice("Loaded JSON, but no inventory item array was found. Open raw response to inspect the schema, or paste <code>/v1/account/inventory</code> JSON below.","error");
+      else setNotice("Inventory loaded from <b>"+esc(source||"manual JSON")+"</b>. Detected item array path: <code>"+esc(found.path||"root")+"</code>.",source==="proxy"?"warn":"good");
+      applyFilters();
     }
-
-    function isPet(item) {
-      return String(item.class || "").toLowerCase() === "pet";
+    async function loadPublic(){
+      const slug=$("slug").value.trim()||"Cinnamowopal";
+      const btn=$("loadBtn");btn.disabled=true;btn.textContent="Loading...";
+      try{const url=API_BASE+"/v1/players/"+encodeURIComponent(slug)+"?include=inventory,profile,extendedProfile";const {json,source}=await fetchJson(url);loadItemsFromJson(json,source)}
+      catch(e){allItems=[];displayRaw({error:String(e)});$("statSource").textContent="fetch_error";$("statInventory").textContent="fetch_error";$("statStacks").textContent="0";setNotice("Fetch failed: "+esc(e.message||String(e))+". If this still happens, the reliable fix is a small Cloudflare Worker proxy. You can still paste JSON into the manual box below.","error");applyFilters()}
+      finally{btn.disabled=false;btn.textContent="Load Inventory"}
     }
-
-    function isHugeFamily(item) {
-      const text = rawText(item);
-      return isPet(item) && (text.includes("huge") || text.includes("titanic") || text.includes("gargantuan"));
+    function applyFilters(){
+      const q=$("search").value.trim().toLowerCase();
+      const sort=$("sortBy").value;
+      let rows=allItems.filter(item=>{if(activeFilter==="pet"&&!isPet(item))return false;if(activeFilter==="huge"&&!isHugeFamily(item))return false;if(activeFilter==="valuable"&&itemRap(item)<=0)return false;if(q&&!itemRawText(item).includes(q))return false;return true});
+      rows.sort((a,b)=>{if(sort==="count")return itemCount(b)-itemCount(a);if(sort==="rap")return itemRap(b)-itemRap(a);if(sort==="class")return String(itemClass(a)).localeCompare(String(itemClass(b)))||itemName(a).localeCompare(itemName(b));return itemName(a).localeCompare(itemName(b))});
+      $("statShown").textContent=fmt(rows.length);$("resultLabel").textContent=rows.length?fmt(rows.length)+" item stack"+(rows.length===1?"":"s")+" shown":"No matching items.";renderRows(rows)
     }
-
-    function isGamepassish(item) {
-      const text = rawText(item);
-      return text.includes("gamepass") || text.includes("auto farm") || text.includes("auto tap") || text.includes("lucky") || text.includes("vip") || text.includes("hatch") || text.includes("enchant slot");
+    function renderRows(rows){
+      const grid=$("grid");
+      if(!rows.length){grid.innerHTML='<div class="empty">No items match the current search/filter.</div>';return}
+      grid.innerHTML=rows.map(item=>{const b=badges(item).map(x=>'<span class="badge '+x[1]+'">'+esc(x[0])+'</span>').join("");const rap=itemRap(item);return '<article class="card"><div class="card-title" title="'+esc(itemName(item))+'">'+esc(itemName(item))+'</div><div class="meta"><span>Class<b>'+esc(itemClass(item))+'</b></span><span>Count<b>'+fmt(itemCount(item))+'</b></span><span>ID<b title="'+esc(item.id||item.itemId||"")+'">'+esc(item.id||item.itemId||"—")+'</b></span><span>RAP/value<b>'+ (rap?compact(rap):"—") +'</b></span></div>'+(b?'<div class="badges">'+b+'</div>':"")+'<details><summary>Raw stack</summary><pre>'+esc(JSON.stringify(item,null,2))+'</pre></details></article>'}).join("")
     }
+    function parseManual(){try{loadItemsFromJson(JSON.parse($("manualJson").value),"manual")}catch(e){setNotice("Manual JSON parse failed: "+esc(e.message||String(e)),"error")}}
 
-    function variantBadges(item) {
-      const badges = [];
-      const text = rawText(item);
-      if (text.includes("titanic")) badges.push(["Titanic","good"]);
-      if (text.includes("gargantuan")) badges.push(["Gargantuan","good"]);
-      if (text.includes("huge")) badges.push(["Huge","good"]);
-      if (text.includes("rainbow")) badges.push(["Rainbow","warn"]);
-      if (text.includes("golden") || text.includes('"pt":1') || text.includes("gold")) badges.push(["Golden",""]);
-      if (text.includes("shiny") || text.includes('"sh":true')) badges.push(["Shiny","warn"]);
-      return badges;
-    }
-
-    function setStats(inv) {
-      const account = rawResponse?.data?.account;
-      $("statAccount").textContent = account ? `${account.username || account.displayName || account.robloxUserId}` : "—";
-      $("statInventory").textContent = inv.available ? "Available" : (inv.reason || "Unavailable");
-      $("statStacks").textContent = nfmt(allItems.length);
-      $("statFetched").textContent = inv.fetchedAt ? new Date(inv.fetchedAt).toLocaleString() : "—";
-    }
-
-    function normalizeItems(inv) {
-      const items = inv?.data?.items;
-      return Array.isArray(items) ? items : [];
-    }
-
-    function applyFilters() {
-      const q = $("search").value.trim().toLowerCase();
-      const sortBy = $("sortBy").value;
-      let rows = allItems.filter(item => {
-        if (activeFilter === "pet" && !isPet(item)) return false;
-        if (activeFilter === "huge" && !isHugeFamily(item)) return false;
-        if (activeFilter === "gamepass" && !isGamepassish(item)) return false;
-        if (activeFilter === "valuable" && itemRap(item) <= 0) return false;
-        if (q && !rawText(item).includes(q)) return false;
-        return true;
-      });
-
-      rows.sort((a,b) => {
-        if (sortBy === "count") return itemCount(b) - itemCount(a);
-        if (sortBy === "rap") return itemRap(b) - itemRap(a);
-        if (sortBy === "class") return String(a.class || "").localeCompare(String(b.class || "")) || itemName(a).localeCompare(itemName(b));
-        return itemName(a).localeCompare(itemName(b));
-      });
-
-      $("statShown").textContent = nfmt(rows.length);
-      $("resultLabel").textContent = rows.length ? `${nfmt(rows.length)} item stack${rows.length===1?"":"s"} shown` : "No matching items.";
-      renderRows(rows);
-    }
-
-    function renderRows(rows) {
-      const grid = $("grid");
-      if (!rows.length) {
-        grid.innerHTML = '<div class="notice bad" style="grid-column:1/-1">No items match the current search/filter.</div>';
-        return;
-      }
-      grid.innerHTML = rows.map(item => {
-        const rap = itemRap(item);
-        const badges = variantBadges(item).map(([label, cls]) => `<span class="badge ${cls}">${esc(label)}</span>`).join("");
-        return `<article class="card">
-          <div class="card-title" title="${esc(itemName(item))}">${esc(itemName(item))}</div>
-          <div class="meta">
-            <span>Class<b>${esc(item.class || "—")}</b></span>
-            <span>Count<b>${nfmt(itemCount(item))}</b></span>
-            <span>ID<b title="${esc(item.id || "")}">${esc(item.id || "—")}</b></span>
-            <span>RAP/value<b>${rap ? compact(rap) : "—"}</b></span>
-          </div>
-          ${badges ? `<div class="badges">${badges}</div>` : ""}
-          <details><summary>Raw stack</summary><pre>${esc(stringify(item))}</pre></details>
-        </article>`;
-      }).join("");
-    }
-
-    async function loadPublic() {
-      const slug = $("slug").value.trim() || "Cinnamowopal";
-      const btn = $("loadBtn");
-      btn.disabled = true;
-      btn.innerHTML = '<span class="loader"></span>Loading';
-      try {
-        const url = `${API_BASE}/v1/players/${encodeURIComponent(slug)}?include=inventory,profile,extendedProfile`;
-        const res = await fetch(url, { cache: "no-store" });
-        const json = await res.json();
-        rawResponse = json;
-        $("rawBox").textContent = stringify(json);
-        if (!res.ok || json.status === "error") {
-          allItems = [];
-          setStats({available:false,reason:json?.error?.code || res.status});
-          notice(`Public lookup failed for <b>${esc(slug)}</b>. The account may not be linked or public inventory may be disabled.`, "bad");
-          applyFilters();
-          return;
-        }
-        const inv = getInventoryEnvelope(json);
-        if (!inv.available) {
-          allItems = [];
-          setStats(inv);
-          notice(`The player loaded, but inventory is not available: <b>${esc(inv.reason || "not_public")}</b>. Enable public inventory in Big Games, or paste a private account inventory JSON below.`, "bad");
-          applyFilters();
-          return;
-        }
-        allItems = normalizeItems(inv);
-        setStats(inv);
-        notice(`Loaded public inventory for <b>${esc(slug)}</b>. Use the search bar or filters to sample specific items.`, "good");
-        applyFilters();
-      } catch (err) {
-        allItems = [];
-        rawResponse = { error: String(err) };
-        $("rawBox").textContent = stringify(rawResponse);
-        setStats({available:false,reason:"fetch_error"});
-        notice(`Fetch failed: ${esc(err.message || String(err))}`, "bad");
-        applyFilters();
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Load public inventory";
-      }
-    }
-
-    function parseManual() {
-      try {
-        const json = JSON.parse($("manualJson").value);
-        rawResponse = json;
-        $("rawBox").textContent = stringify(json);
-        const inv = getInventoryEnvelope(json);
-        allItems = normalizeItems(inv);
-        setStats(inv);
-        notice(`Parsed manual JSON. ${nfmt(allItems.length)} inventory stacks found.`, allItems.length ? "good" : "bad");
-        applyFilters();
-      } catch (err) {
-        notice(`Manual JSON parse failed: ${esc(err.message || String(err))}`, "bad");
-      }
-    }
-
-    document.addEventListener("click", (e) => {
-      const chip = e.target.closest(".chip[data-filter]");
-      if (chip) {
-        activeFilter = chip.dataset.filter;
-        document.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === chip));
-        applyFilters();
-      }
-    });
-
-    $("loadBtn").addEventListener("click", loadPublic);
-    $("search").addEventListener("input", applyFilters);
-    $("sortBy").addEventListener("change", applyFilters);
-    $("parseManual").addEventListener("click", parseManual);
-    $("clearManual").addEventListener("click", () => { $("manualJson").value = ""; });
-    $("rawToggle").addEventListener("click", () => {
-      $("rawBox").classList.toggle("hidden");
-      $("rawToggle").textContent = $("rawBox").classList.contains("hidden") ? "Show raw response" : "Hide raw response";
-    });
-
+    document.addEventListener("click",e=>{const chip=e.target.closest(".chip[data-filter]");if(!chip)return;activeFilter=chip.dataset.filter;document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active",c===chip));applyFilters()});
+    $("loadBtn").addEventListener("click",loadPublic);$("search").addEventListener("input",applyFilters);$("sortBy").addEventListener("change",applyFilters);$("parseManual").addEventListener("click",parseManual);$("clearManual").addEventListener("click",()=>$("manualJson").value="");$("rawToggle").addEventListener("click",()=>{$("rawBox").classList.toggle("hidden");$("rawToggle").textContent=$("rawBox").classList.contains("hidden")?"Show raw response":"Hide raw response"});
     loadPublic();
   </script>
 </body>
