@@ -29,9 +29,10 @@ create table if not exists public.ps99_inventory_snapshot_items (
   roblox_user_id bigint not null,
   captured_at timestamptz not null,
   local_day date not null,
-  -- item_key must remain short because it is indexed in the primary key.
-  -- Worker should store a hashed/stable key here, not the raw Big Games stackKey JSON.
-  item_key varchar(128) not null,
+  -- item_key can be the raw Big Games stackKey, which can be very long.
+  -- Do not btree-index item_key directly.
+  item_key text not null,
+  item_hash text generated always as (md5(item_key)) stored,
   item_class text,
   item_id text,
   display_name text,
@@ -39,16 +40,16 @@ create table if not exists public.ps99_inventory_snapshot_items (
   count numeric not null default 0,
   rap numeric not null default 0,
   raw jsonb not null default '{}'::jsonb,
-  primary key (snapshot_id, item_key)
+  primary key (snapshot_id, item_hash)
 );
 
-create index if not exists idx_ps99_inventory_items_user_key_time
-  on public.ps99_inventory_snapshot_items (roblox_user_id, item_key, captured_at desc);
+create index if not exists idx_ps99_inventory_items_user_hash_time
+  on public.ps99_inventory_snapshot_items (roblox_user_id, item_hash, captured_at desc);
 
 create index if not exists idx_ps99_inventory_items_snapshot
   on public.ps99_inventory_snapshot_items (snapshot_id);
 
--- Migration/fix for an already-created table where item_key was text and a raw stackKey
+-- Migration/fix for an already-created table where item_key was indexed directly and
 -- caused "index row size exceeds btree maximum" errors.
 truncate table public.ps99_inventory_snapshot_items;
 
@@ -65,11 +66,23 @@ begin
   end if;
 end $$;
 
-alter table public.ps99_inventory_snapshot_items
-  alter column item_key type varchar(128) using left(item_key, 128);
+drop index if exists public.idx_ps99_inventory_items_user_key_time;
+drop index if exists public.idx_ps99_inventory_items_user_hash_time;
 
 alter table public.ps99_inventory_snapshot_items
-  add constraint ps99_inventory_snapshot_items_pkey primary key (snapshot_id, item_key);
+  alter column item_key type text using item_key::text;
+
+alter table public.ps99_inventory_snapshot_items
+  add column if not exists item_hash text generated always as (md5(item_key)) stored;
+
+alter table public.ps99_inventory_snapshot_items
+  add constraint ps99_inventory_snapshot_items_pkey primary key (snapshot_id, item_hash);
+
+create index if not exists idx_ps99_inventory_items_user_hash_time
+  on public.ps99_inventory_snapshot_items (roblox_user_id, item_hash, captured_at desc);
+
+create index if not exists idx_ps99_inventory_items_snapshot
+  on public.ps99_inventory_snapshot_items (snapshot_id);
 
 -- Remove failed snapshot shells that were created before item insertion failed.
 delete from public.ps99_inventory_snapshots s
