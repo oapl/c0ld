@@ -110,8 +110,8 @@ async function handleHourlySeries(request, env) {
   for (let i = hours; i >= 1; i--) {
     const endTarget = new Date(latestDate.getTime() - (i - 1) * 3600000);
     const startTarget = new Date(endTarget.getTime() - 3600000);
-    const start = closestSnapshotAtOrBefore(sorted, startTarget) || sorted[0];
-    const end = closestSnapshotAtOrBefore(sorted, endTarget) || latest;
+    const start = closestSnapshotAtOrBefore(sorted, startTarget);
+    const end = closestSnapshotAtOrBefore(sorted, endTarget);
     if (!start || !end || start.id === end.id) continue;
     const diff = await buildDiffFromSnapshots(env, start, end);
     rows.push({
@@ -231,7 +231,8 @@ async function sendDiscordWebhook(webhookUrl, payload) {
 
 async function buildDiffPayload(env, userId, picked) {
   if (!picked.start || !picked.end || picked.start.id === picked.end.id) {
-    return { ok: false, message: "Not enough snapshots to compare yet.", mode: picked.mode || "unknown" };
+    const targetText = picked.target_at ? ` Need a snapshot at or before ${picked.target_at}.` : "";
+    return { ok: false, message: `Not enough snapshots to compare yet.${targetText}`, mode: picked.mode || "unknown", end: lightSnapshot(picked.end || null), target_at: picked.target_at || null };
   }
   const diff = await buildDiffFromSnapshots(env, picked.start, picked.end);
   return {
@@ -259,8 +260,9 @@ function pickLastHourSnapshots(snapshots) {
   const end = snaps[snaps.length - 1];
   if (!end) return { mode: "last_hour", start: null, end: null };
   const target = new Date(new Date(end.captured_at).getTime() - 3600000);
-  const start = closestSnapshotAtOrBefore(snaps, target) || snaps[0];
-  return { mode: "last_hour_live", start, end };
+  const start = closestSnapshotAtOrBefore(snaps, target);
+  if (!start) return { mode: "last_hour_waiting_for_baseline", start: null, end, target_at: target.toISOString() };
+  return { mode: "last_hour_live", start, end, target_at: target.toISOString() };
 }
 
 function pickDailyComparisonSnapshots(descSnapshots, requestedDay) {
