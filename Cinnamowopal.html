@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cinnamowopal Inventory Test</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#121936;
+      --panel2:#172047;
+      --line:#2a3564;
+      --text:#eef3ff;
+      --muted:#9eabd5;
+      --good:#42e6a4;
+      --bad:#ff6b8f;
+      --warn:#ffd36a;
+      --accent:#73a7ff;
+      --chip:#24305e;
+      --shadow:0 18px 45px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(circle at top,#16215a 0,#0b1020 42%,#070a13 100%);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh}
+    .wrap{max-width:1280px;margin:0 auto;padding:28px 18px 56px}
+    .hero{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
+    h1{font-size:clamp(26px,4vw,42px);line-height:1.05;margin:0 0 8px}
+    .sub{color:var(--muted);max-width:850px;line-height:1.55}
+    .panel{background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+    .toolbar{padding:16px;display:grid;grid-template-columns:minmax(180px,320px) 1fr auto auto;gap:10px;align-items:end;margin-bottom:14px}
+    label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+    input,select,button,textarea{font:inherit;border:1px solid var(--line);border-radius:12px;background:#0d1430;color:var(--text);padding:11px 12px;outline:none}
+    textarea{width:100%;min-height:160px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(115,167,255,.16)}
+    button{cursor:pointer;background:linear-gradient(180deg,#3568ff,#214bd2);border-color:#4c78ff;font-weight:800;white-space:nowrap}
+    button.secondary{background:#101936;border-color:var(--line);font-weight:700}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0}
+    .stat{padding:14px;border-radius:16px;background:rgba(18,25,54,.78);border:1px solid var(--line)}
+    .stat .k{font-size:12px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.02em}
+    .stat .v{font-size:22px;margin-top:6px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .notice{padding:12px 14px;border-radius:14px;border:1px solid rgba(255,211,106,.35);background:rgba(255,211,106,.09);color:#ffe7a8;margin:14px 0;line-height:1.45}
+    .notice.bad{border-color:rgba(255,107,143,.35);background:rgba(255,107,143,.09);color:#ffc7d5}
+    .notice.good{border-color:rgba(66,230,164,.35);background:rgba(66,230,164,.09);color:#bcffdf}
+    .results-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:18px 0 10px;flex-wrap:wrap}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{border:1px solid var(--line);background:var(--chip);border-radius:999px;padding:7px 10px;color:var(--muted);font-size:13px;font-weight:800;cursor:pointer;user-select:none}
+    .chip.active{color:#fff;background:#3159d8;border-color:#668bff}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px}
+    .card{background:rgba(18,25,54,.88);border:1px solid var(--line);border-radius:16px;padding:14px;min-width:0}
+    .card-title{font-weight:900;font-size:16px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;color:var(--muted)}
+    .meta b{display:block;color:var(--text);font-size:15px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .badges{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
+    .badge{background:#101936;border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:12px;color:var(--muted);font-weight:800}
+    .badge.good{color:var(--good);border-color:rgba(66,230,164,.45);background:rgba(66,230,164,.08)}
+    .badge.warn{color:var(--warn);border-color:rgba(255,211,106,.45);background:rgba(255,211,106,.08)}
+    details{margin-top:10px}
+    summary{color:var(--accent);font-size:13px;cursor:pointer;font-weight:800}
+    pre{white-space:pre-wrap;word-break:break-word;background:#070b19;border:1px solid var(--line);border-radius:12px;padding:10px;max-height:260px;overflow:auto;color:#dce6ff;font-size:12px}
+    .manual{padding:16px;margin-top:14px}
+    .hidden{display:none!important}
+    .loader{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:7px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:820px){.toolbar{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.stat .v{font-size:18px}}
+    @media (max-width:520px){.stats{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1>Cinnamowopal Inventory Test</h1>
+        <div class="sub">Public Big Games API test page for <b>Cinnamowopal</b> / Roblox ID <b>109818</b>. It loads the public <code>/v1/players/:slug?include=inventory</code> view, then lets you search and filter the returned inventory.</div>
+      </div>
+      <button class="secondary" id="rawToggle">Show raw response</button>
+    </div>
+
+    <div class="notice" id="apiNotice">This page does not use OAuth and does not store tokens. It only works if your public inventory view is enabled in Big Games. Use the manual JSON box below to test a private <code>/v1/account/inventory</code> response from PowerShell/curl.</div>
+
+    <section class="panel toolbar">
+      <div>
+        <label for="slug">Player</label>
+        <input id="slug" value="Cinnamowopal" autocomplete="off" />
+      </div>
+      <div>
+        <label for="search">Search inventory</label>
+        <input id="search" placeholder="Huge, Titanic, shiny, enchant, gift, rainbow, etc." autocomplete="off" />
+      </div>
+      <div>
+        <label for="sortBy">Sort</label>
+        <select id="sortBy">
+          <option value="name">Name</option>
+          <option value="class">Class</option>
+          <option value="count">Count</option>
+          <option value="rap">RAP / value</option>
+        </select>
+      </div>
+      <div>
+        <button id="loadBtn">Load public inventory</button>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><div class="k">Account</div><div class="v" id="statAccount">—</div></div>
+      <div class="stat"><div class="k">Inventory View</div><div class="v" id="statInventory">—</div></div>
+      <div class="stat"><div class="k">Total Stacks</div><div class="v" id="statStacks">0</div></div>
+      <div class="stat"><div class="k">Shown</div><div class="v" id="statShown">0</div></div>
+      <div class="stat"><div class="k">Fetched</div><div class="v" id="statFetched">—</div></div>
+    </section>
+
+    <pre id="rawBox" class="hidden"></pre>
+
+    <div class="results-head">
+      <div class="chips" id="chips">
+        <span class="chip active" data-filter="all">All</span>
+        <span class="chip" data-filter="pet">Pets</span>
+        <span class="chip" data-filter="huge">Huge/Titanic/Gargantuan</span>
+        <span class="chip" data-filter="gamepass">Gamepass-ish</span>
+        <span class="chip" data-filter="valuable">Has RAP/value</span>
+      </div>
+      <div style="color:var(--muted);font-weight:800" id="resultLabel">No inventory loaded yet.</div>
+    </div>
+
+    <section class="grid" id="grid"></section>
+
+    <section class="panel manual">
+      <h2 style="margin:0 0 8px">Manual JSON test</h2>
+      <div class="sub" style="margin-bottom:12px">Paste JSON from <code>/v1/account/inventory</code> or <code>/v1/players/Cinnamowopal?include=inventory</code>, then use the same search/filter UI.</div>
+      <textarea id="manualJson" placeholder="Paste JSON response here..."></textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <button id="parseManual">Parse pasted JSON</button>
+        <button class="secondary" id="clearManual">Clear</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = "https://ps99.biggamesapi.io";
+    let rawResponse = null;
+    let allItems = [];
+    let activeFilter = "all";
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const nfmt = (n) => new Intl.NumberFormat().format(Number(n || 0));
+    const compact = (n) => {
+      const num = Number(n);
+      if (!Number.isFinite(num)) return "—";
+      return new Intl.NumberFormat(undefined,{notation:"compact",maximumFractionDigits:2}).format(num);
+    };
+
+    function notice(text, type="") {
+      const el = $("apiNotice");
+      el.className = "notice" + (type ? " " + type : "");
+      el.innerHTML = text;
+    }
+
+    function stringify(v) {
+      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+    }
+
+    function getInventoryEnvelope(json) {
+      const data = json?.data ?? json;
+      const publicInv = data?.views?.inventory;
+      if (publicInv) {
+        return {
+          source: "public",
+          available: publicInv.available,
+          reason: publicInv.reason,
+          data: publicInv.data || {},
+          fetchedAt: publicInv.fetchedAt || publicInv.data?.fetchedAt,
+          cached: publicInv.data?.cached
+        };
+      }
+      if (data?.items || data?.equipped) {
+        return { source: "account", available: true, data, fetchedAt: data.fetchedAt, cached: data.cached };
+      }
+      if (json?.items || json?.equipped) {
+        return { source: "raw", available: true, data: json, fetchedAt: json.fetchedAt, cached: json.cached };
+      }
+      return { source: "unknown", available: false, reason: "inventory_not_found", data: {} };
+    }
+
+    function itemName(item) {
+      return item.displayName || item.name || item.id || item.stackKey || "Unknown item";
+    }
+
+    function itemCount(item) {
+      const c = Number(item.count ?? item.amount ?? item.quantity ?? 1);
+      return Number.isFinite(c) ? c : 1;
+    }
+
+    function itemRap(item) {
+      const candidates = [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap, item.rawData?.RAP];
+      for (const v of candidates) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return 0;
+    }
+
+    function rawText(item) {
+      return (itemName(item) + " " + (item.class || "") + " " + (item.id || "") + " " + stringify(item.rawData || {}) + " " + stringify(item)).toLowerCase();
+    }
+
+    function isPet(item) {
+      return String(item.class || "").toLowerCase() === "pet";
+    }
+
+    function isHugeFamily(item) {
+      const text = rawText(item);
+      return isPet(item) && (text.includes("huge") || text.includes("titanic") || text.includes("gargantuan"));
+    }
+
+    function isGamepassish(item) {
+      const text = rawText(item);
+      return text.includes("gamepass") || text.includes("auto farm") || text.includes("auto tap") || text.includes("lucky") || text.includes("vip") || text.includes("hatch") || text.includes("enchant slot");
+    }
+
+    function variantBadges(item) {
+      const badges = [];
+      const text = rawText(item);
+      if (text.includes("titanic")) badges.push(["Titanic","good"]);
+      if (text.includes("gargantuan")) badges.push(["Gargantuan","good"]);
+      if (text.includes("huge")) badges.push(["Huge","good"]);
+      if (text.includes("rainbow")) badges.push(["Rainbow","warn"]);
+      if (text.includes("golden") || text.includes('"pt":1') || text.includes("gold")) badges.push(["Golden",""]);
+      if (text.includes("shiny") || text.includes('"sh":true')) badges.push(["Shiny","warn"]);
+      return badges;
+    }
+
+    function setStats(inv) {
+      const account = rawResponse?.data?.account;
+      $("statAccount").textContent = account ? `${account.username || account.displayName || account.robloxUserId}` : "—";
+      $("statInventory").textContent = inv.available ? "Available" : (inv.reason || "Unavailable");
+      $("statStacks").textContent = nfmt(allItems.length);
+      $("statFetched").textContent = inv.fetchedAt ? new Date(inv.fetchedAt).toLocaleString() : "—";
+    }
+
+    function normalizeItems(inv) {
+      const items = inv?.data?.items;
+      return Array.isArray(items) ? items : [];
+    }
+
+    function applyFilters() {
+      const q = $("search").value.trim().toLowerCase();
+      const sortBy = $("sortBy").value;
+      let rows = allItems.filter(item => {
+        if (activeFilter === "pet" && !isPet(item)) return false;
+        if (activeFilter === "huge" && !isHugeFamily(item)) return false;
+        if (activeFilter === "gamepass" && !isGamepassish(item)) return false;
+        if (activeFilter === "valuable" && itemRap(item) <= 0) return false;
+        if (q && !rawText(item).includes(q)) return false;
+        return true;
+      });
+
+      rows.sort((a,b) => {
+        if (sortBy === "count") return itemCount(b) - itemCount(a);
+        if (sortBy === "rap") return itemRap(b) - itemRap(a);
+        if (sortBy === "class") return String(a.class || "").localeCompare(String(b.class || "")) || itemName(a).localeCompare(itemName(b));
+        return itemName(a).localeCompare(itemName(b));
+      });
+
+      $("statShown").textContent = nfmt(rows.length);
+      $("resultLabel").textContent = rows.length ? `${nfmt(rows.length)} item stack${rows.length===1?"":"s"} shown` : "No matching items.";
+      renderRows(rows);
+    }
+
+    function renderRows(rows) {
+      const grid = $("grid");
+      if (!rows.length) {
+        grid.innerHTML = '<div class="notice bad" style="grid-column:1/-1">No items match the current search/filter.</div>';
+        return;
+      }
+      grid.innerHTML = rows.map(item => {
+        const rap = itemRap(item);
+        const badges = variantBadges(item).map(([label, cls]) => `<span class="badge ${cls}">${esc(label)}</span>`).join("");
+        return `<article class="card">
+          <div class="card-title" title="${esc(itemName(item))}">${esc(itemName(item))}</div>
+          <div class="meta">
+            <span>Class<b>${esc(item.class || "—")}</b></span>
+            <span>Count<b>${nfmt(itemCount(item))}</b></span>
+            <span>ID<b title="${esc(item.id || "")}">${esc(item.id || "—")}</b></span>
+            <span>RAP/value<b>${rap ? compact(rap) : "—"}</b></span>
+          </div>
+          ${badges ? `<div class="badges">${badges}</div>` : ""}
+          <details><summary>Raw stack</summary><pre>${esc(stringify(item))}</pre></details>
+        </article>`;
+      }).join("");
+    }
+
+    async function loadPublic() {
+      const slug = $("slug").value.trim() || "Cinnamowopal";
+      const btn = $("loadBtn");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loader"></span>Loading';
+      try {
+        const url = `${API_BASE}/v1/players/${encodeURIComponent(slug)}?include=inventory,profile,extendedProfile`;
+        const res = await fetch(url, { cache: "no-store" });
+        const json = await res.json();
+        rawResponse = json;
+        $("rawBox").textContent = stringify(json);
+        if (!res.ok || json.status === "error") {
+          allItems = [];
+          setStats({available:false,reason:json?.error?.code || res.status});
+          notice(`Public lookup failed for <b>${esc(slug)}</b>. The account may not be linked or public inventory may be disabled.`, "bad");
+          applyFilters();
+          return;
+        }
+        const inv = getInventoryEnvelope(json);
+        if (!inv.available) {
+          allItems = [];
+          setStats(inv);
+          notice(`The player loaded, but inventory is not available: <b>${esc(inv.reason || "not_public")}</b>. Enable public inventory in Big Games, or paste a private account inventory JSON below.`, "bad");
+          applyFilters();
+          return;
+        }
+        allItems = normalizeItems(inv);
+        setStats(inv);
+        notice(`Loaded public inventory for <b>${esc(slug)}</b>. Use the search bar or filters to sample specific items.`, "good");
+        applyFilters();
+      } catch (err) {
+        allItems = [];
+        rawResponse = { error: String(err) };
+        $("rawBox").textContent = stringify(rawResponse);
+        setStats({available:false,reason:"fetch_error"});
+        notice(`Fetch failed: ${esc(err.message || String(err))}`, "bad");
+        applyFilters();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Load public inventory";
+      }
+    }
+
+    function parseManual() {
+      try {
+        const json = JSON.parse($("manualJson").value);
+        rawResponse = json;
+        $("rawBox").textContent = stringify(json);
+        const inv = getInventoryEnvelope(json);
+        allItems = normalizeItems(inv);
+        setStats(inv);
+        notice(`Parsed manual JSON. ${nfmt(allItems.length)} inventory stacks found.`, allItems.length ? "good" : "bad");
+        applyFilters();
+      } catch (err) {
+        notice(`Manual JSON parse failed: ${esc(err.message || String(err))}`, "bad");
+      }
+    }
+
+    document.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip[data-filter]");
+      if (chip) {
+        activeFilter = chip.dataset.filter;
+        document.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === chip));
+        applyFilters();
+      }
+    });
+
+    $("loadBtn").addEventListener("click", loadPublic);
+    $("search").addEventListener("input", applyFilters);
+    $("sortBy").addEventListener("change", applyFilters);
+    $("parseManual").addEventListener("click", parseManual);
+    $("clearManual").addEventListener("click", () => { $("manualJson").value = ""; });
+    $("rawToggle").addEventListener("click", () => {
+      $("rawBox").classList.toggle("hidden");
+      $("rawToggle").textContent = $("rawBox").classList.contains("hidden") ? "Show raw response" : "Hide raw response";
+    });
+
+    loadPublic();
+  </script>
+</body>
+</html>
