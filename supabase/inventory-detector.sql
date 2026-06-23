@@ -1,5 +1,5 @@
 -- PS99 Inventory Detector schema
--- Stores inventory snapshots and item stacks so the Worker can compare daily differences.
+-- Stores inventory snapshots and item stacks so the Worker can compare hourly and daily differences.
 -- Daily windows use America/Denver / Mountain time, with the intended boundary at midnight local time.
 
 create extension if not exists pgcrypto;
@@ -25,12 +25,11 @@ create index if not exists idx_ps99_inventory_snapshots_user_day
   on public.ps99_inventory_snapshots (roblox_user_id, local_day desc, is_boundary desc, captured_at desc);
 
 create table if not exists public.ps99_inventory_snapshot_items (
+  id uuid primary key default gen_random_uuid(),
   snapshot_id uuid not null references public.ps99_inventory_snapshots(id) on delete cascade,
   roblox_user_id bigint not null,
   captured_at timestamptz not null,
   local_day date not null,
-  -- item_key can be the raw Big Games stackKey, which can be very long.
-  -- Do not btree-index item_key directly.
   item_key text not null,
   item_hash text generated always as (md5(item_key)) stored,
   item_class text,
@@ -39,9 +38,11 @@ create table if not exists public.ps99_inventory_snapshot_items (
   variant text,
   count numeric not null default 0,
   rap numeric not null default 0,
-  raw jsonb not null default '{}'::jsonb,
-  primary key (snapshot_id, item_hash)
+  raw jsonb not null default '{}'::jsonb
 );
+
+create index if not exists idx_ps99_inventory_items_user_time
+  on public.ps99_inventory_snapshot_items (roblox_user_id, captured_at desc);
 
 create index if not exists idx_ps99_inventory_items_user_hash_time
   on public.ps99_inventory_snapshot_items (roblox_user_id, item_hash, captured_at desc);
@@ -49,10 +50,24 @@ create index if not exists idx_ps99_inventory_items_user_hash_time
 create index if not exists idx_ps99_inventory_items_snapshot
   on public.ps99_inventory_snapshot_items (snapshot_id);
 
--- Migration/fix for an already-created table where item_key was indexed directly and
--- caused "index row size exceeds btree maximum" errors.
-truncate table public.ps99_inventory_snapshot_items;
+create table if not exists public.ps99_inventory_discord_posts (
+  id uuid primary key default gen_random_uuid(),
+  roblox_user_id bigint not null,
+  post_key text not null,
+  period_type text not null default 'hourly',
+  period_start timestamptz not null,
+  period_end timestamptz not null,
+  snapshot_start_id uuid references public.ps99_inventory_snapshots(id) on delete set null,
+  snapshot_end_id uuid references public.ps99_inventory_snapshots(id) on delete set null,
+  discord_response jsonb,
+  created_at timestamptz not null default now(),
+  unique (roblox_user_id, post_key)
+);
 
+create index if not exists idx_ps99_inventory_discord_posts_user_time
+  on public.ps99_inventory_discord_posts (roblox_user_id, period_end desc);
+
+-- Migration/fix for older versions where snapshot_id + item_key/item_hash was the primary key.
 do $$
 begin
   if exists (
@@ -66,31 +81,39 @@ begin
   end if;
 end $$;
 
+alter table public.ps99_inventory_snapshot_items
+  add column if not exists id uuid default gen_random_uuid();
+
+update public.ps99_inventory_snapshot_items
+set id = gen_random_uuid()
+where id is null;
+
+alter table public.ps99_inventory_snapshot_items
+  alter column id set not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ps99_inventory_snapshot_items_id_pkey'
+      and conrelid = 'public.ps99_inventory_snapshot_items'::regclass
+  ) then
+    alter table public.ps99_inventory_snapshot_items
+      add constraint ps99_inventory_snapshot_items_id_pkey primary key (id);
+  end if;
+end $$;
+
 drop index if exists public.idx_ps99_inventory_items_user_key_time;
-drop index if exists public.idx_ps99_inventory_items_user_hash_time;
 
-alter table public.ps99_inventory_snapshot_items
-  alter column item_key type text using item_key::text;
-
-alter table public.ps99_inventory_snapshot_items
-  add column if not exists item_hash text generated always as (md5(item_key)) stored;
-
-alter table public.ps99_inventory_snapshot_items
-  add constraint ps99_inventory_snapshot_items_pkey primary key (snapshot_id, item_hash);
+create index if not exists idx_ps99_inventory_items_user_time
+  on public.ps99_inventory_snapshot_items (roblox_user_id, captured_at desc);
 
 create index if not exists idx_ps99_inventory_items_user_hash_time
   on public.ps99_inventory_snapshot_items (roblox_user_id, item_hash, captured_at desc);
 
 create index if not exists idx_ps99_inventory_items_snapshot
   on public.ps99_inventory_snapshot_items (snapshot_id);
-
--- Remove failed snapshot shells that were created before item insertion failed.
-delete from public.ps99_inventory_snapshots s
-where not exists (
-  select 1
-  from public.ps99_inventory_snapshot_items i
-  where i.snapshot_id = s.id
-);
 
 notify pgrst, 'reload schema';
 
