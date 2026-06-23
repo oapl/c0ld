@@ -29,7 +29,9 @@ create table if not exists public.ps99_inventory_snapshot_items (
   roblox_user_id bigint not null,
   captured_at timestamptz not null,
   local_day date not null,
-  item_key text not null,
+  -- item_key must remain short because it is indexed in the primary key.
+  -- Worker should store a hashed/stable key here, not the raw Big Games stackKey JSON.
+  item_key varchar(128) not null,
   item_class text,
   item_id text,
   display_name text,
@@ -45,6 +47,39 @@ create index if not exists idx_ps99_inventory_items_user_key_time
 
 create index if not exists idx_ps99_inventory_items_snapshot
   on public.ps99_inventory_snapshot_items (snapshot_id);
+
+-- Migration/fix for an already-created table where item_key was text and a raw stackKey
+-- caused "index row size exceeds btree maximum" errors.
+truncate table public.ps99_inventory_snapshot_items;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ps99_inventory_snapshot_items_pkey'
+      and conrelid = 'public.ps99_inventory_snapshot_items'::regclass
+  ) then
+    alter table public.ps99_inventory_snapshot_items
+      drop constraint ps99_inventory_snapshot_items_pkey;
+  end if;
+end $$;
+
+alter table public.ps99_inventory_snapshot_items
+  alter column item_key type varchar(128) using left(item_key, 128);
+
+alter table public.ps99_inventory_snapshot_items
+  add constraint ps99_inventory_snapshot_items_pkey primary key (snapshot_id, item_key);
+
+-- Remove failed snapshot shells that were created before item insertion failed.
+delete from public.ps99_inventory_snapshots s
+where not exists (
+  select 1
+  from public.ps99_inventory_snapshot_items i
+  where i.snapshot_id = s.id
+);
+
+notify pgrst, 'reload schema';
 
 -- Optional cleanup helper. Adjust retention as needed.
 -- delete from public.ps99_inventory_snapshots where captured_at < now() - interval '90 days';
