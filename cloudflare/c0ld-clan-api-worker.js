@@ -247,7 +247,7 @@ async function handleHistory(request, env) {
   const clan = url.searchParams.get("clan") || clanName(env);
   const battle = url.searchParams.get("battle") || battleKey(env);
   const userId = url.searchParams.get("user_id");
-  const hours = clamp(Number(url.searchParams.get("hours") || 24), 1, Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS));
+  const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
@@ -446,21 +446,29 @@ async function handleClansHistory(request, env) {
 
   const url = new URL(request.url);
   const battle = url.searchParams.get("battle") || battleKey(env);
-  const hours = clamp(Number(url.searchParams.get("hours") || 24), 1, Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS));
+  const clan = url.searchParams.get("clan") || "";
+  const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-  const rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, {
+  const params = {
     select: "snapshot_id,fetched_at,battle_key,rank,clan_name,points,icon_id,icon_url",
     battle_key: `eq.${battle}`,
     fetched_at: `gte.${afterIso}`,
     order: "fetched_at.desc,rank.asc",
     limit: String(limit)
-  });
+  };
+
+  if (clan) {
+    params.clan_name = `eq.${clan}`;
+  }
+
+  const rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, params);
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     battle,
+    clan_name: clan || null,
     hours,
     rows
   }, env);
@@ -1871,6 +1879,16 @@ function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function historyHours(url, env, defaultHours) {
+  const requested = Number(url.searchParams.get("hours") || defaultHours);
+  const retentionHours = Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS);
+  const maxHours = Number.isFinite(retentionHours) && retentionHours > 0
+    ? retentionHours
+    : 100000;
+
+  return clamp(requested, 1, maxHours);
 }
 
 function safeIso(value) {
