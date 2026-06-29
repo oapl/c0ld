@@ -267,6 +267,32 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .sort-btn {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .sort-btn.numeric {
+      text-align: right;
+    }
+
+    .sort-btn:hover,
+    .sort-btn.active {
+      color: var(--text);
+    }
+
+    .sort-mark {
+      margin-left: 4px;
+      color: var(--link);
+      font-size: 11px;
+    }
+
     .clan-cell {
       display: flex;
       align-items: center;
@@ -401,6 +427,8 @@
   <script>
     const THRESHOLDS_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/top-clan-thresholds";
     const LEGACY_WORKER_URL = "https://top-clan-thresholds.opal-dde.workers.dev/";
+    let currentPayload = null;
+    let sortState = { key: "high", direction: "desc" };
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -553,7 +581,81 @@
         formatCompactNumber(payload?.lowThreshold || parseFlexibleNumber(document.getElementById("low-input").value) || 70000000);
     }
 
+    function sortMark(key) {
+      if (sortState.key !== key) return "";
+      return `<span class="sort-mark">${sortState.direction === "desc" ? "desc" : "asc"}</span>`;
+    }
+
+    function sortHeader(key, label, numeric = false) {
+      const active = sortState.key === key ? " active" : "";
+      const cls = numeric ? "sort-btn numeric" : "sort-btn";
+      return `<button class="${cls}${active}" type="button" data-sort="${htmlEscape(key)}">${htmlEscape(label)}${sortMark(key)}</button>`;
+    }
+
+    function rowMetrics(row) {
+      const highCount = Number(row.high_count || 0);
+      const lowCount = Number(row.low_count || 0);
+      const memberCount = Number(row.member_count || 0);
+      const belowLowCount = Number.isFinite(Number(row.below_low_count))
+        ? Number(row.below_low_count)
+        : Math.max(0, memberCount - highCount - lowCount);
+
+      return {
+        rank: Number(row.rank || 999999),
+        clan: String(row.clan_name || "").toLowerCase(),
+        points: Number(row.battle_points ?? row.points ?? row.clan_points ?? 0),
+        high: highCount,
+        mid: lowCount,
+        under: belowLowCount
+      };
+    }
+
+    function sortedRows(rows) {
+      const direction = sortState.direction === "asc" ? 1 : -1;
+
+      return rows.slice().sort((a, b) => {
+        const am = rowMetrics(a);
+        const bm = rowMetrics(b);
+        const av = am[sortState.key];
+        const bv = bm[sortState.key];
+
+        if (sortState.key === "clan") {
+          const textCmp = String(av).localeCompare(String(bv));
+          if (textCmp) return textCmp * direction;
+        } else if (av !== bv) {
+          return (Number(av) - Number(bv)) * direction;
+        }
+
+        if (am.rank !== bm.rank) return am.rank - bm.rank;
+        return am.clan.localeCompare(bm.clan);
+      });
+    }
+
+    function wireSortHeaders() {
+      document.querySelectorAll("[data-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.sort;
+          if (!key) return;
+
+          if (sortState.key === key) {
+            sortState = {
+              key,
+              direction: sortState.direction === "desc" ? "asc" : "desc"
+            };
+          } else {
+            sortState = {
+              key,
+              direction: key === "rank" || key === "clan" ? "asc" : "desc"
+            };
+          }
+
+          if (currentPayload) renderTable(currentPayload);
+        });
+      });
+    }
+
     function renderTable(payload) {
+      currentPayload = payload;
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
@@ -561,27 +663,22 @@
       const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
 
       document.getElementById("table-head-row").innerHTML = `
-        <th>Rank</th>
-        <th>Clan</th>
-        <th class="numeric">Points</th>
-        <th class="numeric">${htmlEscape(highLabel)}+</th>
-        <th class="numeric">${htmlEscape(highLabel)}-${htmlEscape(lowLabel)}</th>
-        <th class="numeric">Under ${htmlEscape(lowLabel)}</th>
+        <th>${sortHeader("rank", "Rank")}</th>
+        <th>${sortHeader("clan", "Clan")}</th>
+        <th class="numeric">${sortHeader("points", "Points", true)}</th>
+        <th class="numeric">${sortHeader("high", `${highLabel}+`, true)}</th>
+        <th class="numeric">${sortHeader("mid", `${highLabel}-${lowLabel}`, true)}</th>
+        <th class="numeric">${sortHeader("under", `Under ${lowLabel}`, true)}</th>
       `;
+      wireSortHeaders();
 
       if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No rows returned.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map(row => {
-        const highCount = Number(row.high_count || 0);
-        const lowCount = Number(row.low_count || 0);
-        const memberCount = Number(row.member_count || 0);
-        const belowLowCount = Number.isFinite(Number(row.below_low_count))
-          ? Number(row.below_low_count)
-          : Math.max(0, memberCount - highCount - lowCount);
-        const points = row.battle_points ?? row.points ?? row.clan_points;
+      tbody.innerHTML = sortedRows(rows).map(row => {
+        const metrics = rowMetrics(row);
 
         return `
           <tr>
@@ -597,10 +694,10 @@
                 </span>
               </div>
             </td>
-            <td class="numeric">${fmtShortNumber(points)}</td>
-            <td class="numeric">${htmlEscape(highCount)}</td>
-            <td class="numeric">${htmlEscape(lowCount)}</td>
-            <td class="numeric">${htmlEscape(belowLowCount)}</td>
+            <td class="numeric">${fmtShortNumber(metrics.points)}</td>
+            <td class="numeric">${htmlEscape(metrics.high)}</td>
+            <td class="numeric">${htmlEscape(metrics.mid)}</td>
+            <td class="numeric">${htmlEscape(metrics.under)}</td>
           </tr>
         `;
       }).join("");
