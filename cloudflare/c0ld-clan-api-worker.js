@@ -619,6 +619,8 @@ async function handleClansHistory(request, env) {
   const clan = url.searchParams.get("clan") || "";
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
+  const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 500);
+  const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 500);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   const params = {
@@ -633,13 +635,26 @@ async function handleClansHistory(request, env) {
     params.clan_name = `eq.${clan}`;
   }
 
-  const rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, params);
+  if (rankMinParam !== null || rankMaxParam !== null) {
+    const rankMin = rankMinParam ?? 1;
+    const rankMax = rankMaxParam ?? 500;
+    params.rank = [
+      `gte.${Math.min(rankMin, rankMax)}`,
+      `lte.${Math.max(rankMin, rankMax)}`
+    ];
+  }
+
+  const rows = (clan || params.rank)
+    ? await supabaseSelectPaged(env, CLANS_SNAPSHOT_TABLE, params, limit)
+    : await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, params);
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     battle,
     clan_name: clan || null,
     hours,
+    rank_min: rankMinParam,
+    rank_max: rankMaxParam,
     rows
   }, env);
 }
@@ -1867,6 +1882,27 @@ async function supabaseSelect(env, tableName, params) {
   return res.json();
 }
 
+async function supabaseSelectPaged(env, tableName, params, limit, pageSize = 1000) {
+  const requested = clamp(Number(limit || 1000), 1, 50000);
+  const size = clamp(Number(pageSize || 1000), 1, 1000);
+  const baseOffset = Number(params.offset || 0);
+  const rows = [];
+
+  while (rows.length < requested) {
+    const pageLimit = Math.min(size, requested - rows.length);
+    const page = await supabaseSelect(env, tableName, {
+      ...params,
+      limit: String(pageLimit),
+      offset: String(baseOffset + rows.length)
+    });
+
+    rows.push(...page);
+    if (page.length < pageLimit) break;
+  }
+
+  return rows;
+}
+
 function supabaseUrl(env, tableName) {
   const base = String(env.SUPABASE_URL || "").replace(/\/$/, "");
   return new URL(`${base}/rest/v1/${encodeURIComponent(tableName)}`);
@@ -2365,6 +2401,16 @@ function historyHours(url, env, defaultHours) {
     : 100000;
 
   return clamp(requested, 1, maxHours);
+}
+
+function boundedIntegerParam(url, name, min, max) {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === "") return null;
+
+  const value = Math.round(Number(raw));
+  if (!Number.isFinite(value)) return null;
+
+  return clamp(value, min, max);
 }
 
 function safeIso(value) {
