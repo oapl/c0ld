@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clan Filter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg:#0d1117;
+      --panel:#161b22;
+      --panel-2:#0d1117;
+      --border:#30363d;
+      --text:#e6edf3;
+      --muted:#8b949e;
+      --link:#ff9b96;
+      --hover:#1f2630;
+      --good:#3fb950;
+      --warn:#f2cc60;
+      --danger:#f85149;
+      --danger-bg:rgba(248,81,73,.12);
+    }
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    a { color:var(--link); text-decoration:none; }
+    header { background:var(--panel); border-bottom:1px solid var(--border); padding:12px 22px 10px; }
+    .header-inner { max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:center; gap:18px; flex-wrap:wrap; }
+    .site-logo-link { display:inline-flex; align-items:center; justify-content:center; line-height:0; }
+    .site-logo { display:block; width:76px; height:auto; border-radius:10px; }
+    .menu-bar { max-width:1200px; margin:9px auto 0; display:flex; justify-content:center; gap:8px; flex-wrap:wrap; }
+    .menu-btn { display:inline-block; padding:7px 12px; border:1px solid var(--border); border-radius:5px; background:var(--panel-2); color:var(--text); cursor:pointer; font-size:13px; line-height:1; transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease; }
+    .menu-btn:hover { background:var(--hover); border-color:var(--link); transform:translateY(-1px); }
+    .menu-btn.active { border-color:var(--link); color:var(--link); background:rgba(248,81,73,.12); }
+    main { max-width:1200px; margin:0 auto; padding:22px 24px 24px; }
+    .page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:18px; }
+    h1 { margin:0 0 4px; font-size:28px; line-height:1.15; }
+    .subtle { color:var(--muted); font-size:13px; }
+    .cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:18px; }
+    .card { border:1px solid var(--border); border-radius:10px; background:var(--panel); padding:16px; min-height:88px; }
+    .label { color:var(--muted); font-size:13px; margin-bottom:8px; }
+    .value { font-size:24px; font-weight:700; line-height:1.2; }
+    .under { color:var(--danger); }
+    .near { color:var(--warn); }
+    .clear { color:var(--good); }
+    .toolbar { display:grid; grid-template-columns:220px minmax(0,1fr) auto; gap:12px; margin-bottom:18px; align-items:center; }
+    input, select, button { border:1px solid var(--border); border-radius:6px; background:var(--panel-2); color:var(--text); padding:11px 12px; font-size:14px; outline:none; }
+    input:focus, select:focus { border-color:var(--link); background:var(--hover); }
+    button { cursor:pointer; }
+    button:hover { border-color:var(--link); background:var(--hover); }
+    .section { border:1px solid var(--border); border-radius:10px; background:var(--panel); overflow:hidden; }
+    .section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:16px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    .section-title { margin:0; font-size:18px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:820px; }
+    th, td { padding:12px 14px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+    th { color:var(--muted); font-size:13px; font-weight:500; }
+    tr:last-child td { border-bottom:0; }
+    .player { display:flex; align-items:center; gap:12px; min-width:260px; }
+    .avatar { width:42px; height:42px; border-radius:8px; background:#21262d; object-fit:cover; flex:0 0 auto; }
+    .name { font-weight:700; }
+    .rank { font-weight:700; }
+    .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .pill { display:inline-flex; align-items:center; justify-content:center; min-width:94px; padding:5px 9px; border-radius:999px; border:1px solid var(--border); font-size:12px; }
+    .pill.under { border-color:rgba(248,81,73,.55); background:rgba(248,81,73,.12); }
+    .pill.near { border-color:rgba(242,204,96,.55); background:rgba(242,204,96,.1); }
+    .pill.clear { border-color:rgba(63,185,80,.55); background:rgba(63,185,80,.1); }
+    .empty, .error { padding:18px; }
+    .empty { color:var(--muted); }
+    .error { border:1px solid var(--danger); border-radius:10px; background:var(--danger-bg); color:#ffb4ad; }
+    @media (max-width:800px) {
+      header { padding:14px 16px 10px; }
+      main { padding:16px; }
+      .menu-bar { justify-content:flex-start; }
+      .cards { grid-template-columns:1fr; }
+      .toolbar { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner"><a class="site-logo-link" href="index.html" aria-label="c0ld home"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn active" href="clan-filter.html">Clan Filter</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+      <a class="menu-btn" href="servers.html">Servers</a>
+      <a class="menu-btn" href="macros.html">Macros</a>
+    </div>
+  </header>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Clan Filter</h1>
+        <div id="meta" class="subtle">Loading current c0ld member points...</div>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+
+    <section class="cards" aria-label="Point bands">
+      <div class="card">
+        <div class="label">Points under 70m</div>
+        <div id="count-under" class="value under">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Points 70m-72.5m</div>
+        <div id="count-near" class="value near">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Points 72.5m+</div>
+        <div id="count-clear" class="value clear">-</div>
+      </div>
+    </section>
+
+    <div class="toolbar">
+      <select id="band-filter" aria-label="Point band">
+        <option value="below" selected>Below 72.5m</option>
+        <option value="under">Under 70m</option>
+        <option value="near">70m-72.5m</option>
+        <option value="clear">72.5m+</option>
+        <option value="all">All members</option>
+      </select>
+      <input id="search" placeholder="Search members..." autocomplete="off" />
+      <select id="sort" aria-label="Sort">
+        <option value="points-asc" selected>Lowest points first</option>
+        <option value="points-desc">Highest points first</option>
+        <option value="rank">Rank order</option>
+        <option value="name">Name</option>
+      </select>
+    </div>
+
+    <section class="section">
+      <div class="section-header">
+        <h2 id="list-title" class="section-title">Members below 72.5m</h2>
+        <div id="list-count" class="subtle">-</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th class="num">Points</th>
+              <th class="num">Needed for 72.5m</th>
+              <th>Band</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="5" class="empty">Loading members...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const API_CURRENT = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current?clan=c0ld";
+    const LOWER_THRESHOLD = 70000000;
+    const TARGET_THRESHOLD = 72500000;
+    const DEFAULT_AVATAR_SVG = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150"><rect width="150" height="150" rx="16" fill="#21262d"/><circle cx="75" cy="58" r="26" fill="#6e7681"/><path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/></svg>`);
+    let rows = [];
+    let currentData = null;
+
+    function fmtNum(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toLocaleString("en-US") : "-";
+    }
+
+    function fmtShort(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "-";
+      if (Math.abs(n) >= 1000000000) return `${(n / 1000000000).toFixed(2).replace(/\.?0+$/, "")}B`;
+      if (Math.abs(n) >= 1000000) return `${(n / 1000000).toFixed(2).replace(/\.?0+$/, "")}M`;
+      return fmtNum(n);
+    }
+
+    function fmtDateTime(value) {
+      if (!value) return "-";
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString(undefined, { dateStyle:"short", timeStyle:"short" });
+    }
+
+    function getPoints(row) {
+      const points = Number(row.total_points ?? row.points);
+      return Number.isFinite(points) ? points : 0;
+    }
+
+    function bandOf(row) {
+      const points = getPoints(row);
+      if (points < LOWER_THRESHOLD) return "under";
+      if (points < TARGET_THRESHOLD) return "near";
+      return "clear";
+    }
+
+    function bandLabel(band) {
+      if (band === "under") return "Under 70m";
+      if (band === "near") return "70m-72.5m";
+      return "72.5m+";
+    }
+
+    function getProfileUrl(row) {
+      if (row.user_id) return `profile.html?id=${encodeURIComponent(row.user_id)}`;
+      return `profile.html?id=${encodeURIComponent(row.username || "")}`;
+    }
+
+    function normalizeRows(rawRows) {
+      return (rawRows || []).map(row => ({
+        rank: row.rank,
+        username: row.username || "Unknown",
+        user_id: row.user_id || null,
+        avatar_url: row.avatar_url || DEFAULT_AVATAR_SVG,
+        total_points: getPoints(row)
+      })).filter(row => row.username || row.user_id);
+    }
+
+    function filteredRows() {
+      const band = document.getElementById("band-filter").value;
+      const search = document.getElementById("search").value.trim().toLowerCase();
+      const sort = document.getElementById("sort").value;
+
+      let visible = rows.filter(row => {
+        const rowBand = bandOf(row);
+        if (band === "below" && rowBand === "clear") return false;
+        if (["under", "near", "clear"].includes(band) && rowBand !== band) return false;
+        if (!search) return true;
+        return String(row.username || "").toLowerCase().includes(search) || String(row.user_id || "").includes(search);
+      });
+
+      visible = visible.slice().sort((a, b) => {
+        if (sort === "points-desc") return getPoints(b) - getPoints(a);
+        if (sort === "rank") return Number(a.rank || 9999) - Number(b.rank || 9999);
+        if (sort === "name") return String(a.username || "").localeCompare(String(b.username || ""));
+        return getPoints(a) - getPoints(b);
+      });
+
+      return visible;
+    }
+
+    function updateCards() {
+      const counts = { under:0, near:0, clear:0 };
+      for (const row of rows) counts[bandOf(row)] += 1;
+      document.getElementById("count-under").textContent = counts.under.toLocaleString("en-US");
+      document.getElementById("count-near").textContent = counts.near.toLocaleString("en-US");
+      document.getElementById("count-clear").textContent = counts.clear.toLocaleString("en-US");
+    }
+
+    function updateMeta() {
+      const battle = currentData?.display_name || currentData?.battle || "Current battle";
+      const snapshot = currentData?.snapshot_at || currentData?.generated_at;
+      document.getElementById("meta").textContent = `${battle} · Last DB update ${fmtDateTime(snapshot)}`;
+    }
+
+    function updateTitle(visible) {
+      const band = document.getElementById("band-filter").value;
+      const titles = {
+        below: "Members below 72.5m",
+        under: "Members under 70m",
+        near: "Members from 70m to 72.5m",
+        clear: "Members at 72.5m+",
+        all: "All current members"
+      };
+
+      document.getElementById("list-title").textContent = titles[band] || titles.below;
+      document.getElementById("list-count").textContent = `${visible.length.toLocaleString("en-US")} member(s)`;
+    }
+
+    function render() {
+      const visible = filteredRows();
+      updateCards();
+      updateTitle(visible);
+
+      const tbody = document.getElementById("tbody");
+      if (!visible.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty">No members in this point band.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = visible.map(row => {
+        const points = getPoints(row);
+        const needed = Math.max(0, TARGET_THRESHOLD - points);
+        const band = bandOf(row);
+
+        return `
+          <tr>
+            <td class="rank">#${fmtNum(row.rank)}</td>
+            <td>
+              <a class="player" href="${getProfileUrl(row)}">
+                <img class="avatar" src="${row.avatar_url}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR_SVG}';">
+                <span class="name">${escapeHtml(row.username)}</span>
+              </a>
+            </td>
+            <td class="num" title="${fmtNum(points)}">${fmtShort(points)}</td>
+            <td class="num" title="${fmtNum(needed)}">${needed ? fmtShort(needed) : "-"}</td>
+            <td><span class="pill ${band}">${bandLabel(band)}</span></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function loadData() {
+      document.getElementById("tbody").innerHTML = `<tr><td colspan="5" class="empty">Loading members...</td></tr>`;
+      const res = await fetch(`${API_CURRENT}&v=${Date.now()}`, { cache:"no-store" });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.message || `HTTP ${res.status}`);
+      currentData = data;
+      rows = normalizeRows(data.rows || []);
+      updateMeta();
+      render();
+    }
+
+    async function main() {
+      document.getElementById("band-filter").addEventListener("change", render);
+      document.getElementById("search").addEventListener("input", render);
+      document.getElementById("sort").addEventListener("change", render);
+      document.getElementById("refresh").addEventListener("click", () => loadData().catch(showError));
+      await loadData();
+    }
+
+    function showError(error) {
+      console.error(error);
+      document.getElementById("tbody").innerHTML = `<tr><td colspan="5" class="error">${escapeHtml(error.message || String(error))}</td></tr>`;
+      document.getElementById("meta").textContent = "Could not load current c0ld member data.";
+    }
+
+    main().catch(showError);
+  </script>
+</body>
+</html>
