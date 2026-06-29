@@ -1186,6 +1186,10 @@
       return String(item?.battle || item?.battle_key || item?.api_battle_key || "").trim();
     }
 
+    function isApiBattle(item) {
+      return String(item?.source || "").toLowerCase() === "api";
+    }
+
     function mergeBattleLists(...lists) {
       const merged = new Map();
 
@@ -1197,16 +1201,34 @@
           const normalized = normalizeKey(key);
           if (!normalized) continue;
 
-          const existing = merged.get(normalized) || {};
+          const existing = merged.get(normalized);
+
+          if (!existing) {
+            merged.set(normalized, {
+              ...item,
+              battle: key,
+              display_name: battleDisplayName(item) || key,
+              first_snapshot: item.first_snapshot || item.battle_start_iso || null,
+              last_snapshot: item.last_snapshot || item.latest_snapshot_at || item.snapshot_at || null,
+              source: isApiBattle(item) ? "api" : "static",
+              has_static_rows: Array.isArray(item.rows)
+            });
+            continue;
+          }
+
+          const itemIsApi = isApiBattle(item);
+          const existingIsApi = isApiBattle(existing);
+          const primary = existingIsApi && !itemIsApi ? existing : item;
+          const fallback = primary === item ? existing : item;
 
           merged.set(normalized, {
-            ...existing,
-            ...item,
-            battle: existing.battle || key,
-            display_name: battleDisplayName(item) || existing.display_name || key,
-            first_snapshot: item.first_snapshot || existing.first_snapshot || item.battle_start_iso || null,
-            last_snapshot: item.last_snapshot || existing.last_snapshot || item.latest_snapshot_at || item.snapshot_at || null,
-            source: existing.source === "static" || item.source !== "api" ? "static" : "api",
+            ...fallback,
+            ...primary,
+            battle: battleKeyOf(primary) || battleKeyOf(fallback) || key,
+            display_name: battleDisplayName(primary) || battleDisplayName(fallback) || key,
+            first_snapshot: primary.first_snapshot || fallback.first_snapshot || primary.battle_start_iso || fallback.battle_start_iso || null,
+            last_snapshot: primary.last_snapshot || fallback.last_snapshot || primary.latest_snapshot_at || primary.snapshot_at || fallback.latest_snapshot_at || fallback.snapshot_at || null,
+            source: existingIsApi || itemIsApi ? "api" : "static",
             has_static_rows: existing.has_static_rows || Array.isArray(item.rows)
           });
         }
@@ -1426,7 +1448,8 @@
         item => normalizeKey(item.battle) === normalizeKey(selected.battle)
       );
 
-      const historicalRows = await buildHistoricalRows(selected.battle);
+      const preferLiveRows = selected.source === "api";
+      const historicalRows = preferLiveRows ? [] : await buildHistoricalRows(selected.battle);
 
       if (historicalRows.length) {
         currentRows = historicalRows;
