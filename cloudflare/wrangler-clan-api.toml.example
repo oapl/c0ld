@@ -7,8 +7,9 @@ crons = ["*/5 * * * *"]
 
 [vars]
 CLAN_NAME = "c0ld"
-CURRENT_BATTLE_NAME = "Backrooms2026"
-AUTO_DETECT_BATTLE = "false"
+CURRENT_BATTLE_NAME = "auto"
+AUTO_DETECT_BATTLE = "true"
+ACTIVE_BATTLE_LOOKUP = "true"
 # Optional overrides. Leave blank to use API metadata when present.
 CURRENT_BATTLE_DISPLAY_NAME = ""
 CURRENT_BATTLE_END_ISO = ""

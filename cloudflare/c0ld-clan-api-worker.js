@@ -4,7 +4,7 @@ const BATTLE_RUNS_TABLE = "c0ld_battle_runs";
 const CLANS_SNAPSHOT_TABLE = "c0ld_clans_snapshots";
 const CLANS_CURRENT_TABLE = "c0ld_clans_current";
 const DEFAULT_CLAN_NAME = "c0ld";
-const DEFAULT_BATTLE_KEY = "AngelBattle2026";
+const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_RETENTION_HOURS = 336;
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const ROBLOX_BATCH_SIZE = 100;
@@ -77,7 +77,7 @@ async function handleIngest(env, source, requestedClan) {
   const api = await fetchClanApi(clan);
   const battles = api.data?.Battles || {};
   const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
-  const resolvedBattleKey = resolveBattleKey(battles, activeBattleMeta?.battleKey || configuredBattleKey, env);
+  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
   if (!battle) {
@@ -278,7 +278,7 @@ async function handleClansIngest(env, source) {
   const api = await fetchClanApi(trackedClan);
   const battles = api.data?.Battles || {};
   const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
-  const resolvedBattleKey = resolveBattleKey(battles, activeBattleMeta?.battleKey || configuredBattleKey, env);
+  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
   const battleMeta = mergeBattleMeta(
     extractBattleMeta(battle || {}, resolvedBattleKey, env),
@@ -1385,15 +1385,63 @@ function requireAdmin(request, env) {
   }
 }
 
-function resolveBattleKey(battles, configuredBattleKey, env = {}) {
+function resolveBattleKey(battles, configuredBattleKey, env = {}, activeBattleKey = "") {
   const autoDetect = String(env.AUTO_DETECT_BATTLE || "").toLowerCase() === "true" ||
     String(configuredBattleKey || "").toLowerCase() === "auto";
+  const activeMatch = findBattleKey(battles, activeBattleKey);
+  const configuredMatch = findBattleKey(battles, configuredBattleKey);
 
-  if (!autoDetect && configuredBattleKey && battles?.[configuredBattleKey]) {
-    return configuredBattleKey;
+  if (autoDetect && activeMatch) {
+    return activeMatch;
   }
 
-  return chooseBattleKey(battles) || configuredBattleKey;
+  if (!autoDetect && configuredMatch) {
+    return configuredMatch;
+  }
+
+  return chooseBattleKey(battles) || configuredMatch || configuredBattleKey;
+}
+
+function findBattleKey(battles, value) {
+  const keys = Object.keys(battles || {});
+  const target = normalizeText(value);
+  if (!target) return "";
+
+  if (battles?.[value]) {
+    return value;
+  }
+
+  for (const key of keys) {
+    if (normalizeText(key) === target || normalizeText(prettifyBattleKey(key)) === target) {
+      return key;
+    }
+  }
+
+  for (const key of keys) {
+    const battle = battles[key] || {};
+    const names = [
+      getFirstValue(battle, [
+        "ConfigName",
+        "configName",
+        "DisplayName",
+        "displayName",
+        "display_name",
+        "BattleName",
+        "battleName",
+        "battle_name",
+        "Name",
+        "name",
+        "Title",
+        "title"
+      ])
+    ];
+
+    if (names.some(name => normalizeText(name) === target)) {
+      return key;
+    }
+  }
+
+  return "";
 }
 
 function chooseBattleKey(battles) {

@@ -468,9 +468,9 @@ async function addGainFields(env, rows, latest) {
   if (!rows.length) return [];
   const latestMs = new Date(latest.fetched_at).getTime();
   if (!Number.isFinite(latestMs)) return rows.map(addNullGains);
-  const windows = [{ key: "gain_5m", minutes: 5, tolerance: 4 }, { key: "gain_1h", minutes: 60, tolerance: 10 }, { key: "gain_6h", minutes: 360, tolerance: 20 }, { key: "gain_12h", minutes: 720, tolerance: 25 }, { key: "gain_24h", minutes: 1440, tolerance: 45 }];
+  const windows = [{ key: "gain_5m", minutes: 5, tolerance: 4, fallback: 20 }, { key: "gain_1h", minutes: 60, tolerance: 10, fallback: 90 }, { key: "gain_6h", minutes: 360, tolerance: 20 }, { key: "gain_12h", minutes: 720, tolerance: 25 }, { key: "gain_24h", minutes: 1440, tolerance: 45 }];
   const maps = {};
-  for (const win of windows) maps[win.key] = await fetchClosestPointMap(env, latest.league_name, latestMs, win.minutes, win.tolerance);
+  for (const win of windows) maps[win.key] = await fetchClosestPointMap(env, latest.league_name, latestMs, win.minutes, win.tolerance, win.fallback);
   return rows.map(row => {
     const out = { ...row };
     const currentPoints = toNumber(row.points) || 0;
@@ -484,10 +484,16 @@ async function addGainFields(env, rows, latest) {
 
 function addNullGains(row) { return { ...row, gain_5m: null, gain_1h: null, gain_6h: null, gain_12h: null, gain_24h: null }; }
 
-async function fetchClosestPointMap(env, league, latestMs, minutes, toleranceMinutes) {
+async function fetchClosestPointMap(env, league, latestMs, minutes, toleranceMinutes, fallbackMinutes = 0) {
   const targetMs = latestMs - minutes * 60 * 1000;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,points", league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - toleranceMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs + toleranceMinutes * 60 * 1000).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
-  if (!rows.length) return new Map();
+  if (rows.length) return closestSnapshotPointMap(rows, targetMs);
+  if (!fallbackMinutes) return new Map();
+  const fallbackRows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,points", league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - fallbackMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
+  return fallbackRows.length ? closestSnapshotPointMap(fallbackRows, targetMs) : new Map();
+}
+
+function closestSnapshotPointMap(rows, targetMs) {
   const snapshots = new Map();
   for (const row of rows) {
     const id = String(row.snapshot_id || "");

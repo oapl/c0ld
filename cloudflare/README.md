@@ -123,8 +123,9 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | Variable | Example |
 |---|---|
 | `CLAN_NAME` | `c0ld` |
-| `CURRENT_BATTLE_NAME` | `Backrooms2026` |
-| `AUTO_DETECT_BATTLE` | `false`; set to `true` to let the Worker pick the active/latest API battle automatically. |
+| `CURRENT_BATTLE_NAME` | `auto`; lets the Worker avoid stale hard-coded battle keys. Set this to a specific API battle key only when you intentionally want to force one battle. |
+| `AUTO_DETECT_BATTLE` | `true`; lets the Worker pick the active/latest API battle automatically. Set to `false` only when you want to force `CURRENT_BATTLE_NAME`. |
+| `ACTIVE_BATTLE_LOOKUP` | Optional. Defaults to `true`; reads Big Games' active battle metadata for display/start/end times. |
 | `CURRENT_BATTLE_DISPLAY_NAME` | Optional override. If blank, the Worker uses the API battle name or prettifies the battle key. |
 | `CURRENT_BATTLE_END_ISO` | Optional override. If blank, the Worker reads the API end timestamp when present. |
 | `SITE_ORIGINS` | `https://oapl.github.io` |
@@ -135,7 +136,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `INGEST_CLANS_LEADERBOARD` | `true` |
 | `CLAN_RANK_TOP_N` | `200` |
 
-Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker chooses the active/latest battle object from the API and stores that battle key in `battle_key`.
+Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
 ### Secrets
 
