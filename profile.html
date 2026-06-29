@@ -104,7 +104,7 @@ function normalizeProfile(value){return String(value||"").trim().toLowerCase().r
 function clan(){return CLANS[normalize(new URLSearchParams(location.search).get("clan"))]||CLANS.c0ld}
 function profileId(){return new URLSearchParams(location.search).get("id")||""}
 function prettifyBattleName(value){return String(value||"").trim().replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/(\D)(20\d{2})$/i,"$1 $2").replace(/\s+/g," ").trim()}
-function isLegacyNongBattle(battle){const key=normalize(battle?.battle||battle?.battle_key||battle?.api_battle_key||battle?.display_name);return key==="safetybattle"||key==="poisonbattle"||key==="poisonturtlebattle"}
+function isLegacyNongBattle(battle){const key=normalize(battle?.battle||battle?.battle_key||battle?.api_battle_key||battle?.display_name);return key==="safetybattle"||key==="poisonbattle"||key==="poisonturtlebattle"||key==="abstractbattle"}
 function battleName(battle){const key=String(battle?.battle||battle?.battle_key||battle?.api_battle_key||"").trim(),raw=String(battle?.display_name||battle?.battle_display_name||"").trim(),pretty=prettifyBattleName(key);if(key&&raw&&normalize(raw).includes("backrooms")&&!normalize(key).includes("backrooms"))return pretty||key;return raw||pretty||key}
 
 function escapeHtml(value){

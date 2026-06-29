@@ -370,11 +370,6 @@
   <main>
     <section class="cards">
       <div class="card">
-        <div class="label">c0ld Current Rank</div>
-        <div class="value" id="c0ld-current-rank">—</div>
-      </div>
-
-      <div class="card">
         <div class="label" id="battle-countdown-label">Current Battle Ends in:</div>
         <div class="value" id="battle-countdown">—</div>
       </div>
@@ -382,6 +377,11 @@
       <div class="card">
         <div class="label">Last DB Update</div>
         <div class="value" id="last-db-update">—</div>
+      </div>
+
+      <div class="card">
+        <div class="label">c0ld Current Rank</div>
+        <div class="value" id="c0ld-current-rank">—</div>
       </div>
 
       <div class="card">
@@ -482,7 +482,7 @@
 
     function isLegacyNongBattle(item) {
       const key = normalizeKey(item?.battle || item?.battle_key || item?.api_battle_key || item?.display_name);
-      return key === "safetybattle" || key === "poisonbattle" || key === "poisonturtlebattle";
+      return key === "safetybattle" || key === "poisonbattle" || key === "poisonturtlebattle" || key === "abstractbattle";
     }
 
     function battleDisplayName(item) {

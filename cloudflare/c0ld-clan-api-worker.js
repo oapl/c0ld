@@ -61,6 +61,12 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/clans/ingest") {
         requireAdmin(request, env);
         response = await handleClansIngest(env, "manual", isForceRequest(url));
+      } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
+        requireAdmin(request, env);
+        response = json({
+          ok: true,
+          results: await runScheduledIngests(env, isForceRequest(url))
+        });
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -75,17 +81,67 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil((async () => {
-      for (const clan of clanNames(env)) {
-        await handleIngest(env, "schedule", clan);
-      }
-
-      if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
-        await handleClansIngest(env, "schedule");
-      }
-    })());
+    ctx.waitUntil(runScheduledIngests(env));
   }
 };
+
+async function runScheduledIngests(env, force = false) {
+  const jobs = clanNames(env).map(clan => ({
+    label: `members:${clan}`,
+    run: () => handleIngest(env, "schedule", clan, force)
+  }));
+
+  if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
+    jobs.push({
+      label: "clans",
+      run: () => handleClansIngest(env, "schedule", force)
+    });
+  }
+
+  const results = [];
+
+  for (const job of jobs) {
+    try {
+      const response = await job.run();
+      const payload = await responseJson(response);
+      const result = {
+        label: job.label,
+        ok: response.ok,
+        status: response.status,
+        skipped: Boolean(payload?.skipped),
+        reason: payload?.reason || null,
+        battle_key: payload?.battle_key || null,
+        rows_inserted: payload?.rows_inserted ?? null,
+        message: payload?.message || null
+      };
+      results.push(result);
+      console.log("scheduled ingest result", JSON.stringify(result));
+    } catch (err) {
+      const result = {
+        label: job.label,
+        ok: false,
+        status: err?.status || 500,
+        skipped: false,
+        reason: "error",
+        battle_key: null,
+        rows_inserted: 0,
+        message: err?.message || String(err)
+      };
+      results.push(result);
+      console.error("scheduled ingest failed", JSON.stringify(result));
+    }
+  }
+
+  return results;
+}
+
+async function responseJson(response) {
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+}
 
 async function handleIngest(env, source, requestedClan, force = false) {
   requireSupabase(env);
