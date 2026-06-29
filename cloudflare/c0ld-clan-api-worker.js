@@ -3,6 +3,7 @@ const CURRENT_TABLE = "c0ld_clan_current";
 const BATTLE_RUNS_TABLE = "c0ld_battle_runs";
 const CLANS_SNAPSHOT_TABLE = "c0ld_clans_snapshots";
 const CLANS_CURRENT_TABLE = "c0ld_clans_current";
+const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_RETENTION_HOURS = 336;
@@ -509,6 +510,18 @@ async function handleClansIngest(env, source, force = false) {
   }
 
   await pruneOldTableRows(env, CLANS_SNAPSHOT_TABLE, fetchedAt);
+  await upsertBattleRun(env, {
+    clan_name: CLANS_BATTLE_RUN_CLAN_NAME,
+    battle_key: resolvedBattleKey,
+    battle_display_name: battleMeta.displayName,
+    battle_started_at: battleMeta.startedAt,
+    battle_ended_at: battleMeta.endedAt,
+    last_seen_at: fetchedAt,
+    latest_snapshot_id: snapshotId,
+    latest_snapshot_at: fetchedAt,
+    is_active: !battleMeta.endedAt || new Date(battleMeta.endedAt).getTime() > Date.now(),
+    updated_at: fetchedAt
+  });
 
   const tracked = rows.find(row => normalizeText(row.clan_name) === normalizeText(trackedClan));
 
@@ -633,18 +646,77 @@ async function handleClansBattles(request, env) {
   requireSupabase(env);
 
   const url = new URL(request.url);
-  const limit = clamp(Number(url.searchParams.get("limit") || 50000), 1, 50000);
-  const rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, {
-    select: "snapshot_id,fetched_at,battle_key,battle_display_name,battle_started_at,battle_ended_at",
-    order: "fetched_at.desc",
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const scanLimit = clamp(
+    Number(url.searchParams.get("scan_limit") || env.CLAN_BATTLES_SCAN_LIMIT || 100000),
+    1000,
+    500000
+  );
+
+  const battleRuns = await supabaseSelect(env, BATTLE_RUNS_TABLE, {
+    select: "battle_key,battle_display_name,battle_started_at,battle_ended_at,first_seen_at,last_seen_at,latest_snapshot_id,latest_snapshot_at,is_active",
+    clan_name: `eq.${CLANS_BATTLE_RUN_CLAN_NAME}`,
+    order: "latest_snapshot_at.desc",
     limit: String(limit)
   });
 
   const byBattle = new Map();
 
-  for (const row of rows) {
+  for (const row of battleRuns) {
     const key = String(row.battle_key || "").trim();
     if (!key) continue;
+
+    byBattle.set(key, {
+      battle: key,
+      display_name: cleanBattleDisplayName(key, row.battle_display_name),
+      battle_start_iso: row.battle_started_at || null,
+      battle_end_iso: row.battle_ended_at || null,
+      first_snapshot: row.first_seen_at || null,
+      last_snapshot: row.latest_snapshot_at || row.last_seen_at || null,
+      latest_snapshot_id: row.latest_snapshot_id || null,
+      snapshot_count: 0,
+      is_active: row.is_active,
+      source: "api"
+    });
+  }
+
+  const rows = await fetchClansBattleListRows(env, scanLimit);
+
+  for (const row of rows) {
+    addClansBattleSummary(byBattle, row);
+  }
+
+  return cacheJson({
+    generated_at: new Date().toISOString(),
+    rows: [...byBattle.values()].sort((a, b) =>
+      new Date(b.last_snapshot || 0) - new Date(a.last_snapshot || 0)
+    ).slice(0, limit)
+  }, env);
+}
+
+async function fetchClansBattleListRows(env, scanLimit) {
+  const pageSize = 1000;
+  const rows = [];
+
+  for (let offset = 0; offset < scanLimit; offset += pageSize) {
+    const page = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, {
+      select: "snapshot_id,fetched_at,battle_key,battle_display_name,battle_started_at,battle_ended_at",
+      order: "fetched_at.desc",
+      limit: String(Math.min(pageSize, scanLimit - offset)),
+      offset: String(offset)
+    });
+
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+function addClansBattleSummary(byBattle, row) {
+    const key = String(row.battle_key || "").trim();
+    if (!key) return;
 
     const existing = byBattle.get(key);
     const fetchedMs = new Date(row.fetched_at || 0).getTime();
@@ -661,7 +733,7 @@ async function handleClansBattles(request, env) {
         snapshot_count: 1,
         source: "api"
       });
-      continue;
+      return;
     }
 
     existing.snapshot_count += 1;
@@ -680,14 +752,6 @@ async function handleClansBattles(request, env) {
       existing.battle_start_iso = row.battle_started_at || existing.battle_start_iso;
       existing.battle_end_iso = row.battle_ended_at || existing.battle_end_iso;
     }
-  }
-
-  return cacheJson({
-    generated_at: new Date().toISOString(),
-    rows: [...byBattle.values()].sort((a, b) =>
-      new Date(b.last_snapshot || 0) - new Date(a.last_snapshot || 0)
-    )
-  }, env);
 }
 
 async function fetchClanApi(clan) {

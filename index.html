@@ -619,8 +619,25 @@
     }
 
     function isLegacyNongBattle(item) {
-      const key = normalizeKey(item?.battle || item?.battle_key || item?.api_battle_key || item?.display_name);
-      return key === "safetybattle" || key === "poisonbattle" || key === "poisonturtlebattle" || key === "abstractbattle";
+      const keys = [
+        item?.battle,
+        item?.battle_key,
+        item?.api_battle_key,
+        item?.display_name,
+        item?.battle_display_name,
+        item?.source_table,
+        item?.c0ld_results_table,
+        item?.clan_results_table
+      ].map(normalizeKey);
+
+      return keys.some(key =>
+        key === "safetybattle" ||
+        key === "poisonbattle" ||
+        key === "poisonturtlebattle" ||
+        key === "abstractbattle" ||
+        key === "abstractc0ld" ||
+        key === "spring2026"
+      );
     }
 
     function battleDisplayName(item) {
