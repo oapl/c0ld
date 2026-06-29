@@ -583,7 +583,7 @@
 
     function sortMark(key) {
       if (sortState.key !== key) return "";
-      return `<span class="sort-mark">${sortState.direction === "desc" ? "desc" : "asc"}</span>`;
+      return `<span class="sort-mark">[sorted]</span>`;
     }
 
     function sortHeader(key, label, numeric = false) {
