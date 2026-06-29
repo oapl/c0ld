@@ -76,6 +76,8 @@
   <script>
     const PREVIOUS_PAGE_SIZE = 25;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const MEMBER_API_BATTLES_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
+    const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
     const CLAN_OPTIONS = ["c0ld", "WMSY"];
     const DEFAULT_AVATAR_SVG = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150"><rect width="150" height="150" rx="16" fill="#21262d"/><circle cx="75" cy="58" r="26" fill="#6e7681"/><path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/></svg>`);
     let allPlayers = [];
@@ -87,6 +89,7 @@
     let lastPreviousTotalPages = 1;
 
     function normalizeClanKey(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
+    function normalizeBattleKey(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
     function normalizeName(value) { return String(value || "").trim().toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9_]/g, ""); }
     function getRequestedClanName() { const raw = new URLSearchParams(location.search).get("clan") || "c0ld"; return CLAN_OPTIONS.find(c => normalizeClanKey(c) === normalizeClanKey(raw)) || "c0ld"; }
     function formatClanDisplayName(clan) { return normalizeClanKey(clan) === "c0ld" ? "c0ld" : String(clan || "").toUpperCase(); }
@@ -99,6 +102,36 @@
     function pageUrl(path, params = {}) { const out = new URL(path, location.href); if (!isDefaultClan()) out.searchParams.set("clan", activeClan); for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") out.searchParams.set(k, String(v)); return `${out.pathname.split("/").pop()}${out.search}${out.hash}`; }
     function getProfileLink(player) { return pageUrl("profile.html", { id: player.user_id || player.profile_key || player.username || "" }); }
     function getAvatarUrl(player) { return player.avatar_url || DEFAULT_AVATAR_SVG; }
+    function isLegacyNongBattle(item) {
+      const keys = [
+        item?.battle,
+        item?.battle_key,
+        item?.api_battle_key,
+        item?.display_name,
+        item?.battle_display_name,
+        item?.source_table,
+        item?.c0ld_results_table,
+        item?.clan_results_table
+      ].map(normalizeBattleKey);
+
+      return keys.some(key =>
+        key === "safetybattle" ||
+        key === "poisonbattle" ||
+        key === "poisonturtlebattle" ||
+        key === "abstractbattle" ||
+        key === "abstractc0ld" ||
+        key === "spring2026"
+      );
+    }
+    function battleIdentity(item) { return String(item?.battle || item?.battle_key || item?.api_battle_key || "").trim(); }
+    function playerLookupKeys(row) {
+      const keys = [];
+      [row?.user_id, row?.profile_key, row?.username, normalizeName(row?.username)].forEach(value => {
+        const key = String(value || "").trim().toLowerCase();
+        if (key && !keys.includes(key)) keys.push(key);
+      });
+      return keys;
+    }
 
     function applyClanChrome() {
       const display = formatClanDisplayName(activeClan);
@@ -160,7 +193,60 @@
     }
     function isCurrentPlayer(p) { return [p.user_id, p.profile_key, p.username, normalizeName(p.username)].some(value => value && currentKeys.has(String(value).toLowerCase())); }
 
-    function mergePlayers(staticRows, liveRows) {
+    function addBattleCount(countSets, row, battle) {
+      const battleKey = normalizeBattleKey(battle);
+      if (!battleKey) return;
+      for (const key of playerLookupKeys(row)) {
+        if (!countSets.has(key)) countSets.set(key, new Set());
+        countSets.get(key).add(battleKey);
+      }
+    }
+    function battleCountFor(row, countSets) {
+      let count = null;
+      for (const key of playerLookupKeys(row)) {
+        const size = countSets.get(key)?.size;
+        if (Number.isFinite(size)) count = Math.max(count ?? 0, size);
+      }
+      return count;
+    }
+    async function loadBattleCountSets(liveRows) {
+      const countSets = new Map();
+      const currentBattle = battleIdentity(currentData) || "current";
+
+      for (const row of liveRows || []) {
+        addBattleCount(countSets, row, currentBattle);
+      }
+
+      const battleList = await fetchLiveJson(withClanQuery(`${MEMBER_API_BATTLES_URL}?limit=100`), `${formatClanDisplayName(activeClan)} battle list`).catch(() => ({ rows: [] }));
+      const battles = [
+        { battle: currentBattle },
+        ...(Array.isArray(battleList?.rows) ? battleList.rows : [])
+      ];
+
+      const seenBattles = new Set();
+      const filteredBattles = battles.filter(battle => {
+        if (isLegacyNongBattle(battle)) return false;
+        const key = battleIdentity(battle);
+        const normalized = normalizeBattleKey(key);
+        if (!normalized || seenBattles.has(normalized)) return false;
+        seenBattles.add(normalized);
+        return true;
+      });
+
+      await Promise.all(filteredBattles.map(async battle => {
+        const key = battleIdentity(battle);
+        const url = withClanQuery(`${MEMBER_API_HISTORY_URL}?battle=${encodeURIComponent(key)}&hours=10000&limit=50000`);
+        const history = await fetchLiveJson(url, `${key} member history`).catch(() => ({ rows: [] }));
+
+        for (const row of Array.isArray(history?.rows) ? history.rows : []) {
+          addBattleCount(countSets, row, key);
+        }
+      }));
+
+      return countSets;
+    }
+
+    function mergePlayers(staticRows, liveRows, battleCountSets) {
       const map = new Map();
       for (const row of staticRows) map.set(playerKey(row), row);
       for (const live of liveRows) {
@@ -169,14 +255,17 @@
         map.set(key, {
           ...existing,
           ...live,
-          total_battles: existing.total_battles ?? live.total_battles,
+          total_battles: battleCountFor({ ...existing, ...live }, battleCountSets) ?? (isDefaultClan() ? null : existing.total_battles ?? live.total_battles),
           avatar_url: live.avatar_url || existing.avatar_url || null,
           profile_key: live.profile_key || existing.profile_key || null,
           user_id: live.user_id || existing.user_id || null,
           username: live.username || existing.username || "Unknown"
         });
       }
-      return [...map.values()];
+      return [...map.values()].map(row => ({
+        ...row,
+        total_battles: battleCountFor(row, battleCountSets) ?? (isDefaultClan() ? null : row.total_battles)
+      }));
     }
 
     function compareByRank(a, b) {
@@ -236,7 +325,8 @@
       buildCurrentKeys(liveRows);
       const staticRows = isDefaultClan() ? normalizeStaticRows(await fetchOptionalJson("Data/players.json", [])) : [];
       playerIndex = isDefaultClan() ? await fetchOptionalJson("Data/player-index.json", []) : [];
-      allPlayers = mergePlayers(staticRows, liveRows);
+      const battleCountSets = await loadBattleCountSets(liveRows);
+      allPlayers = mergePlayers(staticRows, liveRows, battleCountSets);
       render();
     }
     function wireEvents() {
