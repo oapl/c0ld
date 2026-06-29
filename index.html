@@ -609,6 +609,32 @@
         .replace(/[^a-z0-9]/g, "");
     }
 
+    function prettifyBattleName(value) {
+      return String(value || "")
+        .trim()
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/(\D)(20\d{2})$/i, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function isLegacyNongBattle(item) {
+      const key = normalizeKey(item?.battle || item?.battle_key || item?.api_battle_key || item?.display_name);
+      return key === "safetybattle" || key === "poisonbattle" || key === "poisonturtlebattle";
+    }
+
+    function battleDisplayName(item) {
+      const key = battleKeyOf(item);
+      const raw = String(item?.display_name || item?.battle_display_name || "").trim();
+      const pretty = prettifyBattleName(key);
+
+      if (key && raw && normalizeKey(raw).includes("backrooms") && !normalizeKey(key).includes("backrooms")) {
+        return pretty || key;
+      }
+
+      return raw || pretty || key;
+    }
+
     function normalizeName(value) {
       return String(value || "")
         .trim()
@@ -1148,6 +1174,8 @@
 
       for (const list of lists) {
         for (const item of Array.isArray(list) ? list : []) {
+          if (isLegacyNongBattle(item)) continue;
+
           const key = battleKeyOf(item);
           const normalized = normalizeKey(key);
           if (!normalized) continue;
@@ -1158,7 +1186,7 @@
             ...existing,
             ...item,
             battle: existing.battle || key,
-            display_name: item.display_name || item.battle_display_name || existing.display_name || key,
+            display_name: battleDisplayName(item) || existing.display_name || key,
             first_snapshot: item.first_snapshot || existing.first_snapshot || item.battle_start_iso || null,
             last_snapshot: item.last_snapshot || existing.last_snapshot || item.latest_snapshot_at || item.snapshot_at || null,
             source: existing.source === "static" || item.source !== "api" ? "static" : "api",
@@ -1277,7 +1305,7 @@
         { value: "current", label: "Current Clan Battle" },
         ...filteredBattles.map(battle => ({
           value: battle.battle,
-          label: battle.display_name || battle.battle
+          label: battleDisplayName(battle)
         }))
       ];
 
@@ -1379,7 +1407,7 @@
 
         clanData = {
           battle: selected.battle,
-          display_name: selected.display_name || selected.battle,
+          display_name: battleDisplayName(selected),
           battle_end_iso: selected.battle_end_iso || null,
           clan_rank: getNumericPlacement(selected),
           projected_rank: null,
@@ -1388,7 +1416,7 @@
       } else {
         const liveBattle = await fetchLiveJson(
           withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle }),
-          `${TRACKED_CLAN_DISPLAY} ${selected.display_name || selected.battle} leaderboard`
+          `${TRACKED_CLAN_DISPLAY} ${battleDisplayName(selected)} leaderboard`
         );
 
         currentRows = normalizeCurrentRows(liveBattle?.rows || []);
@@ -1396,7 +1424,7 @@
           ...liveBattle,
           snapshot_at: liveBattle?.snapshot_at || selected.last_snapshot || null,
           battle: liveBattle?.battle || selected.battle,
-          display_name: liveBattle?.display_name || selected.display_name || selected.battle,
+          display_name: battleDisplayName(liveBattle || selected),
           battle_end_iso: liveBattle?.battle_end_iso || selected.battle_end_iso || null,
           projected_rank: null
         };

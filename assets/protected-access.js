@@ -115,13 +115,13 @@
     }
 
     if (callback.denied) {
-      setText(statusId, "Your Discord account does not have a required C0LD role for this page.");
+      setText(statusId, "Your Discord account does not have a required c0ld or WMSY role for this page.");
       return { allowed: false, reason: "denied" };
     }
 
     const token = getToken();
     if (!token) {
-      setText(statusId, "Sign in with Discord to verify your C0LD role before this page loads.");
+      setText(statusId, "Sign in with Discord to verify your c0ld or WMSY role before this page loads.");
       return { allowed: false, reason: "missing_token" };
     }
 

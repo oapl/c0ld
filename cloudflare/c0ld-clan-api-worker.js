@@ -106,10 +106,12 @@ async function handleIngest(env, source, requestedClan) {
     .map((row, index) => ({ ...row, rank: index + 1 }));
 
   const battleMeta = mergeBattleMeta(
-    extractBattleMeta(battle, resolvedBattleKey, env),
+    extractBattleMeta(battle, resolvedBattleKey, env, {
+      allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
+      allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
+    }),
     activeBattleMeta,
-    resolvedBattleKey,
-    { allowMismatch: true }
+    resolvedBattleKey
   );
   const snapshotId = `${clan}:${resolvedBattleKey}:${fetchedAt}`;
   const rows = ranked.map(row => ({
@@ -217,7 +219,7 @@ async function handleCurrent(request, env) {
     snapshot_at: latest.fetched_at,
     clan_name: latest.clan_name,
     battle: latest.battle_key,
-    display_name: latest.battle_display_name,
+    display_name: cleanBattleDisplayName(latest.battle_key, latest.battle_display_name),
     battle_start_iso: latest.battle_started_at,
     battle_end_iso: latest.battle_ended_at,
     clan_rank: trackedClan?.rank ?? null,
@@ -291,7 +293,7 @@ async function handleBattles(request, env) {
     clan_name: clan,
     rows: rows.map(row => ({
       battle: row.battle_key,
-      display_name: row.battle_display_name || row.battle_key,
+      display_name: cleanBattleDisplayName(row.battle_key, row.battle_display_name),
       battle_start_iso: row.battle_started_at || null,
       battle_end_iso: row.battle_ended_at || null,
       first_snapshot: row.first_seen_at || null,
@@ -315,10 +317,12 @@ async function handleClansIngest(env, source) {
   const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
   const battleMeta = mergeBattleMeta(
-    extractBattleMeta(battle || {}, resolvedBattleKey, env),
+    extractBattleMeta(battle || {}, resolvedBattleKey, env, {
+      allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
+      allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
+    }),
     activeBattleMeta,
-    resolvedBattleKey,
-    { allowMismatch: true }
+    resolvedBattleKey
   );
   const clans = await fetchTopClans(env);
   const snapshotId = `clans:${resolvedBattleKey}:${fetchedAt}`;
@@ -407,7 +411,9 @@ async function handleClansCurrent(request, env) {
     generated_at: new Date().toISOString(),
     snapshot_at: latestWithActiveMeta?.fetched_at || null,
     battle: latestWithActiveMeta?.battle_key || null,
-    display_name: latestWithActiveMeta?.battle_display_name || null,
+    display_name: latestWithActiveMeta
+      ? cleanBattleDisplayName(latestWithActiveMeta.battle_key, latestWithActiveMeta.battle_display_name)
+      : null,
     battle_start_iso: latestWithActiveMeta?.battle_started_at || null,
     battle_end_iso: latestWithActiveMeta?.battle_ended_at || null,
     clan_name: trackedClan,
@@ -483,7 +489,7 @@ async function handleClansBattles(request, env) {
     if (!existing) {
       byBattle.set(key, {
         battle: key,
-        display_name: row.battle_display_name || key,
+        display_name: cleanBattleDisplayName(key, row.battle_display_name),
         battle_start_iso: row.battle_started_at || null,
         battle_end_iso: row.battle_ended_at || null,
         first_snapshot: row.fetched_at || null,
@@ -507,7 +513,7 @@ async function handleClansBattles(request, env) {
     if (Number.isFinite(fetchedMs) && (!Number.isFinite(lastMs) || fetchedMs > lastMs)) {
       existing.last_snapshot = row.fetched_at || existing.last_snapshot;
       existing.latest_snapshot_id = row.snapshot_id || existing.latest_snapshot_id;
-      existing.display_name = row.battle_display_name || existing.display_name;
+      existing.display_name = cleanBattleDisplayName(key, row.battle_display_name) || existing.display_name;
       existing.battle_start_iso = row.battle_started_at || existing.battle_start_iso;
       existing.battle_end_iso = row.battle_ended_at || existing.battle_end_iso;
     }
@@ -599,7 +605,10 @@ async function fetchActiveClanBattleMeta(env) {
         configData._id,
         data._id
       ) || "").trim();
-      const meta = extractBattleMeta(merged, activeKey || battleKey(env), env);
+      const meta = extractBattleMeta(merged, activeKey || battleKey(env), env, {
+        allowEnvDisplayName: false,
+        allowEnvTiming: false
+      });
 
       return {
         battleKey: activeKey || meta.displayName || null,
@@ -1655,6 +1664,14 @@ function battleDisplayName(env, fallback) {
   return String(env.CURRENT_BATTLE_DISPLAY_NAME || fallback || battleKey(env));
 }
 
+function shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey) {
+  const configured = normalizeText(configuredBattleKey || battleKey(env));
+  const resolved = normalizeText(resolvedBattleKey);
+  if (!configured || configured === "auto") return false;
+
+  return configured === resolved;
+}
+
 function activeBattleMatches(activeMeta, battleKeyValue, displayName) {
   if (!activeMeta) return false;
 
@@ -1681,7 +1698,7 @@ function mergeBattleMeta(meta, activeMeta, battleKeyValue, options = {}) {
 
   return {
     ...meta,
-    displayName: meta?.displayName || activeMeta.displayName,
+    displayName: activeMeta.displayName || meta?.displayName,
     startedAt: meta?.startedAt || activeMeta.startedAt,
     endedAt: meta?.endedAt || activeMeta.endedAt
   };
@@ -1698,15 +1715,37 @@ function mergeLatestMeta(latest, activeMeta, options = {}) {
 
   return {
     ...latest,
-    battle_display_name: latest.battle_display_name || activeMeta.displayName,
-    battle_started_at: latest.battle_started_at || activeMeta.startedAt,
-    battle_ended_at: latest.battle_ended_at || activeMeta.endedAt
+    battle_display_name: activeMeta.displayName || latest.battle_display_name,
+    battle_started_at: activeMeta.startedAt || latest.battle_started_at,
+    battle_ended_at: activeMeta.endedAt || latest.battle_ended_at
   };
 }
 
-function extractBattleMeta(battle, resolvedBattleKey, env) {
+function cleanBattleDisplayName(key, displayName) {
+  const raw = String(displayName || "").trim();
+  const battleKeyValue = String(key || "").trim();
+
+  if (
+    battleKeyValue &&
+    raw &&
+    normalizeText(raw).includes("backrooms") &&
+    !normalizeText(battleKeyValue).includes("backrooms")
+  ) {
+    return prettifyBattleKey(battleKeyValue) || battleKeyValue;
+  }
+
+  return raw || prettifyBattleKey(battleKeyValue) || battleKeyValue;
+}
+
+function extractBattleMeta(battle, resolvedBattleKey, env, options = {}) {
+  const displayOverride = options.allowEnvDisplayName === false
+    ? null
+    : env.CURRENT_BATTLE_DISPLAY_NAME;
+  const endOverride = options.allowEnvTiming === false
+    ? null
+    : env.CURRENT_BATTLE_END_ISO;
   const displayName = String(firstDefined(
-    env.CURRENT_BATTLE_DISPLAY_NAME,
+    displayOverride,
     getFirstValue(battle, [
       "ConfigName",
       "configName",
@@ -1745,7 +1784,7 @@ function extractBattleMeta(battle, resolvedBattleKey, env) {
   ]));
 
   const endedAt = safeIso(firstDefined(
-    env.CURRENT_BATTLE_END_ISO,
+    endOverride,
     getFirstValue(battle, [
       "EndedAt",
       "endedAt",

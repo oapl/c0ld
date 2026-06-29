@@ -103,6 +103,9 @@ function normalize(value){return String(value||"").trim().toLowerCase().replace(
 function normalizeProfile(value){return String(value||"").trim().toLowerCase().replace(/\s+/g,"").replace(/[^a-z0-9_]/g,"")}
 function clan(){return CLANS[normalize(new URLSearchParams(location.search).get("clan"))]||CLANS.c0ld}
 function profileId(){return new URLSearchParams(location.search).get("id")||""}
+function prettifyBattleName(value){return String(value||"").trim().replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/(\D)(20\d{2})$/i,"$1 $2").replace(/\s+/g," ").trim()}
+function isLegacyNongBattle(battle){const key=normalize(battle?.battle||battle?.battle_key||battle?.api_battle_key||battle?.display_name);return key==="safetybattle"||key==="poisonbattle"||key==="poisonturtlebattle"}
+function battleName(battle){const key=String(battle?.battle||battle?.battle_key||battle?.api_battle_key||"").trim(),raw=String(battle?.display_name||battle?.battle_display_name||"").trim(),pretty=prettifyBattleName(key);if(key&&raw&&normalize(raw).includes("backrooms")&&!normalize(key).includes("backrooms"))return pretty||key;return raw||pretty||key}
 
 function escapeHtml(value){
   return String(value??"")
@@ -336,13 +339,14 @@ async function loadLiveProfile(id){
   for(const item of[
     {
       battle:current.battle||"current",
-      display_name:current.display_name||current.battle||"Current Clan Battle",
+      display_name:battleName(current)||"Current Clan Battle",
       battle_start_iso:current.battle_start_iso,
       battle_end_iso:current.battle_end_iso,
       last_snapshot:current.snapshot_at||current.generated_at
     },
     ...(Array.isArray(battleListData.rows)?battleListData.rows:[])
   ]){
+    if(isLegacyNongBattle(item))continue;
     const key=battleIdentity(item)||`battle-${battleMap.size}`;
     if(!battleMap.has(key))battleMap.set(key,item);
   }
@@ -401,7 +405,7 @@ async function loadLiveProfile(id){
 
     battles.push(recalcBattle({
       battle:battleKey||"current",
-      display_name:battleMeta.display_name||battleMeta.battle_display_name||battleKey||"Current Clan Battle",
+      display_name:battleName(battleMeta)||battleKey||"Current Clan Battle",
       battle_first_snapshot:battleMeta.battle_start_iso||battleMeta.first_snapshot||first.fetched_at||null,
       battle_last_snapshot:battleMeta.last_snapshot||last.fetched_at||null,
       first_seen:first.fetched_at||null,
@@ -440,7 +444,23 @@ async function loadStaticProfile(id){
   return res.ok?res.json():null;
 }
 
+function filterProfileBattles(source){
+  if(!source)return null;
+  const battles=(source.battles||[])
+    .filter(battle=>!isLegacyNongBattle(battle))
+    .map(recalcBattle);
+
+  return{
+    ...source,
+    total_battles:battles.length,
+    battles
+  };
+}
+
 function mergeProfiles(staticProfile,liveProfile){
+  staticProfile=filterProfileBattles(staticProfile);
+  liveProfile=filterProfileBattles(liveProfile);
+
   if(!staticProfile)return liveProfile;
   if(!liveProfile)return staticProfile;
 
@@ -448,6 +468,7 @@ function mergeProfiles(staticProfile,liveProfile){
 
   for(const source of[staticProfile,liveProfile]){
     for(const battle of source.battles||[]){
+      if(isLegacyNongBattle(battle))continue;
       const key=battleIdentity(battle)||`battle-${battleMap.size}`;
       const existing=battleMap.get(key);
 
@@ -479,6 +500,7 @@ function mergeProfiles(staticProfile,liveProfile){
 
 function sortedBattles(){
   return(profile?.battles||[])
+    .filter(battle=>!isLegacyNongBattle(battle))
     .map(recalcBattle)
     .sort((a,b)=>new Date(b.battle_last_snapshot||b.last_seen||0)-new Date(a.battle_last_snapshot||a.last_seen||0));
 }
@@ -605,7 +627,7 @@ function render(){
     </section>
 
     <section class="cards">
-      <div class="card"><div class="label">Battles</div><div class="value">${fmt(profile.total_battles)}</div></div>
+      <div class="card"><div class="label">Battles</div><div class="value">${fmt(battles.length)}</div></div>
       <div class="card"><div class="label">Latest Rank</div><div class="value">${fmt(profile.latest_rank)}</div></div>
       <div class="card"><div class="label">Latest Points</div><div class="value">${fmt(profile.latest_points)}</div></div>
       <div class="card"><div class="label">Latest Seen</div><div class="value">${fmtDateTime(profile.latest_seen)}</div></div>
