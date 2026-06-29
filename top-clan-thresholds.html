@@ -385,9 +385,9 @@
               <th>Rank</th>
               <th>Clan</th>
               <th class="numeric">Points</th>
-              <th class="numeric">Under 70M</th>
-              <th class="numeric">70M-72.5M</th>
               <th class="numeric">72.5M+</th>
+              <th class="numeric">72.5M-70M</th>
+              <th class="numeric">Under 70M</th>
             </tr>
           </thead>
           <tbody id="tbody">
@@ -566,9 +566,9 @@
         <th>Rank</th>
         <th>Clan</th>
         <th class="numeric">Points</th>
-        <th class="numeric">Under ${htmlEscape(lowLabel)}</th>
-        <th class="numeric">${htmlEscape(lowLabel)}-${htmlEscape(highLabel)}</th>
         <th class="numeric">${htmlEscape(highLabel)}+</th>
+        <th class="numeric">${htmlEscape(highLabel)}-${htmlEscape(lowLabel)}</th>
+        <th class="numeric">Under ${htmlEscape(lowLabel)}</th>
       `;
 
       if (!rows.length) {
@@ -600,9 +600,9 @@
               </div>
             </td>
             <td class="numeric">${fmtShortNumber(points)}</td>
-            <td class="numeric">${htmlEscape(belowLowCount)}</td>
-            <td class="numeric">${htmlEscape(lowCount)}</td>
             <td class="numeric">${htmlEscape(highCount)}</td>
+            <td class="numeric">${htmlEscape(lowCount)}</td>
+            <td class="numeric">${htmlEscape(belowLowCount)}</td>
           </tr>
         `;
       }).join("");
