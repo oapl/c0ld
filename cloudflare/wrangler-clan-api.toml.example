@@ -10,6 +10,7 @@ CLAN_NAME = "c0ld"
 CURRENT_BATTLE_NAME = "auto"
 AUTO_DETECT_BATTLE = "true"
 ACTIVE_BATTLE_LOOKUP = "true"
+SKIP_ENDED_BATTLE_INGEST = "true"
 # Optional overrides. Leave blank to use API metadata when present.
 CURRENT_BATTLE_DISPLAY_NAME = ""
 CURRENT_BATTLE_END_ISO = ""

@@ -21,12 +21,27 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
+        const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+        const gate = battleIngestGate({
+          activeBattleMeta,
+          battleMeta: activeBattleMeta,
+          battleKey: activeBattleMeta?.battleKey || battleKey(env),
+          env,
+          force: false
+        });
+
         response = json({
           ok: true,
           service: "c0ld-clan-api",
           clan_name: clanName(env),
           clan_names: clanNames(env),
-          battle_key: battleKey(env)
+          configured_battle_key: battleKey(env),
+          active_battle_key: activeBattleMeta?.battleKey || null,
+          active_battle_display_name: activeBattleMeta?.displayName || null,
+          active_battle_started_at: activeBattleMeta?.startedAt || null,
+          active_battle_ended_at: activeBattleMeta?.endedAt || null,
+          ingest_open: gate.allowed,
+          ingest_skip_reason: gate.allowed ? null : gate.reason
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -42,10 +57,10 @@ export default {
         response = await handleClansBattles(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
-        response = await handleIngest(env, "manual", url.searchParams.get("clan"));
+        response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
       } else if (request.method === "POST" && url.pathname === "/api/clans/ingest") {
         requireAdmin(request, env);
-        response = await handleClansIngest(env, "manual");
+        response = await handleClansIngest(env, "manual", isForceRequest(url));
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -72,15 +87,36 @@ export default {
   }
 };
 
-async function handleIngest(env, source, requestedClan) {
+async function handleIngest(env, source, requestedClan, force = false) {
   requireSupabase(env);
 
   const fetchedAt = new Date().toISOString();
   const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
   const configuredBattleKey = battleKey(env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta: activeBattleMeta,
+    battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+    env,
+    force
+  });
+
+  if (!activeGate.allowed) {
+    return skippedIngestResponse({
+      scope: "members",
+      source,
+      clan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+      battleMeta: activeBattleMeta,
+      gate: activeGate
+    });
+  }
+
   const api = await fetchClanApi(clan);
   const battles = api.data?.Battles || {};
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
   const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
@@ -113,6 +149,27 @@ async function handleIngest(env, source, requestedClan) {
     activeBattleMeta,
     resolvedBattleKey
   );
+  const ingestGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey: resolvedBattleKey,
+    env,
+    force
+  });
+
+  if (!ingestGate.allowed) {
+    return skippedIngestResponse({
+      scope: "members",
+      source,
+      clan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey,
+      battleMeta,
+      gate: ingestGate
+    });
+  }
+
   const snapshotId = `${clan}:${resolvedBattleKey}:${fetchedAt}`;
   const rows = ranked.map(row => ({
     snapshot_id: snapshotId,
@@ -305,15 +362,36 @@ async function handleBattles(request, env) {
   }, env);
 }
 
-async function handleClansIngest(env, source) {
+async function handleClansIngest(env, source, force = false) {
   requireSupabase(env);
 
   const fetchedAt = new Date().toISOString();
   const trackedClan = clanName(env);
   const configuredBattleKey = battleKey(env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta: activeBattleMeta,
+    battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+    env,
+    force
+  });
+
+  if (!activeGate.allowed) {
+    return skippedIngestResponse({
+      scope: "clans",
+      source,
+      clan: trackedClan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+      battleMeta: activeBattleMeta,
+      gate: activeGate
+    });
+  }
+
   const api = await fetchClanApi(trackedClan);
   const battles = api.data?.Battles || {};
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
   const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
   const battleMeta = mergeBattleMeta(
@@ -324,6 +402,27 @@ async function handleClansIngest(env, source) {
     activeBattleMeta,
     resolvedBattleKey
   );
+  const ingestGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey: resolvedBattleKey,
+    env,
+    force
+  });
+
+  if (!ingestGate.allowed) {
+    return skippedIngestResponse({
+      scope: "clans",
+      source,
+      clan: trackedClan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey,
+      battleMeta,
+      gate: ingestGate
+    });
+  }
+
   const clans = await fetchTopClans(env);
   const snapshotId = `clans:${resolvedBattleKey}:${fetchedAt}`;
 
@@ -608,6 +707,18 @@ async function fetchActiveClanBattleMeta(env) {
       const activeKey = String(firstDefined(
         data.configName,
         data.ConfigName,
+        data.battleName,
+        data.BattleName,
+        data.name,
+        data.Name,
+        data.title,
+        data.Title,
+        configData.configName,
+        configData.ConfigName,
+        configData.BattleName,
+        configData.battleName,
+        configData.DisplayName,
+        configData.displayName,
         configData.Title,
         configData.title,
         configData._id,
@@ -1534,6 +1645,90 @@ function requireAdmin(request, env) {
   if (token !== env.INGEST_ADMIN_TOKEN) {
     throw httpError(401, "Invalid or missing ingest token.");
   }
+}
+
+function isForceRequest(url) {
+  return ["1", "true", "yes", "force"].includes(
+    String(url.searchParams.get("force") || "").trim().toLowerCase()
+  );
+}
+
+function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force = false }) {
+  if (force) {
+    return { allowed: true, reason: "forced" };
+  }
+
+  if (String(env.SKIP_ENDED_BATTLE_INGEST || "true").toLowerCase() === "false") {
+    return { allowed: true, reason: "disabled" };
+  }
+
+  const meta = battleMeta || activeBattleMeta || {};
+  const startedAt = meta.startedAt || activeBattleMeta?.startedAt || null;
+  const endedAt = meta.endedAt || activeBattleMeta?.endedAt || null;
+  const startMs = isoToMs(startedAt);
+  const endMs = isoToMs(endedAt);
+  const now = Date.now();
+
+  if (Number.isFinite(endMs) && endMs <= now) {
+    return {
+      allowed: false,
+      reason: "battle_ended",
+      message: "Battle has ended; ingest skipped without writing snapshot rows.",
+      battle_key: battleKey || activeBattleMeta?.battleKey || null,
+      battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
+      battle_started_at: startedAt,
+      battle_ended_at: endedAt
+    };
+  }
+
+  if (Number.isFinite(startMs) && startMs > now) {
+    return {
+      allowed: false,
+      reason: "battle_not_started",
+      message: "Battle has not started yet; ingest skipped without writing snapshot rows.",
+      battle_key: battleKey || activeBattleMeta?.battleKey || null,
+      battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
+      battle_started_at: startedAt,
+      battle_ended_at: endedAt
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "battle_open",
+    battle_key: battleKey || activeBattleMeta?.battleKey || null,
+    battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
+    battle_started_at: startedAt,
+    battle_ended_at: endedAt
+  };
+}
+
+function skippedIngestResponse({
+  scope,
+  source,
+  clan,
+  fetchedAt,
+  configuredBattleKey,
+  resolvedBattleKey,
+  battleMeta,
+  gate
+}) {
+  return json({
+    ok: true,
+    skipped: true,
+    reason: gate.reason,
+    message: gate.message || "Ingest skipped without writing snapshot rows.",
+    scope,
+    source,
+    clan_name: clan,
+    configured_battle_key: configuredBattleKey,
+    battle_key: gate.battle_key || resolvedBattleKey || null,
+    battle_display_name: gate.battle_display_name || battleMeta?.displayName || null,
+    battle_started_at: gate.battle_started_at || battleMeta?.startedAt || null,
+    battle_ended_at: gate.battle_ended_at || battleMeta?.endedAt || null,
+    fetched_at: fetchedAt,
+    rows_inserted: 0
+  });
 }
 
 function resolveBattleKey(battles, configuredBattleKey, env = {}, activeBattleKey = "") {
