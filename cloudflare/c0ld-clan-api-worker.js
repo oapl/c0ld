@@ -648,7 +648,7 @@ async function handleClansBattles(request, env) {
   const url = new URL(request.url);
   const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
   const scanLimit = clamp(
-    Number(url.searchParams.get("scan_limit") || env.CLAN_BATTLES_SCAN_LIMIT || 100000),
+    Number(url.searchParams.get("scan_limit") || env.CLAN_BATTLES_SCAN_LIMIT || 20000),
     1000,
     500000
   );
