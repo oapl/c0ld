@@ -432,6 +432,7 @@
     const TARGET_CLAN_ICON_ID = "126265328107529";
     const AUTO_REFRESH_MS = 60 * 1000;
     const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+    const CLANS_API_BATTLES_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/battles";
 
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
@@ -444,6 +445,7 @@
 
     let currentData = null;
     let historyData = [];
+    let liveBattleRows = new Map();
     let selectedBattle = "current";
     let countdownTimer = null;
     let autoRefreshTimer = null;
@@ -622,6 +624,37 @@
       });
     }
 
+    function battleKeyOf(item) {
+      return String(item?.battle || item?.battle_key || item?.api_battle_key || "").trim();
+    }
+
+    function mergeBattleLists(...lists) {
+      const merged = new Map();
+
+      for (const list of lists) {
+        for (const item of Array.isArray(list) ? list : []) {
+          const key = battleKeyOf(item);
+          const normalized = normalizeKey(key);
+          if (!normalized) continue;
+
+          const existing = merged.get(normalized) || {};
+
+          merged.set(normalized, {
+            ...existing,
+            ...item,
+            battle: existing.battle || key,
+            display_name: item.display_name || item.battle_display_name || existing.display_name || key,
+            first_snapshot: item.first_snapshot || existing.first_snapshot || item.battle_start_iso || null,
+            last_snapshot: item.last_snapshot || existing.last_snapshot || item.latest_snapshot_at || item.snapshot_at || null,
+            source: existing.source === "static" || item.source !== "api" ? "static" : "api",
+            has_static_rows: existing.has_static_rows || Array.isArray(item.rows)
+          });
+        }
+      }
+
+      return [...merged.values()];
+    }
+
     function getClanIconUrl(row) {
       return row.icon_url || DEFAULT_CLAN_ICON;
     }
@@ -659,9 +692,27 @@
     function getHistoryRows() {
       const battle = getHistoryBattle();
 
-      if (!battle || !Array.isArray(battle.rows)) return [];
+      if (battle && Array.isArray(battle.rows)) {
+        return battle.rows.map(row => ({
+          rank: row.rank,
+          clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
+          points: row.points ?? row.total_points,
+          gain_5m: row.gain_5m ?? null,
+          gain_1h: row.gain_1h ?? null,
+          gain_12h: row.gain_12h ?? null,
+          gain_24h: row.gain_24h ?? null,
+          projected_rank: row.projected_rank ?? null,
+          projected_points: row.projected_points ?? null,
+          projection_basis: row.projection_basis ?? null,
+          icon_id: row.icon_id || null,
+          icon_url: row.icon_url || null
+        }));
+      }
 
-      return battle.rows.map(row => ({
+      const liveRows = liveBattleRows.get(normalizeKey(selectedBattle));
+      if (!Array.isArray(liveRows)) return [];
+
+      return liveRows.map(row => ({
         rank: row.rank,
         clan_name: cleanClanName(row.clan_name || row.clan || row.name || row.tag),
         points: row.points ?? row.total_points,
@@ -787,10 +838,7 @@
       const filteredHistory = sortBattlesNewestFirst(
         (historyData || []).filter(item =>
           item &&
-          item.battle &&
-          (item.source_table || item.clan_results_table) &&
-          Array.isArray(item.rows) &&
-          item.rows.length > 0
+          item.battle
         )
       );
 
@@ -899,18 +947,44 @@
       return fallback.json();
     }
 
+    async function fetchLiveJson(url, label) {
+      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        throw new Error(`Could not load ${label}. HTTP ${res.status}`);
+      }
+
+      return res.json();
+    }
+
+    async function ensureLiveBattleRows(battle) {
+      if (!battle || battle === "current") return;
+      const key = normalizeKey(battle);
+      if (liveBattleRows.has(key)) return;
+
+      const historyBattle = getHistoryBattle();
+      if (historyBattle && Array.isArray(historyBattle.rows) && historyBattle.rows.length) return;
+
+      const url = `${CLANS_API_CURRENT_URL}?battle=${encodeURIComponent(battle)}`;
+      const data = withProjectedRanks(await fetchLiveJson(url, `${battle} clans leaderboard`));
+      liveBattleRows.set(key, Array.isArray(data?.rows) ? data.rows : []);
+    }
+
     async function loadData() {
       const tbody = document.getElementById("clans-tbody");
 
       try {
         const cacheBust = Date.now();
 
-        const [currentJson, historyRes] = await Promise.all([
+        const [currentJson, liveBattlesJson, historyRes] = await Promise.all([
           fetchJsonWithFallback(
             CLANS_API_CURRENT_URL,
             `Data/clans-current.json?v=${cacheBust}`,
             "live clans leaderboard"
           ),
+          fetchLiveJson(CLANS_API_BATTLES_URL, "live clans battle list").catch(() => ({ rows: [] })),
           fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
@@ -921,13 +995,14 @@
         }
 
         if (historyRes.ok) {
-          historyData = await historyRes.json();
-          if (!Array.isArray(historyData)) historyData = [];
+          const staticHistory = await historyRes.json();
+          historyData = mergeBattleLists(liveBattlesJson?.rows || [], Array.isArray(staticHistory) ? staticHistory : []);
         } else {
-          historyData = [];
+          historyData = mergeBattleLists(liveBattlesJson?.rows || []);
         }
 
         selectedBattle = getUrlBattle();
+        await ensureLiveBattleRows(selectedBattle);
         await renderAll();
       } catch (error) {
         console.error(error);
@@ -939,6 +1014,7 @@
       document.getElementById("battle-select").addEventListener("change", async event => {
         selectedBattle = event.target.value;
         updateUrlBattle(selectedBattle);
+        await ensureLiveBattleRows(selectedBattle);
         await renderAll();
       });
 

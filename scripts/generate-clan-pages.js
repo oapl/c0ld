@@ -130,8 +130,8 @@ async function main() {
     html = html.replace("<head>", "<head>\n  <base href=\"../../\">");
     html = html.replace("<title>Clan Profile</title>", `<title>${escapeHtml(clanName)} - Clan Profile</title>`);
     html = html.replace(
-      /function viewedClanName\(\)\s*\{[\s\S]*?\n\s*\}/,
-      `function viewedClanName() {\n      return ${JSON.stringify(clanName)};\n    }`
+      /<script>\s*const CUR=/,
+      `<script>\nwindow.__CLAN_PROFILE_NAME=${JSON.stringify(clanName)};\nconst CUR=`
     );
 
     html = ensureScript(html, "assets/site-announcement.js");

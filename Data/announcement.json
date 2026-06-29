@@ -1,6 +1,6 @@
 {
-  "enabled": true,
-  "message": "I converted a timezone wrong and deleted the last 2 hours of the CB for Backrooms2026. 😔 Sorry. GG c0ld!",
+  "enabled": false,
+  "message": "",
   "href": "",
   "target": "_self",
   "level": "info"

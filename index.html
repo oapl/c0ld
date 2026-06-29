@@ -477,6 +477,7 @@
   <script>
     const AUTO_REFRESH_MS = 60 * 1000;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+    const MEMBER_API_BATTLES_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
     const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
     const TRACKED_CLAN = getRequestedClanName();
     const TRACKED_CLAN_KEY = normalizeKey(TRACKED_CLAN);
@@ -1138,6 +1139,37 @@
       });
     }
 
+    function battleKeyOf(item) {
+      return String(item?.battle || item?.battle_key || item?.api_battle_key || "").trim();
+    }
+
+    function mergeBattleLists(...lists) {
+      const merged = new Map();
+
+      for (const list of lists) {
+        for (const item of Array.isArray(list) ? list : []) {
+          const key = battleKeyOf(item);
+          const normalized = normalizeKey(key);
+          if (!normalized) continue;
+
+          const existing = merged.get(normalized) || {};
+
+          merged.set(normalized, {
+            ...existing,
+            ...item,
+            battle: existing.battle || key,
+            display_name: item.display_name || item.battle_display_name || existing.display_name || key,
+            first_snapshot: item.first_snapshot || existing.first_snapshot || item.battle_start_iso || null,
+            last_snapshot: item.last_snapshot || existing.last_snapshot || item.latest_snapshot_at || item.snapshot_at || null,
+            source: existing.source === "static" || item.source !== "api" ? "static" : "api",
+            has_static_rows: existing.has_static_rows || Array.isArray(item.rows)
+          });
+        }
+      }
+
+      return [...merged.values()];
+    }
+
     function getBattleEndIso() {
       return clanData?.battle_end_iso || currentData?.battle_end_iso || null;
     }
@@ -1238,11 +1270,7 @@
       const select = document.getElementById("battle-select");
 
       const filteredBattles = sortBattlesForDropdown(
-        (battles || []).filter(battle =>
-          battle &&
-          battle.battle &&
-          battle.c0ld_results_table
-        )
+        (battles || []).filter(battle => battle && battle.battle)
       );
 
       const options = [
@@ -1331,7 +1359,7 @@
 
       const selected = battles.find(b => normalizeKey(b.battle) === normalizeKey(activeBattle));
 
-      if (!selected || !selected.c0ld_results_table) {
+      if (!selected) {
         activeBattle = "current";
         clanData = clansCurrentData || currentData;
         currentRows = normalizeCurrentRows(currentData?.rows || []);
@@ -1340,20 +1368,39 @@
         return;
       }
 
-      currentRows = await buildHistoricalRows(selected.battle);
-
       const historicalMeta = (c0ldHistoryData || []).find(
         item => normalizeKey(item.battle) === normalizeKey(selected.battle)
       );
 
-      clanData = {
-        battle: selected.battle,
-        display_name: selected.display_name || selected.battle,
-        battle_end_iso: null,
-        clan_rank: getNumericPlacement(selected),
-        projected_rank: null,
-        snapshot_at: historicalMeta?.snapshot_at || selected.last_snapshot || null
-      };
+      const historicalRows = await buildHistoricalRows(selected.battle);
+
+      if (historicalRows.length) {
+        currentRows = historicalRows;
+
+        clanData = {
+          battle: selected.battle,
+          display_name: selected.display_name || selected.battle,
+          battle_end_iso: selected.battle_end_iso || null,
+          clan_rank: getNumericPlacement(selected),
+          projected_rank: null,
+          snapshot_at: historicalMeta?.snapshot_at || selected.last_snapshot || null
+        };
+      } else {
+        const liveBattle = await fetchLiveJson(
+          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle }),
+          `${TRACKED_CLAN_DISPLAY} ${selected.display_name || selected.battle} leaderboard`
+        );
+
+        currentRows = normalizeCurrentRows(liveBattle?.rows || []);
+        clanData = {
+          ...liveBattle,
+          snapshot_at: liveBattle?.snapshot_at || selected.last_snapshot || null,
+          battle: liveBattle?.battle || selected.battle,
+          display_name: liveBattle?.display_name || selected.display_name || selected.battle,
+          battle_end_iso: liveBattle?.battle_end_iso || selected.battle_end_iso || null,
+          projected_rank: null
+        };
+      }
 
       startCountdown(null);
       await renderAll();
@@ -1378,9 +1425,14 @@
       const status = document.getElementById("status");
 
       try {
-        const [currentJson, clansJson] = await Promise.all([
+        const cacheBust = Date.now();
+        const [currentJson, clansJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
           fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`),
-          fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard")
+          fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard"),
+          fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`).catch(() => ({ rows: [] })),
+          fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
+          fetch(`Data/c0ld-history.json?v=${cacheBust}`, { cache: "no-store" })
         ]);
 
         currentData = currentJson;
@@ -1404,10 +1456,14 @@
           };
         }
 
-        battles = [];
-        playerIndex = [];
+        const staticBattles = isDefaultClan() && staticBattlesRes.ok ? await staticBattlesRes.json() : [];
+        c0ldHistoryData = isDefaultClan() && historyRes.ok ? await historyRes.json() : [];
+        if (!Array.isArray(c0ldHistoryData)) c0ldHistoryData = [];
+
+        battles = mergeBattleLists(liveBattlesJson?.rows || [], staticBattles, c0ldHistoryData);
+        playerIndex = playerIndexRes.ok ? await playerIndexRes.json() : [];
+        if (!Array.isArray(playerIndex)) playerIndex = [];
         rebuildPlayerIndexMaps();
-        c0ldHistoryData = [];
 
         if (!activeBattle) {
           activeBattle = "current";

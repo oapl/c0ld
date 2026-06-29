@@ -81,6 +81,7 @@ const CLANS={
 
 const MEMBER_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
+const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 
 const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
@@ -329,64 +330,96 @@ async function loadLiveProfile(id){
 
   if(!userId&&!currentRow)return null;
 
-  let history={rows:[]};
+  const battleListData=await optionalJson(`${MEMBER_BATTLES}?clan=${encodeURIComponent(clan().label)}&limit=100`)||{rows:[]};
+  const battleMap=new Map();
 
-  if(userId){
-    const historyUrl=
-      `${MEMBER_HISTORY}?clan=${encodeURIComponent(clan().label)}`+
-      `&user_id=${encodeURIComponent(userId)}`+
-      `${current.battle?`&battle=${encodeURIComponent(current.battle)}`:""}`+
-      `&hours=336&limit=50000`;
-
-    history=await optionalJson(historyUrl)||{rows:[]};
+  for(const item of[
+    {
+      battle:current.battle||"current",
+      display_name:current.display_name||current.battle||"Current Clan Battle",
+      battle_start_iso:current.battle_start_iso,
+      battle_end_iso:current.battle_end_iso,
+      last_snapshot:current.snapshot_at||current.generated_at
+    },
+    ...(Array.isArray(battleListData.rows)?battleListData.rows:[])
+  ]){
+    const key=battleIdentity(item)||`battle-${battleMap.size}`;
+    if(!battleMap.has(key))battleMap.set(key,item);
   }
 
-  const rows=Array.isArray(history.rows)?history.rows.slice():[];
+  const battles=[];
+  let username=currentRow?.username||String(id);
+  let latestPoints=currentRow?rowPoints(currentRow):null;
+  let latestRank=currentRow?.rank??null;
+  let latestSeen=currentRow?.fetched_at||current.snapshot_at||current.generated_at||null;
 
-  if(currentRow){
-    const currentTime=currentRow.fetched_at||current.snapshot_at||current.generated_at;
+  for(const battleMeta of battleMap.values()){
+    let history={rows:[]};
+    const battleKey=battleMeta.battle||battleMeta.battle_key||current.battle||"";
 
-    if(currentTime&&!rows.some(row=>new Date(row.fetched_at||0).getTime()===new Date(currentTime).getTime())){
-      rows.push({
-        fetched_at:currentTime,
-        rank:currentRow.rank,
-        username:currentRow.username,
-        user_id:currentRow.user_id,
-        total_points:rowPoints(currentRow)
-      });
+    if(userId){
+      const historyUrl=
+        `${MEMBER_HISTORY}?clan=${encodeURIComponent(clan().label)}`+
+        `&user_id=${encodeURIComponent(userId)}`+
+        `${battleKey?`&battle=${encodeURIComponent(battleKey)}`:""}`+
+        `&hours=10000&limit=50000`;
+
+      history=await optionalJson(historyUrl)||{rows:[]};
     }
+
+    const rows=Array.isArray(history.rows)?history.rows.slice():[];
+    const isCurrentBattle=normalize(battleKey)===normalize(current.battle||"current");
+
+    if(currentRow&&isCurrentBattle){
+      const currentTime=currentRow.fetched_at||current.snapshot_at||current.generated_at;
+
+      if(currentTime&&!rows.some(row=>new Date(row.fetched_at||0).getTime()===new Date(currentTime).getTime())){
+        rows.push({
+          fetched_at:currentTime,
+          rank:currentRow.rank,
+          username:currentRow.username,
+          user_id:currentRow.user_id,
+          total_points:rowPoints(currentRow)
+        });
+      }
+    }
+
+    if(!rows.length)continue;
+
+    rows.sort((a,b)=>new Date(a.fetched_at||0)-new Date(b.fetched_at||0));
+
+    const first=rows[0]||{};
+    const last=rows[rows.length-1]||{};
+    const ranks=rows.map(row=>finite(row.rank)).filter(Number.isFinite);
+
+    if(isCurrentBattle||!latestSeen||new Date(last.fetched_at||0)>new Date(latestSeen||0)){
+      username=currentRow?.username||last.username||first.username||username;
+      latestPoints=isCurrentBattle&&currentRow?rowPoints(currentRow):rowPoints(last);
+      latestRank=isCurrentBattle&&currentRow?currentRow.rank:last.rank??latestRank;
+      latestSeen=(isCurrentBattle&&currentRow?currentRow.fetched_at:null)||last.fetched_at||latestSeen;
+    }
+
+    battles.push(recalcBattle({
+      battle:battleKey||"current",
+      display_name:battleMeta.display_name||battleMeta.battle_display_name||battleKey||"Current Clan Battle",
+      battle_first_snapshot:battleMeta.battle_start_iso||battleMeta.first_snapshot||first.fetched_at||null,
+      battle_last_snapshot:battleMeta.last_snapshot||last.fetched_at||null,
+      first_seen:first.fetched_at||null,
+      last_seen:last.fetched_at||null,
+      starting_rank:first.rank??null,
+      worst_rank:ranks.length?Math.max(...ranks):null,
+      best_rank:ranks.length?Math.min(...ranks):null,
+      ending_rank:(isCurrentBattle&&currentRow?currentRow.rank:null)??last.rank??null,
+      ending_points:(isCurrentBattle&&currentRow?rowPoints(currentRow):null)??rowPoints(last),
+      series:rows.map(row=>({
+        t:row.fetched_at,
+        rank:row.rank??null,
+        points:Number(rowPoints(row)||0)
+      })).filter(point=>point.t)
+    }));
   }
 
-  if(!rows.length)return null;
-
-  rows.sort((a,b)=>new Date(a.fetched_at||0)-new Date(b.fetched_at||0));
-
-  const first=rows[0]||{};
-  const last=rows[rows.length-1]||{};
-  const ranks=rows.map(row=>finite(row.rank)).filter(Number.isFinite);
-  const username=currentRow?.username||last.username||first.username||String(id);
-  const latestPoints=currentRow?rowPoints(currentRow):rowPoints(last);
-  const latestRank=currentRow?.rank??last.rank??null;
-  const latestSeen=currentRow?.fetched_at||last.fetched_at||current.snapshot_at||current.generated_at||null;
-
-  const battle=recalcBattle({
-    battle:current.battle||"current",
-    display_name:current.display_name||current.battle||"Current Clan Battle",
-    battle_first_snapshot:current.battle_start_iso||first.fetched_at||null,
-    battle_last_snapshot:latestSeen,
-    first_seen:first.fetched_at||null,
-    last_seen:latestSeen,
-    starting_rank:first.rank??null,
-    worst_rank:ranks.length?Math.max(...ranks):null,
-    best_rank:ranks.length?Math.min(...ranks):null,
-    ending_rank:latestRank,
-    ending_points:latestPoints,
-    series:rows.map(row=>({
-      t:row.fetched_at,
-      rank:row.rank??null,
-      points:Number(rowPoints(row)||0)
-    })).filter(point=>point.t)
-  });
+  if(!battles.length)return null;
 
   return{
     aliases:[String(id)],
@@ -394,11 +427,11 @@ async function loadLiveProfile(id){
     user_id:userId||currentRow?.user_id||null,
     avatar_url:currentRow?.avatar_url||null,
     profile_url:(userId||currentRow?.user_id)?`https://www.roblox.com/users/${userId||currentRow.user_id}/profile`:null,
-    total_battles:1,
+    total_battles:battles.length,
     latest_rank:latestRank,
     latest_points:latestPoints,
     latest_seen:latestSeen,
-    battles:[battle]
+    battles
   };
 }
 
