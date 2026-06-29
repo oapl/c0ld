@@ -492,7 +492,8 @@
         item?.clan_results_table
       ].map(normalizeKey);
 
-      return keys.some(key =>
+      const isApiSource = String(item?.source || "").toLowerCase() === "api";
+      const isAlwaysLegacy = keys.some(key =>
         key === "safetybattle" ||
         key === "poisonbattle" ||
         key === "poisonturtlebattle" ||
@@ -500,6 +501,16 @@
         key === "abstractc0ld" ||
         key === "spring2026"
       );
+      const isStaticOnlyLegacy = !isApiSource && keys.some(key =>
+        key === "angelbattle2026" ||
+        key === "angelbattle2026c0ld" ||
+        key === "angelbattle2026clans" ||
+        key === "starrybattle" ||
+        key === "starryc0ld" ||
+        key === "starryclans"
+      );
+
+      return isAlwaysLegacy || isStaticOnlyLegacy;
     }
 
     function battleDisplayName(item) {
@@ -1033,7 +1044,12 @@
         throw new Error(`Could not load ${label}. HTTP ${fallback.status}`);
       }
 
-      return fallback.json();
+      const data = await fallback.json();
+      if (isLegacyNongBattle(data)) {
+        throw new Error(`Refusing to display legacy NONG fallback data for ${label}.`);
+      }
+
+      return data;
     }
 
     async function fetchLiveJson(url, label) {

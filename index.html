@@ -630,7 +630,8 @@
         item?.clan_results_table
       ].map(normalizeKey);
 
-      return keys.some(key =>
+      const isApiSource = String(item?.source || "").toLowerCase() === "api";
+      const isAlwaysLegacy = keys.some(key =>
         key === "safetybattle" ||
         key === "poisonbattle" ||
         key === "poisonturtlebattle" ||
@@ -638,6 +639,16 @@
         key === "abstractc0ld" ||
         key === "spring2026"
       );
+      const isStaticOnlyLegacy = !isApiSource && keys.some(key =>
+        key === "angelbattle2026" ||
+        key === "angelbattle2026c0ld" ||
+        key === "angelbattle2026clans" ||
+        key === "starrybattle" ||
+        key === "starryc0ld" ||
+        key === "starryclans"
+      );
+
+      return isAlwaysLegacy || isStaticOnlyLegacy;
     }
 
     function battleDisplayName(item) {

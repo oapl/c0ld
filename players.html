@@ -114,7 +114,8 @@
         item?.clan_results_table
       ].map(normalizeBattleKey);
 
-      return keys.some(key =>
+      const isApiSource = String(item?.source || "").toLowerCase() === "api";
+      const isAlwaysLegacy = keys.some(key =>
         key === "safetybattle" ||
         key === "poisonbattle" ||
         key === "poisonturtlebattle" ||
@@ -122,6 +123,16 @@
         key === "abstractc0ld" ||
         key === "spring2026"
       );
+      const isStaticOnlyLegacy = !isApiSource && keys.some(key =>
+        key === "angelbattle2026" ||
+        key === "angelbattle2026c0ld" ||
+        key === "angelbattle2026clans" ||
+        key === "starrybattle" ||
+        key === "starryc0ld" ||
+        key === "starryclans"
+      );
+
+      return isAlwaysLegacy || isStaticOnlyLegacy;
     }
     function battleIdentity(item) { return String(item?.battle || item?.battle_key || item?.api_battle_key || "").trim(); }
     function playerLookupKeys(row) {
@@ -219,7 +230,7 @@
 
       const battleList = await fetchLiveJson(withClanQuery(`${MEMBER_API_BATTLES_URL}?limit=100`), `${formatClanDisplayName(activeClan)} battle list`).catch(() => ({ rows: [] }));
       const battles = [
-        { battle: currentBattle },
+        { battle: currentBattle, source: "api" },
         ...(Array.isArray(battleList?.rows) ? battleList.rows : [])
       ];
 
