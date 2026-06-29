@@ -56,6 +56,8 @@ export default {
         response = await handleClansHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/battles") {
         response = await handleClansBattles(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/top-clan-thresholds") {
+        response = await handleTopClanThresholds(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
@@ -694,6 +696,142 @@ async function handleClansBattles(request, env) {
   }, env);
 }
 
+async function handleTopClanThresholds(request, env) {
+  const url = new URL(request.url);
+  const top = clamp(Math.round(parseThresholdNumber(url.searchParams.get("top")) || 10), 1, 25);
+  const highThreshold = parseThresholdNumber(
+    firstDefined(url.searchParams.get("high"), url.searchParams.get("highThreshold"), "72.5M")
+  );
+  const lowThreshold = parseThresholdNumber(
+    firstDefined(url.searchParams.get("low"), url.searchParams.get("lowThreshold"), "70M")
+  );
+
+  if (!Number.isFinite(highThreshold) || highThreshold <= 0) {
+    throw httpError(400, "High threshold is invalid.");
+  }
+
+  if (!Number.isFinite(lowThreshold) || lowThreshold <= 0) {
+    throw httpError(400, "Low threshold is invalid.");
+  }
+
+  if (lowThreshold >= highThreshold) {
+    throw httpError(400, "Low threshold must be lower than high threshold.");
+  }
+
+  const configuredBattleKey = battleKey(env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const topClans = await fetchTopClans(env, top);
+  const generatedAt = new Date().toISOString();
+  const rows = [];
+  let selectedBattleKey = activeBattleMeta?.battleKey || configuredBattleKey;
+  let selectedBattleDisplayName = activeBattleMeta?.displayName || prettifyBattleKey(selectedBattleKey) || selectedBattleKey;
+
+  for (const clan of topClans) {
+    try {
+      const api = await fetchClanApi(clan.clan_name);
+      const data = api.data || {};
+      const battles = data.Battles || data.battles || {};
+      const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
+      const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+
+      if (!battle) {
+        rows.push(topClanThresholdErrorRow(clan, "No matching battle data found."));
+        continue;
+      }
+
+      const battleMeta = mergeBattleMeta(
+        extractBattleMeta(battle, resolvedBattleKey, env, {
+          allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
+          allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
+        }),
+        activeBattleMeta,
+        resolvedBattleKey
+      );
+      const members = normalizeMembers(data, battle);
+      const counts = countThresholdMembers(members, highThreshold, lowThreshold);
+
+      selectedBattleKey = resolvedBattleKey || selectedBattleKey;
+      selectedBattleDisplayName = battleMeta.displayName || selectedBattleDisplayName;
+
+      rows.push({
+        rank: clan.rank,
+        clan_name: clan.clan_name,
+        icon_id: clan.icon_id || null,
+        icon_url: clan.icon_url || null,
+        clan_points: clan.points,
+        battle_points: counts.total_points,
+        battle_key: resolvedBattleKey,
+        battle_display_name: battleMeta.displayName,
+        high_count: counts.high_count,
+        low_count: counts.low_count,
+        below_low_count: counts.below_low_count,
+        member_count: counts.member_count,
+        error: null
+      });
+    } catch (err) {
+      rows.push(topClanThresholdErrorRow(clan, err?.message || String(err)));
+    }
+  }
+
+  return cacheJson({
+    ok: true,
+    generated_at: generatedAt,
+    top,
+    highThreshold,
+    lowThreshold,
+    battle: selectedBattleKey,
+    display_name: cleanBattleDisplayName(selectedBattleKey, selectedBattleDisplayName),
+    activeBattle: {
+      configName: cleanBattleDisplayName(selectedBattleKey, selectedBattleDisplayName),
+      battleKey: selectedBattleKey
+    },
+    rows
+  }, env);
+}
+
+function topClanThresholdErrorRow(clan, error) {
+  return {
+    rank: clan.rank,
+    clan_name: clan.clan_name,
+    icon_id: clan.icon_id || null,
+    icon_url: clan.icon_url || null,
+    clan_points: clan.points,
+    battle_points: null,
+    battle_key: null,
+    battle_display_name: null,
+    high_count: 0,
+    low_count: 0,
+    below_low_count: 0,
+    member_count: 0,
+    error
+  };
+}
+
+function countThresholdMembers(members, highThreshold, lowThreshold) {
+  const counts = {
+    high_count: 0,
+    low_count: 0,
+    below_low_count: 0,
+    member_count: members.length,
+    total_points: 0
+  };
+
+  for (const member of members) {
+    const points = toNumber(member.total_points) || 0;
+    counts.total_points += points;
+
+    if (points >= highThreshold) {
+      counts.high_count += 1;
+    } else if (points >= lowThreshold) {
+      counts.low_count += 1;
+    } else {
+      counts.below_low_count += 1;
+    }
+  }
+
+  return counts;
+}
+
 async function fetchClansBattleListRows(env, scanLimit) {
   const pageSize = 1000;
   const rows = [];
@@ -868,8 +1006,8 @@ async function fetchActiveClanBattleMeta(env) {
   return null;
 }
 
-async function fetchTopClans(env) {
-  const topN = clamp(Number(env.CLAN_RANK_TOP_N || 100), 1, 500);
+async function fetchTopClans(env, requestedTopN = null) {
+  const topN = clamp(Number(requestedTopN || env.CLAN_RANK_TOP_N || 100), 1, 500);
   const maxPages = Math.ceil(topN / CLANS_PAGE_SIZE) + 2;
   const hosts = [
     "https://biggamesapi.io/api/clans",
@@ -2194,6 +2332,29 @@ function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseThresholdNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const cleaned = raw.replace(/,/g, "").replace(/\s+/g, "").toUpperCase();
+  const match = cleaned.match(/^(\d+(?:\.\d+)?)([KMBT])?$/);
+  if (!match) return null;
+
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) return null;
+
+  const multipliers = {
+    "": 1,
+    K: 1e3,
+    M: 1e6,
+    B: 1e9,
+    T: 1e12
+  };
+
+  const valueNumber = Math.round(base * (multipliers[match[2] || ""] || 1));
+  return Number.isFinite(valueNumber) ? valueNumber : null;
 }
 
 function historyHours(url, env, defaultHours) {

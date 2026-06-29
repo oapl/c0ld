@@ -289,6 +289,15 @@
       padding: 20px 18px;
     }
 
+    .row-error {
+      color: var(--danger);
+      font-size: 12px;
+      font-weight: 400;
+      margin-top: 4px;
+      max-width: 340px;
+      white-space: normal;
+    }
+
     .card-help {
       color: var(--muted);
       font-size: 12px;
@@ -324,8 +333,8 @@
 
     <div class="menu-bar">
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
-      <a class="menu-btn" href="wmsy.html">WMSY Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="clan-filter.html">Clan Filter</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
       <a class="menu-btn" href="servers.html">Servers</a>
       <a class="menu-btn" href="macros.html">Macros</a>
@@ -348,15 +357,15 @@
       </div>
 
       <div class="card">
-        <div class="label">1B+ Threshold</div>
-        <input id="high-input" class="card-input" type="text" value="1B" />
-        <div class="card-help">Examples: 500K, 750M, 1B, 10,000,000</div>
+        <div class="label">72.5M+ Threshold</div>
+        <input id="high-input" class="card-input" type="text" value="72.5M" />
+        <div class="card-help">Members at or above this amount</div>
       </div>
 
       <div class="card">
-        <div class="label">750M+ Threshold</div>
-        <input id="low-input" class="card-input" type="text" value="750M" />
-        <div class="card-help">This bucket excludes anyone already counted in 1B+</div>
+        <div class="label">70M Threshold</div>
+        <input id="low-input" class="card-input" type="text" value="70M" />
+        <div class="card-help">Middle bucket is 70M up to 72.5M</div>
       </div>
     </section>
 
@@ -375,16 +384,15 @@
             <tr id="table-head-row">
               <th>Rank</th>
               <th>Clan</th>
-              <th class="numeric">Clan Points</th>
-              <th class="numeric">Battle Points</th>
-              <th class="numeric">1B+</th>
-              <th class="numeric">750M+</th>
-              <th class="numeric">Members</th>
+              <th class="numeric">Points</th>
+              <th class="numeric">Under 70M</th>
+              <th class="numeric">70M-72.5M</th>
+              <th class="numeric">72.5M+</th>
             </tr>
           </thead>
           <tbody id="tbody">
             <tr>
-              <td colspan="7" class="empty-state">No data loaded yet.</td>
+              <td colspan="6" class="empty-state">No data loaded yet.</td>
             </tr>
           </tbody>
         </table>
@@ -393,7 +401,8 @@
   </main>
 
   <script>
-    const WORKER_URL = "https://top-clan-thresholds.opal-dde.workers.dev/";
+    const THRESHOLDS_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/top-clan-thresholds";
+    const LEGACY_WORKER_URL = "https://top-clan-thresholds.opal-dde.workers.dev/";
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -404,9 +413,9 @@
       `);
 
     const STORAGE_KEYS = {
-      top: "ps99_top_clan_thresholds_top",
-      high: "ps99_top_clan_thresholds_high",
-      low: "ps99_top_clan_thresholds_low"
+      top: "ps99_top_clan_member_thresholds_top",
+      high: "ps99_top_clan_member_thresholds_high",
+      low: "ps99_top_clan_member_thresholds_low"
     };
 
     function htmlEscape(value) {
@@ -534,58 +543,69 @@
 
     function renderCards(payload) {
       document.getElementById("card-battle").textContent =
-        payload?.activeBattle?.configName || "—";
+        payload?.activeBattle?.configName || payload?.display_name || payload?.battle || "—";
 
       document.getElementById("top-input").value =
         String(payload?.top || document.getElementById("top-input").value || "10");
 
       document.getElementById("high-input").value =
-        formatCompactNumber(payload?.highThreshold || parseFlexibleNumber(document.getElementById("high-input").value) || 1000000000);
+        formatCompactNumber(payload?.highThreshold || parseFlexibleNumber(document.getElementById("high-input").value) || 72500000);
 
       document.getElementById("low-input").value =
-        formatCompactNumber(payload?.lowThreshold || parseFlexibleNumber(document.getElementById("low-input").value) || 750000000);
+        formatCompactNumber(payload?.lowThreshold || parseFlexibleNumber(document.getElementById("low-input").value) || 70000000);
     }
 
     function renderTable(payload) {
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
-      const highLabel = formatCompactNumber(payload?.highThreshold || 0) + "+";
-      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0) + "+";
+      const highLabel = formatCompactNumber(payload?.highThreshold || 0);
+      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
 
       document.getElementById("table-head-row").innerHTML = `
         <th>Rank</th>
         <th>Clan</th>
-        <th class="numeric">Clan Points</th>
-        <th class="numeric">Battle Points</th>
-        <th class="numeric">${htmlEscape(highLabel)}</th>
-        <th class="numeric">${htmlEscape(lowLabel)}</th>
-        <th class="numeric">Members</th>
+        <th class="numeric">Points</th>
+        <th class="numeric">Under ${htmlEscape(lowLabel)}</th>
+        <th class="numeric">${htmlEscape(lowLabel)}-${htmlEscape(highLabel)}</th>
+        <th class="numeric">${htmlEscape(highLabel)}+</th>
       `;
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No rows returned.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map(row => `
-        <tr>
-          <td>#${htmlEscape(row.rank)}</td>
-          <td>
-            <div class="clan-cell">
-              <img class="clan-icon" src="${htmlEscape(row.icon_url || DEFAULT_CLAN_ICON)}" alt=""
-                   loading="lazy"
-                   onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">
-              <span>${htmlEscape(row.clan_name)}</span>
-            </div>
-          </td>
-          <td class="numeric">${fmtShortNumber(row.clan_points)}</td>
-          <td class="numeric">${fmtShortNumber(row.battle_points)}</td>
-          <td class="numeric">${htmlEscape(row.high_count)}</td>
-          <td class="numeric">${htmlEscape(row.low_count)}</td>
-          <td class="numeric">${htmlEscape(row.member_count)}</td>
-        </tr>
-      `).join("");
+      tbody.innerHTML = rows.map(row => {
+        const highCount = Number(row.high_count || 0);
+        const lowCount = Number(row.low_count || 0);
+        const memberCount = Number(row.member_count || 0);
+        const belowLowCount = Number.isFinite(Number(row.below_low_count))
+          ? Number(row.below_low_count)
+          : Math.max(0, memberCount - highCount - lowCount);
+        const points = row.battle_points ?? row.points ?? row.clan_points;
+
+        return `
+          <tr>
+            <td>#${htmlEscape(row.rank)}</td>
+            <td>
+              <div class="clan-cell">
+                <img class="clan-icon" src="${htmlEscape(row.icon_url || DEFAULT_CLAN_ICON)}" alt=""
+                     loading="lazy"
+                     onerror="this.onerror=null;this.src='${DEFAULT_CLAN_ICON}';">
+                <span>
+                  <span>${htmlEscape(row.clan_name)}</span>
+                  ${row.error ? `<div class="row-error">${htmlEscape(row.error)}</div>` : ""}
+                </span>
+              </div>
+            </td>
+            <td class="numeric">${fmtShortNumber(points)}</td>
+            <td class="numeric">${htmlEscape(belowLowCount)}</td>
+            <td class="numeric">${htmlEscape(lowCount)}</td>
+            <td class="numeric">${htmlEscape(highCount)}</td>
+          </tr>
+        `;
+      }).join("");
     }
 
     function getParsedInputs() {
@@ -598,18 +618,66 @@
       }
 
       if (!Number.isFinite(high)) {
-        throw new Error("1B+ Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+        throw new Error("72.5M+ Threshold is invalid. Try values like 70M, 72.5M, or 10,000,000.");
       }
 
       if (!Number.isFinite(low)) {
-        throw new Error("750M+ Threshold is invalid. Try values like 500K, 750M, 1B, or 10,000,000.");
+        throw new Error("70M Threshold is invalid. Try values like 70M, 72.5M, or 10,000,000.");
       }
 
       if (low >= high) {
-        throw new Error("750M+ Threshold must be lower than 1B+ Threshold.");
+        throw new Error("70M Threshold must be lower than 72.5M+ Threshold.");
       }
 
       return { top, high, low };
+    }
+
+    function buildThresholdUrl(baseUrl, top, high, low) {
+      const url = new URL(baseUrl);
+      url.searchParams.set("top", String(top));
+      url.searchParams.set("high", String(high));
+      url.searchParams.set("low", String(low));
+      return url.toString();
+    }
+
+    async function fetchJsonOrThrow(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      const text = await res.text();
+      let payload = null;
+
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(payload?.message || payload?.error || text || `Worker request failed (${res.status}).`);
+      }
+
+      if (payload?.ok === false) {
+        throw new Error(payload?.message || payload?.error || "Lookup failed.");
+      }
+
+      return payload;
+    }
+
+    async function fetchThresholds(top, high, low) {
+      try {
+        return await fetchJsonOrThrow(buildThresholdUrl(THRESHOLDS_URL, top, high, low));
+      } catch (primaryError) {
+        const legacyUrl =
+          `${LEGACY_WORKER_URL}?mode=top-thresholds` +
+          `&top=${encodeURIComponent(top)}` +
+          `&high=${encodeURIComponent(high)}` +
+          `&low=${encodeURIComponent(low)}`;
+
+        try {
+          return await fetchJsonOrThrow(legacyUrl);
+        } catch {
+          throw primaryError;
+        }
+      }
     }
 
     async function loadThresholds() {
@@ -629,24 +697,7 @@
       setStatus("Loading top clan threshold counts...", "info");
 
       try {
-        const url =
-          `${WORKER_URL}?mode=top-thresholds` +
-          `&top=${encodeURIComponent(top)}` +
-          `&high=${encodeURIComponent(high)}` +
-          `&low=${encodeURIComponent(low)}`;
-
-        const res = await fetch(url, { cache: "no-store" });
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Worker request failed (${res.status}).`);
-        }
-
-        const payload = await res.json();
-
-        if (!payload?.ok) {
-          throw new Error(payload?.error || "Lookup failed.");
-        }
+        const payload = await fetchThresholds(top, high, low);
 
         renderCards(payload);
         renderTable(payload);
@@ -682,7 +733,7 @@
 
       try {
         const url =
-          `${WORKER_URL}?mode=post-top-thresholds` +
+          `${LEGACY_WORKER_URL}?mode=post-top-thresholds` +
           `&top=${encodeURIComponent(top)}` +
           `&high=${encodeURIComponent(high)}` +
           `&low=${encodeURIComponent(low)}`;
@@ -730,7 +781,7 @@
 
       try {
         const url =
-          `${WORKER_URL}?mode=post-top-thresholds-image` +
+          `${LEGACY_WORKER_URL}?mode=post-top-thresholds-image` +
           `&top=${encodeURIComponent(top)}` +
           `&high=${encodeURIComponent(high)}` +
           `&low=${encodeURIComponent(low)}`;
