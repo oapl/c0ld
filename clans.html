@@ -375,7 +375,7 @@
       </div>
 
       <div class="card">
-        <div class="label">Current Clan Battle Ends In</div>
+        <div class="label" id="battle-countdown-label">Current Battle Ends in:</div>
         <div class="value" id="battle-countdown">—</div>
       </div>
 
@@ -847,6 +847,11 @@
     function renderCards() {
       const currentRows = getCurrentRows();
       const currentC0ld = currentRows.find(row => isTargetClan(row)) || null;
+      const countdownLabel = document.getElementById("battle-countdown-label");
+
+      if (countdownLabel) {
+        countdownLabel.textContent = `${battleDisplayName(currentData) || "Current Clan Battle"} Ends in:`;
+      }
 
       document.getElementById("c0ld-current-rank").textContent =
         fmtRank(currentC0ld?.rank ?? currentData?.clan_rank);
