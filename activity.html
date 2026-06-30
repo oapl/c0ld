@@ -389,6 +389,10 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
+// Fallback only. The active window is read from the current battle API response.
+const FALLBACK_EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
+const FALLBACK_EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
+
 const PRE_START_BUFFER_HOURS = 12;
 const MAX_HISTORY_HOURS = 336;
 const PER_USER_HISTORY_LIMIT = 5000;
@@ -550,6 +554,7 @@ function getEventStartMs() {
     safeMs(current?.battle_started_at) ??
     safeMs(current?.first_snapshot) ??
     safeMs(current?.snapshot_at) ??
+    safeMs(FALLBACK_EVENT_START_ISO) ??
     Date.now()
   );
 }
@@ -560,6 +565,7 @@ function getEventEndMs() {
     safeMs(current?.battle_ended_at) ??
     safeMs(current?.last_snapshot) ??
     safeMs(current?.snapshot_at) ??
+    safeMs(FALLBACK_EVENT_END_ISO) ??
     Date.now()
   );
 }
