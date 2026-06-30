@@ -137,7 +137,7 @@
 
     .cards {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 16px;
     }
@@ -241,7 +241,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 980px;
+      min-width: 1080px;
     }
 
     th, td {
@@ -383,6 +383,12 @@
       </div>
 
       <div class="card">
+        <div class="label">75M+</div>
+        <div class="value" id="elite-threshold">75M</div>
+        <div class="card-help">Members at or above this amount</div>
+      </div>
+
+      <div class="card">
         <div class="label">72.5M+</div>
         <input id="high-input" class="card-input" type="text" value="72.5M" />
       </div>
@@ -409,6 +415,7 @@
               <th>Rank</th>
               <th>Clan</th>
               <th class="numeric">Points</th>
+              <th class="numeric">75M+</th>
               <th class="numeric">72.5M+</th>
               <th class="numeric">72.5M-70M</th>
               <th class="numeric">Under 70M</th>
@@ -416,7 +423,7 @@
           </thead>
           <tbody id="tbody">
             <tr>
-              <td colspan="6" class="empty-state">No data loaded yet.</td>
+              <td colspan="7" class="empty-state">No data loaded yet.</td>
             </tr>
           </tbody>
         </table>
@@ -427,8 +434,9 @@
   <script>
     const THRESHOLDS_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/top-clan-thresholds";
     const LEGACY_WORKER_URL = "https://top-clan-thresholds.opal-dde.workers.dev/";
+    const ELITE_THRESHOLD = 75000000;
     let currentPayload = null;
-    let sortState = { key: "high", direction: "desc" };
+    let sortState = { key: "elite", direction: "desc" };
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -574,6 +582,9 @@
       document.getElementById("top-input").value =
         String(payload?.top || document.getElementById("top-input").value || "10");
 
+      document.getElementById("elite-threshold").textContent =
+        formatCompactNumber(payload?.eliteThreshold || ELITE_THRESHOLD);
+
       document.getElementById("high-input").value =
         formatCompactNumber(payload?.highThreshold || parseFlexibleNumber(document.getElementById("high-input").value) || 72500000);
 
@@ -593,6 +604,7 @@
     }
 
     function rowMetrics(row) {
+      const eliteCount = Number(row.elite_count || 0);
       const highCount = Number(row.high_count || 0);
       const lowCount = Number(row.low_count || 0);
       const memberCount = Number(row.member_count || 0);
@@ -604,6 +616,7 @@
         rank: Number(row.rank || 999999),
         clan: String(row.clan_name || "").toLowerCase(),
         points: Number(row.battle_points ?? row.points ?? row.clan_points ?? 0),
+        elite: eliteCount,
         high: highCount,
         mid: lowCount,
         under: belowLowCount
@@ -659,6 +672,7 @@
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
+      const eliteLabel = formatCompactNumber(payload?.eliteThreshold || ELITE_THRESHOLD);
       const highLabel = formatCompactNumber(payload?.highThreshold || 0);
       const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
 
@@ -666,6 +680,7 @@
         <th>${sortHeader("rank", "Rank")}</th>
         <th>${sortHeader("clan", "Clan")}</th>
         <th class="numeric">${sortHeader("points", "Points", true)}</th>
+        <th class="numeric">${sortHeader("elite", `${eliteLabel}+`, true)}</th>
         <th class="numeric">${sortHeader("high", `${highLabel}+`, true)}</th>
         <th class="numeric">${sortHeader("mid", `${highLabel}-${lowLabel}`, true)}</th>
         <th class="numeric">${sortHeader("under", `Under ${lowLabel}`, true)}</th>
@@ -673,7 +688,7 @@
       wireSortHeaders();
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No rows returned.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
         return;
       }
 
@@ -695,6 +710,7 @@
               </div>
             </td>
             <td class="numeric">${fmtShortNumber(metrics.points)}</td>
+            <td class="numeric">${htmlEscape(metrics.elite)}</td>
             <td class="numeric">${htmlEscape(metrics.high)}</td>
             <td class="numeric">${htmlEscape(metrics.mid)}</td>
             <td class="numeric">${htmlEscape(metrics.under)}</td>
@@ -725,6 +741,38 @@
       }
 
       return { top, high, low };
+    }
+
+    function clanKey(row) {
+      return String(row?.clan_name || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function mergeEliteCounts(payload, elitePayload) {
+      const eliteRows = new Map();
+
+      for (const row of elitePayload?.rows || []) {
+        const key = clanKey(row);
+        if (key) eliteRows.set(key, Number(row.high_count || 0));
+      }
+
+      return {
+        ...payload,
+        eliteThreshold: ELITE_THRESHOLD,
+        rows: (payload?.rows || []).map(row => {
+          const key = clanKey(row);
+          const eliteCount = Number.isFinite(Number(row.elite_count))
+            ? Number(row.elite_count)
+            : eliteRows.get(key);
+
+          return {
+            ...row,
+            elite_count: Number.isFinite(eliteCount) ? eliteCount : 0
+          };
+        })
+      };
     }
 
     function buildThresholdUrl(baseUrl, top, high, low) {
@@ -792,14 +840,22 @@
       setStatus("Loading top clan threshold counts...", "info");
 
       try {
-        const payload = await fetchThresholds(top, high, low);
+        const payloadRequest = fetchThresholds(top, high, low);
+        const eliteRequest = Number(high) === ELITE_THRESHOLD
+          ? payloadRequest
+          : fetchThresholds(top, ELITE_THRESHOLD, low);
+        const [payload, elitePayload] = await Promise.all([
+          payloadRequest,
+          eliteRequest
+        ]);
+        const mergedPayload = mergeEliteCounts(payload, elitePayload);
 
-        renderCards(payload);
-        renderTable(payload);
+        renderCards(mergedPayload);
+        renderTable(mergedPayload);
         saveInputs(
-          String(payload.top || top),
-          formatCompactNumber(payload.highThreshold || high),
-          formatCompactNumber(payload.lowThreshold || low)
+          String(mergedPayload.top || top),
+          formatCompactNumber(mergedPayload.highThreshold || high),
+          formatCompactNumber(mergedPayload.lowThreshold || low)
         );
         setStatus("", "info");
       } catch (err) {
