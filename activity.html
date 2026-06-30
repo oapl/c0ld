@@ -389,11 +389,6 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-// Hard clan battle boundaries.
-// Data outside this range is never plotted.
-const EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
-const EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
-
 const PRE_START_BUFFER_HOURS = 12;
 const MAX_HISTORY_HOURS = 336;
 const PER_USER_HISTORY_LIMIT = 5000;
@@ -540,12 +535,33 @@ function fmtTick(ms, bucketHours) {
   });
 }
 
+function safeMs(value) {
+  if (!value) {
+    return null;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function getEventStartMs() {
-  return new Date(EVENT_START_ISO).getTime();
+  return (
+    safeMs(current?.battle_start_iso) ??
+    safeMs(current?.battle_started_at) ??
+    safeMs(current?.first_snapshot) ??
+    safeMs(current?.snapshot_at) ??
+    Date.now()
+  );
 }
 
 function getEventEndMs() {
-  return new Date(EVENT_END_ISO).getTime();
+  return (
+    safeMs(current?.battle_end_iso) ??
+    safeMs(current?.battle_ended_at) ??
+    safeMs(current?.last_snapshot) ??
+    safeMs(current?.snapshot_at) ??
+    Date.now()
+  );
 }
 
 function usingFullEventWindow() {
@@ -1048,8 +1064,8 @@ function drawChart() {
 
   document.getElementById("subtitle").textContent =
     fullWindow
-      ? "Full event window shown. Data is still limited to available pulls."
-      : "Visible range is fit to the first and last available data pull inside the event.";
+      ? "Full battle window shown. Data is still limited to available pulls."
+      : "Visible range is fit to the first and last available data pull inside the battle.";
 
   if (!visible.length || !buckets.length) {
     drawText("No activity found for the current filters.", width / 2, height / 2, {
