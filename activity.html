@@ -389,10 +389,9 @@ canvas{
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
-// Hard clan battle boundaries.
-// Data outside this range is never plotted.
-const EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
-const EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
+// Fallback only. The active window is read from the current battle API response.
+const FALLBACK_EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
+const FALLBACK_EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
 
 const PRE_START_BUFFER_HOURS = 12;
 const MAX_HISTORY_HOURS = 336;
@@ -540,12 +539,33 @@ function fmtTick(ms, bucketHours) {
   });
 }
 
+function safeMs(value) {
+  if (!value) {
+    return null;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function getEventStartMs() {
-  return new Date(EVENT_START_ISO).getTime();
+  return (
+    safeMs(current?.battle_start_iso) ??
+    safeMs(current?.first_snapshot) ??
+    safeMs(current?.snapshot_at) ??
+    safeMs(FALLBACK_EVENT_START_ISO) ??
+    Date.now()
+  );
 }
 
 function getEventEndMs() {
-  return new Date(EVENT_END_ISO).getTime();
+  return (
+    safeMs(current?.battle_end_iso) ??
+    safeMs(current?.last_snapshot) ??
+    safeMs(current?.snapshot_at) ??
+    safeMs(FALLBACK_EVENT_END_ISO) ??
+    Date.now()
+  );
 }
 
 function usingFullEventWindow() {
