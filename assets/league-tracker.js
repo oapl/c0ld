@@ -147,7 +147,7 @@
     if(gap<=0)return{time:'Passed',hourly:shortNum(currentHourly)+"/hr",tone:'met',title};
     const netHourly=currentHourly-targetHourly;
     return {
-      time:netHourly>0?formatDuration(gap/(netHourly/60)):"Won't catch",
+      time:netHourly>0?formatDuration(gap/(netHourly/60)):"Won't pass",
       hourly:shortNum(currentHourly)+"/hr",
       tone:netHourly>0?"met":"need",
       title:title+" Time is based on YAMO's net gain after #"+TARGET_RANK+"'s pace."
