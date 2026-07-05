@@ -3,6 +3,7 @@ const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
+const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_100_LEAGUES";
 const TOP_LEAGUES_LIMIT = 100;
 const ROBLOX_BATCH_SIZE = 100;
@@ -188,13 +189,15 @@ async function handleTopLeagues(request, env) {
     limit: String(limit)
   });
 
-  if (!rows.length && String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false") {
+  let latest = latestMeta(rows);
+  const allowLiveFallback = String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false";
+  if (allowLiveFallback && (!rows.length || isTopLeaguesStale(latest, env))) {
     const live = await fetchTopLeagues(limit);
     const now = new Date().toISOString();
     rows = live.rows.map(row => ({
       snapshot_id: "live",
       fetched_at: now,
-      source: "live",
+      source: rows.length ? "live:stale-fallback" : "live",
       league_run_key: runKey,
       league_name: TOP_LEAGUES_NAME,
       league_id: row.league_id,
@@ -208,9 +211,9 @@ async function handleTopLeagues(request, env) {
       points: row.points,
       raw_league: row.raw_league
     }));
+    latest = latestMeta(rows);
   }
 
-  const latest = latestMeta(rows);
   if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: TOP_LEAGUES_NAME, rows: [] }, env);
 
   const rowsWithGains = await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: TOP_LEAGUES_NAME });
@@ -522,6 +525,13 @@ function latestMeta(rows) {
   if (!rows.length) return null;
   const row = rows.slice().sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime())[0];
   return { snapshot_id: row.snapshot_id, fetched_at: row.fetched_at, league_run_key: row.league_run_key, league_name: row.league_name, league_id: row.league_id, league_level: row.league_level, league_points: row.league_points, league_icon: row.league_icon, member_capacity: row.member_capacity };
+}
+
+function isTopLeaguesStale(latest, env) {
+  if (!latest?.fetched_at) return true;
+  const maxMinutes = clamp(Number(env.TOP_LEAGUES_MAX_STALE_MINUTES || DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES), 1, 24 * 60 * 30);
+  const fetchedMs = new Date(latest.fetched_at).getTime();
+  return !Number.isFinite(fetchedMs) || Date.now() - fetchedMs > maxMinutes * 60 * 1000;
 }
 
 async function replaceCurrentRows(env, table, filters, rows) { await supabaseDelete(env, table, filters); if (rows.length) await supabaseInsert(env, table, rows); }

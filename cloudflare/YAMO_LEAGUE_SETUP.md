@@ -2,6 +2,7 @@
 
 This Worker stores YAMO league snapshots and global Top 100 League snapshots in Supabase.
 Existing league rows are kept as `legacy`; the active YAMO page now reads the `active` run.
+`top-leagues.html` is powered by this same Worker through `/api/leagues/top-leagues`.
 
 Current Worker URL:
 
@@ -30,6 +31,8 @@ SITE_ORIGINS=https://oapl.github.io,*
 PUBLIC_CACHE_SECONDS=5
 INGEST_LEAGUES=true
 INGEST_TOP_LEAGUES=true
+TOP_LEAGUES_LIVE_FALLBACK=true
+TOP_LEAGUES_MAX_STALE_MINUTES=15
 ROBLOX_USERNAME_LOOKUPS=true
 ROBLOX_AVATAR_LOOKUPS=true
 SUPABASE_URL=https://YOUR-PROJECT.supabase.co
