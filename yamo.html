@@ -37,6 +37,15 @@ th{color:#8b949e;font-size:13px;font-weight:500;text-align:left;cursor:pointer}
 .positive{color:#3fb950;font-weight:700}
 .negative{color:#f85149;font-weight:700}
 .zero,.unknown{color:#8b949e}
+.need{color:#d29922;font-weight:700}
+.met{color:#3fb950;font-weight:700}
+.summary-row td{border-bottom-color:#3d444d}
+.summary-row .summary-label{font-weight:700;color:#e6edf3}
+.summary-row .summary-sub{color:#8b949e;font-size:12px;margin-top:2px}
+.target-row td{background:rgba(248,81,73,.09)}
+.team-row td{background:rgba(63,185,80,.08)}
+.need-row td,.eta-row td{background:rgba(210,153,34,.08)}
+.summary-row:hover td{background-color:rgba(88,166,255,.12)}
 .empty,.error{padding:20px}
 .error{color:#ffb4ad;background:rgba(248,81,73,.12)}
 tbody tr:hover{background:rgba(255,255,255,.02)}
@@ -65,7 +74,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <section class="section"><div class="section-header"><h2 class="section-title">YAMO Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Total Points</th><th data-sort="gain_5m" class="numeric">Last 5m</th><th data-sort="gain_1h" class="numeric">1 Hour</th><th data-sort="gain_6h" class="numeric">6 Hours</th><th data-sort="gain_12h" class="numeric">12 Hours</th><th data-sort="gain_24h" class="numeric">24 Hours</th></tr></thead><tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading YAMO league data...</td></tr></tbody></table></div></section>
 <section class="section rank-log-section"><div class="section-header"><h2 class="section-title">League Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading league rank movement history...</div></div></section>
 </main>
-<script>window.LEAGUE_CONFIG={league:'YAMO',run:'active',title:'YAMO League Tracker'};</script>
+<script>window.LEAGUE_CONFIG={league:'YAMO',run:'active',title:'YAMO League Tracker',showRaceSummary:true,targetRank:60};</script>
 <script src="assets/league-tracker.js"></script>
 <script src="assets/site-announcement.js"></script>
 </body>

@@ -4,10 +4,20 @@
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
   const RUN_KEY = String(config.run || config.runKey || "active").trim();
+  const TARGET_RANK = Number(config.targetRank || 60);
+  const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
+  const GAIN_WINDOWS = [
+    { key: "gain_5m", label: "5m", minutes: 5 },
+    { key: "gain_1h", label: "1 hour", minutes: 60 },
+    { key: "gain_6h", label: "6 hours", minutes: 360 },
+    { key: "gain_12h", label: "12 hours", minutes: 720 },
+    { key: "gain_24h", label: "24 hours", minutes: 1440 }
+  ];
 
   let rows = [];
   let currentData = null;
   let topLeagueRow = null;
+  let targetRankRow = null;
   let leagueRankHistoryRows = [];
   let sortKey = "rank";
   let sortAsc = true;
@@ -46,14 +56,18 @@
     return data;
   }
 
-  async function fetchTopLeagueRow(){
+  async function fetchTopLeagueContext(){
     const url=new URL(API+"/api/leagues/top-leagues");
     url.searchParams.set("limit","100");
     addRunParam(url);
     const data=await getJson(url);
     const targetName=norm(currentData?.league_name||LEAGUE);
     const targetId=String(currentData?.league_id||"").trim();
-    return (data.rows||[]).find(r =>
+    const topRows=data.rows||[];
+    targetRankRow=Number.isFinite(TARGET_RANK)
+      ? topRows.find(r=>Number(r.rank)===TARGET_RANK) || topRows[TARGET_RANK-1] || null
+      : null;
+    return topRows.find(r =>
       (targetId && String(r.league_id||"").trim()===targetId) ||
       norm(r.league_name||r.display_name)===targetName
     ) || null;
@@ -76,11 +90,87 @@
     if(src){img.src=src;img.hidden=false}else img.hidden=true;
   }
 
+  function numOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
+  function teamPoints(){return numOrNull(currentData?.league_points) ?? numOrNull(topLeagueRow?.total_points)}
+  function targetPoints(){return numOrNull(targetRankRow?.total_points ?? targetRankRow?.points)}
+  function goalGap(){
+    const team=teamPoints(),target=targetPoints();
+    if(team==null||target==null)return null;
+    return Math.max(0, Math.ceil(target-team+1));
+  }
+  function teamGain(key){
+    let total=0,has=false;
+    for(const r of rows){
+      const n=numOrNull(r?.[key]);
+      if(n==null)continue;
+      total+=n;has=true;
+    }
+    return has?total:null;
+  }
+  function summaryLabel(main,sub){
+    return '<div class="summary-label">'+esc(main)+'</div><div class="summary-sub">'+esc(sub)+'</div>';
+  }
+  function gapCell(){
+    const gap=goalGap();
+    if(gap==null)return'<span class="unknown">&mdash;</span>';
+    if(gap<=0)return'<span class="met">Goal met</span>';
+    return'<span class="need" title="'+esc(fullNum(gap))+' points needed to pass #'+esc(TARGET_RANK)+'">+'+esc(shortNum(gap))+'</span>';
+  }
+  function requiredPaceCell(win){
+    const gap=goalGap(),targetGain=numOrNull(targetRankRow?.[win.key]),currentGain=teamGain(win.key);
+    if(gap==null||targetGain==null)return'<span class="unknown">&mdash;</span>';
+    if(gap<=0)return'<span class="met">Goal met</span>';
+    const required=Math.max(0,gap)+Math.max(0,targetGain);
+    const title='Required team gain over '+win.label+' if #'+TARGET_RANK+' repeats this pace: '+fullNum(required);
+    if(currentGain==null)return'<span class="need" title="'+esc(title)+'">Need +'+esc(shortNum(required))+'</span>';
+    const shortfall=required-currentGain;
+    if(shortfall<=0)return'<span class="met" title="'+esc(title)+'">On pace +'+esc(shortNum(Math.abs(shortfall)))+'</span>';
+    return'<span class="need" title="'+esc(title)+'">+'+esc(shortNum(shortfall))+' more</span>';
+  }
+  function formatDuration(totalMinutes){
+    if(!Number.isFinite(totalMinutes))return"&mdash;";
+    if(totalMinutes<1)return"<1m";
+    const minutes=Math.ceil(totalMinutes);
+    if(minutes<60)return"~"+minutes+"m";
+    if(minutes<1440){
+      const h=Math.floor(minutes/60),m=minutes%60;
+      return"~"+h+"h"+(m?" "+m+"m":"");
+    }
+    const d=Math.floor(minutes/1440),h=Math.round((minutes%1440)/60);
+    return"~"+d+"d"+(h?" "+h+"h":"");
+  }
+  function catchEtaCell(win){
+    const gap=goalGap(),targetGain=numOrNull(targetRankRow?.[win.key]),currentGain=teamGain(win.key);
+    if(gap==null||targetGain==null||currentGain==null)return'<span class="unknown">&mdash;</span>';
+    if(gap<=0)return'<span class="met">Goal met</span>';
+    const net=currentGain-targetGain;
+    if(net<=0)return'<span class="need" title="YAMO is not gaining on #'+esc(TARGET_RANK)+' at this window pace.">No catch</span>';
+    return'<span class="met" title="Based on a net gain of '+esc(fullNum(net))+' over '+esc(win.label)+'.">'+formatDuration(gap/(net/win.minutes))+'</span>';
+  }
+  function buildRaceSummaryRows(){
+    if(!SHOW_RACE_SUMMARY)return"";
+    if(!targetRankRow){
+      return '<tr class="summary-row target-row"><td class="rank">Goal</td><td>'+summaryLabel("#"+esc(TARGET_RANK)+" target unavailable","Top 100 league snapshot needed")+'</td><td colspan="6" class="unknown">Refresh after the Top 100 league data updates.</td></tr>';
+    }
+    const targetName=targetRankRow.league_name||targetRankRow.display_name||"Top "+TARGET_RANK;
+    const actualRank=targetRankRow.rank||TARGET_RANK;
+    const targetCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(targetRankRow?.[win.key])+'</td>').join("");
+    const teamCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(teamGain(win.key))+'</td>').join("");
+    const requiredCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+requiredPaceCell(win)+'</td>').join("");
+    const etaCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+catchEtaCell(win)+'</td>').join("");
+    return [
+      '<tr class="summary-row target-row"><td class="rank">Goal</td><td>'+summaryLabel("#"+esc(actualRank)+" "+targetName,"Top "+TARGET_RANK+" target pace")+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>',
+      '<tr class="summary-row team-row"><td class="rank">Team</td><td>'+summaryLabel((currentData?.league_name||LEAGUE)+" team total","Sum of member gains")+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>',
+      '<tr class="summary-row need-row"><td class="rank">Need</td><td>'+summaryLabel("Required to pass #"+TARGET_RANK,"Gap plus #"+TARGET_RANK+" pace")+'</td><td class="numeric">'+gapCell()+'</td>'+requiredCells+'</tr>',
+      '<tr class="summary-row eta-row"><td class="rank">ETA</td><td>'+summaryLabel("Catch time at net pace","YAMO gain minus #"+TARGET_RANK+" gain")+'</td><td class="numeric">'+gapCell()+'</td>'+etaCells+'</tr>'
+    ].join("");
+  }
+
   function render(){
     const tbody=document.getElementById("members-tbody");
     const list=visible();
     if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
-    tbody.innerHTML=list.map(r=>{
+    tbody.innerHTML=buildRaceSummaryRows()+list.map(r=>{
       const name=r.username||r.display_name||r.user_id;
       return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
     }).join("");
@@ -153,7 +243,7 @@
       const current=await getJson(currentUrl);
       rows=current.rows||[];
       currentData=current;
-      topLeagueRow=await fetchTopLeagueRow().catch(err=>{console.warn("Projected rank unavailable",err);return null});
+      topLeagueRow=await fetchTopLeagueContext().catch(err=>{console.warn("Projected rank unavailable",err);targetRankRow=null;return null});
       renderCards(current);
       leagueRankHistoryRows=await fetchLeagueRankHistory().catch(err=>{console.warn("League rank history unavailable",err);return []});
       render();
