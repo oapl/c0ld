@@ -117,8 +117,8 @@ function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString
 function rank(v){const n=Number(v);return Number.isFinite(n)&&n>0?"#"+n.toLocaleString("en-US"):"-"}
 function dt(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?"-":d.toLocaleString()}
 function delta(v){if(v==null)return'<span class="unknown">-</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">-</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
-function setStatus(text,kind="info"){const el=document.getElementById("status");el.className="status "+kind;el.textContent=text||""}
-function clearStatus(){const el=document.getElementById("status");el.className="status";el.textContent=""}
+function setStatus(text,kind="info"){const el=document.getElementById("status");if(!el)return;el.className="status "+kind;el.textContent=text||""}
+function clearStatus(){const el=document.getElementById("status");if(!el)return;el.className="status";el.textContent=""}
 function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
 function icon(row){const src=iconUrl(row.league_icon);return src?'<img class="league-icon" src="'+esc(src)+'" alt="">':'<span class="league-icon"></span>'}
 function rowSource(row){if(row.source==="missing")return"not found in Top 1000";return lastSource||"league snapshot"}
