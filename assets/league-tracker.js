@@ -138,21 +138,19 @@
   }
   function raceStats(){
     const gap=goalGap(),basis=raceBasis();
-    if(gap==null||!basis)return{time:'&mdash;',minimum:'&mdash;',current:'&mdash;',net:'&mdash;',tone:'unknown',basis:null};
+    if(gap==null||!basis)return{time:'&mdash;',hourly:'&mdash;',tone:'unknown',title:'Pace unavailable.'};
     const hours=basis.minutes/60;
     const targetHourly=basis.targetGain/hours;
     const currentHourly=basis.currentGain/hours;
-    if(gap<=0)return{time:'Passed',minimum:'Goal met',current:'+'+shortNum(currentHourly)+"/hr",net:'Goal met',tone:'met',basis};
+    const basisLabel=basis.key==="gain_1h"?"1h":basis.label;
+    const title="Uses "+basisLabel+" pace: YAMO "+fullNum(Math.round(currentHourly))+"/hr, #"+TARGET_RANK+" "+fullNum(Math.round(targetHourly))+"/hr.";
+    if(gap<=0)return{time:'Passed',hourly:shortNum(currentHourly)+"/hr",tone:'met',title};
     const netHourly=currentHourly-targetHourly;
-    const deficit=Math.max(0,targetHourly-currentHourly);
-    const minimum=Math.ceil(targetHourly+1);
     return {
       time:netHourly>0?formatDuration(gap/(netHourly/60)):"No catch",
-      minimum:">+"+shortNum(minimum)+"/hr",
-      current:"+"+shortNum(currentHourly)+"/hr vs #"+TARGET_RANK+" +"+shortNum(targetHourly)+"/hr",
-      net:netHourly>0?"+ "+shortNum(netHourly)+"/hr net":"Need +"+shortNum(deficit+1)+"/hr more",
+      hourly:shortNum(currentHourly)+"/hr",
       tone:netHourly>0?"met":"need",
-      basis
+      title:title+" Time is based on YAMO's net gain after #"+TARGET_RANK+"'s pace."
     };
   }
   function renderRaceSummary(){
@@ -170,14 +168,11 @@
     const targetCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(targetRankRow?.[win.key])+'</td>').join("");
     const teamCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(teamGain(win.key))+'</td>').join("");
     const stats=raceStats();
-    const basisText=stats.basis?' <span class="race-stat-basis">('+esc(stats.basis.key==="gain_1h"?"1h":stats.basis.label)+' pace)</span>':'';
     box.innerHTML='<div class="race-summary-scroll"><table class="race-mini-table"><thead><tr>'+headers+'</tr></thead><tbody>'+
       '<tr><td class="race-name" title="'+esc(targetName)+'">'+esc(targetName)+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>'+
       '<tr><td class="race-name" title="'+esc(currentData?.league_name||LEAGUE)+'">'+esc(currentData?.league_name||LEAGUE)+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>'+
       '</tbody></table></div><div class="race-summary-stats">'+
-      '<span>Hourly pace: <strong>'+esc(stats.current)+'</strong>'+basisText+'</span>'+
-      '<span>Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> <span class="race-stat-basis">'+esc(stats.net)+'</span></span>'+
-      '<span>Minimum hourly to catch: <strong class="need">'+esc(stats.minimum)+'</strong></span>'+
+      '<span title="'+esc(stats.title)+'">Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> @ '+esc(stats.hourly)+'</span>'+
       '</div>';
   }
 
