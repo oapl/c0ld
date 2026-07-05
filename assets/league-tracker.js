@@ -138,14 +138,20 @@
   }
   function raceStats(){
     const gap=goalGap(),basis=raceBasis();
-    if(gap==null||!basis)return{time:'&mdash;',hourly:'&mdash;',tone:'unknown',basis:null};
-    if(gap<=0)return{time:'Passed',hourly:'Goal met',tone:'met',basis};
-    const net=basis.currentGain-basis.targetGain;
-    const hourlyNeeded=(Math.max(0,basis.targetGain)+gap)/(basis.minutes/60);
+    if(gap==null||!basis)return{time:'&mdash;',minimum:'&mdash;',current:'&mdash;',net:'&mdash;',tone:'unknown',basis:null};
+    const hours=basis.minutes/60;
+    const targetHourly=basis.targetGain/hours;
+    const currentHourly=basis.currentGain/hours;
+    if(gap<=0)return{time:'Passed',minimum:'Goal met',current:'+'+shortNum(currentHourly)+"/hr",net:'Goal met',tone:'met',basis};
+    const netHourly=currentHourly-targetHourly;
+    const deficit=Math.max(0,targetHourly-currentHourly);
+    const minimum=Math.ceil(targetHourly+1);
     return {
-      time:net>0?formatDuration(gap/(net/basis.minutes)):"No catch",
-      hourly:"+"+shortNum(hourlyNeeded)+"/hr",
-      tone:net>0?"met":"need",
+      time:netHourly>0?formatDuration(gap/(netHourly/60)):"No catch",
+      minimum:">+"+shortNum(minimum)+"/hr",
+      current:"+"+shortNum(currentHourly)+"/hr vs #"+TARGET_RANK+" +"+shortNum(targetHourly)+"/hr",
+      net:netHourly>0?"+ "+shortNum(netHourly)+"/hr net":"Need +"+shortNum(deficit+1)+"/hr more",
+      tone:netHourly>0?"met":"need",
       basis
     };
   }
@@ -169,8 +175,9 @@
       '<tr><td class="race-name" title="'+esc(targetName)+'">'+esc(targetName)+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>'+
       '<tr><td class="race-name" title="'+esc(currentData?.league_name||LEAGUE)+'">'+esc(currentData?.league_name||LEAGUE)+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>'+
       '</tbody></table></div><div class="race-summary-stats">'+
-      '<span>Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong>'+basisText+'</span>'+
-      '<span>Average hourly needed to pass: <strong class="need">'+stats.hourly+'</strong></span>'+
+      '<span>Hourly pace: <strong>'+esc(stats.current)+'</strong>'+basisText+'</span>'+
+      '<span>Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> <span class="race-stat-basis">'+esc(stats.net)+'</span></span>'+
+      '<span>Minimum hourly to catch: <strong class="need">'+esc(stats.minimum)+'</strong></span>'+
       '</div>';
   }
 
