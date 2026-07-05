@@ -16,6 +16,14 @@ TOP_LEAGUES_LIVE_FALLBACK = "true"
 TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 ROBLOX_USERNAME_LOOKUPS = "true"
 ROBLOX_AVATAR_LOOKUPS = "true"
+# Optional Discord inactivity alerts. Store the webhook URL as a secret.
+INACTIVE_ALERTS_ENABLED = "true"
+# JSON map of Roblox user IDs or names to Discord user IDs/mentions.
+# INACTIVE_ALERT_DISCORD_USERS = "{\"Corosion\":\"123456789012345678\"}"
+# Optional. Defaults to mapped users only. Use "all" only if you want every unmapped zero-gain member posted by name.
+# INACTIVE_ALERT_TARGET_USERS = "Corosion"
+INACTIVE_ALERT_REQUIRE_MAPPING = "true"
+INACTIVE_ALERT_EDIT_MESSAGES = "true"
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 
 [triggers]
@@ -24,3 +32,4 @@ crons = ["*/5 * * * *"]
 # Required secrets:
 # wrangler secret put SUPABASE_SERVICE_KEY
 # wrangler secret put INGEST_ADMIN_TOKEN
+# wrangler secret put INACTIVE_ALERT_WEBHOOK_URL

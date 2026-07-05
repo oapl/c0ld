@@ -7,6 +7,8 @@ const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_100_LEAGUES";
 const TOP_LEAGUES_LIMIT = 100;
 const ROBLOX_BATCH_SIZE = 100;
+const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
+const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
 
 export default {
   async fetch(request, env) {
@@ -89,6 +91,7 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
     await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${summary.league_name}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+    await maybeSendInactivityAlerts(env, { runKey, leagueName: summary.league_name, fetchedAt, snapshotId, rows: dbRows }).catch(err => console.error("inactivity alerts failed", err?.message || String(err)));
   }
 
   return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, snapshot_retention: "permanent" }, 202);
@@ -501,6 +504,196 @@ async function addGainFields(env, rows, latest) {
 
 function addNullGains(row) { return { ...row, gain_5m: null, gain_1h: null, gain_6h: null, gain_12h: null, gain_24h: null }; }
 
+async function maybeSendInactivityAlerts(env, context) {
+  if (String(env.INACTIVE_ALERTS_ENABLED || "true").toLowerCase() === "false") return;
+  const webhook = inactivityWebhookUrl(env);
+  if (!webhook || !context.rows?.length) return;
+
+  const latestMs = new Date(context.fetchedAt).getTime();
+  if (!Number.isFinite(latestMs)) return;
+  const previousMap = await fetchClosestPointMap(env, context.runKey, context.leagueName, latestMs, INACTIVITY_ALERT_WINDOW_MINUTES, 4, 20);
+  if (!previousMap.size) return;
+
+  const candidateRows = context.rows
+    .map(row => ({ row, previous: previousMap.get(String(row.user_id)) }))
+    .filter(item => item.previous !== undefined);
+  if (!candidateRows.length) return;
+
+  const usernameMap = await resolveRobloxUsernames(candidateRows.map(item => item.row.user_id), env).catch(() => new Map());
+  const discordMap = inactiveDiscordMap(env);
+  const targetSet = inactiveTargetSet(env, discordMap);
+  const requireMapping = String(env.INACTIVE_ALERT_REQUIRE_MAPPING || "true").toLowerCase() !== "false";
+  const monitored = candidateRows
+    .map(item => buildInactivityCandidate(item.row, item.previous, usernameMap, discordMap))
+    .filter(item => isInactiveTarget(item, targetSet, requireMapping));
+  if (!monitored.length) return;
+
+  const stateMap = await fetchInactivityStates(env, context.runKey, context.leagueName, monitored.map(item => item.userId));
+  const updates = [];
+
+  for (const item of monitored) {
+    const state = stateMap.get(String(item.userId));
+    const gain = item.currentPoints - item.previousPoints;
+    if (gain === 0) {
+      if (state?.last_snapshot_id === context.snapshotId) continue;
+      const previousCount = state?.alert_active ? toNumber(state.zero_count) || 0 : 0;
+      const zeroCount = previousCount + 1;
+      const inactiveMinutes = zeroCount * INACTIVITY_ALERT_WINDOW_MINUTES;
+      const zeroSince = state?.alert_active && state.zero_since
+        ? state.zero_since
+        : new Date(latestMs - INACTIVITY_ALERT_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const message = inactivityAlertMessage(item, inactiveMinutes);
+      const sent = await upsertDiscordInactivityMessage(env, state?.discord_message_id, message);
+      updates.push({
+        league_run_key: context.runKey,
+        league_name: context.leagueName,
+        user_id: item.userId,
+        display_name: item.name,
+        discord_mention: item.mention || null,
+        zero_since: zeroSince,
+        zero_count: zeroCount,
+        last_points: item.currentPoints,
+        last_gain_5m: gain,
+        last_snapshot_id: context.snapshotId,
+        last_snapshot_at: context.fetchedAt,
+        last_alert_snapshot_id: context.snapshotId,
+        discord_message_id: sent?.id || state?.discord_message_id || null,
+        alert_active: true,
+        updated_at: new Date().toISOString()
+      });
+    } else if (state?.alert_active || state) {
+      updates.push({
+        league_run_key: context.runKey,
+        league_name: context.leagueName,
+        user_id: item.userId,
+        display_name: item.name,
+        discord_mention: item.mention || state?.discord_mention || null,
+        zero_since: null,
+        zero_count: 0,
+        last_points: item.currentPoints,
+        last_gain_5m: gain,
+        last_snapshot_id: context.snapshotId,
+        last_snapshot_at: context.fetchedAt,
+        last_alert_snapshot_id: state?.last_alert_snapshot_id || null,
+        discord_message_id: state?.discord_message_id || null,
+        alert_active: false,
+        updated_at: new Date().toISOString()
+      });
+    }
+  }
+
+  if (updates.length) await supabaseUpsert(env, INACTIVITY_ALERT_TABLE, updates, "league_run_key,league_name,user_id");
+}
+
+function buildInactivityCandidate(row, previousPoints, usernameMap, discordMap) {
+  const userId = toNumber(row.user_id);
+  const resolved = userId ? String(usernameMap.get(userId) || "").trim() : "";
+  const name = resolved || String(row.display_name || row.user_id || "").trim();
+  const identity = inactiveDiscordIdentity(row, name, discordMap);
+  return {
+    userId,
+    name: name || (userId ? `user_${userId}` : "Unknown"),
+    currentPoints: toNumber(row.points) || 0,
+    previousPoints: toNumber(previousPoints) || 0,
+    mention: identity.mention,
+    discordUserId: identity.userId,
+    mapped: identity.mapped
+  };
+}
+
+function inactiveTargetSet(env, discordMap) {
+  const raw = String(env.INACTIVE_ALERT_TARGET_USERS || "").trim();
+  if (!raw) return discordMap.size ? new Set(discordMap.keys()) : null;
+  if (raw.toLowerCase() === "all" || raw === "*") return null;
+  return new Set(raw.split(",").map(item => normalizeDiscordMapKey(item)).filter(Boolean));
+}
+
+function isInactiveTarget(item, targetSet, requireMapping) {
+  if (!item.userId) return false;
+  if (requireMapping && !item.mapped) return false;
+  if (!targetSet) return true;
+  return targetSet.has(normalizeDiscordMapKey(item.userId)) || targetSet.has(normalizeDiscordMapKey(item.name));
+}
+
+function inactiveDiscordIdentity(row, name, discordMap) {
+  const candidates = [row.user_id, name, row.display_name].map(normalizeDiscordMapKey).filter(Boolean);
+  for (const key of candidates) {
+    if (!discordMap.has(key)) continue;
+    const parsed = parseDiscordMention(discordMap.get(key));
+    return { ...parsed, mapped: true };
+  }
+  return { mention: name, userId: null, mapped: false };
+}
+
+function inactiveDiscordMap(env) {
+  const raw = String(env.INACTIVE_ALERT_DISCORD_USERS || env.INACTIVE_ALERT_USER_MAP || "").trim();
+  const parsed = parseJsonObject(raw);
+  const map = new Map();
+  for (const [key, value] of Object.entries(parsed)) {
+    const normalized = normalizeDiscordMapKey(key);
+    if (normalized) map.set(normalized, String(value || "").trim());
+  }
+  return map;
+}
+
+function parseDiscordMention(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^<@!?(\d+)>$/) || text.match(/^(\d{15,25})$/);
+  if (match) return { mention: `<@${match[1]}>`, userId: match[1] };
+  return { mention: text, userId: null };
+}
+
+function inactivityAlertMessage(item, inactiveMinutes) {
+  const who = item.mention || item.name;
+  const nameSuffix = item.mention && item.name && item.mention !== item.name ? ` (${item.name})` : "";
+  const content = inactiveMinutes <= INACTIVITY_ALERT_WINDOW_MINUTES
+    ? `${who}${nameSuffix} gained 0 points in the last ${INACTIVITY_ALERT_WINDOW_MINUTES} minutes.`
+    : `${who}${nameSuffix} has gained 0 points for ${inactiveMinutes} minutes.`;
+  const allowed_mentions = item.discordUserId ? { parse: [], users: [item.discordUserId] } : { parse: [] };
+  return { content, allowed_mentions };
+}
+
+async function upsertDiscordInactivityMessage(env, messageId, payload) {
+  if (messageId && String(env.INACTIVE_ALERT_EDIT_MESSAGES || "true").toLowerCase() !== "false") {
+    const edited = await sendDiscordWebhook(env, payload, messageId).catch(() => null);
+    if (edited) return edited;
+  }
+  return sendDiscordWebhook(env, payload);
+}
+
+async function sendDiscordWebhook(env, payload, messageId = null) {
+  const webhook = inactivityWebhookUrl(env);
+  if (!webhook) return null;
+  const url = new URL(webhook);
+  url.search = "";
+  if (messageId) {
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/messages/${encodeURIComponent(messageId)}`;
+  } else {
+    url.searchParams.set("wait", "true");
+  }
+  const res = await fetch(url.toString(), {
+    method: messageId ? "PATCH" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  if (!res.ok) throw httpError(res.status, `Discord inactivity webhook failed: ${text.slice(0, 500)}`);
+  return text ? JSON.parse(text) : null;
+}
+
+async function fetchInactivityStates(env, runKey, leagueName, userIds) {
+  const ids = [...new Set(userIds.map(Number).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const rows = await supabaseSelect(env, INACTIVITY_ALERT_TABLE, {
+    select: "league_run_key,league_name,user_id,display_name,discord_mention,zero_since,zero_count,last_points,last_gain_5m,last_snapshot_id,last_snapshot_at,last_alert_snapshot_id,discord_message_id,alert_active",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${leagueName}`,
+    user_id: `in.(${ids.join(",")})`,
+    limit: "500"
+  });
+  return new Map(rows.map(row => [String(row.user_id), row]));
+}
+
 async function fetchClosestPointMap(env, runKey, league, latestMs, minutes, toleranceMinutes, fallbackMinutes = 0) {
   const targetMs = latestMs - minutes * 60 * 1000;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,points", league_run_key: `eq.${runKey}`, league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - toleranceMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs + toleranceMinutes * 60 * 1000).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
@@ -537,6 +730,7 @@ function isTopLeaguesStale(latest, env) {
 async function replaceCurrentRows(env, table, filters, rows) { await supabaseDelete(env, table, filters); if (rows.length) await supabaseInsert(env, table, rows); }
 async function supabaseSelect(env, table, params = {}, options = {}) { return supabaseFetch(env, table, { method: "GET", params, paramRename: options.paramRename }); }
 async function supabaseInsert(env, table, rows) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", body: rows, headers: { Prefer: "return=minimal" } }); }
+async function supabaseUpsert(env, table, rows, conflictColumns) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", params: { on_conflict: conflictColumns }, body: rows, headers: { Prefer: "resolution=merge-duplicates,return=minimal" } }); }
 async function supabaseDelete(env, table, filters = {}) { return supabaseFetch(env, table, { method: "DELETE", params: filters, headers: { Prefer: "return=minimal" } }); }
 
 async function supabaseFetch(env, table, options = {}) {
@@ -562,6 +756,7 @@ function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY 
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
 function requestedRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || leagueRunKey(env)); }
 function requestedTopLeaguesRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || topLeaguesRunKey(env)); }
+function inactivityWebhookUrl(env) { return String(env.INACTIVE_ALERT_WEBHOOK_URL || env.DISCORD_INACTIVE_ALERT_WEBHOOK_URL || "").trim(); }
 function roleFromPermission(value) { const n = toNumber(value); if (n === 100) return "Owner"; if (n && n >= 90) return "Officer"; if (n && n >= 50) return "Staff"; return "Member"; }
 function getUserId(item) { if (typeof item === "number") return item; return toNumber(firstDefined(item?.UserID, item?.UserId, item?.userID, item?.userId, item?.user_id, item?.id, item?.ID)); }
 function getDisplayName(item, fallbackId) { if (typeof item === "number") return `user_${item}`; return String(firstDefined(item?.DisplayName, item?.displayName, item?.Username, item?.username, item?.Name, item?.name, fallbackId ? `user_${fallbackId}` : "") || "").trim(); }
@@ -569,6 +764,8 @@ function firstArray(...values) { for (const value of values) if (Array.isArray(v
 function firstDefined(...values) { for (const value of values) if (value !== undefined && value !== null && value !== "") return value; return null; }
 function toNumber(value) { if (value === null || value === undefined || value === "") return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
 function stringOrNull(value) { const text = String(value ?? "").trim(); return text || null; }
+function parseJsonObject(raw) { if (!raw) return {}; try { const parsed = JSON.parse(raw); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
+function normalizeDiscordMapKey(value) { return String(value ?? "").trim().toLowerCase().replace(/^<@!?(\d+)>$/, "$1"); }
 function parseTimestamp(value) { if (value === null || value === undefined || value === "") return null; if (typeof value === "number" || /^\d+(\.\d+)?$/.test(String(value).trim())) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) return null; const ms = n > 1e12 ? n : n * 1000; const date = new Date(ms); return Number.isNaN(date.getTime()) ? null : date.toISOString(); } const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toISOString(); }
 function clamp(value, min, max) { const n = Number(value); if (!Number.isFinite(n)) return min; return Math.min(max, Math.max(min, n)); }
 function key(v) { return String(v || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
