@@ -107,26 +107,6 @@
     }
     return has?total:null;
   }
-  function summaryLabel(main,sub){
-    return '<div class="summary-label">'+esc(main)+'</div><div class="summary-sub">'+esc(sub)+'</div>';
-  }
-  function gapCell(){
-    const gap=goalGap();
-    if(gap==null)return'<span class="unknown">&mdash;</span>';
-    if(gap<=0)return'<span class="met">Goal met</span>';
-    return'<span class="need" title="'+esc(fullNum(gap))+' points needed to pass #'+esc(TARGET_RANK)+'">+'+esc(shortNum(gap))+'</span>';
-  }
-  function requiredPaceCell(win){
-    const gap=goalGap(),targetGain=numOrNull(targetRankRow?.[win.key]),currentGain=teamGain(win.key);
-    if(gap==null||targetGain==null)return'<span class="unknown">&mdash;</span>';
-    if(gap<=0)return'<span class="met">Goal met</span>';
-    const required=Math.max(0,gap)+Math.max(0,targetGain);
-    const title='Required team gain over '+win.label+' if #'+TARGET_RANK+' repeats this pace: '+fullNum(required);
-    if(currentGain==null)return'<span class="need" title="'+esc(title)+'">Need +'+esc(shortNum(required))+'</span>';
-    const shortfall=required-currentGain;
-    if(shortfall<=0)return'<span class="met" title="'+esc(title)+'">On pace +'+esc(shortNum(Math.abs(shortfall)))+'</span>';
-    return'<span class="need" title="'+esc(title)+'">+'+esc(shortNum(shortfall))+' more</span>';
-  }
   function formatDuration(totalMinutes){
     if(!Number.isFinite(totalMinutes))return"&mdash;";
     if(totalMinutes<1)return"<1m";
@@ -139,38 +119,67 @@
     const d=Math.floor(minutes/1440),h=Math.round((minutes%1440)/60);
     return"~"+d+"d"+(h?" "+h+"h":"");
   }
-  function catchEtaCell(win){
-    const gap=goalGap(),targetGain=numOrNull(targetRankRow?.[win.key]),currentGain=teamGain(win.key);
-    if(gap==null||targetGain==null||currentGain==null)return'<span class="unknown">&mdash;</span>';
-    if(gap<=0)return'<span class="met">Goal met</span>';
-    const net=currentGain-targetGain;
-    if(net<=0)return'<span class="need" title="YAMO is not gaining on #'+esc(TARGET_RANK)+' at this window pace.">No catch</span>';
-    return'<span class="met" title="Based on a net gain of '+esc(fullNum(net))+' over '+esc(win.label)+'.">'+formatDuration(gap/(net/win.minutes))+'</span>';
+  function ordinal(n){
+    const value=Number(n);
+    if(!Number.isFinite(value))return String(n||"");
+    const mod100=value%100,mod10=value%10;
+    const suffix=mod100>=11&&mod100<=13?"th":mod10===1?"st":mod10===2?"nd":mod10===3?"rd":"th";
+    return value+suffix;
   }
-  function buildRaceSummaryRows(){
-    if(!SHOW_RACE_SUMMARY)return"";
+  function raceBasis(){
+    const preference=["gain_1h","gain_6h","gain_12h","gain_24h","gain_5m"];
+    for(const key of preference){
+      const win=GAIN_WINDOWS.find(w=>w.key===key);
+      const targetGain=numOrNull(targetRankRow?.[key]);
+      const currentGain=teamGain(key);
+      if(win&&targetGain!=null&&currentGain!=null)return{...win,targetGain,currentGain};
+    }
+    return null;
+  }
+  function raceStats(){
+    const gap=goalGap(),basis=raceBasis();
+    if(gap==null||!basis)return{time:'&mdash;',hourly:'&mdash;',tone:'unknown',basis:null};
+    if(gap<=0)return{time:'Passed',hourly:'Goal met',tone:'met',basis};
+    const net=basis.currentGain-basis.targetGain;
+    const hourlyNeeded=(Math.max(0,basis.targetGain)+gap)/(basis.minutes/60);
+    return {
+      time:net>0?formatDuration(gap/(net/basis.minutes)):"No catch",
+      hourly:"+"+shortNum(hourlyNeeded)+"/hr",
+      tone:net>0?"met":"need",
+      basis
+    };
+  }
+  function renderRaceSummary(){
+    const box=document.getElementById("race-summary");
+    if(!box)return;
+    if(!SHOW_RACE_SUMMARY){box.hidden=true;return}
+    box.hidden=false;
     if(!targetRankRow){
-      return '<tr class="summary-row target-row"><td class="rank">Goal</td><td>'+summaryLabel("#"+esc(TARGET_RANK)+" target unavailable","Top 100 league snapshot needed")+'</td><td colspan="6" class="unknown">Refresh after the Top 100 league data updates.</td></tr>';
+      box.innerHTML='<div class="race-summary-empty">#'+esc(TARGET_RANK)+' target unavailable until Top 100 league data updates.</div>';
+      return;
     }
     const targetName=targetRankRow.league_name||targetRankRow.display_name||"Top "+TARGET_RANK;
     const actualRank=targetRankRow.rank||TARGET_RANK;
+    const headers=['<th>'+esc(ordinal(actualRank))+'</th>','<th class="numeric">Total</th>'].concat(GAIN_WINDOWS.map(w=>'<th class="numeric">'+esc(w.key==="gain_1h"?"Hr":w.label)+'</th>')).join("");
     const targetCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(targetRankRow?.[win.key])+'</td>').join("");
     const teamCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(teamGain(win.key))+'</td>').join("");
-    const requiredCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+requiredPaceCell(win)+'</td>').join("");
-    const etaCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+catchEtaCell(win)+'</td>').join("");
-    return [
-      '<tr class="summary-row target-row"><td class="rank">Goal</td><td>'+summaryLabel("#"+esc(actualRank)+" "+targetName,"Top "+TARGET_RANK+" target pace")+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>',
-      '<tr class="summary-row team-row"><td class="rank">Team</td><td>'+summaryLabel((currentData?.league_name||LEAGUE)+" team total","Sum of member gains")+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>',
-      '<tr class="summary-row need-row"><td class="rank">Need</td><td>'+summaryLabel("Required to pass #"+TARGET_RANK,"Gap plus #"+TARGET_RANK+" pace")+'</td><td class="numeric">'+gapCell()+'</td>'+requiredCells+'</tr>',
-      '<tr class="summary-row eta-row"><td class="rank">ETA</td><td>'+summaryLabel("Catch time at net pace","YAMO gain minus #"+TARGET_RANK+" gain")+'</td><td class="numeric">'+gapCell()+'</td>'+etaCells+'</tr>'
-    ].join("");
+    const stats=raceStats();
+    const basisText=stats.basis?' <span class="race-stat-basis">('+esc(stats.basis.key==="gain_1h"?"1h":stats.basis.label)+' pace)</span>':'';
+    box.innerHTML='<div class="race-summary-scroll"><table class="race-mini-table"><thead><tr>'+headers+'</tr></thead><tbody>'+
+      '<tr><td class="race-name" title="'+esc(targetName)+'">'+esc(targetName)+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>'+
+      '<tr><td class="race-name" title="'+esc(currentData?.league_name||LEAGUE)+'">'+esc(currentData?.league_name||LEAGUE)+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>'+
+      '</tbody></table></div><div class="race-summary-stats">'+
+      '<span>Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong>'+basisText+'</span>'+
+      '<span>Average hourly needed to pass: <strong class="need">'+stats.hourly+'</strong></span>'+
+      '</div>';
   }
 
   function render(){
     const tbody=document.getElementById("members-tbody");
+    renderRaceSummary();
     const list=visible();
     if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
-    tbody.innerHTML=buildRaceSummaryRows()+list.map(r=>{
+    tbody.innerHTML=list.map(r=>{
       const name=r.username||r.display_name||r.user_id;
       return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
     }).join("");
