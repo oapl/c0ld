@@ -549,7 +549,7 @@ async function handleClansCurrent(request, env) {
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
-  const limit = String(clamp(Number(url.searchParams.get("limit") || env.CLAN_RANK_TOP_N || 100), 1, 500));
+  const limit = String(clamp(Number(url.searchParams.get("limit") || env.CLAN_RANK_TOP_N || 100), 1, 1000));
 
   let latest = null;
   let rows = [];
@@ -620,8 +620,8 @@ async function handleClansHistory(request, env) {
   const clan = url.searchParams.get("clan") || "";
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
-  const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 500);
-  const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 500);
+  const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 1000);
+  const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 1000);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   const params = {
@@ -638,7 +638,7 @@ async function handleClansHistory(request, env) {
 
   if (rankMinParam !== null || rankMaxParam !== null) {
     const rankMin = rankMinParam ?? 1;
-    const rankMax = rankMaxParam ?? 500;
+    const rankMax = rankMaxParam ?? 1000;
     params.rank = [
       `gte.${Math.min(rankMin, rankMax)}`,
       `lte.${Math.max(rankMin, rankMax)}`
@@ -1023,7 +1023,7 @@ async function fetchActiveClanBattleMeta(env) {
 }
 
 async function fetchTopClans(env, requestedTopN = null) {
-  const topN = clamp(Number(requestedTopN || env.CLAN_RANK_TOP_N || 100), 1, 500);
+  const topN = clamp(Number(requestedTopN || env.CLAN_RANK_TOP_N || 100), 1, 1000);
   const maxPages = Math.ceil(topN / CLANS_PAGE_SIZE) + 2;
   const hosts = [
     "https://biggamesapi.io/api/clans",
