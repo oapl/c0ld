@@ -549,7 +549,7 @@ async function handleClansCurrent(request, env) {
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
-  const limit = String(clamp(Number(url.searchParams.get("limit") || env.CLAN_RANK_TOP_N || 100), 1, 1000));
+  const limit = String(Number(env.CLAN_RANK_TOP_N || 100));
 
   let latest = null;
   let rows = [];
@@ -601,7 +601,6 @@ async function handleClansCurrent(request, env) {
       icon_url: row.icon_url || null,
       gain_5m: row.gain_5m,
       gain_1h: row.gain_1h,
-      gain_6h: row.gain_6h,
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h,
       rate_per_hour: row.rate_per_hour,
@@ -620,8 +619,8 @@ async function handleClansHistory(request, env) {
   const clan = url.searchParams.get("clan") || "";
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
-  const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 1000);
-  const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 1000);
+  const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 500);
+  const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 500);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   const params = {
@@ -638,7 +637,7 @@ async function handleClansHistory(request, env) {
 
   if (rankMinParam !== null || rankMaxParam !== null) {
     const rankMin = rankMinParam ?? 1;
-    const rankMax = rankMaxParam ?? 1000;
+    const rankMax = rankMaxParam ?? 500;
     params.rank = [
       `gte.${Math.min(rankMin, rankMax)}`,
       `lte.${Math.max(rankMin, rankMax)}`
@@ -1023,7 +1022,7 @@ async function fetchActiveClanBattleMeta(env) {
 }
 
 async function fetchTopClans(env, requestedTopN = null) {
-  const topN = clamp(Number(requestedTopN || env.CLAN_RANK_TOP_N || 100), 1, 1000);
+  const topN = clamp(Number(requestedTopN || env.CLAN_RANK_TOP_N || 100), 1, 500);
   const maxPages = Math.ceil(topN / CLANS_PAGE_SIZE) + 2;
   const hosts = [
     "https://biggamesapi.io/api/clans",

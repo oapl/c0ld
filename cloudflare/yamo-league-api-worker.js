@@ -4,8 +4,9 @@ const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
-const TOP_LEAGUES_NAME = "GLOBAL_TOP_100_LEAGUES";
-const TOP_LEAGUES_LIMIT = 100;
+const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
+const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
+const MAX_TOP_LEAGUES_LIMIT = 1000;
 const ROBLOX_BATCH_SIZE = 100;
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
@@ -18,7 +19,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME });
+        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -101,7 +102,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
-  const top = await fetchTopLeagues(TOP_LEAGUES_LIMIT);
+  const top = await fetchTopLeagues(topLeaguesLimit(env));
   const snapshotId = `top_leagues:${runKey}:${fetchedAt}`;
 
   const dbRows = top.rows.map(row => ({
@@ -181,7 +182,7 @@ async function handleCurrent(request, env) {
 async function handleTopLeagues(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
-  const limit = clamp(Number(url.searchParams.get("limit") || TOP_LEAGUES_LIMIT), 1, 100);
+  const limit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
   const runKey = requestedTopLeaguesRunKey(url, env);
 
   let rows = await supabaseSelect(env, CURRENT_TABLE, {
@@ -194,7 +195,7 @@ async function handleTopLeagues(request, env) {
 
   let latest = latestMeta(rows);
   const allowLiveFallback = String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false";
-  if (allowLiveFallback && (!rows.length || isTopLeaguesStale(latest, env))) {
+  if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
     const live = await fetchTopLeagues(limit);
     const now = new Date().toISOString();
     rows = live.rows.map(row => ({
@@ -316,15 +317,30 @@ async function fetchLeagueRank(leagueNameValue) {
 }
 
 async function fetchTopLeagues(limit) {
-  const capped = clamp(Number(limit) || TOP_LEAGUES_LIMIT, 1, 100);
-  const api = await fetchLeagueListApi(1, capped);
-  const leagues = leagueListFromResponse(api)
-    .map((item, index) => {
+  const capped = clamp(Number(limit) || DEFAULT_TOP_LEAGUES_LIMIT, 1, MAX_TOP_LEAGUES_LIMIT);
+  const pageSize = 100;
+  const pages = Math.ceil(capped / pageSize);
+  const seen = new Set();
+  const leagues = [];
+
+  for (let page = 1; page <= pages; page += 1) {
+    const api = await fetchLeagueListApi(page, pageSize);
+    const pageRows = leagueListFromResponse(api);
+    if (!pageRows.length) break;
+
+    pageRows.forEach((item, index) => {
       const summary = summarizeLeague(item, lname(item) || `League ${index + 1}`);
       const explicitRank = toNumber(firstDefined(item.Rank, item.rank, item.Place, item.place, item.Position, item.position));
-      return { item, index, summary, explicitRank };
-    })
-    .filter(x => x.summary.league_name);
+      if (!summary.league_name) return;
+
+      const stableKey = key(summary.league_id || summary.league_name);
+      if (seen.has(stableKey)) return;
+      seen.add(stableKey);
+      leagues.push({ item, index: leagues.length, summary, explicitRank });
+    });
+
+    if (pageRows.length < pageSize || leagues.length >= capped) break;
+  }
 
   leagues.sort((a, b) =>
     (b.summary.league_points - a.summary.league_points) ||
@@ -753,6 +769,7 @@ function leagueNames(env) { const raw = String(env.LEAGUE_NAMES || env.LEAGUE_NA
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
 function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
 function requestedRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || leagueRunKey(env)); }
 function requestedTopLeaguesRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || topLeaguesRunKey(env)); }

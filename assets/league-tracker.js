@@ -1,6 +1,6 @@
 (() => {
   const API = "https://yamo-league-api-worker.opal-dde.workers.dev";
-  const TOP_LEAGUES_NAME = "GLOBAL_TOP_100_LEAGUES";
+  const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
   const RUN_KEY = String(config.run || config.runKey || "active").trim();
@@ -58,7 +58,7 @@
 
   async function fetchTopLeagueContext(){
     const url=new URL(API+"/api/leagues/top-leagues");
-    url.searchParams.set("limit","100");
+    url.searchParams.set("limit","1000");
     addRunParam(url);
     const data=await getJson(url);
     const targetName=norm(currentData?.league_name||LEAGUE);
@@ -161,7 +161,7 @@
     if(!SHOW_RACE_SUMMARY){box.hidden=true;return}
     box.hidden=false;
     if(!targetRankRow){
-      box.innerHTML='<div class="race-summary-empty">#'+esc(TARGET_RANK)+' target unavailable until Top 100 league data updates.</div>';
+      box.innerHTML='<div class="race-summary-empty">#'+esc(TARGET_RANK)+' target unavailable until Top 1000 league data updates.</div>';
       return;
     }
     const targetName=targetRankRow.league_name||targetRankRow.display_name||"Top "+TARGET_RANK;
@@ -237,7 +237,7 @@
     if(!box)return;
     const events=buildLeagueRankLog();
     if(count)count.textContent=events.length?events.length.toLocaleString("en-US")+" league rank changes":"No league rank changes";
-    if(!events.length){box.innerHTML='<div class="rank-log-empty">No league rank up/down changes found yet. This depends on stored Top 100 League snapshots.</div>';return}
+    if(!events.length){box.innerHTML='<div class="rank-log-empty">No league rank up/down changes found yet. This depends on stored Top 1000 League snapshots.</div>';return}
     const name=currentData?.league_name||LEAGUE;
     box.innerHTML=events.slice(0,80).map(ev=>{
       const cls=ev.direction==="up"?"positive":"negative";

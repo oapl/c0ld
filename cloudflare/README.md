@@ -135,7 +135,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `RETENTION_HOURS` | `336` |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
 | `INGEST_CLANS_LEADERBOARD` | `true` |
-| `CLAN_RANK_TOP_N` | `1000`; stores deeper all-clans ranks so pages like `yamo1-9.html` can show rank and increment totals for alt clans near Top 750, Top 250, and Top 60 reward ranges. |
+| `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>YAMO1-9 Alt Clans</title>
+<title>YAMO1-9 Leagues</title>
 <style>
 *{box-sizing:border-box}
 :root{--bg:#0d1117;--panel:#161b22;--panel2:#0f141b;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--bad:#f85149;--warn:#d29922}
@@ -29,18 +29,19 @@ main{max-width:1280px;margin:0 auto;padding:22px 24px 28px}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 button{border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:9px 11px;font-size:14px;cursor:pointer}
 button:hover{border-color:var(--link);background:var(--hover)}
+button:disabled{opacity:.65;cursor:not-allowed}
 .note{color:var(--muted);font-size:12px}
 .table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:980px}
+table{width:100%;border-collapse:collapse;min-width:960px}
 th,td{padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
 th{color:var(--muted);font-size:13px;font-weight:500;text-align:left;cursor:pointer}
 .numeric{text-align:right;font-variant-numeric:tabular-nums}
-.rank{font-weight:700}.clan{font-weight:700}
-.clan-cell{display:flex;align-items:center;gap:10px}
-.clan-icon{width:34px;height:34px;border-radius:8px;background:#21262d;object-fit:cover;flex:0 0 auto}
+.rank{font-weight:700}.league{font-weight:700}
+.league-cell{display:flex;align-items:center;gap:10px}
+.league-icon{width:34px;height:34px;border-radius:8px;background:#21262d;object-fit:cover;flex:0 0 auto}
 .source{color:var(--muted);font-size:12px;margin-top:2px}
 .positive{color:var(--good);font-weight:700}.negative{color:var(--bad);font-weight:700}.zero,.unknown{color:var(--muted)}
-.missing td{color:var(--muted)}.live-only td{background:rgba(210,153,34,.04)}
+.missing td{color:var(--muted)}
 .status{margin-bottom:18px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--panel);color:var(--muted);font-size:13px;display:none}
 .status.error{display:block;border-color:var(--bad);background:rgba(248,81,73,.12);color:#ffb4ad}
 .status.info{display:block}
@@ -67,24 +68,24 @@ th{color:var(--muted);font-size:13px;font-weight:500;text-align:left;cursor:poin
 </header>
 <main>
   <section class="hero">
-    <h1>YAMO1-9 Alt Clans</h1>
-    <p>Clan-only totals for YAMO1 through YAMO9 plus 1YAMO, 2YAMO, and 3YAMO.</p>
+    <h1>YAMO1-9 Leagues</h1>
+    <p>League totals for YAMO1 through YAMO9 plus 1YAMO, 2YAMO, and 3YAMO.</p>
   </section>
 
   <div id="status" class="status"></div>
 
   <section class="cards">
-    <div class="card"><div class="label">Tracked Clans</div><div class="value" id="tracked-count">12</div></div>
-    <div class="card"><div class="label">Found in DB</div><div class="value" id="found-count">—</div></div>
-    <div class="card"><div class="label">Total Points</div><div class="value" id="total-points">—</div></div>
-    <div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">—</div></div>
+    <div class="card"><div class="label">Tracked Leagues</div><div class="value" id="tracked-count">12</div></div>
+    <div class="card"><div class="label">Found in Top 1000</div><div class="value" id="found-count">&mdash;</div></div>
+    <div class="card"><div class="label">Total Points</div><div class="value" id="total-points">&mdash;</div></div>
+    <div class="card"><div class="label">Last Update</div><div class="value" id="last-db-update">&mdash;</div></div>
   </section>
 
   <section class="section">
     <div class="section-header">
       <div>
-        <h2 class="section-title">Alt Clan Totals</h2>
-        <div class="note" id="range-note">Stored rank data comes from the all-clans Worker snapshot.</div>
+        <h2 class="section-title">Alt League Totals</h2>
+        <div class="note" id="range-note">Ranks and gains come from the YAMO league Worker top-leagues snapshots.</div>
       </div>
       <div class="controls"><button id="refresh-btn" type="button">Refresh</button></div>
     </div>
@@ -93,48 +94,48 @@ th{color:var(--muted);font-size:13px;font-weight:500;text-align:left;cursor:poin
         <thead>
           <tr>
             <th data-sort="rank">Rank</th>
-            <th data-sort="clan_name">Clan</th>
-            <th data-sort="points" class="numeric">Total Points</th>
+            <th data-sort="league_name">League</th>
+            <th data-sort="total_points" class="numeric">Total Points</th>
             <th data-sort="gain_5m" class="numeric">5m</th>
             <th data-sort="gain_1h" class="numeric">1 Hour</th>
             <th data-sort="gain_6h" class="numeric">6 Hours</th>
             <th data-sort="gain_12h" class="numeric">12 Hours</th>
             <th data-sort="gain_24h" class="numeric">24 Hours</th>
-            <th data-sort="projected_rank" class="numeric">Projected Rank</th>
+            <th data-sort="projected_rank_1h" class="numeric">Projected Rank</th>
           </tr>
         </thead>
-        <tbody id="clans-tbody"><tr><td colspan="9" class="empty">Loading YAMO alt clans...</td></tr></tbody>
+        <tbody id="leagues-tbody"><tr><td colspan="9" class="empty">Loading YAMO alt leagues...</td></tr></tbody>
       </table>
     </div>
   </section>
 </main>
 
 <script>
-const CLANS_API="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
-const LIVE_LOOKUP_API="https://clan-lookup.opal-dde.workers.dev/";
-const TARGET_CLANS=["YAMO1","YAMO2","YAMO3","YAMO4","YAMO5","YAMO6","YAMO7","YAMO8","YAMO9","1YAMO","2YAMO","3YAMO"];
-let rows=[],sortKey="rank",sortAsc=true,loading=false,lastSnapshot=null;
+const API="https://yamo-league-api-worker.opal-dde.workers.dev";
+const RUN_KEY="active";
+const TARGET_LEAGUES=["YAMO1","YAMO2","YAMO3","YAMO4","YAMO5","YAMO6","YAMO7","YAMO8","YAMO9","1YAMO","2YAMO","3YAMO"];
+let rows=[],sortKey="rank",sortAsc=true,loading=false,lastSnapshot=null,lastSource="";
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function key(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
-function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"—";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
-function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"—"}
-function rank(v){const n=Number(v);return Number.isFinite(n)&&n>0?"#"+n.toLocaleString("en-US"):"—"}
-function dt(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?"—":d.toLocaleString()}
-function delta(v){if(v==null)return'<span class="unknown">—</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">—</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
+function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"&mdash;";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
+function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"-"}
+function rank(v){const n=Number(v);return Number.isFinite(n)&&n>0?"#"+n.toLocaleString("en-US"):"-"}
+function dt(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?"-":d.toLocaleString()}
+function delta(v){if(v==null)return'<span class="unknown">-</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">-</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
 function setStatus(text,kind="info"){const el=document.getElementById("status");el.className="status "+kind;el.textContent=text||""}
 function clearStatus(){const el=document.getElementById("status");el.className="status";el.textContent=""}
-function rowSource(row){if(row.source==="live")return"live rank only";if(row.source==="missing")return"not found";return"stored snapshot"}
-function icon(row){const src=String(row.icon_url||"").trim();return src?'<img class="clan-icon" src="'+esc(src)+'" alt="">':'<span class="clan-icon"></span>'}
-function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r;if(k==="clan_name")r=TARGET_CLANS.indexOf(a.target)-TARGET_CLANS.indexOf(b.target);else if(Number.isFinite(an)&&Number.isFinite(bn))r=an-bn;else if(Number.isFinite(an))r=-1;else if(Number.isFinite(bn))r=1;else r=String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
+function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
+function icon(row){const src=iconUrl(row.league_icon);return src?'<img class="league-icon" src="'+esc(src)+'" alt="">':'<span class="league-icon"></span>'}
+function rowSource(row){if(row.source==="missing")return"not found in Top 1000";return lastSource||"league snapshot"}
+function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r;if(k==="league_name")r=TARGET_LEAGUES.indexOf(a.target)-TARGET_LEAGUES.indexOf(b.target);else if(Number.isFinite(an)&&Number.isFinite(bn))r=an-bn;else if(Number.isFinite(an))r=-1;else if(Number.isFinite(bn))r=1;else r=String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
 function visible(){return rows.slice().sort((a,b)=>compare(a,b,sortKey,sortAsc))}
-function renderCards(){const stored=rows.filter(r=>r.source==="stored").length;const pointRows=rows.filter(r=>Number.isFinite(Number(r.points)));const total=pointRows.reduce((sum,r)=>sum+(Number(r.points)||0),0);document.getElementById("tracked-count").textContent=TARGET_CLANS.length;document.getElementById("found-count").textContent=stored+"/"+TARGET_CLANS.length;document.getElementById("total-points").textContent=pointRows.length?shortNum(total):"—";document.getElementById("total-points").title=pointRows.length?fullNum(total):"";document.getElementById("last-db-update").textContent=lastSnapshot?dt(lastSnapshot):"—"}
-function render(){const tbody=document.getElementById("clans-tbody");const list=visible();renderCards();if(!list.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No alt clan rows loaded.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr class="'+esc(r.source==="live"?"live-only":r.source==="missing"?"missing":"")+'"><td class="rank">'+esc(rank(r.rank))+'</td><td><div class="clan-cell">'+icon(r)+'<div><div class="clan">'+esc(r.clan_name||r.target)+'</div><div class="source">'+esc(rowSource(r))+'</div></div></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td class="numeric">'+esc(rank(r.projected_rank))+'</td></tr>').join("")}
+function renderCards(){const found=rows.filter(r=>r.source!=="missing").length;const pointRows=rows.filter(r=>Number.isFinite(Number(r.total_points)));const total=pointRows.reduce((sum,r)=>sum+(Number(r.total_points)||0),0);document.getElementById("tracked-count").textContent=TARGET_LEAGUES.length;document.getElementById("found-count").textContent=found+"/"+TARGET_LEAGUES.length;document.getElementById("total-points").textContent=pointRows.length?shortNum(total):"-";document.getElementById("total-points").title=pointRows.length?fullNum(total):"";document.getElementById("last-db-update").textContent=lastSnapshot?dt(lastSnapshot):"-"}
+function render(){const tbody=document.getElementById("leagues-tbody");const list=visible();renderCards();if(!list.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No alt league rows loaded.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr class="'+esc(r.source==="missing"?"missing":"")+'"><td class="rank">'+esc(rank(r.rank))+'</td><td><div class="league-cell">'+icon(r)+'<div><div class="league">'+esc(r.league_name||r.target)+'</div><div class="source">'+esc(rowSource(r))+'</div></div></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+shortNum(r.total_points)+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td class="numeric">'+esc(rank(r.projected_rank_1h))+'</td></tr>').join("")}
 async function fetchJson(url){const res=await fetch(url,{cache:"no-store"});const data=await res.json().catch(()=>null);if(!res.ok||data?.ok===false)throw new Error(data?.error||data?.message||"HTTP "+res.status);return data}
-async function loadStoredRows(){const url=new URL(CLANS_API);url.searchParams.set("limit","1000");url.searchParams.set("v",Date.now());const data=await fetchJson(url);lastSnapshot=data.snapshot_at||null;const byName=new Map((data.rows||[]).map(row=>[key(row.clan_name),row]));return TARGET_CLANS.map(target=>{const row=byName.get(key(target));return row?{...row,target,source:"stored"}:null})}
-async function liveFallback(target){try{const url=new URL(LIVE_LOOKUP_API);url.searchParams.set("clan",target);url.searchParams.set("v",Date.now());const data=await fetchJson(url);return{target,source:"live",clan_name:data?.clan?.name||target,rank:data?.rank?.rank||null,points:data?.battle?.totalPoints||data?.rank?.points||null,icon_url:data?.clan?.icon_url||null,projected_rank:null,gain_5m:null,gain_1h:null,gain_6h:null,gain_12h:null,gain_24h:null}}catch(err){return{target,source:"missing",clan_name:target,rank:null,points:null,icon_url:null,projected_rank:null,gain_5m:null,gain_1h:null,gain_6h:null,gain_12h:null,gain_24h:null,error:err.message||String(err)}}}
-async function loadData(){if(loading)return;loading=true;document.getElementById("refresh-btn").disabled=true;setStatus("Loading YAMO alt clans...");try{const stored=await loadStoredRows();const missingTargets=TARGET_CLANS.filter((_,i)=>!stored[i]);const fallbacks=await Promise.all(missingTargets.map(liveFallback));let fallbackIndex=0;rows=stored.map((row,i)=>row||fallbacks[fallbackIndex++]);const liveOnly=rows.filter(r=>r.source==="live").length;const missing=rows.filter(r=>r.source==="missing").length;if(liveOnly||missing)setStatus((liveOnly?liveOnly+" live-rank only. ":"")+(missing?missing+" not found. ":"")+"Increase CLAN_RANK_TOP_N to 1000 on the clan Worker for stored gains on deeper ranks.");else clearStatus();render()}catch(err){console.error(err);rows=TARGET_CLANS.map(target=>({target,source:"missing",clan_name:target}));setStatus(err.message||String(err),"error");render()}finally{loading=false;document.getElementById("refresh-btn").disabled=false}}
+async function loadStoredRows(){const url=new URL(API+"/api/leagues/top-leagues");url.searchParams.set("limit","1000");url.searchParams.set("run",RUN_KEY);url.searchParams.set("v",Date.now());const data=await fetchJson(url);lastSnapshot=data.snapshot_at||null;lastSource=data.source||"";const byName=new Map((data.rows||[]).map(row=>[key(row.league_name||row.display_name),row]));return TARGET_LEAGUES.map(target=>{const row=byName.get(key(target));return row?{...row,target,source:"league"}:{target,source:"missing",league_name:target,total_points:null,rank:null,projected_rank_1h:null,gain_5m:null,gain_1h:null,gain_6h:null,gain_12h:null,gain_24h:null}})}
+async function loadData(){if(loading)return;loading=true;document.getElementById("refresh-btn").disabled=true;setStatus("Loading YAMO alt leagues...");try{rows=await loadStoredRows();const missing=rows.filter(r=>r.source==="missing").map(r=>r.target);if(missing.length)setStatus(missing.join(", ")+" not found in the Top 1000 league data. Deploy the YAMO league Worker with TOP_LEAGUES_LIMIT=1000 if this still shows old data.");else clearStatus();render()}catch(err){console.error(err);rows=TARGET_LEAGUES.map(target=>({target,source:"missing",league_name:target}));setStatus(err.message||String(err),"error");render()}finally{loading=false;document.getElementById("refresh-btn").disabled=false}}
 document.getElementById("refresh-btn").addEventListener("click",loadData);
-document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="clan_name"||k==="projected_rank"}render()}));
+document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="projected_rank_1h"}render()}));
 loadData();
 setInterval(loadData,60000);
 </script>
