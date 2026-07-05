@@ -146,9 +146,11 @@
     const title="Uses "+basisLabel+" pace: YAMO "+fullNum(Math.round(currentHourly))+"/hr, #"+TARGET_RANK+" "+fullNum(Math.round(targetHourly))+"/hr.";
     if(gap<=0)return{time:'Passed',hourly:shortNum(currentHourly)+"/hr",tone:'met',title};
     const netHourly=currentHourly-targetHourly;
+    const requiredHourly=Math.ceil(targetHourly+1);
     return {
-      time:netHourly>0?formatDuration(gap/(netHourly/60)):"No catch",
+      time:netHourly>0?formatDuration(gap/(netHourly/60)):"won't pass",
       hourly:shortNum(currentHourly)+"/hr",
+      required:netHourly>0?"":shortNum(requiredHourly)+"/hr",
       tone:netHourly>0?"met":"need",
       title:title+" Time is based on YAMO's net gain after #"+TARGET_RANK+"'s pace."
     };
@@ -172,7 +174,7 @@
       '<tr><td class="race-name" title="'+esc(targetName)+'">'+esc(targetName)+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>'+
       '<tr><td class="race-name" title="'+esc(currentData?.league_name||LEAGUE)+'">'+esc(currentData?.league_name||LEAGUE)+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>'+
       '</tbody></table></div><div class="race-summary-stats">'+
-      '<span title="'+esc(stats.title)+'">Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> @ '+esc(stats.hourly)+'</span>'+
+      '<span title="'+esc(stats.title)+'">Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> @ '+esc(stats.hourly)+(stats.required?' | <strong class="need">'+esc(stats.required)+'</strong> required to pass':'')+'</span>'+
       '</div>';
   }
 
