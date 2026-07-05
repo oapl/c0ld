@@ -549,7 +549,7 @@ async function handleClansCurrent(request, env) {
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
-  const limit = String(Number(env.CLAN_RANK_TOP_N || 100));
+  const limit = String(clamp(Number(url.searchParams.get("limit") || env.CLAN_RANK_TOP_N || 100), 1, 500));
 
   let latest = null;
   let rows = [];
@@ -601,6 +601,7 @@ async function handleClansCurrent(request, env) {
       icon_url: row.icon_url || null,
       gain_5m: row.gain_5m,
       gain_1h: row.gain_1h,
+      gain_6h: row.gain_6h,
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h,
       rate_per_hour: row.rate_per_hour,
@@ -1447,6 +1448,7 @@ async function addGainFields(env, rows, latest) {
   const windows = [
     { key: "gain_5m", minutes: 5, tolerance: 4 },
     { key: "gain_1h", minutes: 60, tolerance: 10 },
+    { key: "gain_6h", minutes: 6 * 60, tolerance: 20 },
     { key: "gain_12h", minutes: 12 * 60, tolerance: 25 },
     { key: "gain_24h", minutes: 24 * 60, tolerance: 45 }
   ];
@@ -1600,6 +1602,7 @@ function addNullGains(row) {
     ...row,
     gain_5m: null,
     gain_1h: null,
+    gain_6h: null,
     gain_12h: null,
     gain_24h: null
   };
