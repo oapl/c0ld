@@ -2,6 +2,7 @@
   const API = "https://yamo-league-api-worker.opal-dde.workers.dev";
   const params = new URLSearchParams(location.search);
   const LEAGUE = String(params.get("league") || "YAMO");
+  const RUN_KEY = String(params.get("run") || params.get("league_run_key") || "active").trim();
   const USER_ID = String(params.get("id") || params.get("user_id") || "").trim();
 
   let currentData = null;
@@ -27,6 +28,8 @@
     if(!r.ok||data.ok===false)throw new Error(data.message||"HTTP "+r.status);
     return data;
   }
+
+  function addRunParam(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
 
   function dedupe(rows){
     const byTime=new Map();
@@ -128,8 +131,8 @@
   async function load(){
     if(!USER_ID){document.getElementById("error").textContent="Missing player id in URL.";return}
     try{
-      const curUrl=new URL(API+"/api/leagues/current");curUrl.searchParams.set("league",LEAGUE);
-      const histUrl=new URL(API+"/api/leagues/history");histUrl.searchParams.set("league",LEAGUE);histUrl.searchParams.set("user_id",USER_ID);histUrl.searchParams.set("hours","all");histUrl.searchParams.set("limit","50000");
+      const curUrl=new URL(API+"/api/leagues/current");curUrl.searchParams.set("league",LEAGUE);addRunParam(curUrl);
+      const histUrl=new URL(API+"/api/leagues/history");histUrl.searchParams.set("league",LEAGUE);histUrl.searchParams.set("user_id",USER_ID);histUrl.searchParams.set("hours","all");histUrl.searchParams.set("limit","50000");addRunParam(histUrl);
       const [cur,hist]=await Promise.all([getJson(curUrl),getJson(histUrl)]);
       currentData=cur;
       player=(cur.rows||[]).find(r=>String(r.user_id)===String(USER_ID))||null;

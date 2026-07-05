@@ -4,6 +4,8 @@ compatibility_date = "2026-06-20"
 
 [vars]
 LEAGUE_NAME = "YAMO"
+# Change this when a new league run starts. Existing database rows are "legacy".
+LEAGUE_RUN_KEY = "active"
 # Optional comma-separated list if you later track more than one league.
 # LEAGUE_NAMES = "YAMO,OTHER"
 SITE_ORIGINS = "https://oapl.github.io,*"

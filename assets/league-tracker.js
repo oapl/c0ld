@@ -3,6 +3,7 @@
   const TOP_LEAGUES_NAME = "GLOBAL_TOP_100_LEAGUES";
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
+  const RUN_KEY = String(config.run || config.runKey || "active").trim();
 
   let rows = [];
   let currentData = null;
@@ -21,7 +22,12 @@
   function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
   function avatar(r){const url=String(r.avatar_url||"").trim();return url?'<img class="avatar" src="'+esc(url)+'" alt="">':'<span class="avatar">'+esc(initials(r.username||r.display_name))+'</span>'}
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
-  function profileHref(r){return "league-profile.html?league="+encodeURIComponent(LEAGUE)+"&id="+encodeURIComponent(r.user_id||"")}
+  function addRunParam(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
+  function profileHref(r){
+    let href="league-profile.html?league="+encodeURIComponent(LEAGUE)+"&id="+encodeURIComponent(r.user_id||"");
+    if(RUN_KEY)href+="&run="+encodeURIComponent(RUN_KEY);
+    return href;
+  }
   function visible(){const list=rows.slice();list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
   function norm(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
 
@@ -43,6 +49,7 @@
   async function fetchTopLeagueRow(){
     const url=new URL(API+"/api/leagues/top-leagues");
     url.searchParams.set("limit","100");
+    addRunParam(url);
     const data=await getJson(url);
     const targetName=norm(currentData?.league_name||LEAGUE);
     const targetId=String(currentData?.league_id||"").trim();
@@ -90,6 +97,7 @@
     url.searchParams.set("user_id",String(syntheticId));
     url.searchParams.set("hours","all");
     url.searchParams.set("limit","50000");
+    addRunParam(url);
     const data=await getJson(url);
     return data.rows||[];
   }
@@ -141,6 +149,7 @@
     try{
       const currentUrl=new URL(API+"/api/leagues/current");
       currentUrl.searchParams.set("league",LEAGUE);
+      addRunParam(currentUrl);
       const current=await getJson(currentUrl);
       rows=current.rows||[];
       currentData=current;
