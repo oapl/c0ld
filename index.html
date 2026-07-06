@@ -411,7 +411,7 @@
 
 
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
-      <a class="menu-btn" href="top-leagues.html">Top 100 Leagues</a>
+      <a class="menu-btn" href="top-leagues.html">Top 1000 Leagues</a>
       <a class="menu-btn" href="clan-filter.html">Clan Filter</a>
       <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
       <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
@@ -644,8 +644,7 @@
         key === "abstractc0ld" ||
         key === "spring2026"
       );
-      const hasExportedRows = Array.isArray(item?.rows) && item.rows.length > 0;
-      const isStaticOnlyLegacy = !isApiSource && !hasExportedRows && keys.some(key =>
+      const isStaticOnlyLegacy = !isApiSource && keys.some(key =>
         key === "angelbattle2026" ||
         key === "angelbattle2026c0ld" ||
         key === "angelbattle2026clans" ||
@@ -655,6 +654,16 @@
       );
 
       return isAlwaysLegacy || isStaticOnlyLegacy;
+    }
+
+    function hasBattleRows(item) {
+      const rowCount = toFiniteNumber(item?.row_count);
+      if (rowCount !== null) return rowCount > 0;
+
+      const snapshotCount = toFiniteNumber(item?.snapshot_count);
+      if (snapshotCount !== null) return snapshotCount > 0;
+
+      return true;
     }
 
     function battleDisplayName(item) {
@@ -1363,7 +1372,7 @@
       const select = document.getElementById("battle-select");
 
       const filteredBattles = sortBattlesForDropdown(
-        (battles || []).filter(battle => battle && battle.battle)
+        (battles || []).filter(battle => battle && battle.battle && hasBattleRows(battle))
       );
 
       const options = [

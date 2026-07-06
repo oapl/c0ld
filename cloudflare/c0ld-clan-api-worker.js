@@ -1,13 +1,17 @@
 const SNAPSHOT_TABLE = "c0ld_clan_snapshots";
+const SNAPSHOT_ARCHIVE_TABLE = "c0ld_clan_snapshots_archive";
 const CURRENT_TABLE = "c0ld_clan_current";
 const BATTLE_RUNS_TABLE = "c0ld_battle_runs";
 const CLANS_SNAPSHOT_TABLE = "c0ld_clans_snapshots";
+const CLANS_SNAPSHOT_ARCHIVE_TABLE = "c0ld_clans_snapshots_archive";
 const CLANS_CURRENT_TABLE = "c0ld_clans_current";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_HISTORY_MAX_HOURS = 100000;
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
+const ARCHIVE_PRUNE_BATCH_SIZE = 500;
+const ARCHIVE_PRUNE_MAX_BATCHES = 10;
 const ROBLOX_BATCH_SIZE = 100;
 const CLANS_PAGE_SIZE = 100;
 
@@ -403,11 +407,15 @@ async function handleBattles(request, env) {
     order: "latest_snapshot_at.desc",
     limit: String(limit)
   });
+  const rowsWithCoverage = await addBattleRowCounts(env, rows, SNAPSHOT_TABLE, row => ({
+    clan_name: `eq.${row.clan_name}`,
+    battle_key: `eq.${row.battle_key}`
+  }));
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     clan_name: clan,
-    rows: rows.map(row => ({
+    rows: rowsWithCoverage.map(row => ({
       battle: row.battle_key,
       display_name: cleanBattleDisplayName(row.battle_key, row.battle_display_name),
       battle_start_iso: row.battle_started_at || null,
@@ -415,6 +423,8 @@ async function handleBattles(request, env) {
       first_snapshot: row.first_seen_at || null,
       last_snapshot: row.latest_snapshot_at || row.last_seen_at || null,
       latest_snapshot_id: row.latest_snapshot_id || null,
+      row_count: row.row_count,
+      has_rows: row.row_count > 0,
       is_active: row.is_active,
       source: "api"
     }))
@@ -703,11 +713,16 @@ async function handleClansBattles(request, env) {
     addClansBattleSummary(byBattle, row);
   }
 
+  const summaries = [...byBattle.values()].sort((a, b) =>
+    new Date(b.last_snapshot || 0) - new Date(a.last_snapshot || 0)
+  );
+  const rowsWithCoverage = await addBattleRowCounts(env, summaries, CLANS_SNAPSHOT_TABLE, row => ({
+    battle_key: `eq.${row.battle}`
+  }));
+
   return cacheJson({
     generated_at: new Date().toISOString(),
-    rows: [...byBattle.values()].sort((a, b) =>
-      new Date(b.last_snapshot || 0) - new Date(a.last_snapshot || 0)
-    ).slice(0, limit)
+    rows: rowsWithCoverage.slice(0, limit)
   }, env);
 }
 
@@ -845,6 +860,26 @@ function countThresholdMembers(members, highThreshold, lowThreshold) {
   }
 
   return counts;
+}
+
+async function addBattleRowCounts(env, rows, tableName, filtersForRow) {
+  const output = [];
+
+  for (const row of rows) {
+    let rowCount = Number(row.row_count);
+
+    if (!Number.isFinite(rowCount)) {
+      rowCount = await supabaseCount(env, tableName, filtersForRow(row)).catch(() => 0);
+    }
+
+    output.push({
+      ...row,
+      row_count: rowCount,
+      has_rows: rowCount > 0
+    });
+  }
+
+  return output;
 }
 
 async function fetchClansBattleListRows(env, scanLimit) {
@@ -1768,19 +1803,10 @@ async function pruneOldSnapshots(env, clan) {
   if (!Number.isFinite(retentionHours) || retentionHours <= 0) return;
 
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
-  const url = supabaseUrl(env, SNAPSHOT_TABLE);
-  url.searchParams.set("fetched_at", `lt.${cutoff}`);
-  url.searchParams.set("clan_name", `eq.${clan}`);
-
-  const res = await fetch(url.toString(), {
-    method: "DELETE",
-    headers: supabaseHeaders(env)
+  await archiveThenPruneRows(env, SNAPSHOT_TABLE, SNAPSHOT_ARCHIVE_TABLE, {
+    fetched_at: `lt.${cutoff}`,
+    clan_name: `eq.${clan}`
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw httpError(502, `Supabase prune failed (${res.status}): ${text}`);
-  }
 }
 
 async function pruneOldTableRows(env, tableName) {
@@ -1788,9 +1814,45 @@ async function pruneOldTableRows(env, tableName) {
   if (!Number.isFinite(retentionHours) || retentionHours <= 0) return;
 
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
-  await supabaseDelete(env, tableName, {
-    fetched_at: `lt.${cutoff}`
-  });
+
+  if (tableName === CLANS_SNAPSHOT_TABLE) {
+    await archiveThenPruneRows(env, CLANS_SNAPSHOT_TABLE, CLANS_SNAPSHOT_ARCHIVE_TABLE, {
+      fetched_at: `lt.${cutoff}`
+    });
+    return;
+  }
+
+  throw httpError(500, `Pruning is not configured for ${tableName}`);
+}
+
+async function archiveThenPruneRows(env, sourceTable, archiveTable, filters) {
+  for (let batch = 0; batch < ARCHIVE_PRUNE_MAX_BATCHES; batch += 1) {
+    const rows = await supabaseSelect(env, sourceTable, {
+      ...filters,
+      select: "*",
+      order: "id.asc",
+      limit: String(ARCHIVE_PRUNE_BATCH_SIZE)
+    });
+
+    if (!rows.length) return;
+
+    await supabaseUpsert(env, archiveTable, rows, "id");
+
+    const ids = rows
+      .map(row => row.id)
+      .filter(id => id !== undefined && id !== null)
+      .join(",");
+
+    if (!ids) {
+      throw httpError(500, `Archive prune for ${sourceTable} found rows without ids`);
+    }
+
+    await supabaseDelete(env, sourceTable, {
+      id: `in.(${ids})`
+    });
+
+    if (rows.length < ARCHIVE_PRUNE_BATCH_SIZE) return;
+  }
 }
 
 async function supabaseInsert(env, tableName, rows) {
@@ -1882,6 +1944,43 @@ async function supabaseSelect(env, tableName, params) {
   }
 
   return res.json();
+}
+
+async function supabaseCount(env, tableName, params) {
+  const url = supabaseUrl(env, tableName);
+  url.searchParams.set("select", "id");
+  url.searchParams.set("limit", "1");
+
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        url.searchParams.append(key, item);
+      }
+    } else if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: supabaseHeaders(env, {
+      Prefer: "count=exact",
+      Range: "0-0"
+    })
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw httpError(502, `Supabase count failed for ${tableName} (${res.status}): ${text}`);
+  }
+
+  const contentRange = res.headers.get("content-range") || "";
+  const match = contentRange.match(/\/(\d+|\*)$/);
+  if (match && match[1] !== "*") {
+    return Number(match[1]) || 0;
+  }
+
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function supabaseSelectPaged(env, tableName, params, limit, pageSize = 1000) {
