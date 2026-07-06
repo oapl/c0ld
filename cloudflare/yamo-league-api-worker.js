@@ -7,6 +7,9 @@ const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
 const MAX_TOP_LEAGUES_LIMIT = 1000;
+const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
+const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
+const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const ROBLOX_BATCH_SIZE = 100;
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
@@ -26,6 +29,8 @@ export default {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-overlap") {
+        response = await handleC0ldLeagueOverlap(request, env);
       } else if (request.method === "POST" && (url.pathname === "/api/leagues/ingest" || url.pathname === "/api/ingest")) {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
@@ -244,6 +249,60 @@ async function handleTopLeagues(request, env) {
   }, env);
 }
 
+async function handleC0ldLeagueOverlap(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const clan = String(url.searchParams.get("clan") || "c0ld").trim() || "c0ld";
+  const runKey = requestedTopLeaguesRunKey(url, env);
+  const topLimit = clamp(Number(url.searchParams.get("top_limit") || env.COLD_LEAGUES_TOP_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT);
+  const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, Math.max(0, topLimit - 1));
+  const batchLimit = clamp(Number(url.searchParams.get("limit") || env.COLD_LEAGUES_BATCH_SIZE || DEFAULT_COLD_LEAGUES_BATCH_SIZE), 1, MAX_COLD_LEAGUES_BATCH_SIZE);
+  const concurrency = clamp(Number(url.searchParams.get("concurrency") || env.COLD_LEAGUES_CONCURRENCY || 8), 1, 12);
+
+  const [clanCurrent, topContext] = await Promise.all([
+    fetchClanCurrentForOverlap(env, clan),
+    fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
+  ]);
+
+  const clanMembers = new Map();
+  for (const member of clanCurrent.rows || []) {
+    const userId = toNumber(member.user_id);
+    if (!userId) continue;
+    clanMembers.set(String(userId), {
+      user_id: userId,
+      username: String(firstDefined(member.username, member.display_name, `user_${userId}`) || `user_${userId}`),
+      avatar_url: stringOrNull(member.avatar_url),
+      clan_rank: toNumber(member.rank),
+      clan_points: toNumber(firstDefined(member.total_points, member.points)) || 0
+    });
+  }
+
+  const batch = topContext.rows.slice(offset, offset + batchLimit);
+  const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
+  const matchedRows = scanned
+    .filter(row => row.matches.length)
+    .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    clan_snapshot_at: clanCurrent.snapshot_at || null,
+    clan_member_count: clanMembers.size,
+    league_run_key: runKey,
+    top_leagues_snapshot_at: topContext.snapshot_at,
+    top_leagues_total: topContext.rows.length,
+    top_leagues_requested: topLimit,
+    offset,
+    limit: batchLimit,
+    next_offset: offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null,
+    scanned_count: batch.length,
+    matched_count: matchedRows.length,
+    scan_errors: scanned.filter(row => row.error).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
+    rows: matchedRows
+  }, env);
+}
+
 async function handleHistory(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -266,6 +325,101 @@ async function handleHistory(request, env) {
   if (userId) params.user_id = `eq.${userId}`;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
   return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows }, env);
+}
+
+async function fetchClanCurrentForOverlap(env, clan) {
+  const base = String(env.COLD_CLAN_CURRENT_URL || env.CLAN_API_CURRENT_URL || DEFAULT_COLD_CLAN_CURRENT_URL).trim();
+  const url = new URL(base);
+  url.searchParams.set("clan", clan);
+  url.searchParams.set("v", Date.now());
+  const res = await fetch(url.toString(), { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
+  const text = await res.text();
+  if (!res.ok) throw httpError(res.status, `Clan API failed for ${clan}: ${text.slice(0, 500)}`);
+  const data = JSON.parse(text);
+  if (data.ok === false) throw httpError(502, `Clan API failed for ${clan}: ${data.message || "unknown error"}`);
+  return { ...data, rows: Array.isArray(data.rows) ? data.rows : [] };
+}
+
+async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
+  let rows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${TOP_LEAGUES_NAME}`,
+    order: "rank.asc",
+    limit: String(limit)
+  });
+
+  let latest = latestMeta(rows);
+  const allowLiveFallback = String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false";
+  if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
+    const live = await fetchTopLeagues(limit);
+    const now = new Date().toISOString();
+    rows = live.rows.map(row => ({
+      snapshot_id: "live",
+      fetched_at: now,
+      source: "live:overlap",
+      league_run_key: runKey,
+      league_name: TOP_LEAGUES_NAME,
+      league_id: row.league_id,
+      league_level: row.league_level,
+      league_points: row.points,
+      league_icon: row.league_icon,
+      member_capacity: row.member_capacity,
+      rank: row.rank,
+      user_id: row.user_id,
+      display_name: row.league_name,
+      points: row.points,
+      raw_league: row.raw_league
+    }));
+    latest = latestMeta(rows);
+  }
+
+  const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: TOP_LEAGUES_NAME }) : rows.map(addNullGains);
+  return { snapshot_at: latest?.fetched_at || null, rows: rowsWithGains };
+}
+
+async function scanLeagueForClanMembers(env, topRow, clanMembers) {
+  const publicRow = publicLeagueRow(topRow);
+  let leaguePayload = normalizeRawLeague(topRow.raw_league);
+  let rosterSource = hasLeagueRoster(leaguePayload) ? "stored-top-row" : "live-detail";
+  let error = null;
+
+  if (rosterSource === "live-detail") {
+    try {
+      const api = await fetchLeagueApi(publicRow.league_name);
+      leaguePayload = api.data || api;
+    } catch (err) {
+      error = err?.message || String(err);
+      leaguePayload = {};
+    }
+  }
+
+  const leagueMembers = normalizeLeagueRows(leaguePayload);
+  const matches = leagueMembers
+    .map(member => ({ member, clan: clanMembers.get(String(member.user_id)) }))
+    .filter(item => item.clan)
+    .map(item => ({
+      user_id: item.clan.user_id,
+      username: item.clan.username,
+      avatar_url: item.clan.avatar_url,
+      clan_rank: item.clan.clan_rank,
+      clan_points: item.clan.clan_points,
+      league_rank: toNumber(item.member.rank),
+      league_points: toNumber(item.member.points) || 0,
+      league_role: item.member.role || "Member",
+      last_contribution_at: item.member.last_contribution_at || null
+    }))
+    .sort((a, b) => (b.league_points - a.league_points) || (a.clan_rank || 999999) - (b.clan_rank || 999999));
+
+  return {
+    ...publicRow,
+    c0ld_member_count: matches.length,
+    c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
+    roster_source: rosterSource,
+    scanned_member_count: leagueMembers.length,
+    matches,
+    error
+  };
 }
 
 async function fetchLeagueApi(league) {
@@ -741,6 +895,40 @@ function isTopLeaguesStale(latest, env) {
   const maxMinutes = clamp(Number(env.TOP_LEAGUES_MAX_STALE_MINUTES || DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES), 1, 24 * 60 * 30);
   const fetchedMs = new Date(latest.fetched_at).getTime();
   return !Number.isFinite(fetchedMs) || Date.now() - fetchedMs > maxMinutes * 60 * 1000;
+}
+
+function normalizeRawLeague(raw) {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+function hasLeagueRoster(raw) {
+  return Boolean(
+    firstArray(raw.Members, raw.members).length ||
+    firstArray(raw.PointContributions, raw.pointContributions, raw.Contributions, raw.contributions, raw.Players, raw.players).length
+  );
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      out[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 async function replaceCurrentRows(env, table, filters, rows) { await supabaseDelete(env, table, filters); if (rows.length) await supabaseInsert(env, table, rows); }

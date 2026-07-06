@@ -15,6 +15,11 @@ INGEST_TOP_LEAGUES = "true"
 TOP_LEAGUES_LIMIT = "1000"
 TOP_LEAGUES_LIVE_FALLBACK = "true"
 TOP_LEAGUES_MAX_STALE_MINUTES = "15"
+# Used by /api/leagues/c0ld-overlap. Keep batch size conservative; the page scans the top 1000 in chunks.
+COLD_LEAGUES_BATCH_SIZE = "30"
+COLD_LEAGUES_TOP_LIMIT = "1000"
+COLD_LEAGUES_CONCURRENCY = "8"
+COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current"
 ROBLOX_USERNAME_LOOKUPS = "true"
 ROBLOX_AVATAR_LOOKUPS = "true"
 # Optional Discord inactivity alerts. Store the webhook URL as a secret.

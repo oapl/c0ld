@@ -188,6 +188,23 @@ Useful endpoints:
 | `/api/clans/current` | Latest all-clans leaderboard from Supabase. |
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
 
+## League API Worker
+
+`yamo-league-api-worker.js` powers the league pages, the Top 1000 leaderboard,
+and the c0ld league overlap page.
+
+Useful endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
+| `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=1000&offset=0&limit=30` | Scans one Top 1000 chunk, compares league rosters against current c0ld clan members, and returns only matched leagues. |
+
+The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
+the chunks automatically so one request does not attempt hundreds of league
+detail fetches at once.
+
 ## WMSY hourly Discord board
 
 `wmsy-hourly-worker.js` is the Discord image board Worker that posts the
