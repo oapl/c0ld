@@ -10,6 +10,7 @@ const MAX_TOP_LEAGUES_LIMIT = 1000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
+const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
@@ -328,16 +329,71 @@ async function handleHistory(request, env) {
 }
 
 async function fetchClanCurrentForOverlap(env, clan) {
+  const dbRows = await fetchClanCurrentFromSupabase(env, clan).catch(() => null);
+  if (dbRows && dbRows.rows.length) return dbRows;
+
+  if (env.COLD_CLAN_API && typeof env.COLD_CLAN_API.fetch === "function") {
+    const url = new URL("https://c0ld-clan-api-worker.local/api/current");
+    url.searchParams.set("clan", clan);
+    url.searchParams.set("v", Date.now());
+    const res = await env.COLD_CLAN_API.fetch(new Request(url.toString(), {
+      headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }
+    }));
+    return parseClanCurrentResponse(res, clan);
+  }
+
   const base = String(env.COLD_CLAN_CURRENT_URL || env.CLAN_API_CURRENT_URL || DEFAULT_COLD_CLAN_CURRENT_URL).trim();
   const url = new URL(base);
   url.searchParams.set("clan", clan);
   url.searchParams.set("v", Date.now());
   const res = await fetch(url.toString(), { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
+  return parseClanCurrentResponse(res, clan);
+}
+
+async function parseClanCurrentResponse(res, clan) {
   const text = await res.text();
   if (!res.ok) throw httpError(res.status, `Clan API failed for ${clan}: ${text.slice(0, 500)}`);
   const data = JSON.parse(text);
   if (data.ok === false) throw httpError(502, `Clan API failed for ${clan}: ${data.message || "unknown error"}`);
   return { ...data, rows: Array.isArray(data.rows) ? data.rows : [] };
+}
+
+async function fetchClanCurrentFromSupabase(env, clan) {
+  if (String(env.COLD_CLAN_CURRENT_FROM_SUPABASE || "true").toLowerCase() === "false") return null;
+  const table = String(env.COLD_CLAN_CURRENT_TABLE || DEFAULT_COLD_CLAN_CURRENT_TABLE).trim() || DEFAULT_COLD_CLAN_CURRENT_TABLE;
+  const rows = await supabaseSelect(env, table, {
+    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points",
+    clan_name: `eq.${clan}`,
+    order: "fetched_at.desc,rank.asc",
+    limit: "250"
+  });
+  if (!rows.length) return null;
+
+  const latest = rows[0];
+  const latestRows = rows
+    .filter(row => latest.snapshot_id ? row.snapshot_id === latest.snapshot_id : row.fetched_at === latest.fetched_at)
+    .sort((a, b) => (toNumber(a.rank) || 999999) - (toNumber(b.rank) || 999999));
+
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: latest.fetched_at || null,
+    clan_name: latest.clan_name || clan,
+    battle: latest.battle_key || null,
+    display_name: latest.battle_display_name || latest.battle_key || null,
+    battle_start_iso: latest.battle_started_at || null,
+    battle_end_iso: latest.battle_ended_at || null,
+    source: "supabase:" + table,
+    rows: latestRows.map(row => ({
+      fetched_at: row.fetched_at,
+      rank: toNumber(row.rank),
+      username: row.username || null,
+      display_name: row.username || null,
+      user_id: toNumber(row.user_id),
+      total_points: toNumber(row.total_points) || 0,
+      points: toNumber(row.total_points) || 0
+    }))
+  };
 }
 
 async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {

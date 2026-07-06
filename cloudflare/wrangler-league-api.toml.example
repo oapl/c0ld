@@ -6,8 +6,8 @@ compatibility_date = "2026-06-20"
 LEAGUE_NAME = "YAMO"
 # Change this when a new league run starts. Existing database rows are "legacy".
 LEAGUE_RUN_KEY = "active"
-# Optional comma-separated list if you later track more than one league.
-# LEAGUE_NAMES = "YAMO,OTHER"
+# Comma-separated league list used for scheduled pulls.
+LEAGUE_NAMES = "NDCT,GOATs,YAMO,SNCLS,SMSW,VPPPP,brrbr,nfz,3v4,JIME,2w4g,COLD,ENRQE"
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
 INGEST_LEAGUES = "true"
@@ -19,6 +19,10 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "1000"
 COLD_LEAGUES_CONCURRENCY = "8"
+# Preferred if the league Worker uses the same Supabase project as the clan Worker.
+COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current"
+# Last-resort HTTP fallback. Worker-to-Worker fetches can hit Cloudflare 1042 unless
+# you use a Service Binding or the global_fetch_strictly_public compatibility flag.
 COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current"
 ROBLOX_USERNAME_LOOKUPS = "true"
 ROBLOX_AVATAR_LOOKUPS = "true"
@@ -34,6 +38,11 @@ SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+# Optional, recommended over COLD_CLAN_CURRENT_URL for Worker-to-Worker calls:
+# [[services]]
+# binding = "COLD_CLAN_API"
+# service = "c0ld-clan-api-worker"
 
 # Required secrets:
 # wrangler secret put SUPABASE_SERVICE_KEY

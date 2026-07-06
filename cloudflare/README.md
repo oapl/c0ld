@@ -205,6 +205,39 @@ The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
 
+`c0ld-league-matches.html` is the hidden reassessment/scanner page. The normal
+`c0ld-leagues.html` page uses the known c0ld overlap league list and expects the
+league Worker `LEAGUE_NAMES` variable to include those leagues for scheduled
+pulls.
+
+For c0ld league overlap, avoid Worker-to-Worker HTTP when possible. Cloudflare
+can return `1042` when one Worker fetches another Worker on the same zone. The
+league Worker now tries `COLD_CLAN_CURRENT_TABLE` in the same Supabase project
+first, then an optional Service Binding named `COLD_CLAN_API`, and only then the
+`COLD_CLAN_CURRENT_URL` HTTP fallback. If your league and clan tables are in
+different Supabase projects, add a Service Binding on `yamo-league-api-worker`
+named `COLD_CLAN_API` pointing to `c0ld-clan-api-worker`.
+
+The intended c0ld setup is for `yamo-league-api-worker` to use the c0ld Supabase
+project, not the old NONG Leaderboard project. Create the league tables in c0ld
+with `supabase/c0ld_league_tables_setup.sql`, then update the Worker's
+`SUPABASE_URL` and `SUPABASE_SERVICE_KEY` to the c0ld project values.
+
+To move existing league history out of the old NONG Supabase project, pause the
+league Worker cron or set `INGEST_LEAGUES=false` and `INGEST_TOP_LEAGUES=false`,
+then run:
+
+```powershell
+.\scripts\migrate-league-data-to-c0ld.ps1 `
+  -SourceDbUrl "postgresql://postgres.OLD_REF:OLD_DB_PASSWORD@OLD_POOLER_HOST:5432/postgres" `
+  -TargetDbUrl "postgresql://postgres.NEW_REF:NEW_DB_PASSWORD@NEW_POOLER_HOST:5432/postgres" `
+  -ReplaceExisting
+```
+
+Use the Supabase **Session pooler** connection strings from each project's
+Connect panel. After the copy finishes, point `yamo-league-api-worker` at the
+c0ld Supabase project, deploy it, and re-enable the cron.
+
 ## WMSY hourly Discord board
 
 `wmsy-hourly-worker.js` is the Discord image board Worker that posts the
