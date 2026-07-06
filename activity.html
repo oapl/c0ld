@@ -4,55 +4,307 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>c0ld Activity Chart</title>
+
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--panel2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--good:#7ee787;--rank:#f2cc60;--danger:#f85149}
+:root{
+  --bg:#0d1117;
+  --panel:#161b22;
+  --panel2:#0d1117;
+  --border:#30363d;
+  --text:#e6edf3;
+  --muted:#8b949e;
+  --link:#ff9b96;
+  --good:#7ee787;
+  --rank:#f2cc60;
+  --danger:#f85149;
+}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;height:100vh;overflow:hidden}
-a{color:var(--link);text-decoration:none}
-header{background:var(--panel);border-bottom:1px solid var(--border);padding:9px 18px 8px;text-align:center}
-.logo{width:56px;border-radius:8px;display:block;margin:0 auto 7px}
-.menu{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.btn{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel2);color:var(--text);font-size:13px;line-height:1}
-.btn.active,.btn:hover{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
-main{height:calc(100vh - 104px);max-width:1600px;margin:0 auto;padding:14px 18px 18px;display:flex;flex-direction:column;gap:10px}
-.top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
-h1{margin:0 0 4px;font-size:22px;line-height:1.15}
-.sub{color:var(--muted);font-size:13px;line-height:1.35}
-.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
-select,input:not([type="checkbox"]),button{border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:8px 10px;font-size:14px;outline:none}
-input:not([type="checkbox"]){min-width:220px}
-input[type="checkbox"]{min-width:0;width:14px;height:14px;padding:0;margin:0;accent-color:#238636}
-button{cursor:pointer}
-button:hover,select:hover,input:not([type="checkbox"]):focus{border-color:var(--link)}
-.toggles{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--muted);font-size:13px}
-.toggle-title{color:var(--muted);font-weight:700;margin-right:2px}
-.toggle{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-.gain-toggle{color:var(--good)}.rank-toggle{color:var(--rank)}
-.status-toggle,.window-toggle{color:var(--muted)}
-.summary{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:13px;line-height:1.35}
-.summary strong{color:var(--text)}
-.status{display:none;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:9px 11px;color:var(--muted);font-size:13px}
-.status.show{display:block}.status.err{border-color:var(--danger);color:#ffb4ad;background:rgba(248,81,73,.12)}
-.chart-panel{flex:1;min-height:0;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden;display:flex;flex-direction:column}
-.chart-head{padding:10px 13px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px}
-.chart-note{color:var(--muted);font-size:12px}
-.chart-box{flex:1;min-height:0;background:var(--panel2);position:relative}
-canvas{display:block;width:100%;height:100%}
-@media(max-width:850px){body{overflow:auto;height:auto}main{height:auto;min-height:calc(100vh - 104px)}.chart-panel{min-height:560px}.tools{width:100%;justify-content:flex-start}select,input:not([type="checkbox"]),button{width:100%;min-width:0}.toggles{width:100%}}
+
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:Arial,Helvetica,sans-serif;
+  height:100vh;
+  overflow:hidden;
+}
+
+a{
+  color:var(--link);
+  text-decoration:none;
+}
+
+header{
+  background:var(--panel);
+  border-bottom:1px solid var(--border);
+  padding:9px 18px 8px;
+  text-align:center;
+}
+
+.logo{
+  width:56px;
+  border-radius:8px;
+  display:block;
+  margin:0 auto 7px;
+}
+
+.menu{
+  display:flex;
+  gap:8px;
+  justify-content:center;
+  flex-wrap:wrap;
+}
+
+.btn{
+  display:inline-block;
+  padding:7px 12px;
+  border:1px solid var(--border);
+  border-radius:5px;
+  background:var(--panel2);
+  color:var(--text);
+  font-size:13px;
+  line-height:1;
+}
+
+.btn.active,
+.btn:hover{
+  border-color:var(--link);
+  color:var(--link);
+  background:rgba(248,81,73,.12);
+}
+
+main{
+  height:calc(100vh - 104px);
+  max-width:1600px;
+  margin:0 auto;
+  padding:14px 18px 18px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  flex-wrap:wrap;
+}
+
+h1{
+  margin:0 0 4px;
+  font-size:22px;
+  line-height:1.15;
+}
+
+.sub{
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.35;
+}
+
+.tools{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:flex-end;
+}
+
+select,
+input:not([type="checkbox"]),
+button{
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--panel2);
+  color:var(--text);
+  padding:8px 10px;
+  font-size:14px;
+  outline:none;
+}
+
+input:not([type="checkbox"]){
+  min-width:220px;
+}
+
+input[type="checkbox"]{
+  min-width:0;
+  width:14px;
+  height:14px;
+  padding:0;
+  margin:0;
+  accent-color:#238636;
+}
+
+button{
+  cursor:pointer;
+}
+
+button:hover,
+select:hover,
+input:not([type="checkbox"]):focus{
+  border-color:var(--link);
+}
+
+.toggles{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  padding:7px 10px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--panel2);
+  color:var(--muted);
+  font-size:13px;
+}
+
+.toggle-title{
+  color:var(--muted);
+  font-weight:700;
+  margin-right:2px;
+}
+
+.toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+}
+
+.gain-toggle{
+  color:var(--good);
+}
+
+.rank-toggle{
+  color:var(--rank);
+}
+
+.status-toggle,
+.window-toggle{
+  color:var(--muted);
+}
+
+.summary{
+  display:flex;
+  gap:14px;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.35;
+}
+
+.summary strong{
+  color:var(--text);
+}
+
+.status{
+  display:none;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:9px 11px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.status.show{
+  display:block;
+}
+
+.status.err{
+  border-color:var(--danger);
+  color:#ffb4ad;
+  background:rgba(248,81,73,.12);
+}
+
+.chart-panel{
+  flex:1;
+  min-height:0;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+.chart-head{
+  padding:10px 13px;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  font-size:13px;
+}
+
+.chart-note{
+  color:var(--muted);
+  font-size:12px;
+}
+
+.chart-box{
+  flex:1;
+  min-height:0;
+  background:var(--panel2);
+  position:relative;
+}
+
+canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+
+@media(max-width:850px){
+  body{
+    overflow:auto;
+    height:auto;
+  }
+
+  main{
+    height:auto;
+    min-height:calc(100vh - 104px);
+  }
+
+  .chart-panel{
+    min-height:560px;
+  }
+
+  .tools{
+    width:100%;
+    justify-content:flex-start;
+  }
+
+  select,
+  input:not([type="checkbox"]),
+  button{
+    width:100%;
+    min-width:0;
+  }
+
+  .toggles{
+    width:100%;
+  }
+}
 </style>
 </head>
+
 <body>
 <header>
-  <a id="home-logo-link" href="index.html">
+  <a href="index.html">
     <img class="logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld">
   </a>
+
   <div class="menu">
-    <a id="home-link" class="btn" href="index.html">c0ld Leaderboard</a>
+    <a class="btn" href="index.html">c0ld Leaderboard</a>
     <a class="btn" href="clans.html">Top Clans</a>
     <a class="btn" href="c0ld-leagues.html">c0ld Leagues</a>
     <a class="btn" href="top-leagues.html">Top Leagues</a>
     <a class="btn" href="live-clan.html">Clan Lookup</a>
-    <a id="activity-link" class="btn active" href="activity.html">Activity</a>
   </div>
 </header>
 
@@ -62,12 +314,14 @@ canvas{display:block;width:100%;height:100%}
       <h1 id="title">c0ld Member Activity Chart</h1>
       <div class="sub" id="subtitle">Line graph using the first and last available data pull by default.</div>
     </div>
+
     <div class="tools">
       <select id="bucket">
         <option value="1">Hourly</option>
         <option value="12" selected>12 Hours</option>
         <option value="24">Daily</option>
       </select>
+
       <select id="line-count">
         <option value="top10">Top 10</option>
         <option value="top15">Top 15</option>
@@ -77,13 +331,31 @@ canvas{display:block;width:100%;height:100%}
         <option value="bottom10">Bottom 10</option>
         <option value="bottom15">Bottom 15</option>
       </select>
+
       <div class="toggles">
         <span class="toggle-title">Show:</span>
-        <label class="toggle gain-toggle"><input id="toggle-gain" type="checkbox">Gain</label>
-        <label class="toggle rank-toggle"><input id="toggle-rank" type="checkbox" checked>Rank</label>
-        <label class="toggle status-toggle"><input id="toggle-status" type="checkbox">Active dots</label>
-        <label class="toggle window-toggle"><input id="toggle-full-window" type="checkbox">Full CB window</label>
+
+        <label class="toggle gain-toggle">
+          <input id="toggle-gain" type="checkbox">
+          Gain
+        </label>
+
+        <label class="toggle rank-toggle">
+          <input id="toggle-rank" type="checkbox" checked>
+          Rank
+        </label>
+
+        <label class="toggle status-toggle">
+          <input id="toggle-status" type="checkbox">
+          Active dots
+        </label>
+
+        <label class="toggle window-toggle">
+          <input id="toggle-full-window" type="checkbox">
+          Full CB window
+        </label>
       </div>
+
       <input id="search" placeholder="Search member...">
       <button id="refresh" type="button">Refresh</button>
     </div>
@@ -103,6 +375,7 @@ canvas{display:block;width:100%;height:100%}
       <strong id="chart-title">Member activity line graph</strong>
       <span class="chart-note" id="chart-note">Loading...</span>
     </div>
+
     <div class="chart-box">
       <canvas id="chart"></canvas>
     </div>
@@ -113,19 +386,21 @@ canvas{display:block;width:100%;height:100%}
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 
+// Fallback only. The active window is read from the current battle API response.
 const FALLBACK_EVENT_START_ISO = "2026-06-13T10:00:00-06:00";
 const FALLBACK_EVENT_END_ISO = "2026-06-19T10:00:00-06:00";
+
 const PRE_START_BUFFER_HOURS = 12;
 const MAX_HISTORY_HOURS = 336;
 const PER_USER_HISTORY_LIMIT = 5000;
 const HISTORY_FETCH_CONCURRENCY = 6;
 
 const LINE_COLORS = [
-  "#7ee787","#58a6ff","#ff9b96","#d2a8ff","#f2cc60",
-  "#56d4dd","#ffa657","#a5d6ff","#ff7b72","#b3f5bc",
-  "#79c0ff","#e3b341","#f778ba","#8ddb8c","#bc8cff",
-  "#39c5cf","#ffdf5d","#a371f7","#3fb950","#db6d28",
-  "#1f6feb","#d29922","#da3633","#8957e5","#238636"
+  "#7ee787", "#58a6ff", "#ff9b96", "#d2a8ff", "#f2cc60",
+  "#56d4dd", "#ffa657", "#a5d6ff", "#ff7b72", "#b3f5bc",
+  "#79c0ff", "#e3b341", "#f778ba", "#8ddb8c", "#bc8cff",
+  "#39c5cf", "#ffdf5d", "#a371f7", "#3fb950", "#db6d28",
+  "#1f6feb", "#d29922", "#da3633", "#8957e5", "#238636"
 ];
 
 let current = null;
@@ -148,33 +423,42 @@ const DISPLAY = CLAN.toLowerCase() === "c0ld" ? "c0ld" : CLAN.toUpperCase();
 
 function pageUrl(path) {
   const out = new URL(path, location.href);
-  if (CLAN.toLowerCase() !== "c0ld") out.searchParams.set("clan", CLAN);
+
+  if (CLAN.toLowerCase() !== "c0ld") {
+    out.searchParams.set("clan", CLAN);
+  }
+
   return out.pathname.split("/").pop() + out.search;
 }
 
 function withQuery(url, params = {}) {
   const out = new URL(url, location.href);
   out.searchParams.set("clan", CLAN);
+
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") out.searchParams.set(key, String(value));
+    if (value !== undefined && value !== null && value !== "") {
+      out.searchParams.set(key, String(value));
+    }
   }
+
   out.searchParams.set("v", String(Date.now()));
   return out.toString();
 }
 
 function setStatus(text, isError = false) {
   const el = document.getElementById("status");
-  if (!el) return;
   el.textContent = text || "";
   el.className = "status " + (text ? "show " : "") + (isError ? "err" : "");
 }
 
 async function getJson(url, label) {
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("Could not load " + label + ". HTTP " + res.status);
-  const data = await res.json();
-  if (data && data.ok === false) throw new Error(data.message || "Could not load " + label + ".");
-  return data;
+
+  if (!res.ok) {
+    throw new Error("Could not load " + label + ". HTTP " + res.status);
+  }
+
+  return res.json();
 }
 
 function toNumber(value) {
@@ -184,50 +468,103 @@ function toNumber(value) {
 
 function shortNum(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  const tiers = [[1e12,"T"],[1e9,"B"],[1e6,"M"],[1e3,"K"]];
-  for (const [amount, suffix] of tiers) {
-    if (Math.abs(n) >= amount) return (n / amount).toFixed(2).replace(/\.?0+$/, "") + suffix;
+
+  if (!Number.isFinite(n)) {
+    return "—";
   }
+
+  const tiers = [
+    [1e12, "T"],
+    [1e9, "B"],
+    [1e6, "M"],
+    [1e3, "K"]
+  ];
+
+  for (const [amount, suffix] of tiers) {
+    if (Math.abs(n) >= amount) {
+      return (n / amount).toFixed(2).replace(/\.?0+$/, "") + suffix;
+    }
+  }
+
   return Math.round(n).toLocaleString("en-US");
+}
+
+function formatPercent(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) {
+    return "—";
+  }
+
+  if (Math.abs(n) < 0.1 && n !== 0) {
+    return n.toFixed(2).replace(/\.?0+$/, "") + "%";
+  }
+
+  return n.toFixed(1).replace(/\.0$/, "") + "%";
 }
 
 function fmtDateTime(value) {
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short", timeZone: "America/Denver" });
+
+  if (Number.isNaN(d.getTime())) {
+    return "—";
+  }
+
+  return d.toLocaleString(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Denver"
+  });
 }
 
 function fmtTick(ms, bucketHours) {
   const d = new Date(ms);
+
   if (bucketHours >= 24) {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "America/Denver" });
+    return d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      timeZone: "America/Denver"
+    });
   }
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", timeZone: "America/Denver" });
+
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    timeZone: "America/Denver"
+  });
 }
 
 function safeMs(value) {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
+
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
 }
 
 function getEventStartMs() {
-  return safeMs(current?.battle_start_iso) ??
+  return (
+    safeMs(current?.battle_start_iso) ??
     safeMs(current?.battle_started_at) ??
     safeMs(current?.first_snapshot) ??
     safeMs(current?.snapshot_at) ??
     safeMs(FALLBACK_EVENT_START_ISO) ??
-    Date.now();
+    Date.now()
+  );
 }
 
 function getEventEndMs() {
-  return safeMs(current?.battle_end_iso) ??
+  return (
+    safeMs(current?.battle_end_iso) ??
     safeMs(current?.battle_ended_at) ??
     safeMs(current?.last_snapshot) ??
     safeMs(current?.snapshot_at) ??
     safeMs(FALLBACK_EVENT_END_ISO) ??
-    Date.now();
+    Date.now()
+  );
 }
 
 function usingFullEventWindow() {
@@ -235,54 +572,91 @@ function usingFullEventWindow() {
 }
 
 function getStartMs() {
-  return usingFullEventWindow() ? getEventStartMs() : (Number.isFinite(dataStartMs) ? dataStartMs : getEventStartMs());
+  if (usingFullEventWindow()) {
+    return getEventStartMs();
+  }
+
+  return Number.isFinite(dataStartMs) ? dataStartMs : getEventStartMs();
 }
 
 function getEndMs() {
-  return usingFullEventWindow() ? getEventEndMs() : (Number.isFinite(dataEndMs) ? dataEndMs : getEventEndMs());
+  if (usingFullEventWindow()) {
+    return getEventEndMs();
+  }
+
+  return Number.isFinite(dataEndMs) ? dataEndMs : getEventEndMs();
 }
 
 function deriveDataWindow() {
   const eventStart = getEventStartMs();
   const eventEnd = getEventEndMs();
+
   let first = Infinity;
   let last = -Infinity;
 
   for (const row of rawHistoryRows) {
-    const ms = safeMs(row.fetched_at);
-    if (!Number.isFinite(ms) || ms < eventStart || ms > eventEnd) continue;
+    const ms = new Date(row.fetched_at || "").getTime();
+
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+
+    if (ms < eventStart || ms > eventEnd) {
+      continue;
+    }
+
     first = Math.min(first, ms);
     last = Math.max(last, ms);
   }
 
   for (const row of current?.rows || []) {
-    const ms = safeMs(row.fetched_at || current?.snapshot_at || current?.generated_at);
-    if (!Number.isFinite(ms) || ms < eventStart || ms > eventEnd) continue;
+    const ms = new Date(row.fetched_at || current?.snapshot_at || current?.generated_at || "").getTime();
+
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+
+    if (ms < eventStart || ms > eventEnd) {
+      continue;
+    }
+
     first = Math.min(first, ms);
     last = Math.max(last, ms);
   }
 
   dataStartMs = Number.isFinite(first) ? first : eventStart;
   dataEndMs = Number.isFinite(last) ? last : eventEnd;
-  if (dataEndMs < dataStartMs) dataEndMs = dataStartMs;
+
+  if (dataEndMs < dataStartMs) {
+    dataEndMs = dataStartMs;
+  }
 }
 
 function makeBuckets() {
-  const bucketHours = Number(document.getElementById("bucket")?.value) || 12;
+  const bucketHours = Number(document.getElementById("bucket").value) || 12;
   const step = bucketHours * 60 * 60 * 1000;
   const start = getStartMs();
   const end = Math.max(getEndMs(), start + step);
   const out = [];
+
   for (let cursor = start; cursor <= end; cursor += step) {
-    out.push({ key: String(cursor), startMs: cursor, endMs: cursor + step });
+    out.push({
+      key: String(cursor),
+      startMs: cursor,
+      endMs: cursor + step
+    });
   }
+
   buckets = out;
 }
 
 function getBucketIndex(ms) {
   for (let i = 0; i < buckets.length; i++) {
-    if (ms >= buckets[i].startMs && ms < buckets[i].endMs) return i;
+    if (ms >= buckets[i].startMs && ms < buckets[i].endMs) {
+      return i;
+    }
   }
+
   return -1;
 }
 
@@ -292,368 +666,704 @@ function getMemberRows() {
 
 function getMemberIds() {
   const ids = [];
+
   for (const row of getMemberRows()) {
     const id = String(row.user_id || "").trim();
-    if (id) ids.push(id);
+
+    if (id) {
+      ids.push(id);
+    }
   }
+
   return [...new Set(ids)];
-}
-
-function currentMemberMap() {
-  const map = new Map();
-  for (const row of getMemberRows()) {
-    const id = String(row.user_id || "").trim();
-    if (!id) continue;
-    map.set(id, {
-      user_id: id,
-      username: row.username || row.display_name || id,
-      display_name: row.display_name || row.username || id,
-      rank: toNumber(row.rank),
-      current_points: toNumber(row.total_points ?? row.points) ?? 0
-    });
-  }
-  return map;
-}
-
-async function fetchHistoryForUser(userId) {
-  const startMs = getEventStartMs() - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
-  const endMs = getEventEndMs();
-  const url = withQuery(HISTORY_API, {
-    user_id: userId,
-    hours: MAX_HISTORY_HOURS,
-    limit: PER_USER_HISTORY_LIMIT,
-    start: new Date(startMs).toISOString(),
-    end: new Date(endMs).toISOString()
-  });
-
-  const data = await getJson(url, "history for " + userId);
-  return (data.rows || []).map(row => ({ ...row, user_id: String(row.user_id || userId) }));
 }
 
 async function fetchAllMemberHistory() {
   const ids = getMemberIds();
-  const all = [];
-  let cursor = 0;
+  const eventStart = getEventStartMs();
+  const oldestNeeded = eventStart - PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+  const hoursNeeded = Math.ceil((Date.now() - oldestNeeded) / (60 * 60 * 1000));
+  const hours = Math.min(MAX_HISTORY_HOURS, Math.max(1, hoursNeeded));
+  const battle = current?.battle || "current";
+
+  const rows = [];
+  let completed = 0;
+  const queue = ids.slice();
 
   async function worker() {
-    while (cursor < ids.length) {
-      const id = ids[cursor++];
+    while (queue.length) {
+      const id = queue.shift();
+
       try {
-        const rows = await fetchHistoryForUser(id);
-        all.push(...rows);
-      } catch (err) {
-        console.warn("History failed for", id, err);
+        const history = await getJson(
+          withQuery(HISTORY_API, {
+            battle,
+            user_id: id,
+            hours,
+            limit: PER_USER_HISTORY_LIMIT
+          }),
+          "history for user " + id
+        );
+
+        if (Array.isArray(history.rows)) {
+          rows.push(...history.rows);
+        }
+      } catch (error) {
+        console.warn("Could not load history for user", id, error);
+      } finally {
+        completed++;
+        setStatus("Loading player histories... " + completed + " / " + ids.length);
       }
     }
   }
 
-  const workers = [];
-  for (let i = 0; i < Math.min(HISTORY_FETCH_CONCURRENCY, ids.length); i++) workers.push(worker());
+  const workers = Array.from(
+    { length: Math.min(HISTORY_FETCH_CONCURRENCY, ids.length) },
+    worker
+  );
+
   await Promise.all(workers);
-  return all;
+
+  return rows;
 }
 
 function buildActivityModel() {
   makeBuckets();
 
-  const byUser = new Map();
-  const membersById = currentMemberMap();
+  const eventStart = getEventStartMs();
+  const eventEnd = getEventEndMs();
+  const displayStart = getStartMs();
+  const displayEnd = getEndMs();
+  const bufferMs = PRE_START_BUFFER_HOURS * 60 * 60 * 1000;
+  const fullEventWindow = usingFullEventWindow();
 
-  for (const [id, row] of membersById.entries()) {
-    byUser.set(id, {
-      user_id: id,
-      username: row.username,
-      display_name: row.display_name,
+  const memberMap = new Map();
+  const seriesByUser = new Map();
+
+  for (const row of getMemberRows()) {
+    const id = String(row.user_id || "").trim();
+
+    if (!id) {
+      continue;
+    }
+
+    memberMap.set(id, {
+      id,
+      name: row.username || id,
       rank: row.rank,
-      current_points: row.current_points,
-      buckets: buckets.map(() => ({ firstPoints: null, lastPoints: null, firstRank: null, lastRank: null, active: false }))
+      currentTotal: toNumber(row.total_points) || 0,
+      bucketGains: buckets.map(() => 0),
+      rankValues: buckets.map(() => null),
+      statusValues: buckets.map(() => 0),
+      totalGain: 0
     });
   }
 
   for (const row of rawHistoryRows) {
     const id = String(row.user_id || "").trim();
-    if (!id || !byUser.has(id)) continue;
-
-    const ms = safeMs(row.fetched_at);
-    if (!Number.isFinite(ms)) continue;
-
-    const idx = getBucketIndex(ms);
-    if (idx < 0) continue;
-
-    const model = byUser.get(id);
-    const b = model.buckets[idx];
-    const points = toNumber(row.total_points ?? row.points);
+    const total = toNumber(row.total_points);
     const rank = toNumber(row.rank);
+    const ms = new Date(row.fetched_at || "").getTime();
 
-    if (points !== null) {
-      if (b.firstPoints === null) b.firstPoints = points;
-      b.lastPoints = points;
+    if (!id || total === null || !Number.isFinite(ms)) {
+      continue;
     }
 
-    if (rank !== null) {
-      if (b.firstRank === null) b.firstRank = rank;
-      b.lastRank = rank;
+    if (ms < eventStart - bufferMs || ms > eventEnd + 60 * 60 * 1000) {
+      continue;
     }
 
-    if (points !== null && points > 0) b.active = true;
+    if (!seriesByUser.has(id)) {
+      seriesByUser.set(id, []);
+    }
+
+    seriesByUser.get(id).push({
+      ms,
+      total,
+      rank,
+      name: row.username || id
+    });
+
+    if (!memberMap.has(id)) {
+      memberMap.set(id, {
+        id,
+        name: row.username || id,
+        rank,
+        currentTotal: total,
+        bucketGains: buckets.map(() => 0),
+        rankValues: buckets.map(() => null),
+        statusValues: buckets.map(() => 0),
+        totalGain: 0
+      });
+    }
   }
 
-  for (const row of getMemberRows()) {
-    const id = String(row.user_id || "").trim();
-    if (!id || !byUser.has(id)) continue;
-    const ms = safeMs(row.fetched_at || current?.snapshot_at || current?.generated_at);
-    const idx = getBucketIndex(ms);
-    if (idx < 0) continue;
+  for (const [id, series] of seriesByUser.entries()) {
+    series.sort((a, b) => a.ms - b.ms);
 
-    const model = byUser.get(id);
-    const b = model.buckets[idx];
-    const points = toNumber(row.total_points ?? row.points);
-    const rank = toNumber(row.rank);
+    const member = memberMap.get(id);
 
-    if (points !== null) {
-      if (b.firstPoints === null) b.firstPoints = points;
-      b.lastPoints = points;
+    if (!member) {
+      continue;
     }
 
-    if (rank !== null) {
-      if (b.firstRank === null) b.firstRank = rank;
-      b.lastRank = rank;
-    }
+    for (let i = 1; i < series.length; i++) {
+      const previous = series[i - 1];
+      const next = series[i];
 
-    if (points !== null && points > 0) b.active = true;
-  }
-
-  members = Array.from(byUser.values()).map(member => {
-    let totalGain = 0;
-    let hasGain = false;
-    let bestRank = null;
-
-    for (const b of member.buckets) {
-      const gain = b.firstPoints !== null && b.lastPoints !== null ? b.lastPoints - b.firstPoints : null;
-      b.gain = gain;
-      b.rank = b.lastRank;
-      if (gain !== null) {
-        totalGain += Math.max(0, gain);
-        hasGain = true;
+      if (next.ms < displayStart || next.ms > displayEnd) {
+        continue;
       }
-      if (b.lastRank !== null) bestRank = bestRank === null ? b.lastRank : Math.min(bestRank, b.lastRank);
+
+      if (!fullEventWindow && previous.ms < displayStart) {
+        continue;
+      }
+
+      const gain = Math.max(0, next.total - previous.total);
+
+      if (!gain) {
+        continue;
+      }
+
+      const bucketIndex = getBucketIndex(next.ms);
+
+      if (bucketIndex < 0) {
+        continue;
+      }
+
+      member.bucketGains[bucketIndex] += gain;
+      member.statusValues[bucketIndex] = 1;
+      member.totalGain += gain;
     }
 
-    member.totalGain = hasGain ? totalGain : 0;
-    member.bestRank = bestRank ?? member.rank ?? 999999;
-    return member;
+    let pointer = 0;
+    let lastRank = null;
+
+    while (pointer < series.length && series[pointer].ms < displayStart) {
+      if (Number.isFinite(series[pointer].rank)) {
+        lastRank = series[pointer].rank;
+      }
+
+      pointer++;
+    }
+
+    for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
+      const bucket = buckets[bucketIndex];
+
+      while (pointer < series.length && series[pointer].ms < bucket.endMs) {
+        if (series[pointer].ms >= displayStart && Number.isFinite(series[pointer].rank)) {
+          lastRank = series[pointer].rank;
+        }
+
+        pointer++;
+      }
+
+      member.rankValues[bucketIndex] = lastRank;
+    }
+
+    member.statusValues = member.bucketGains.map(value => value > 0 ? 1 : 0);
+  }
+
+  members = Array.from(memberMap.values()).sort((a, b) => {
+    if (b.totalGain !== a.totalGain) {
+      return b.totalGain - a.totalGain;
+    }
+
+    if (b.currentTotal !== a.currentTotal) {
+      return b.currentTotal - a.currentTotal;
+    }
+
+    return String(a.name).localeCompare(String(b.name));
   });
 }
 
+function middleSlice(list, count) {
+  if (count >= list.length) {
+    return list;
+  }
+
+  const start = Math.max(0, Math.floor((list.length - count) / 2));
+  return list.slice(start, start + count);
+}
+
 function getVisibleMembers() {
-  const q = String(document.getElementById("search")?.value || "").trim().toLowerCase();
-  const mode = document.getElementById("line-count")?.value || "all";
+  const query = document.getElementById("search").value.toLowerCase().trim();
+  const mode = document.getElementById("line-count").value;
 
   let list = members.slice();
 
-  if (q) {
-    list = list.filter(m =>
-      String(m.username || "").toLowerCase().includes(q) ||
-      String(m.display_name || "").toLowerCase().includes(q) ||
-      String(m.user_id || "").toLowerCase().includes(q)
+  if (query) {
+    list = list.filter(member =>
+      member.name.toLowerCase().includes(query) ||
+      member.id.includes(query)
     );
   }
 
-  list.sort((a, b) => {
-    const gainDiff = (b.totalGain || 0) - (a.totalGain || 0);
-    if (gainDiff) return gainDiff;
-    return (a.bestRank || 999999) - (b.bestRank || 999999);
-  });
-
-  if (mode === "top10") return list.slice(0, 10);
-  if (mode === "top15") return list.slice(0, 15);
-  if (mode === "bottom10") return list.slice(-10);
-  if (mode === "bottom15") return list.slice(-15);
-  if (mode === "middle10") {
-    const start = Math.max(0, Math.floor((list.length - 10) / 2));
-    return list.slice(start, start + 10);
+  if (mode === "top10") {
+    return list.slice(0, 10);
   }
+
+  if (mode === "top15") {
+    return list.slice(0, 15);
+  }
+
+  if (mode === "middle10") {
+    return middleSlice(list, 10);
+  }
+
   if (mode === "middle25") {
-    const start = Math.max(0, Math.floor((list.length - 25) / 2));
-    return list.slice(start, start + 25);
+    return middleSlice(list, 25);
+  }
+
+  if (mode === "bottom10") {
+    return list.slice().reverse().slice(0, 10);
+  }
+
+  if (mode === "bottom15") {
+    return list.slice().reverse().slice(0, 15);
   }
 
   return list;
 }
 
-function resizeCanvas() {
-  const box = canvas.parentElement.getBoundingClientRect();
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-  canvas.width = Math.max(1, Math.floor(box.width * dpr));
-  canvas.height = Math.max(1, Math.floor(box.height * dpr));
-  canvas.style.width = box.width + "px";
-  canvas.style.height = box.height + "px";
+function setupCanvas() {
+  const box = canvas.parentElement;
+  const rect = box.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  canvas.style.width = rect.width + "px";
+  canvas.style.height = rect.height + "px";
+
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { width: box.width, height: box.height };
+
+  return {
+    width: rect.width,
+    height: rect.height
+  };
 }
 
-function drawText(text, x, y, opts = {}) {
+function drawText(text, x, y, options = {}) {
   ctx.save();
-  ctx.fillStyle = opts.color || "#e6edf3";
-  ctx.font = opts.font || "12px Arial";
-  ctx.textAlign = opts.align || "left";
-  ctx.textBaseline = opts.baseline || "alphabetic";
+  ctx.fillStyle = options.color || "#e6edf3";
+  ctx.font = options.font || "12px Arial";
+  ctx.textAlign = options.align || "left";
+  ctx.textBaseline = options.baseline || "middle";
   ctx.fillText(text, x, y);
   ctx.restore();
 }
 
-function drawChart() {
-  const { width, height } = resizeCanvas();
-  ctx.clearRect(0, 0, width, height);
-
-  const showGain = document.getElementById("toggle-gain")?.checked || false;
-  const showRank = document.getElementById("toggle-rank")?.checked || false;
-  const showDots = document.getElementById("toggle-status")?.checked || false;
-
-  if (!showGain && !showRank) {
-    const rank = document.getElementById("toggle-rank");
-    if (rank) rank.checked = true;
+function activeDotRadius(bucketHours, visibleCount) {
+  if (bucketHours >= 24) {
+    return visibleCount > 15 ? 4 : 5;
   }
 
-  const visible = getVisibleMembers();
-  const left = 68;
-  const right = 28;
-  const top = 28;
-  const bottom = 64;
-  const chartW = Math.max(1, width - left - right);
-  const chartH = Math.max(1, height - top - bottom);
-  const bucketHours = Number(document.getElementById("bucket")?.value) || 12;
+  if (bucketHours >= 12) {
+    return visibleCount > 15 ? 3.5 : 4.5;
+  }
 
-  if (!visible.length || !buckets.length) {
-    drawText("No activity data available.", left, top + 28, { color: "#8b949e", font: "14px Arial" });
-    updateSummary(visible);
+  return visibleCount > 15 ? 2 : 3;
+}
+
+function drawStatusStrip(visible, plotX, plotY, plotW, plotH) {
+  if (visible.length !== 1) {
     return;
   }
 
-  let maxGain = 1;
-  let minRank = Infinity;
-  let maxRank = -Infinity;
+  const member = visible[0];
+  const stripY = plotY + plotH + 16;
 
-  for (const m of visible) {
-    for (const b of m.buckets) {
-      if (b.gain !== null) maxGain = Math.max(maxGain, b.gain);
-      if (b.rank !== null) {
-        minRank = Math.min(minRank, b.rank);
-        maxRank = Math.max(maxRank, b.rank);
+  ctx.save();
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+
+  for (let i = 0; i < member.statusValues.length - 1; i++) {
+    const x1 = member.statusValues.length === 1
+      ? plotX
+      : plotX + (i / (member.statusValues.length - 1)) * plotW;
+
+    const x2 = member.statusValues.length === 1
+      ? plotX
+      : plotX + ((i + 1) / (member.statusValues.length - 1)) * plotW;
+
+    ctx.strokeStyle = member.statusValues[i] ? "#3fb950" : "#f85149";
+    ctx.beginPath();
+    ctx.moveTo(x1, stripY);
+    ctx.lineTo(x2, stripY);
+    ctx.stroke();
+  }
+
+  drawText("Active", plotX - 10, stripY, {
+    color: "#8b949e",
+    font: "11px Arial",
+    align: "right"
+  });
+
+  ctx.restore();
+}
+
+function drawChart() {
+  const { width, height } = setupCanvas();
+  const visible = getVisibleMembers();
+  const bucketHours = Number(document.getElementById("bucket").value) || 12;
+  const dotRadius = activeDotRadius(bucketHours, visible.length);
+
+  const showGain = document.getElementById("toggle-gain").checked;
+  const showRank = document.getElementById("toggle-rank").checked;
+  const showStatus = document.getElementById("toggle-status").checked;
+  const fullWindow = usingFullEventWindow();
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(0, 0, width, height);
+
+  const totalGain = visible.reduce((sum, member) => sum + member.totalGain, 0);
+  const visibleTotalPoints = visible.reduce((sum, member) => {
+    return sum + (Number(member.currentTotal) || 0);
+  }, 0);
+
+  const gainPercentOfTotal = visibleTotalPoints
+    ? (totalGain / visibleTotalPoints) * 100
+    : 0;
+
+  document.getElementById("battle").textContent =
+    current?.display_name || current?.battle || "Current";
+
+  document.getElementById("range").textContent =
+    fmtDateTime(getStartMs()) + " → " + fmtDateTime(getEndMs());
+
+  document.getElementById("shown").textContent =
+    visible.length.toLocaleString("en-US") + " / " + members.length.toLocaleString("en-US");
+
+  document.getElementById("total-gain").textContent =
+    shortNum(totalGain) + " (" + formatPercent(gainPercentOfTotal) + " of shown total points)";
+
+  const titleParts = [];
+
+  if (showGain) {
+    titleParts.push("gain");
+  }
+
+  if (showRank) {
+    titleParts.push("rank");
+  }
+
+  if (showStatus) {
+    titleParts.push("active dots");
+  }
+
+  document.getElementById("chart-title").textContent =
+    "Member " + titleParts.join(" + ");
+
+  document.getElementById("chart-note").textContent =
+    visible.length + " member" + (visible.length === 1 ? "" : "s") +
+    " shown · " +
+    document.getElementById("bucket").selectedOptions[0].text +
+    " · " +
+    document.getElementById("line-count").selectedOptions[0].text +
+    " · " +
+    (fullWindow ? "Full CB window" : "Fit to data pulls");
+
+  document.getElementById("subtitle").textContent =
+    fullWindow
+      ? "Full battle window shown. Data is still limited to available pulls."
+      : "Visible range is fit to the first and last available data pull inside the battle.";
+
+  if (!visible.length || !buckets.length) {
+    drawText("No activity found for the current filters.", width / 2, height / 2, {
+      color: "#8b949e",
+      font: "14px Arial",
+      align: "center"
+    });
+    return;
+  }
+
+  const margin = {
+    left: 78,
+    right: showRank ? 70 : 28,
+    top: 48,
+    bottom: showStatus && visible.length === 1 ? 70 : 52
+  };
+
+  const plotX = margin.left;
+  const plotY = margin.top;
+  const plotW = Math.max(10, width - margin.left - margin.right);
+  const plotH = Math.max(10, height - margin.top - margin.bottom);
+
+  let maxGain = 0;
+
+  for (const member of visible) {
+    for (const value of member.bucketGains) {
+      if (Number.isFinite(Number(value))) {
+        maxGain = Math.max(maxGain, Number(value));
       }
     }
   }
 
-  if (!Number.isFinite(minRank)) minRank = 1;
-  if (!Number.isFinite(maxRank)) maxRank = 100;
-  if (minRank === maxRank) maxRank = minRank + 1;
+  if (!maxGain) {
+    maxGain = 1;
+  }
 
-  ctx.strokeStyle = "#30363d";
+  maxGain *= 1.08;
+
+  let minRank = Infinity;
+  let maxRank = -Infinity;
+
+  for (const member of visible) {
+    for (const value of member.rankValues) {
+      if (Number.isFinite(Number(value))) {
+        minRank = Math.min(minRank, Number(value));
+        maxRank = Math.max(maxRank, Number(value));
+      }
+    }
+  }
+
+  if (!Number.isFinite(minRank) || !Number.isFinite(maxRank)) {
+    minRank = 1;
+    maxRank = 75;
+  }
+
+  minRank = Math.max(1, Math.floor(minRank));
+  maxRank = Math.ceil(maxRank);
+
+  if (minRank === maxRank) {
+    maxRank = minRank + 1;
+  }
+
+  function xForIndex(index, count) {
+    return count === 1
+      ? plotX
+      : plotX + (index / (count - 1)) * plotW;
+  }
+
+  function yForGain(value) {
+    return plotY + plotH - (Number(value || 0) / maxGain) * plotH;
+  }
+
+  function yForRank(value) {
+    return plotY + ((Number(value) - minRank) / (maxRank - minRank)) * plotH;
+  }
+
+  ctx.strokeStyle = "rgba(48,54,61,0.9)";
   ctx.lineWidth = 1;
 
-  for (let i = 0; i <= 4; i++) {
-    const y = top + (chartH * i / 4);
+  const gridLines = 5;
+
+  for (let i = 0; i <= gridLines; i++) {
+    const t = i / gridLines;
+    const y = plotY + plotH - t * plotH;
+
     ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(left + chartW, y);
+    ctx.moveTo(plotX, y);
+    ctx.lineTo(plotX + plotW, y);
     ctx.stroke();
+
+    if (showGain) {
+      drawText(shortNum(maxGain * t), plotX - 10, y, {
+        color: "#8b949e",
+        font: "11px Arial",
+        align: "right"
+      });
+    } else {
+      const rankValue = minRank + (maxRank - minRank) * (1 - t);
+
+      drawText("#" + Math.round(rankValue), plotX - 10, y, {
+        color: "#8b949e",
+        font: "11px Arial",
+        align: "right"
+      });
+    }
   }
 
-  const xFor = i => left + (buckets.length <= 1 ? 0 : chartW * i / (buckets.length - 1));
-  const gainY = value => top + chartH - (Math.max(0, value || 0) / maxGain) * chartH;
-  const rankY = value => top + ((value - minRank) / (maxRank - minRank)) * chartH;
+  if (showRank && showGain) {
+    for (let i = 0; i <= gridLines; i++) {
+      const t = i / gridLines;
+      const y = plotY + t * plotH;
+      const rankValue = minRank + (maxRank - minRank) * t;
 
-  drawText(showRank ? "#" + Math.round(minRank) : shortNum(maxGain), 8, top + 4, { color: "#8b949e", font: "11px Arial" });
-  drawText(showRank ? "#" + Math.round(maxRank) : "0", 8, top + chartH, { color: "#8b949e", font: "11px Arial" });
-
-  for (let i = 0; i < buckets.length; i++) {
-    if (i % Math.ceil(buckets.length / 8) !== 0 && i !== buckets.length - 1) continue;
-    const x = xFor(i);
-    ctx.strokeStyle = "#21262d";
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, top + chartH);
-    ctx.stroke();
-    drawText(fmtTick(buckets[i].startMs, bucketHours), x, top + chartH + 22, { color: "#8b949e", font: "11px Arial", align: "center" });
+      drawText("#" + Math.round(rankValue), plotX + plotW + 8, y, {
+        color: "#f2cc60",
+        font: "11px Arial",
+        align: "left"
+      });
+    }
   }
 
-  visible.forEach((m, index) => {
-    const color = LINE_COLORS[index % LINE_COLORS.length];
+  ctx.strokeStyle = "rgba(139,148,158,0.85)";
+  ctx.beginPath();
+  ctx.moveTo(plotX, plotY);
+  ctx.lineTo(plotX, plotY + plotH);
+  ctx.lineTo(plotX + plotW, plotY + plotH);
+  ctx.stroke();
 
-    if (document.getElementById("toggle-gain")?.checked) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      let started = false;
-      m.buckets.forEach((b, i) => {
-        if (b.gain === null) return;
-        const x = xFor(i);
-        const y = gainY(b.gain);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
-      });
-      if (started) ctx.stroke();
-    }
+  const maxXTicks = Math.min(9, buckets.length);
+  const tickEvery = Math.max(1, Math.ceil(buckets.length / maxXTicks));
 
-    if (document.getElementById("toggle-rank")?.checked) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = document.getElementById("toggle-gain")?.checked ? 1.4 : 2;
-      ctx.setLineDash(document.getElementById("toggle-gain")?.checked ? [5, 4] : []);
-      ctx.beginPath();
-      let started = false;
-      m.buckets.forEach((b, i) => {
-        if (b.rank === null) return;
-        const x = xFor(i);
-        const y = rankY(b.rank);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
-      });
-      if (started) ctx.stroke();
-      ctx.setLineDash([]);
-    }
+  for (let i = 0; i < buckets.length; i += tickEvery) {
+    const x = xForIndex(i, buckets.length);
 
-    if (showDots) {
-      ctx.fillStyle = color;
-      m.buckets.forEach((b, i) => {
-        if (!b.active) return;
-        const x = xFor(i);
-        const y = b.rank !== null ? rankY(b.rank) : gainY(b.gain || 0);
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    }
+    ctx.strokeStyle = "rgba(48,54,61,0.65)";
+    ctx.beginPath();
+    ctx.moveTo(x, plotY);
+    ctx.lineTo(x, plotY + plotH);
+    ctx.stroke();
+
+    drawText(fmtTick(buckets[i].startMs, bucketHours), x, plotY + plotH + 18, {
+      color: "#8b949e",
+      font: "11px Arial",
+      align: "center"
+    });
+  }
+
+  drawText(showGain ? "Gain" : "Rank", 12, plotY + plotH / 2, {
+    color: "#8b949e",
+    font: "12px Arial",
+    align: "left"
   });
 
-  const maxLegendItems = Math.min(visible.length, Math.floor(chartW / 145));
-  const legendY = top + chartH + 47;
+  if (showGain) {
+    visible.forEach((member, memberIndex) => {
+      const color = LINE_COLORS[memberIndex % LINE_COLORS.length];
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = visible.length > 25 ? 1 : 2;
+      ctx.globalAlpha = visible.length > 25 ? 0.65 : 0.95;
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+
+      member.bucketGains.forEach((value, index) => {
+        const x = xForIndex(index, member.bucketGains.length);
+        const y = yForGain(value);
+
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+
+      if (showStatus) {
+        member.bucketGains.forEach((value, index) => {
+          const active = Number(value || 0) > 0;
+
+          if (showRank && !active && visible.length > 1) {
+            return;
+          }
+
+          const x = xForIndex(index, member.bucketGains.length);
+          const y = yForGain(value);
+
+          ctx.fillStyle = active ? "#3fb950" : "#f85149";
+          ctx.globalAlpha = active ? 0.9 : 0.65;
+          ctx.beginPath();
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+    });
+  }
+
+  if (showRank) {
+    visible.forEach((member, memberIndex) => {
+      const color = showGain
+        ? "#f2cc60"
+        : LINE_COLORS[memberIndex % LINE_COLORS.length];
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = visible.length > 10 ? 1 : 1.5;
+      ctx.globalAlpha = showGain
+        ? (visible.length > 10 ? 0.28 : 0.58)
+        : (visible.length > 25 ? 0.65 : 0.95);
+
+      ctx.setLineDash(showGain ? [5, 5] : []);
+
+      let started = false;
+
+      ctx.beginPath();
+
+      member.rankValues.forEach((value, index) => {
+        if (!Number.isFinite(Number(value))) {
+          started = false;
+          return;
+        }
+
+        const x = xForIndex(index, member.rankValues.length);
+        const y = yForRank(value);
+
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (showStatus && !showGain) {
+        member.rankValues.forEach((rankValue, index) => {
+          if (!Number.isFinite(Number(rankValue))) {
+            return;
+          }
+
+          const active = member.statusValues[index] > 0;
+          const x = xForIndex(index, member.rankValues.length);
+          const y = yForRank(rankValue);
+
+          ctx.fillStyle = active ? "#3fb950" : "#f85149";
+          ctx.globalAlpha = active ? 0.9 : 0.65;
+          ctx.beginPath();
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+    });
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+
+  if (showStatus && visible.length === 1) {
+    drawStatusStrip(visible, plotX, plotY, plotW, plotH);
+  }
+
+  const legendX = plotX + 8;
+  const legendY = 18;
+  const maxLegendItems = Math.min(
+    visible.length,
+    Math.floor((width - plotX - 40) / 145),
+    10
+  );
+
   for (let i = 0; i < maxLegendItems; i++) {
-    const x = left + i * 145;
-    ctx.fillStyle = LINE_COLORS[i % LINE_COLORS.length];
-    ctx.fillRect(x, legendY - 8, 10, 10);
-    drawText((visible[i].username || visible[i].display_name || visible[i].user_id).slice(0, 16), x + 15, legendY, { color: "#c9d1d9", font: "11px Arial" });
+    const member = visible[i];
+    const color = LINE_COLORS[i % LINE_COLORS.length];
+    const x = legendX + i * 145;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, legendY);
+    ctx.lineTo(x + 18, legendY);
+    ctx.stroke();
+
+    drawText(member.name.slice(0, 15), x + 24, legendY, {
+      color: "#e6edf3",
+      font: "11px Arial"
+    });
   }
 
   if (visible.length > maxLegendItems) {
-    drawText("+" + (visible.length - maxLegendItems) + " more", left + maxLegendItems * 145, legendY, { color: "#8b949e", font: "11px Arial" });
+    drawText("+" + (visible.length - maxLegendItems) + " more", legendX + maxLegendItems * 145, legendY, {
+      color: "#8b949e",
+      font: "11px Arial"
+    });
   }
-
-  updateSummary(visible);
-}
-
-function updateSummary(visible) {
-  const totalGain = visible.reduce((sum, m) => sum + (m.totalGain || 0), 0);
-  const battle = document.getElementById("battle");
-  const range = document.getElementById("range");
-  const shown = document.getElementById("shown");
-  const total = document.getElementById("total-gain");
-  const note = document.getElementById("chart-note");
-
-  if (battle) battle.textContent = fmtDateTime(getEventStartMs()) + " → " + fmtDateTime(getEventEndMs());
-  if (range) range.textContent = fmtDateTime(getStartMs()) + " → " + fmtDateTime(getEndMs());
-  if (shown) shown.textContent = visible.length.toLocaleString("en-US") + " / " + members.length.toLocaleString("en-US");
-  if (total) total.textContent = shortNum(totalGain);
-  if (note) note.textContent = "Rank is drawn inverted: higher placement appears higher on the chart.";
 }
 
 function render() {
@@ -661,29 +1371,38 @@ function render() {
   drawChart();
 }
 
+function enforceAtLeastOneMainToggle(preferred) {
+  const gain = document.getElementById("toggle-gain");
+  const rank = document.getElementById("toggle-rank");
+
+  if (!gain.checked && !rank.checked) {
+    if (preferred === "rank") {
+      rank.checked = true;
+    } else {
+      gain.checked = true;
+    }
+  }
+}
+
 async function loadData() {
   try {
     setStatus("Loading current leaderboard...");
 
     document.title = DISPLAY + " Activity Chart";
+    document.getElementById("title").textContent = DISPLAY + " Member Activity Chart";
 
-    const title = document.getElementById("title");
-    if (title) title.textContent = DISPLAY + " Member Activity Chart";
-
-    const homeLogoLink = document.getElementById("home-logo-link");
-    const homeLink = document.getElementById("home-link");
-    const activityLink = document.getElementById("activity-link");
-
-    if (homeLogoLink) homeLogoLink.href = pageUrl("index.html");
-    if (homeLink) homeLink.href = pageUrl("index.html");
-    if (activityLink) activityLink.href = pageUrl("activity.html");
+    const homeLink = document.querySelector('.menu a[href="index.html"]');
+    if (homeLink) {
+      homeLink.href = pageUrl("index.html");
+    }
 
     current = await getJson(withQuery(CURRENT_API), DISPLAY + " current leaderboard");
 
     setStatus("Loading player histories...");
-    rawHistoryRows = await fetchAllMemberHistory();
 
+    rawHistoryRows = await fetchAllMemberHistory();
     deriveDataWindow();
+
     buildActivityModel();
     drawChart();
 
@@ -694,18 +1413,30 @@ async function loadData() {
   }
 }
 
-document.getElementById("refresh")?.addEventListener("click", loadData);
-document.getElementById("bucket")?.addEventListener("change", render);
-document.getElementById("line-count")?.addEventListener("change", drawChart);
-document.getElementById("search")?.addEventListener("input", drawChart);
-document.getElementById("toggle-gain")?.addEventListener("change", drawChart);
-document.getElementById("toggle-rank")?.addEventListener("change", drawChart);
-document.getElementById("toggle-status")?.addEventListener("change", drawChart);
-document.getElementById("toggle-full-window")?.addEventListener("change", render);
-window.addEventListener("resize", drawChart);
+document.getElementById("bucket").addEventListener("change", render);
+document.getElementById("line-count").addEventListener("change", drawChart);
+document.getElementById("search").addEventListener("input", drawChart);
+document.getElementById("refresh").addEventListener("click", loadData);
+
+document.getElementById("toggle-gain").addEventListener("change", () => {
+  enforceAtLeastOneMainToggle("gain");
+  drawChart();
+});
+
+document.getElementById("toggle-rank").addEventListener("change", () => {
+  enforceAtLeastOneMainToggle("rank");
+  drawChart();
+});
+
+document.getElementById("toggle-status").addEventListener("change", drawChart);
+document.getElementById("toggle-full-window").addEventListener("change", render);
+
+window.addEventListener("resize", () => {
+  clearTimeout(window.__activityResize);
+  window.__activityResize = setTimeout(drawChart, 100);
+});
 
 loadData();
 </script>
-<script src="assets/site-announcement.js"></script>
 </body>
 </html>
