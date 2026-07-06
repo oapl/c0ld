@@ -35,6 +35,7 @@ button:hover,input:focus,select:focus{border-color:var(--link);background:var(--
 table{width:100%;border-collapse:collapse;min-width:1120px}
 th,td{padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:top}
 th{color:var(--muted);font-size:13px;text-align:left;cursor:pointer;font-weight:500}
+th:not([data-sort]){cursor:default}
 .numeric{text-align:right;font-variant-numeric:tabular-nums}
 .rank{font-weight:700}
 .league-cell{display:flex;align-items:center;gap:10px;font-weight:700}
@@ -121,6 +122,8 @@ function setStatus(text){document.getElementById("status").textContent=text}
 function norm(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
 function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="League rank #'+esc(m.rank||"-")+'"><strong>'+esc(m.username||m.user_id)+'</strong> '+esc(shortNum(m.points))+'</span>').join("")}
 function getMode(){return document.getElementById("view-mode").value==="members"?"members":"leagues"}
+function scoreDesc(a,b){return (Number(b.points)||0)-(Number(a.points)||0)}
+function rankMembers(rows){return rows.slice().sort(scoreDesc).map((row,index)=>({...row,score_rank:index+1}))}
 async function getJson(url){url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}
 function addRun(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
 function byLeagueKey(rows){const map=new Map();for(const row of rows||[]){const id=String(row.league_id||"").trim();if(id)map.set("id:"+id,row);map.set("name:"+norm(row.league_name||row.display_name),row)}return map}
@@ -165,7 +168,7 @@ function buildOverlapLeague(entry,top,row){
 }
 function tableHeaders(){
   const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';
-  const members='<tr><th data-sort="rank">Rank</th><th data-sort="username">Player</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th></tr>';
+  const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';
   document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;
   document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}));
 }
@@ -173,6 +176,7 @@ function visible(){
   const q=document.getElementById("search-input").value.trim().toLowerCase();
   let list=(getMode()==="members"?memberRows:leagueRows).slice();
   if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));
+  if(getMode()==="members")return list.sort(scoreDesc);
   list.sort((a,b)=>compare(a,b,sortKey,sortAsc));
   return list;
 }
@@ -180,7 +184,7 @@ function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(
 function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US")}
 function renderMeta(){const updated=lastTopUpdated?" · Top 1000 updated "+dt(lastTopUpdated):"";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors · ":"")+leagueRows.length+" c0ld leagues · "+memberRows.length+" members"+updated}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No tracked c0ld leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+(r.rank?"#"+esc(r.rank):"-")+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
-function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+(r.rank?"#"+esc(r.rank):"-")+'</td><td><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'&id='+encodeURIComponent(r.user_id||"")+'"><strong>'+esc(r.username||r.user_id)+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
+function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'&id='+encodeURIComponent(r.user_id||"")+'"><strong>'+esc(r.username||r.user_id)+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
 async function loadData(){
   if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;
@@ -209,7 +213,7 @@ async function loadData(){
       return row;
     }));
     leagueRows=built.sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
-    memberRows=leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999)||(Number(a.league_rank)||999999)-(Number(b.league_rank)||999999));
+    memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))));
     setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" tracked c0ld leagues from the latest Top 1000.");
     render();
   }catch(err){
@@ -222,7 +226,7 @@ async function loadData(){
   }
 }
 document.getElementById("refresh-btn").addEventListener("click",loadData);
-document.getElementById("view-mode").addEventListener("change",()=>{sortKey="rank";sortAsc=true;render()});
+document.getElementById("view-mode").addEventListener("change",()=>{if(getMode()==="members"){sortKey="points";sortAsc=false}else{sortKey="rank";sortAsc=true}render()});
 document.getElementById("search-input").addEventListener("input",render);
 loadData();
 </script>
