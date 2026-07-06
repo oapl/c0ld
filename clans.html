@@ -506,7 +506,8 @@
         key === "abstractc0ld" ||
         key === "spring2026"
       );
-      const isStaticOnlyLegacy = !isApiSource && keys.some(key =>
+      const hasExportedRows = Array.isArray(item?.rows) && item.rows.length > 0;
+      const isStaticOnlyLegacy = !isApiSource && !hasExportedRows && keys.some(key =>
         key === "angelbattle2026" ||
         key === "angelbattle2026c0ld" ||
         key === "angelbattle2026clans" ||

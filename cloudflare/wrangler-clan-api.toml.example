@@ -16,7 +16,11 @@ CURRENT_BATTLE_DISPLAY_NAME = ""
 CURRENT_BATTLE_END_ISO = ""
 SITE_ORIGINS = "https://oapl.github.io"
 PUBLIC_CACHE_SECONDS = "30"
-RETENTION_HOURS = "336"
+# Optional. Leave blank/omit to keep archived battle snapshots indefinitely.
+# Set to a positive hour count only if you intentionally want rolling pruning.
+SNAPSHOT_RETENTION_HOURS = ""
+# Optional safety cap for /api/history and /api/clans/history requests.
+HISTORY_MAX_HOURS = "100000"
 ROBLOX_USERNAME_LOOKUPS = "true"
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 INGEST_CLANS_LEADERBOARD = "true"

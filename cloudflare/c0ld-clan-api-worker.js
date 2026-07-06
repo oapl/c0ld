@@ -6,7 +6,7 @@ const CLANS_CURRENT_TABLE = "c0ld_clans_current";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
-const DEFAULT_RETENTION_HOURS = 336;
+const DEFAULT_HISTORY_MAX_HOURS = 100000;
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const ROBLOX_BATCH_SIZE = 100;
 const CLANS_PAGE_SIZE = 100;
@@ -1764,7 +1764,7 @@ async function fetchClanSnapshotRows(env, snapshotId, limit) {
 }
 
 async function pruneOldSnapshots(env, clan) {
-  const retentionHours = Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS);
+  const retentionHours = snapshotRetentionHours(env);
   if (!Number.isFinite(retentionHours) || retentionHours <= 0) return;
 
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
@@ -1784,7 +1784,7 @@ async function pruneOldSnapshots(env, clan) {
 }
 
 async function pruneOldTableRows(env, tableName) {
-  const retentionHours = Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS);
+  const retentionHours = snapshotRetentionHours(env);
   if (!Number.isFinite(retentionHours) || retentionHours <= 0) return;
 
   const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
@@ -2397,12 +2397,24 @@ function parseThresholdNumber(value) {
 
 function historyHours(url, env, defaultHours) {
   const requested = Number(url.searchParams.get("hours") || defaultHours);
-  const retentionHours = Number(env.RETENTION_HOURS || DEFAULT_RETENTION_HOURS);
-  const maxHours = Number.isFinite(retentionHours) && retentionHours > 0
-    ? retentionHours
-    : 100000;
+  const maxHoursValue = Number(env.HISTORY_MAX_HOURS || DEFAULT_HISTORY_MAX_HOURS);
+  const maxHours = Number.isFinite(maxHoursValue) && maxHoursValue > 0
+    ? maxHoursValue
+    : DEFAULT_HISTORY_MAX_HOURS;
 
   return clamp(requested, 1, maxHours);
+}
+
+function snapshotRetentionHours(env) {
+  const raw = String(env.SNAPSHOT_RETENTION_HOURS || "").trim();
+  if (!raw) return 0;
+
+  if (["0", "false", "off", "none", "disabled"].includes(raw.toLowerCase())) {
+    return 0;
+  }
+
+  const hours = Number(raw);
+  return Number.isFinite(hours) && hours > 0 ? hours : 0;
 }
 
 function boundedIntegerParam(url, name, min, max) {

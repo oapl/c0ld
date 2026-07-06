@@ -132,7 +132,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `SITE_ORIGINS` | `https://oapl.github.io` |
 | `SUPABASE_URL` | `https://YOUR-PROJECT.supabase.co` |
 | `PUBLIC_CACHE_SECONDS` | `30` |
-| `RETENTION_HOURS` | `336` |
+| `SNAPSHOT_RETENTION_HOURS` | Optional. Leave blank/omit to preserve archived battle snapshots. Set a positive hour count only if you intentionally want rolling pruning. |
+| `HISTORY_MAX_HOURS` | Optional. Defaults to `100000`; caps `/api/history` and `/api/clans/history` lookback requests. |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
 | `INGEST_CLANS_LEADERBOARD` | `true` |
 | `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
