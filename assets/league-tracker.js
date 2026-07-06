@@ -78,15 +78,17 @@
     const leagueName=data.league_name||LEAGUE;
     currentData=data;
     document.title=leagueName+" League Tracker";
-    document.getElementById("league-points").textContent=shortNum(data.league_points);
-    document.getElementById("league-points").title=fullNum(data.league_points);
-    document.getElementById("last-db-update").textContent=data.snapshot_at?dt(data.snapshot_at):"—";
+    const leaguePoints=data.league_points ?? topLeagueRow?.total_points ?? topLeagueRow?.points;
+    const snapshotAt=data.snapshot_at || topLeagueRow?.fetched_at;
+    document.getElementById("league-points").textContent=shortNum(leaguePoints);
+    document.getElementById("league-points").title=fullNum(leaguePoints);
+    document.getElementById("last-db-update").textContent=snapshotAt?dt(snapshotAt):"—";
     document.getElementById("page-title").textContent=leagueName+" League Tracker";
     const currentRank=topLeagueRow?.rank||data.league_rank;
     const projectedRank=topLeagueRow?.projected_rank_1h;
     document.getElementById("league-rank").textContent=currentRank?"#"+currentRank:"—";
     document.getElementById("projected-rank").textContent=projectedRank?"#"+projectedRank:"—";
-    const img=document.getElementById("league-icon"),src=iconUrl(data.league_icon);
+    const img=document.getElementById("league-icon"),src=iconUrl(data.league_icon || topLeagueRow?.league_icon);
     if(src){img.src=src;img.hidden=false}else img.hidden=true;
   }
 
@@ -143,7 +145,8 @@
     const targetHourly=basis.targetGain/hours;
     const currentHourly=basis.currentGain/hours;
     const basisLabel=basis.key==="gain_1h"?"1h":basis.label;
-    const title="Uses "+basisLabel+" pace: YAMO "+fullNum(Math.round(currentHourly))+"/hr, #"+TARGET_RANK+" "+fullNum(Math.round(targetHourly))+"/hr.";
+    const leagueName=currentData?.league_name||LEAGUE;
+    const title="Uses "+basisLabel+" pace: "+leagueName+" "+fullNum(Math.round(currentHourly))+"/hr, #"+TARGET_RANK+" "+fullNum(Math.round(targetHourly))+"/hr.";
     if(gap<=0)return{time:'Passed',hourly:shortNum(currentHourly)+"/hr",tone:'met',title};
     const netHourly=currentHourly-targetHourly;
     const requiredHourly=Math.ceil(targetHourly+1);
@@ -152,7 +155,7 @@
       hourly:shortNum(currentHourly)+"/hr",
       required:netHourly>0?"":shortNum(requiredHourly)+"/hr",
       tone:netHourly>0?"met":"need",
-      title:title+" Time is based on YAMO's net gain after #"+TARGET_RANK+"'s pace."
+      title:title+" Time is based on "+leagueName+"'s net gain after #"+TARGET_RANK+"'s pace."
     };
   }
   function renderRaceSummary(){
