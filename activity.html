@@ -751,7 +751,7 @@ function buildActivityModel() {
       id,
       name: row.username || id,
       rank: row.rank,
-      currentTotal: toNumber(row.total_points) || 0,
+      currentTotal: toNumber(row.total_points ?? row.points) || 0,
       bucketGains: buckets.map(() => 0),
       rankValues: buckets.map(() => null),
       statusValues: buckets.map(() => 0),
@@ -761,7 +761,7 @@ function buildActivityModel() {
 
   for (const row of rawHistoryRows) {
     const id = String(row.user_id || "").trim();
-    const total = toNumber(row.total_points);
+    const total = toNumber(row.total_points ?? row.points);
     const rank = toNumber(row.rank);
     const ms = new Date(row.fetched_at || "").getTime();
 
