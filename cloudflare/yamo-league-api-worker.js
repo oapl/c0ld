@@ -51,9 +51,6 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
-        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env)).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
-      }
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
         const leagues = leagueNames(env);
         const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 4), 1, 8);
@@ -68,6 +65,9 @@ export default {
           }
         });
         console.log("scheduled tracked league ingest complete", JSON.stringify(results));
+      }
+      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
+        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env)).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
@@ -121,7 +121,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
-  const top = await fetchTopLeagues(topLeaguesLimit(env));
+  const top = await fetchTopLeagues(source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env));
   const snapshotId = `top_leagues:${runKey}:${fetchedAt}`;
 
   const dbRows = top.rows.map(row => ({
@@ -161,13 +161,22 @@ async function handleCurrent(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
-  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+  let rows = await supabaseSelect(env, CURRENT_TABLE, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${requested}`,
     order: "rank.asc",
     limit: "500"
   });
+  if (!rows.length) {
+    rows = await supabaseSelect(env, CURRENT_TABLE, {
+      select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
+      league_run_key: `eq.${runKey}`,
+      league_name: `ilike.${requested}`,
+      order: "rank.asc",
+      limit: "500"
+    });
+  }
 
   const latest = latestMeta(rows);
   if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: requested, rows: [] }, env);
@@ -1201,6 +1210,7 @@ function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY)
 function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
+function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }

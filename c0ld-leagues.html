@@ -106,7 +106,7 @@ const REFRESH_INTERVAL_MS=5*60*1000;
 const TRACKED_LEAGUES=[
   {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",page:"ndct.html",rank:9},
   {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",page:"yamo.html",rank:17},
-  {name:"GOATs",id:"6b43150496874c60a7597c5df1928932",page:"goats.html",rank:20},
+  {name:"GOATs",apiName:"GOATS",id:"6b43150496874c60a7597c5df1928932",page:"goats.html",rank:20},
   {name:"SNCLS",id:"2a696dd9980c44e99c7d59224d3bebfa",page:"sncls.html",rank:136},
   {name:"VPPPP",id:"4ee7ee279dcd437dbfd160bb0a30a748",page:"vpppp.html",rank:152},
   {name:"brrbr",id:"1259d0a1ebfe4db7975b0b50ed7ff3e3",page:"brrbr.html",rank:166},
@@ -161,7 +161,7 @@ function leaguePage(row){const entry=row.page?row:trackedLeagueFor(row);return e
 function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="League rank #'+esc(m.rank||"-")+'"><strong>'+esc(bestName(m.user_id,m.username,m.display_name))+'</strong> '+esc(shortNum(m.points))+'</span>').join("")}
 async function getJson(url){url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}
 function addRun(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
-async function fetchLeagueCurrent(entry){const url=new URL(API+"/api/leagues/current");url.searchParams.set("league",entry.name);url.searchParams.set("rank_lookup","false");addRun(url);return getJson(url)}
+async function fetchLeagueCurrent(entry){const url=new URL(API+"/api/leagues/current");url.searchParams.set("league",entry.apiName||entry.name);url.searchParams.set("rank_lookup","false");addRun(url);return getJson(url)}
 function finiteOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function sumCurrentGain(current,key){const values=(current?.rows||[]).map(row=>finiteOrNull(row[key])).filter(value=>value!==null);if(!values.length)return null;return values.reduce((sum,value)=>sum+value,0)}
 function leagueBase(entry,current){return {rank:entry.rank??current?.league_rank??null,league_name:current?.league_name||entry.name,league_id:current?.league_id||entry.id,league_icon:current?.league_icon||null,page:entry.page||null,points:finiteOrNull(current?.league_points)??0,gain_1h:sumCurrentGain(current,"gain_1h"),gain_6h:sumCurrentGain(current,"gain_6h"),gain_12h:sumCurrentGain(current,"gain_12h"),gain_24h:sumCurrentGain(current,"gain_24h"),c0ld_member_count:0,matches:[],snapshot_at:current?.snapshot_at||null}}

@@ -3,6 +3,7 @@
   const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
+  const API_LEAGUE = String(config.apiLeague || config.league || "YAMO");
   const RUN_KEY = String(config.run || config.runKey || "active").trim();
   const TARGET_RANK = Number(config.targetRank || 60);
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
@@ -35,7 +36,7 @@
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
   function addRunParam(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
   function profileHref(r){
-    let href="league-profile.html?league="+encodeURIComponent(LEAGUE)+"&id="+encodeURIComponent(r.user_id||"");
+    let href="league-profile.html?league="+encodeURIComponent(currentData?.league_name||API_LEAGUE||LEAGUE)+"&id="+encodeURIComponent(r.user_id||"");
     if(RUN_KEY)href+="&run="+encodeURIComponent(RUN_KEY);
     return href;
   }
@@ -255,7 +256,7 @@
     if(loading)return;loading=true;
     try{
       const currentUrl=new URL(API+"/api/leagues/current");
-      currentUrl.searchParams.set("league",LEAGUE);
+      currentUrl.searchParams.set("league",API_LEAGUE);
       addRunParam(currentUrl);
       const current=await getJson(currentUrl);
       rows=current.rows||[];
