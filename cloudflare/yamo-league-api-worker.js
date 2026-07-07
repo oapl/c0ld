@@ -262,8 +262,9 @@ async function handleC0ldLeagueOverlap(request, env) {
   const concurrency = clamp(Number(url.searchParams.get("concurrency") || env.COLD_LEAGUES_CONCURRENCY || 8), 1, 12);
   const liveScan = boolParam(url.searchParams.get("live"), boolEnv(env.COLD_LEAGUES_LIVE_SCAN, false));
 
+  const preferLiveClan = boolParam(url.searchParams.get("live_clan"), liveScan || boolEnv(env.COLD_LEAGUES_LIVE_CLAN_CURRENT, false));
   const [clanCurrent, topContext] = await Promise.all([
-    fetchClanCurrentForOverlap(env, clan),
+    fetchClanCurrentForOverlap(env, clan, preferLiveClan),
     liveScan
       ? fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, batchLimit, topLimit)
       : fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
@@ -292,6 +293,7 @@ async function handleC0ldLeagueOverlap(request, env) {
     ok: true,
     generated_at: new Date().toISOString(),
     clan_name: clan,
+    clan_source: clanCurrent.source || null,
     clan_snapshot_at: clanCurrent.snapshot_at || null,
     clan_member_count: clanMembers.size,
     league_run_key: runKey,
@@ -335,7 +337,15 @@ async function handleHistory(request, env) {
   return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows }, env);
 }
 
-async function fetchClanCurrentForOverlap(env, clan) {
+async function fetchClanCurrentForOverlap(env, clan, preferLive = false) {
+  if (preferLive) {
+    const liveRows = await fetchLiveClanRosterForOverlap(env, clan).catch(err => {
+      console.warn("live clan roster lookup failed", err?.message || String(err));
+      return null;
+    });
+    if (liveRows?.rows?.length) return liveRows;
+  }
+
   const dbRows = await fetchClanCurrentFromSupabase(env, clan).catch(() => null);
   if (dbRows && dbRows.rows.length) return dbRows;
 
@@ -355,6 +365,85 @@ async function fetchClanCurrentForOverlap(env, clan) {
   url.searchParams.set("v", Date.now());
   const res = await fetch(url.toString(), { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
   return parseClanCurrentResponse(res, clan);
+}
+
+async function fetchLiveClanRosterForOverlap(env, clan) {
+  const api = await fetchClanApiForOverlap(clan);
+  const data = api.data || api;
+  const members = collectClanMembersWithOwnerForOverlap(data);
+  const dbRows = await fetchClanCurrentFromSupabase(env, clan).catch(() => null);
+  const dbById = new Map((dbRows?.rows || []).map(row => [String(row.user_id), row]));
+  const usernameMap = await resolveRobloxUsernames(members.map(member => getUserId(member)), env).catch(() => new Map());
+  const now = new Date().toISOString();
+  const rows = [];
+
+  for (const member of members) {
+    const userId = getUserId(member);
+    if (!userId) continue;
+    const stored = dbById.get(String(userId)) || {};
+    const username = String(
+      firstDefined(
+        usernameMap.get(userId),
+        getDisplayName(member, userId),
+        stored.username,
+        stored.display_name,
+        `user_${userId}`
+      ) || `user_${userId}`
+    );
+    rows.push({
+      fetched_at: now,
+      rank: toNumber(stored.rank),
+      username,
+      display_name: username,
+      user_id: userId,
+      total_points: toNumber(firstDefined(stored.total_points, stored.points)) || 0,
+      points: toNumber(firstDefined(stored.total_points, stored.points)) || 0,
+      role: roleFromPermission(firstDefined(member.PermissionLevel, member.permissionLevel, member.permission_level))
+    });
+  }
+
+  return {
+    ok: true,
+    generated_at: now,
+    snapshot_at: now,
+    clan_name: clan,
+    battle: dbRows?.battle || null,
+    display_name: dbRows?.display_name || null,
+    battle_start_iso: dbRows?.battle_start_iso || null,
+    battle_end_iso: dbRows?.battle_end_iso || null,
+    source: "live-clan-api",
+    rows
+  };
+}
+
+async function fetchClanApiForOverlap(clan) {
+  const urls = [
+    `https://biggamesapi.io/api/clan/${encodeURIComponent(clan)}`,
+    `https://ps99.biggamesapi.io/api/clan/${encodeURIComponent(clan)}`
+  ];
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
+      const text = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
+      const data = JSON.parse(text);
+      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+      return data;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw httpError(502, `Big Games clan API failed for ${clan}: ${lastError?.message || "unknown error"}`);
+}
+
+function collectClanMembersWithOwnerForOverlap(clan) {
+  const members = firstArray(clan?.Members, clan?.members).slice();
+  const ownerId = toNumber(firstDefined(clan?.Owner, clan?.owner, clan?.OwnerUserID, clan?.ownerUserId));
+  if (ownerId && !members.some(member => getUserId(member) === ownerId)) {
+    members.unshift({ UserID: ownerId, PermissionLevel: 100, OwnerInjected: true });
+  }
+  return members;
 }
 
 async function parseClanCurrentResponse(res, clan) {
