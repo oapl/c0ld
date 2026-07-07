@@ -65,7 +65,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
   <section class="hero">
     <div>
       <h1>c0ld Leagues</h1>
-      <div id="status" class="subtle">Latest c0ld league overlap.</div>
+      <div id="status" class="subtle">Stored data for the static c0ld league list.</div>
     </div>
     <div class="controls">
       <select id="view-mode" aria-label="View">
@@ -136,7 +136,7 @@ const TRACKED_LEAGUES=[
   {name:"yuurr",id:"bafdf8d8777343e1a6a99f92707958fd",page:"yuurr.html",rank:9068}
 ];
 const COLD_MEMBER_OVERRIDE_IDS=new Set(["1462748729"]);
-let leagueRows=[],memberRows=[],sortKey="rank",sortAsc=true,loading=false,lastTopUpdated=null,errors=[],knownPlayers=new Map(),knownC0ldMembers=new Set(COLD_MEMBER_OVERRIDE_IDS);
+let leagueRows=[],memberRows=[],sortKey="rank",sortAsc=true,loading=false,lastUpdated=null,errors=[],knownPlayers=new Map(),knownC0ldMembers=new Set(COLD_MEMBER_OVERRIDE_IDS);
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
 function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"-"}
@@ -161,55 +161,41 @@ function leaguePage(row){const entry=row.page?row:trackedLeagueFor(row);return e
 function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="League rank #'+esc(m.rank||"-")+'"><strong>'+esc(bestName(m.user_id,m.username,m.display_name))+'</strong> '+esc(shortNum(m.points))+'</span>').join("")}
 async function getJson(url){url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}
 function addRun(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
-function byLeagueKey(rows){const map=new Map();for(const row of rows||[]){const id=String(row.league_id||"").trim();if(id)map.set("id:"+id,row);map.set("name:"+norm(row.league_name||row.display_name),row)}return map}
-function topLeagueFor(entry,map){return map.get("id:"+entry.id)||map.get("name:"+norm(entry.name))||null}
-async function fetchTopLeagues(){const url=new URL(API+"/api/leagues/top-leagues");url.searchParams.set("limit","1000");addRun(url);const data=await getJson(url);lastTopUpdated=data.snapshot_at||data.generated_at||null;return data.rows||[]}
 async function fetchLeagueCurrent(entry){const url=new URL(API+"/api/leagues/current");url.searchParams.set("league",entry.name);url.searchParams.set("rank_lookup","false");addRun(url);return getJson(url)}
-async function fetchOverlapForRank(entry,rank){if(!Number.isFinite(Number(rank)))return null;const load=async live=>{const url=new URL(API+"/api/leagues/c0ld-overlap");url.searchParams.set("clan","c0ld");url.searchParams.set("top_limit","10000");url.searchParams.set("offset",String(Math.max(0,Number(rank)-1)));url.searchParams.set("limit","1");if(live){url.searchParams.set("live","1");url.searchParams.set("live_clan","1")}addRun(url);const data=await getJson(url);return (data.rows||[]).find(row=>String(row.league_id||"")===String(entry.id||"")||norm(row.league_name)===norm(entry.name))||null};return await load(true)||await load(false)}
-function topLeagueBase(entry,top){return {rank:top?.rank??entry.rank??null,league_name:top?.league_name||entry.name,league_id:top?.league_id||entry.id,league_icon:top?.league_icon||null,page:entry.page||null,points:Number(top?.total_points??top?.points??0),gain_1h:top?.gain_1h,gain_6h:top?.gain_6h,gain_12h:top?.gain_12h,gain_24h:top?.gain_24h,c0ld_member_count:0,matches:[]}}
-function normalizeOverlapMatches(row){return (row?.matches||[]).map(match=>({...match,rank:match.league_rank||match.rank,points:Number(match.league_points??match.points??0),username:bestName(match.user_id,match.username,match.display_name)})).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999))}
 function finiteOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
-function currentMemberMap(current){const map=new Map();for(const row of current?.rows||[]){if(row.user_id)map.set(String(row.user_id),row)}return map}
 function sumCurrentGain(current,key){const values=(current?.rows||[]).map(row=>finiteOrNull(row[key])).filter(value=>value!==null);if(!values.length)return null;return values.reduce((sum,value)=>sum+value,0)}
-function enrichMatchesWithCurrent(matches,current){const map=currentMemberMap(current);return matches.map(match=>{const currentRow=map.get(String(match.user_id));if(!currentRow)return {...match,username:bestName(match.user_id,match.username,match.display_name)};return {...match,username:bestName(match.user_id,currentRow.username,currentRow.display_name,match.username),points:finiteOrNull(currentRow.total_points)??match.points,gain_1h:finiteOrNull(currentRow.gain_1h),gain_6h:finiteOrNull(currentRow.gain_6h),gain_12h:finiteOrNull(currentRow.gain_12h),gain_24h:finiteOrNull(currentRow.gain_24h)}})}
-function fallbackMatchesFromCurrent(current,matches){const existing=new Set((matches||[]).map(match=>String(match.user_id)));return (current?.rows||[]).filter(row=>isKnownC0ldMember(row.user_id)&&!existing.has(String(row.user_id))).map(row=>({user_id:row.user_id,username:bestName(row.user_id,row.username,row.display_name),rank:row.rank,points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h)}))}
-function mergeMatches(matches,current){const merged=[...matches,...fallbackMatchesFromCurrent(current,matches)];return merged.sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0))}
-function buildOverlapLeague(entry,top,row,current){const base=topLeagueBase(entry,top);const matches=mergeMatches(enrichMatchesWithCurrent(normalizeOverlapMatches(row),current),current);return {...base,rank:row.rank??current?.league_rank??base.rank,league_name:row.league_name||current?.league_name||base.league_name,league_id:row.league_id||current?.league_id||base.league_id,league_icon:row.league_icon||current?.league_icon||base.league_icon,points:finiteOrNull(current?.league_points)??Number(row.total_points??row.points??base.points),gain_1h:finiteOrNull(row.gain_1h)??base.gain_1h??sumCurrentGain(current,"gain_1h"),gain_6h:finiteOrNull(row.gain_6h)??base.gain_6h??sumCurrentGain(current,"gain_6h"),gain_12h:finiteOrNull(row.gain_12h)??base.gain_12h??sumCurrentGain(current,"gain_12h"),gain_24h:finiteOrNull(row.gain_24h)??base.gain_24h??sumCurrentGain(current,"gain_24h"),c0ld_member_count:matches.length,matches}}
+function leagueBase(entry,current){return {rank:entry.rank??current?.league_rank??null,league_name:current?.league_name||entry.name,league_id:current?.league_id||entry.id,league_icon:current?.league_icon||null,page:entry.page||null,points:finiteOrNull(current?.league_points)??0,gain_1h:sumCurrentGain(current,"gain_1h"),gain_6h:sumCurrentGain(current,"gain_6h"),gain_12h:sumCurrentGain(current,"gain_12h"),gain_24h:sumCurrentGain(current,"gain_24h"),c0ld_member_count:0,matches:[],snapshot_at:current?.snapshot_at||null}}
+function matchesFromCurrent(current){return (current?.rows||[]).filter(row=>isKnownC0ldMember(row.user_id)).map(row=>({user_id:row.user_id,username:bestName(row.user_id,row.username,row.display_name),display_name:row.display_name,rank:row.rank,points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h)})).sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0))}
+function buildStoredLeague(entry,current){const matches=matchesFromCurrent(current);return {...leagueBase(entry,current),c0ld_member_count:matches.length,matches}}
 function tableHeaders(){const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}))}
 function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
 function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
 function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US");document.getElementById("top3300-count").textContent=countRankRange(1401,3300).toLocaleString("en-US");document.getElementById("top8500-count").textContent=countRankRange(3301,8500).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(8501,10000).toLocaleString("en-US")}
-function renderMeta(){const updated=lastTopUpdated?" · Top Leagues updated "+dt(lastTopUpdated):"";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors · ":"")+leagueRows.length+" c0ld leagues · "+memberRows.length+" members"+updated}
+function renderMeta(){const updated=lastUpdated?" · League data updated "+dt(lastUpdated):"";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors · ":"")+leagueRows.length+" static leagues · "+memberRows.length+" c0ld members"+updated}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No tracked c0ld leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+(r.rank?"#"+esc(r.rank):"-")+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
 function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="'+esc(leaguePage(r))+'"><strong>'+esc(bestName(r.user_id,r.username,r.display_name))+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
 async function loadData(){
   if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;
   try{
-    setStatus("Refreshing latest Top Leagues...");
-    const [topRows]=await Promise.all([fetchTopLeagues(),loadKnownPlayers(),loadKnownC0ldMembers()]);
-    const topMap=byLeagueKey(topRows);
-    const candidates=TRACKED_LEAGUES.map(entry=>({entry,top:topLeagueFor(entry,topMap)}));
-    leagueRows=candidates.map(item=>topLeagueBase(item.entry,item.top)).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+    setStatus("Refreshing stored data for the static c0ld league list...");
+    await Promise.all([loadKnownPlayers(),loadKnownC0ldMembers()]);
+    leagueRows=TRACKED_LEAGUES.map(entry=>leagueBase(entry,null)).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
     memberRows=[];
-    setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" tracked c0ld leagues from the latest Top Leagues.");
     render();
-    const built=await Promise.all(candidates.map(async ({entry,top})=>{
-      let row=topLeagueBase(entry,top);
+    const built=await Promise.all(TRACKED_LEAGUES.map(async entry=>{
       try{
-        const [overlap,current]=await Promise.all([
-          fetchOverlapForRank(entry,row.rank).catch(err=>{errors.push({league:entry.name,message:err.message||String(err)});return null}),
-          fetchLeagueCurrent(entry).catch(err=>{errors.push({league:entry.name,message:err.message||String(err)});return null})
-        ]);
-        row=buildOverlapLeague(entry,top,overlap||{},current);
+        const current=await fetchLeagueCurrent(entry);
+        return buildStoredLeague(entry,current);
       }catch(err){
         errors.push({league:entry.name,message:err.message||String(err)});
+        return leagueBase(entry,null);
       }
-      return row;
     }));
     leagueRows=built.sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+    lastUpdated=leagueRows.map(row=>row.snapshot_at).filter(Boolean).sort().pop()||null;
     memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank,page:row.page}))));
-    setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" tracked c0ld leagues from the latest Top Leagues.");
+    setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" static c0ld leagues from stored league pulls.");
     render();
   }catch(err){
     console.error(err);
