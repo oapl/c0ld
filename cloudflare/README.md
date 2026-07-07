@@ -190,7 +190,7 @@ Useful endpoints:
 
 ## League API Worker
 
-`yamo-league-api-worker.js` powers the league pages, the Top 10000 leaderboard,
+`yamo-league-api-worker.js` powers the league pages, the Top 1000 leaderboard,
 and the c0ld league overlap page.
 
 Useful endpoints:
@@ -198,8 +198,8 @@ Useful endpoints:
 | Endpoint | Purpose |
 |---|---|
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
-| `/api/leagues/top-leagues?limit=10000` | Latest Top 10000 league leaderboard with gain projections. |
-| `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Scans one Top 10000 chunk, compares league rosters against current c0ld clan members, and returns only matched leagues. |
+| `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 
 The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
