@@ -162,7 +162,7 @@ async function handleCurrent(request, env) {
 
   const [rowsWithGains, leagueRank] = await Promise.all([
     addGainFields(env, rows, latest),
-    fetchLeagueRank(requested).catch(() => null)
+    boolParam(url.searchParams.get("rank_lookup"), true) ? fetchLeagueRank(requested).catch(() => null) : Promise.resolve(null)
   ]);
   const ids = rowsWithGains.map(row => row.user_id);
   const usernameMap = await resolveRobloxUsernames(ids, env).catch(() => new Map());
@@ -381,14 +381,12 @@ async function fetchLiveClanRosterForOverlap(env, clan) {
     const userId = getUserId(member);
     if (!userId) continue;
     const stored = dbById.get(String(userId)) || {};
-    const username = String(
-      firstDefined(
-        usernameMap.get(userId),
-        getDisplayName(member, userId),
-        stored.username,
-        stored.display_name,
-        `user_${userId}`
-      ) || `user_${userId}`
+    const username = bestUsernameForOverlap(
+      userId,
+      usernameMap.get(userId),
+      getDisplayName(member, userId),
+      stored.username,
+      stored.display_name
     );
     rows.push({
       fetched_at: now,
@@ -607,7 +605,7 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
     .filter(item => item.clan)
     .map(item => ({
       user_id: item.clan.user_id,
-      username: item.clan.username,
+      username: bestUsernameForOverlap(item.clan.user_id, item.clan.username, item.member.display_name, item.member.username),
       avatar_url: item.clan.avatar_url,
       clan_rank: item.clan.clan_rank,
       clan_points: item.clan.clan_points,
@@ -1187,6 +1185,7 @@ function key(v) { return String(v || "").trim().toLowerCase().replace(/[^a-z0-9]
 function lname(r) { return String(firstDefined(r.Name, r.name, r.LeagueName, r.leagueName, "") || "").trim(); }
 function lpoints(r) { const n = Number(firstDefined(r.Points, r.points, r.TotalPoints, r.totalPoints, r.Score, r.score, 0)); return Number.isFinite(n) ? n : 0; }
 function isFallbackUsername(username, userId) { const text = String(username || "").trim(); const id = String(userId || "").trim(); return !text || (id && text === id) || /^user_\d+$/i.test(text); }
+function bestUsernameForOverlap(userId, ...values) { const names = values.map(value => String(value || "").trim()).filter(Boolean); return names.find(name => !isFallbackUsername(name, userId)) || names[0] || `user_${userId}`; }
 function displayUsername(row, usernameMap) { const id = toNumber(row.user_id); const existing = String(row.display_name || "").trim(); const resolved = id ? String(usernameMap.get(id) || "").trim() : ""; if (resolved && !isFallbackUsername(resolved, id)) return resolved; if (existing && !isFallbackUsername(existing, id)) return existing; return existing || (id ? `user_${id}` : ""); }
 function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
 function json(payload, status = 200, headers = {}) { return new Response(JSON.stringify(payload, null, 2), { status, headers: { "Content-Type": "application/json; charset=utf-8", ...headers } }); }
