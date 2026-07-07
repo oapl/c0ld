@@ -7,7 +7,7 @@ LEAGUE_NAME = "YAMO"
 # Change this when a new league run starts. Existing database rows are "legacy".
 LEAGUE_RUN_KEY = "active"
 # Comma-separated league list used for scheduled pulls.
-LEAGUE_NAMES = "NDCT,GOATs,YAMO,SNCLS,SMSW,VPPPP,brrbr,nfz,3v4,JIME,2w4g,COLD,ENRQE"
+LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,COLD,2w4g,zee1,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr"
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
 INGEST_LEAGUES = "true"
