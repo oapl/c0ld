@@ -51,13 +51,13 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
+        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env)).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
+      }
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
         for (const league of leagueNames(env)) await handleIngest(env, "schedule", league, leagueRunKey(env));
       }
-      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
-        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env));
-      }
-    })());
+    })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
 };
 
