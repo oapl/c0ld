@@ -70,7 +70,8 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     </div>
     <div class="controls">
       <select id="scan-limit" aria-label="Scan limit">
-        <option value="all" selected>Find c0ld members, max Top 5000</option>
+        <option value="all" selected>Find c0ld members, max Top 10000</option>
+        <option value="10000">Scan Top 10000</option>
         <option value="5000">Scan Top 5000</option>
         <option value="2500">Scan Top 2500</option>
         <option value="500">Scan Top 500</option>
@@ -117,7 +118,7 @@ const API="https://yamo-league-api-worker.opal-dde.workers.dev";
 const BATCH_SIZE=10;
 const SCAN_CONCURRENCY=2;
 const SCAN_DELAY_MS=2500;
-const FIND_ALL_LIMIT=5000;
+const FIND_ALL_LIMIT=10000;
 let rows=[],sortKey="rank",sortAsc=true,loading=false,lastPayload=null,scanErrors=[];
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
