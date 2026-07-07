@@ -282,6 +282,19 @@ async function handleC0ldLeagueOverlap(request, env) {
       clan_points: toNumber(firstDefined(member.total_points, member.points)) || 0
     });
   }
+  for (const member of c0ldMemberOverrides(env)) {
+    const userId = toNumber(firstDefined(member.user_id, member.userId, member.UserID, member.id));
+    if (!userId) continue;
+    const existing = clanMembers.get(String(userId)) || {};
+    clanMembers.set(String(userId), {
+      ...existing,
+      user_id: userId,
+      username: bestUsernameForOverlap(userId, member.username, member.display_name, existing.username),
+      avatar_url: existing.avatar_url || stringOrNull(member.avatar_url),
+      clan_rank: toNumber(firstDefined(existing.clan_rank, member.clan_rank, member.rank)),
+      clan_points: toNumber(firstDefined(existing.clan_points, member.clan_points, member.total_points, member.points)) || 0
+    });
+  }
 
   const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
   const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
@@ -384,9 +397,9 @@ async function fetchLiveClanRosterForOverlap(env, clan) {
     const username = bestUsernameForOverlap(
       userId,
       usernameMap.get(userId),
-      getDisplayName(member, userId),
       stored.username,
-      stored.display_name
+      stored.display_name,
+      getDisplayName(member, userId)
     );
     rows.push({
       fetched_at: now,
@@ -1178,6 +1191,18 @@ function firstDefined(...values) { for (const value of values) if (value !== und
 function toNumber(value) { if (value === null || value === undefined || value === "") return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
 function stringOrNull(value) { const text = String(value ?? "").trim(); return text || null; }
 function parseJsonObject(raw) { if (!raw) return {}; try { const parsed = JSON.parse(raw); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
+function c0ldMemberOverrides(env) {
+  const raw = String(env.COLD_MEMBER_OVERRIDES_JSON || env.COLD_LEAGUES_MEMBER_OVERRIDES_JSON || "").trim();
+  if (!raw) return [];
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return []; }
+  if (Array.isArray(parsed)) return parsed.filter(item => item && typeof item === "object");
+  if (!parsed || typeof parsed !== "object") return [];
+  return Object.entries(parsed).map(([userId, value]) => {
+    if (value && typeof value === "object") return { user_id: userId, ...value };
+    return { user_id: userId, username: String(value || "").trim() };
+  });
+}
 function normalizeDiscordMapKey(value) { return String(value ?? "").trim().toLowerCase().replace(/^<@!?(\d+)>$/, "$1"); }
 function parseTimestamp(value) { if (value === null || value === undefined || value === "") return null; if (typeof value === "number" || /^\d+(\.\d+)?$/.test(String(value).trim())) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) return null; const ms = n > 1e12 ? n : n * 1000; const date = new Date(ms); return Number.isNaN(date.getTime()) ? null : date.toISOString(); } const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toISOString(); }
 function clamp(value, min, max) { const n = Number(value); if (!Number.isFinite(n)) return min; return Math.min(max, Math.max(min, n)); }
