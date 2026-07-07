@@ -6,7 +6,7 @@ const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
-const MAX_TOP_LEAGUES_LIMIT = 1000;
+const MAX_TOP_LEAGUES_LIMIT = 5000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
@@ -260,10 +260,13 @@ async function handleC0ldLeagueOverlap(request, env) {
   const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, Math.max(0, topLimit - 1));
   const batchLimit = clamp(Number(url.searchParams.get("limit") || env.COLD_LEAGUES_BATCH_SIZE || DEFAULT_COLD_LEAGUES_BATCH_SIZE), 1, MAX_COLD_LEAGUES_BATCH_SIZE);
   const concurrency = clamp(Number(url.searchParams.get("concurrency") || env.COLD_LEAGUES_CONCURRENCY || 8), 1, 12);
+  const liveScan = boolParam(url.searchParams.get("live"), boolEnv(env.COLD_LEAGUES_LIVE_SCAN, false));
 
   const [clanCurrent, topContext] = await Promise.all([
     fetchClanCurrentForOverlap(env, clan),
-    fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
+    liveScan
+      ? fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, batchLimit, topLimit)
+      : fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
   ]);
 
   const clanMembers = new Map();
@@ -279,7 +282,7 @@ async function handleC0ldLeagueOverlap(request, env) {
     });
   }
 
-  const batch = topContext.rows.slice(offset, offset + batchLimit);
+  const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
   const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
   const matchedRows = scanned
     .filter(row => row.matches.length)
@@ -293,11 +296,14 @@ async function handleC0ldLeagueOverlap(request, env) {
     clan_member_count: clanMembers.size,
     league_run_key: runKey,
     top_leagues_snapshot_at: topContext.snapshot_at,
-    top_leagues_total: topContext.rows.length,
+    top_leagues_source: topContext.source || "stored",
+    top_leagues_total: liveScan ? topContext.total_available : topContext.rows.length,
     top_leagues_requested: topLimit,
     offset,
     limit: batchLimit,
-    next_offset: offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null,
+    next_offset: liveScan
+      ? (batch.length && offset + batch.length < topLimit ? offset + batch.length : null)
+      : (offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null),
     scanned_count: batch.length,
     matched_count: matchedRows.length,
     scan_errors: scanned.filter(row => row.error).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
@@ -433,6 +439,61 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
 
   const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: TOP_LEAGUES_NAME }) : rows.map(addNullGains);
   return { snapshot_at: latest?.fetched_at || null, rows: rowsWithGains };
+}
+
+async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
+  const pageSize = 100;
+  const start = clamp(offset, 0, Math.max(0, topLimit - 1));
+  const end = Math.min(topLimit, start + limit);
+  const startPage = Math.floor(start / pageSize) + 1;
+  const endPage = Math.ceil(end / pageSize);
+  const now = new Date().toISOString();
+  const rows = [];
+
+  for (let page = startPage; page <= endPage; page += 1) {
+    const api = await fetchLeagueListApi(page, pageSize);
+    const pageRows = leagueListFromResponse(api);
+    if (!pageRows.length) break;
+
+    pageRows.forEach((item, index) => {
+      const globalIndex = (page - 1) * pageSize + index;
+      if (globalIndex < start || globalIndex >= end) return;
+
+      const summary = summarizeLeague(item, lname(item) || `League ${globalIndex + 1}`);
+      if (!summary.league_name) return;
+
+      const explicitRank = toNumber(firstDefined(item.Rank, item.rank, item.Place, item.place, item.Position, item.position));
+      const rank = explicitRank && explicitRank > 0 ? explicitRank : globalIndex + 1;
+      const stable = summary.league_id || summary.league_name;
+
+      rows.push(addNullGains({
+        snapshot_id: "live-window",
+        fetched_at: now,
+        source: "live:overlap-window",
+        league_run_key: runKey,
+        league_name: TOP_LEAGUES_NAME,
+        league_id: summary.league_id,
+        league_level: summary.league_level,
+        league_points: summary.league_points,
+        league_icon: summary.league_icon,
+        member_capacity: summary.member_capacity,
+        rank,
+        user_id: stableLeagueUserId(stable),
+        display_name: summary.league_name,
+        points: summary.league_points,
+        raw_league: { ...summary.raw_league, league_rank: rank, synthetic_user_id: stableLeagueUserId(stable) }
+      }));
+    });
+
+    if (pageRows.length < pageSize) break;
+  }
+
+  return {
+    source: "live-window",
+    snapshot_at: now,
+    total_available: rows.length < limit ? start + rows.length : topLimit,
+    rows: rows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999))
+  };
 }
 
 async function scanLeagueForClanMembers(env, topRow, clanMembers) {
@@ -1016,6 +1077,7 @@ function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LE
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
+function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
 function requestedRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || leagueRunKey(env)); }
