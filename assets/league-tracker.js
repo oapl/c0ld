@@ -6,6 +6,7 @@
   const RUN_KEY = String(config.run || config.runKey || "active").trim();
   const TARGET_RANK = Number(config.targetRank || 60);
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
+  const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const GAIN_WINDOWS = [
     { key: "gain_5m", label: "5m", minutes: 5 },
     { key: "gain_1h", label: "1 hour", minutes: 60 },
@@ -275,5 +276,5 @@
     render();
   }));
   loadData();
-  setInterval(loadData,60000);
+  setInterval(loadData,REFRESH_INTERVAL_MS);
 })();

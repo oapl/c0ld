@@ -14,6 +14,7 @@ const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
+const FALSEY_ENV_VALUES = new Set(["false", "0", "no", "off"]);
 
 export default {
   async fetch(request, env) {
@@ -200,7 +201,7 @@ async function handleTopLeagues(request, env) {
   });
 
   let latest = latestMeta(rows);
-  const allowLiveFallback = String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false";
+  const allowLiveFallback = allowTopLeaguesLiveFallback(env);
   if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
     const live = await fetchTopLeagues(limit);
     const now = new Date().toISOString();
@@ -406,7 +407,7 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
   });
 
   let latest = latestMeta(rows);
-  const allowLiveFallback = String(env.TOP_LEAGUES_LIVE_FALLBACK || "true").toLowerCase() !== "false";
+  const allowLiveFallback = allowTopLeaguesLiveFallback(env);
   if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
     const live = await fetchTopLeagues(limit);
     const now = new Date().toISOString();
@@ -1014,6 +1015,8 @@ function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY)
 function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
+function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
+function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
 function requestedRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || leagueRunKey(env)); }
 function requestedTopLeaguesRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || topLeaguesRunKey(env)); }

@@ -99,6 +99,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 const API="https://yamo-league-api-worker.opal-dde.workers.dev";
 const CLAN_API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const RUN_KEY="active";
+const REFRESH_INTERVAL_MS=5*60*1000;
 const TRACKED_LEAGUES=[
   {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",page:"ndct.html"},
   {name:"GOATs",id:"6b43150496874c60a7597c5df1928932",page:"goats.html"},
@@ -111,7 +112,11 @@ const TRACKED_LEAGUES=[
   {name:"3v4",id:"cd897be1a8cb430b8194d01ca10decca",page:"3v4.html"},
   {name:"JIME",id:"8e0eb3e3b41a4d8485157e9d21f52286",page:"jime.html"},
   {name:"2w4g",id:"3cbb6b31afcd4cd18c4d13d28ec1f333",page:"2w4g.html"},
+<<<<<<< Updated upstream
   {name:"COLD",id:"37eb011134514cc69955c982d08d524a",page:"cold.html"},
+=======
+  {name:"COLD",id:"37eb011134514cc69955c982d08d524a",page:"cold-league.html"},
+>>>>>>> Stashed changes
   {name:"ENRQE",id:"f7b67c52e6b147c290ef2fbf4aaeec58",page:"enrqe.html"}
 ];
 let leagueRows=[],memberRows=[],sortKey="rank",sortAsc=true,loading=false,lastTopUpdated=null,errors=[];
@@ -130,6 +135,7 @@ function memberPills(matches){return (matches||[]).map(m=>'<span class="member-p
 function getMode(){return document.getElementById("view-mode").value==="members"?"members":"leagues"}
 function scoreDesc(a,b){return (Number(b.points)||0)-(Number(a.points)||0)}
 function rankMembers(rows){return rows.slice().sort(scoreDesc).map((row,index)=>({...row,score_rank:index+1}))}
+function leaguePage(r){return r.page||"league-profile.html?league="+encodeURIComponent(r.league_name||"")}
 async function getJson(url){url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}
 function addRun(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
 function byLeagueKey(rows){const map=new Map();for(const row of rows||[]){const id=String(row.league_id||"").trim();if(id)map.set("id:"+id,row);map.set("name:"+norm(row.league_name||row.display_name),row)}return map}
@@ -141,7 +147,57 @@ async function fetchClanMembers(){const url=new URL(CLAN_API+"/api/current");url
 async function fetchLeagueCurrent(name){const url=new URL(API+"/api/leagues/current");url.searchParams.set("league",name);addRun(url);return getJson(url)}
 async function fetchOverlapForRank(entry,rank){if(!Number.isFinite(Number(rank)))return null;const url=new URL(API+"/api/leagues/c0ld-overlap");url.searchParams.set("clan","c0ld");url.searchParams.set("top_limit","1000");url.searchParams.set("offset",String(Math.max(0,Number(rank)-1)));url.searchParams.set("limit","1");addRun(url);const data=await getJson(url);return (data.rows||[]).find(row=>String(row.league_id||"")===String(entry.id||"")||norm(row.league_name)===norm(entry.name))||null}
 function topLeagueBase(entry,top){
+<<<<<<< Updated upstream
   return {rank:top?.rank??null,league_name:top?.league_name||entry.name,league_id:top?.league_id||entry.id,league_icon:top?.league_icon||null,points:Number(top?.total_points??top?.points??0),gain_1h:top?.gain_1h,gain_6h:top?.gain_6h,gain_12h:top?.gain_12h,gain_24h:top?.gain_24h,c0ld_member_count:0,matches:[]};
+=======
+  return {
+    rank:top?.rank??null,
+    league_name:top?.league_name||entry.name,
+    league_id:top?.league_id||entry.id,
+    league_icon:top?.league_icon||null,
+    page:entry.page||null,
+    points:Number(top?.total_points??top?.points??0),
+    gain_1h:top?.gain_1h,
+    gain_6h:top?.gain_6h,
+    gain_12h:top?.gain_12h,
+    gain_24h:top?.gain_24h,
+    c0ld_member_count:0,
+    matches:[]
+  };
+}
+function normalizeCurrentMatches(rows,entry,top,clanMap){
+  return (rows||[]).filter(row=>clanMap.has(String(row.user_id||"").trim())).map(row=>{
+    const member=clanMap.get(String(row.user_id||"").trim())||{};
+    return {...row,league_name:entry.name,league_rank:top?.rank,username:member.username||row.username||row.display_name||row.user_id,avatar_url:member.avatar_url||row.avatar_url||null,clan_rank:member.clan_rank,points:Number(row.total_points||row.points||0)}
+  }).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+}
+function normalizeOverlapMatches(row){
+  return (row?.matches||[]).map(match=>({...match,rank:match.league_rank||match.rank,points:Number(match.league_points??match.points??0),username:match.username||match.display_name||match.user_id})).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+}
+function buildLeague(entry,top,current,clanMap){
+  const base=topLeagueBase(entry,top);
+  const matches=normalizeCurrentMatches(current.rows,entry,top,clanMap);
+  return {...base,rank:base.rank??current.league_rank??null,league_name:base.league_name||current.league_name||entry.name,league_id:base.league_id||current.league_id||entry.id,league_icon:base.league_icon||current.league_icon||null,points:base.points||Number(current.league_points||0),c0ld_member_count:matches.length,matches};
+}
+function buildOverlapLeague(entry,top,row){
+  const base=topLeagueBase(entry,top);
+  const matches=normalizeOverlapMatches(row);
+  return {...base,rank:row.rank??base.rank,league_name:row.league_name||base.league_name,league_id:row.league_id||base.league_id,league_icon:row.league_icon||base.league_icon,points:Number(row.total_points??row.points??base.points),gain_1h:row.gain_1h??base.gain_1h,gain_6h:row.gain_6h??base.gain_6h,gain_12h:row.gain_12h??base.gain_12h,gain_24h:row.gain_24h??base.gain_24h,c0ld_member_count:matches.length,matches};
+}
+function tableHeaders(){
+  const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';
+  const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';
+  document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;
+  document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}));
+}
+function visible(){
+  const q=document.getElementById("search-input").value.trim().toLowerCase();
+  let list=(getMode()==="members"?memberRows:leagueRows).slice();
+  if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));
+  if(getMode()==="members")return list.sort(scoreDesc);
+  list.sort((a,b)=>compare(a,b,sortKey,sortAsc));
+  return list;
+>>>>>>> Stashed changes
 }
 function normalizeCurrentMatches(rows,entry,top,clanMap){return (rows||[]).filter(row=>clanMap.has(String(row.user_id||"").trim())).map(row=>{const member=clanMap.get(String(row.user_id||"").trim())||{};return {...row,league_name:entry.name,league_rank:top?.rank,username:member.username||row.username||row.display_name||row.user_id,avatar_url:member.avatar_url||row.avatar_url||null,clan_rank:member.clan_rank,points:Number(row.total_points||row.points||0)}}).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));}
 function normalizeOverlapMatches(row){return (row?.matches||[]).map(match=>({...match,rank:match.league_rank||match.rank,points:Number(match.league_points??match.points??0),username:match.username||match.display_name||match.user_id})).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));}
@@ -153,13 +209,58 @@ function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(
 function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US")}
 function renderMeta(){const updated=lastTopUpdated?" · Top Leagues updated "+dt(lastTopUpdated):"";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors · ":"")+leagueRows.length+" c0ld leagues · "+memberRows.length+" members"+updated}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No tracked c0ld leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+(r.rank?"#"+esc(r.rank):"-")+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
+<<<<<<< Updated upstream
 function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="league-profile.html?league='+encodeURIComponent(r.league_name||"")+'&id='+encodeURIComponent(r.user_id||"")+'"><strong>'+esc(r.username||r.user_id)+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
 async function loadData(){if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;try{setStatus("Refreshing latest Top Leagues and c0ld roster...");const [topRows,clanMap]=await Promise.all([fetchTopLeagues(),fetchClanMembers()]);const topMap=byLeagueKey(topRows);const candidates=TRACKED_LEAGUES.map(entry=>({entry,top:topLeagueFor(entry,topMap)})).filter(item=>item.top);leagueRows=candidates.map(item=>topLeagueBase(item.entry,item.top)).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));memberRows=[];render();const built=await Promise.all(candidates.map(async ({entry,top})=>{let row=topLeagueBase(entry,top);try{const current=await fetchLeagueCurrent(entry.name);row=buildLeague(entry,top,current,clanMap);if(row.c0ld_member_count===0){const overlap=await fetchOverlapForRank(entry,row.rank).catch(()=>null);if(overlap)row=buildOverlapLeague(entry,top,overlap)}}catch(err){errors.push({league:entry.name,message:err.message||String(err)});const overlap=await fetchOverlapForRank(entry,row.rank).catch(()=>null);if(overlap)row=buildOverlapLeague(entry,top,overlap)}return row;}));leagueRows=built.sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))));setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" tracked c0ld leagues from the latest Top Leagues.");render();}catch(err){console.error(err);setStatus("Could not load c0ld leagues: "+(err.message||String(err)));document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(err.message||String(err))+'</td></tr>';}finally{loading=false;document.getElementById("refresh-btn").disabled=false;}}
+=======
+function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="'+esc(leaguePage(r))+'"><strong>'+esc(r.username||r.user_id)+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
+function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
+async function loadData(){
+  if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;
+  try{
+    setStatus("Refreshing latest Top Leagues and c0ld roster...");
+    const [topRows,clanMap]=await Promise.all([fetchTopLeagues(),fetchClanMembers()]);
+    const topMap=byLeagueKey(topRows);
+    const candidates=TRACKED_LEAGUES.map(entry=>({entry,top:topLeagueFor(entry,topMap)})).filter(item=>item.top);
+    leagueRows=candidates.map(item=>topLeagueBase(item.entry,item.top)).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+    memberRows=[];
+    render();
+    const built=await Promise.all(candidates.map(async ({entry,top})=>{
+      let row=topLeagueBase(entry,top);
+      try{
+        const current=await fetchLeagueCurrent(entry.name);
+        row=buildLeague(entry,top,current,clanMap);
+        if(row.c0ld_member_count===0){
+          const overlap=await fetchOverlapForRank(entry,row.rank).catch(()=>null);
+          if(overlap)row=buildOverlapLeague(entry,top,overlap);
+        }
+      }catch(err){
+        errors.push({league:entry.name,message:err.message||String(err)});
+        const overlap=await fetchOverlapForRank(entry,row.rank).catch(()=>null);
+        if(overlap)row=buildOverlapLeague(entry,top,overlap);
+      }
+      return row;
+    }));
+    leagueRows=built.sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+    memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank,page:row.page}))));
+    setStatus("Showing "+leagueRows.length.toLocaleString("en-US")+" tracked c0ld leagues from the latest Top Leagues.");
+    render();
+  }catch(err){
+    console.error(err);
+    setStatus("Could not load c0ld leagues: "+(err.message||String(err)));
+    document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(err.message||String(err))+'</td></tr>';
+  }finally{
+    loading=false;
+    document.getElementById("refresh-btn").disabled=false;
+  }
+}
+>>>>>>> Stashed changes
 document.getElementById("refresh-btn").addEventListener("click",loadData);
 document.getElementById("view-mode").addEventListener("change",()=>{if(getMode()==="members"){sortKey="points";sortAsc=false}else{sortKey="rank";sortAsc=true}render()});
 document.getElementById("search-input").addEventListener("input",render);
 loadData();
+setInterval(loadData,REFRESH_INTERVAL_MS);
 </script>
 <script src="assets/site-announcement.js"></script>
 </body>
