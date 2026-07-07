@@ -5,7 +5,7 @@ const DEFAULT_LEAGUE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
-const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
+const DEFAULT_TOP_LEAGUES_LIMIT = 10000;
 const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
@@ -55,7 +55,19 @@ export default {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env)).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
       }
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
-        for (const league of leagueNames(env)) await handleIngest(env, "schedule", league, leagueRunKey(env));
+        const leagues = leagueNames(env);
+        const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 4), 1, 8);
+        const results = await mapLimit(leagues, concurrency, async league => {
+          try {
+            const response = await handleIngest(env, "schedule", league, leagueRunKey(env));
+            const payload = await response.clone().json().catch(() => ({}));
+            return { league, ok: response.ok, rows_inserted: payload.rows_inserted ?? null };
+          } catch (err) {
+            console.error(`scheduled league ingest failed for ${league}`, err?.message || String(err));
+            return { league, ok: false, message: err?.message || String(err) };
+          }
+        });
+        console.log("scheduled tracked league ingest complete", JSON.stringify(results));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
@@ -646,9 +658,7 @@ async function fetchLeagueApi(league) {
   for (const url of urls) {
     try {
       const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
-      const text = await res.text();
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
-      const data = JSON.parse(text);
+      const data = await readJsonResponse(res, url);
       if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
       return data;
     } catch (err) { lastError = err; }
@@ -663,14 +673,29 @@ async function fetchLeagueListApi(page = 1, pageSize = 100) {
   for (const url of urls) {
     try {
       const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
-      const text = await res.text();
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
-      const data = JSON.parse(text);
+      const data = await readJsonResponse(res, url);
       if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
       return data;
     } catch (err) { lastError = err; }
   }
   throw httpError(502, `Big Games leagues API failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function readJsonResponse(res, url) {
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
+
+  const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+  const trimmed = text.trim();
+  if (!contentType.includes("json") && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    throw new Error(`Expected JSON from ${url}, got ${contentType || "unknown content-type"}: ${trimmed.slice(0, 160).replace(/\s+/g, " ")}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`Invalid JSON from ${url}: ${err?.message || String(err)}; sample: ${trimmed.slice(0, 160).replace(/\s+/g, " ")}`);
+  }
 }
 
 async function fetchLeagueRank(leagueNameValue) {
