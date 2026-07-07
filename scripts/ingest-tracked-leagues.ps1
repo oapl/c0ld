@@ -8,7 +8,8 @@ param(
   [string[]]$Leagues = @(
     "NDCT", "YAMO", "GOATS", "SNCLS", "VPPPP", "brrbr", "3v4", "SMSW", "nfz", "GOLD",
     "ECTA", "JIME", "COLD", "2w4g", "zee1", "PERC", "ENRQE", "letto", "vexly", "Bol1i",
-    "CLOW", "puhhh", "grndd", "KARAX", "4ff", "RAZ0", "tre5", "Phuny", "FYNE", "yuurr"
+    "CLOW", "puhhh", "grndd", "KARAX", "4ff", "RAZ0", "tre5", "Phuny", "FYNE", "yuurr",
+    "zee2"
   )
 )
 
