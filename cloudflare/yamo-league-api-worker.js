@@ -549,7 +549,7 @@ async function handleC0ldLeagueOverlap(request, env) {
   const [clanCurrent, topContext] = await Promise.all([
     fetchClanCurrentForOverlap(env, clan, preferLiveClan),
     liveScan
-      ? fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, batchLimit, topLimit)
+      ? fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, batchLimit, topLimit)
       : fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
   ]);
 
@@ -580,8 +580,9 @@ async function handleC0ldLeagueOverlap(request, env) {
   }
 
   const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
-  if (liveScan && batch.length) {
-    await persistTopLeagueWindowRows(env, runKey, batch, {
+  const persistRows = liveScan ? (topContext.persist_rows || (topContext.source === "live-window" ? batch : [])) : [];
+  if (persistRows.length) {
+    await persistTopLeagueWindowRows(env, runKey, persistRows, {
       listName: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
       fetchedAt: topContext.snapshot_at || new Date().toISOString(),
       source: "live:overlap-window"
@@ -819,6 +820,52 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
   return { snapshot_at: latest?.fetched_at || null, source: listName, rows: rowsWithGains };
 }
 
+async function fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
+  const stored = await fetchStoredTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit).catch(err => {
+    console.warn("stored top league overlap window lookup failed", err?.message || String(err));
+    return null;
+  });
+  const expected = Math.max(0, Math.min(limit, topLimit - offset));
+  if (stored?.rows?.length >= expected && isFreshStoredTopLeagueWindow(stored.snapshot_at, env)) return stored;
+  return fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit);
+}
+
+async function fetchStoredTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
+  const listName = topLeagueListNameForLimit(topLimit, env);
+  const startRank = offset + 1;
+  const endRank = Math.min(topLimit, offset + limit);
+  if (startRank > endRank) {
+    return { source: "stored-window", list_name: listName, snapshot_at: null, total_available: offset, rows: [] };
+  }
+
+  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${listName}`,
+    rank_gte: `gte.${startRank}`,
+    rank_lte: `lte.${endRank}`,
+    order: "rank.asc",
+    limit: String(limit)
+  }, { paramRename: { rank_gte: "rank", rank_lte: "rank" } });
+
+  const latest = latestMeta(rows);
+  const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName }) : rows.map(addNullGains);
+  return {
+    source: "stored-window",
+    list_name: listName,
+    snapshot_at: latest?.fetched_at || null,
+    total_available: offset + rowsWithGains.length,
+    rows: rowsWithGains.sort((a, b) => (a.rank || 999999) - (b.rank || 999999))
+  };
+}
+
+function isFreshStoredTopLeagueWindow(snapshotAt, env) {
+  const maxSeconds = clamp(Number(env.COLD_LEAGUES_STORED_WINDOW_MAX_AGE_SECONDS || 600), 0, 60 * 60);
+  if (maxSeconds <= 0) return true;
+  const fetchedMs = new Date(snapshotAt || 0).getTime();
+  return Number.isFinite(fetchedMs) && Date.now() - fetchedMs <= maxSeconds * 1000;
+}
+
 async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
   const pageSize = 100;
   const listName = topLeagueListNameForLimit(topLimit, env);
@@ -828,6 +875,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
   const endPage = Math.ceil(end / pageSize);
   const now = new Date().toISOString();
   const rows = [];
+  const persistRows = [];
 
   for (let page = startPage; page <= endPage; page += 1) {
     const api = await fetchLeagueListApi(page, pageSize);
@@ -836,7 +884,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
 
     pageRows.forEach((item, index) => {
       const globalIndex = (page - 1) * pageSize + index;
-      if (globalIndex < start || globalIndex >= end) return;
+      if (globalIndex >= topLimit) return;
 
       const summary = summarizeLeague(item, lname(item) || `League ${globalIndex + 1}`);
       if (!summary.league_name) return;
@@ -845,7 +893,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
       const rank = explicitRank && explicitRank > 0 ? explicitRank : globalIndex + 1;
       const stable = summary.league_id || summary.league_name;
 
-      rows.push(addNullGains({
+      const dbRow = addNullGains({
         snapshot_id: "live-window",
         fetched_at: now,
         source: "live:overlap-window",
@@ -861,7 +909,9 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
         display_name: summary.league_name,
         points: summary.league_points,
         raw_league: { ...summary.raw_league, league_rank: rank, synthetic_user_id: stableLeagueUserId(stable) }
-      }));
+      });
+      persistRows.push(dbRow);
+      if (globalIndex >= start && globalIndex < end) rows.push(dbRow);
     });
 
     if (pageRows.length < pageSize) break;
@@ -872,7 +922,8 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
     list_name: listName,
     snapshot_at: now,
     total_available: rows.length < limit ? start + rows.length : topLimit,
-    rows: rows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999))
+    rows: rows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999)),
+    persist_rows: persistRows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999))
   };
 }
 
