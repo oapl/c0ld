@@ -110,38 +110,38 @@ const REFRESH_INTERVAL_MS=5*60*1000;
 const LEAGUE_FETCH_CONCURRENCY=4;
 const LEAGUE_FETCH_STAGGER_MS=150;
 const TRACKED_LEAGUES=[
-  {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",page:"ndct.html",rank:1},
-  {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",page:"yamo.html",rank:2},
-  {name:"GOATs",apiName:"GOATS",id:"6b43150496874c60a7597c5df1928932",page:"goats.html",rank:3},
-  {name:"SNCLS",id:"2a696dd9980c44e99c7d59224d3bebfa",page:"sncls.html",rank:4},
-  {name:"VPPPP",id:"4ee7ee279dcd437dbfd160bb0a30a748",page:"vpppp.html",rank:5},
-  {name:"brrbr",id:"1259d0a1ebfe4db7975b0b50ed7ff3e3",page:"brrbr.html",rank:6},
-  {name:"3v4",id:"cd897be1a8cb430b8194d01ca10decca",page:"3v4.html",rank:7},
-  {name:"SMSW",id:"415276d8aac543129407d7296515c835",page:"smsw.html",rank:8},
-  {name:"nfz",id:"19d8e0baebdd4caf8785bc4a496f9538",page:"nfz.html",rank:9},
-  {name:"GOLD",id:"9dc9415fea6544fcac0609b446280a66",page:"gold.html",rank:10},
-  {name:"ECTA",id:"3d2f5f4d02084d9cadde05962f2f2272",page:"ecta.html",rank:11},
-  {name:"JIME",id:"8e0eb3e3b41a4d8485157e9d21f52286",page:"jime.html",rank:12},
-  {name:"C0LD",id:"37eb011134514cc69955c982d08d524a",page:"c0ld.html",rank:656},
-  {name:"COLD",id:"38488a306a97428ca4f151fcc22f9804",page:"cold.html",rank:731},
-  {name:"2w4g",id:"3cbb6b31afcd4cd18c4d13d28ec1f333",page:"2w4g.html",rank:14},
-  {name:"zee1",id:"c62414cab5024812a9c8d013a8afcc8c",page:"zee1.html",rank:15},
-  {name:"PERC",id:"935f60c2fd7743a985d1f4ab5e15929f",page:"perc.html",rank:16},
-  {name:"ENRQE",id:"f7b67c52e6b147c290ef2fbf4aaeec58",page:"enrqe.html",rank:17},
-  {name:"letto",id:"fefe8c286249423ab34ce2bcd4400bdd",page:"letto.html",rank:18},
-  {name:"vexly",id:"5bf3af55d17f469994eb66e8e6b3e0e4",page:"vexly.html",rank:19},
-  {name:"Bol1i",id:"637a6f2e9fdb44c99bc498117cd79a9",page:"bol1i.html",rank:20},
-  {name:"CLOW",id:"b6dea34c28aa4134918f3cc45d3ec032",page:"clow.html",rank:21},
-  {name:"puhhh",id:"5bc7ca00ff7344e8b5575a26e8f819f3",page:"puhhh.html",rank:22},
-  {name:"grndd",id:"99f568477b3c4eba91cefee90b21decf",page:"grndd.html",rank:23},
-  {name:"KARAX",id:"a3308e93d75b48bb81e2d4a3eedcce65",page:"karax.html",rank:24},
-  {name:"4ff",id:"bf58bed1806849819625db7ef6f2ae52",page:"4ff.html",rank:25},
-  {name:"RAZ0",id:"32ff88296dc94de5ac4b459dab0743af",page:"raz0.html",rank:26},
-  {name:"tre5",id:"85837442397645aab4a4665fcb6ff631",page:"tre5.html",rank:27},
-  {name:"Phuny",id:"c8cda9ae878340b097598cc9ba7acafa",page:"phuny.html",rank:28},
-  {name:"FYNE",id:"ca75d53b75f2422dbdf41217a20debd3",page:"fyne.html",rank:29},
-  {name:"yuurr",id:"bafdf8d8777343e1a6a99f92707958fd",page:"yuurr.html",rank:10001},
-  {name:"zee2",id:"341f28e8351940b4bcaf6cd0ca30c59a",page:"zee2.html",rank:31}
+  {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",rank:1},
+  {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",rank:2},
+  {name:"GOATs",apiName:"GOATS",id:"6b43150496874c60a7597c5df1928932",rank:3},
+  {name:"SNCLS",id:"2a696dd9980c44e99c7d59224d3bebfa",rank:4},
+  {name:"VPPPP",id:"4ee7ee279dcd437dbfd160bb0a30a748",rank:5},
+  {name:"brrbr",id:"1259d0a1ebfe4db7975b0b50ed7ff3e3",rank:6},
+  {name:"3v4",id:"cd897be1a8cb430b8194d01ca10decca",rank:7},
+  {name:"SMSW",id:"415276d8aac543129407d7296515c835",rank:8},
+  {name:"nfz",id:"19d8e0baebdd4caf8785bc4a496f9538",rank:9},
+  {name:"GOLD",id:"9dc9415fea6544fcac0609b446280a66",rank:10},
+  {name:"ECTA",id:"3d2f5f4d02084d9cadde05962f2f2272",rank:11},
+  {name:"JIME",id:"8e0eb3e3b41a4d8485157e9d21f52286",rank:12},
+  {name:"C0LD",id:"37eb011134514cc69955c982d08d524a",rank:656},
+  {name:"COLD",id:"38488a306a97428ca4f151fcc22f9804",rank:731},
+  {name:"2w4g",id:"3cbb6b31afcd4cd18c4d13d28ec1f333",rank:14},
+  {name:"zee1",id:"c62414cab5024812a9c8d013a8afcc8c",rank:15},
+  {name:"PERC",id:"935f60c2fd7743a985d1f4ab5e15929f",rank:16},
+  {name:"ENRQE",id:"f7b67c52e6b147c290ef2fbf4aaeec58",rank:17},
+  {name:"letto",id:"fefe8c286249423ab34ce2bcd4400bdd",rank:18},
+  {name:"vexly",id:"5bf3af55d17f469994eb66e8e6b3e0e4",rank:19},
+  {name:"Bol1i",id:"637a6f2e9fdb44c99bc498117cd79a9",rank:20},
+  {name:"CLOW",id:"b6dea34c28aa4134918f3cc45d3ec032",rank:21},
+  {name:"puhhh",id:"5bc7ca00ff7344e8b5575a26e8f819f3",rank:22},
+  {name:"grndd",id:"99f568477b3c4eba91cefee90b21decf",rank:23},
+  {name:"KARAX",id:"a3308e93d75b48bb81e2d4a3eedcce65",rank:24},
+  {name:"4ff",id:"bf58bed1806849819625db7ef6f2ae52",rank:25},
+  {name:"RAZ0",id:"32ff88296dc94de5ac4b459dab0743af",rank:26},
+  {name:"tre5",id:"85837442397645aab4a4665fcb6ff631",rank:27},
+  {name:"Phuny",id:"c8cda9ae878340b097598cc9ba7acafa",rank:28},
+  {name:"FYNE",id:"ca75d53b75f2422dbdf41217a20debd3",rank:29},
+  {name:"yuurr",id:"bafdf8d8777343e1a6a99f92707958fd",rank:10001},
+  {name:"zee2",id:"341f28e8351940b4bcaf6cd0ca30c59a",rank:31}
 ];
 const COLD_MEMBER_OVERRIDE_IDS=new Set(["1462748729"]);
 let leagueRows=[],memberRows=[],sortKey="points",sortAsc=false,loading=false,lastUpdated=null,errors=[],knownPlayers=new Map(),knownC0ldMembers=new Set(COLD_MEMBER_OVERRIDE_IDS);
@@ -178,7 +178,7 @@ function scoreDesc(a,b){return (Number(b.points)||0)-(Number(a.points)||0)}
 function leaguePointsDesc(a,b){const p=(Number(b.points)||0)-(Number(a.points)||0);if(p)return p;return (Number(a.rank)||999999)-(Number(b.rank)||999999)}
 function rankMembers(rows){return rows.slice().sort(scoreDesc).map((row,index)=>({...row,score_rank:index+1}))}
 function trackedLeagueFor(row){return TRACKED_LEAGUES.find(entry=>String(row.league_id||"")===String(entry.id)||norm(row.league_name)===norm(entry.name))||null}
-function leaguePage(row){const entry=row.page?row:trackedLeagueFor(row);return entry?.page||"league.html?league="+encodeURIComponent(row.league_name||"")}
+function leaguePage(row){const entry=trackedLeagueFor(row);return"league.html?league="+encodeURIComponent(row.league_name||entry?.name||"")}
 function rankMove(row){const move=finiteOrNull(row.rank_move_5m);if(!move)return"";const up=move>0;return'<span class="rank-move '+(up?"up":"down")+'" title="Rank '+(up?"up":"down")+' '+esc(Math.abs(move))+' since the previous 5m snapshot">'+(up?"&uarr;":"&darr;")+esc(Math.abs(move))+'</span>'}
 function rankCell(row){return'<span class="rank-wrap"><span>'+(row.rank?"#"+esc(row.rank):"-")+'</span>'+rankMove(row)+'</span>'}
 function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="League rank #'+esc(m.rank||"-")+'"><strong>'+esc(bestName(m.user_id,m.username,m.display_name))+'</strong> '+esc(shortNum(m.points))+'</span>').join("")}
@@ -193,10 +193,10 @@ async function fetchDiscoveredLeagues(){try{const url=new URL(API+"/api/leagues/
 function topRowFor(entry,topRows){return topRows.get(norm(entry.name))||topRows.get(String(entry.id||""))||null}
 function finiteOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function sumCurrentGain(current,key){const values=(current?.rows||[]).map(row=>finiteOrNull(row[key])).filter(value=>value!==null);if(!values.length)return null;return values.reduce((sum,value)=>sum+value,0)}
-function leagueBase(entry,current,topRow=null){return {rank:current?.league_rank??topRow?.rank??entry.rank??null,previous_rank_5m:finiteOrNull(topRow?.previous_rank_5m),rank_move_5m:finiteOrNull(topRow?.rank_move_5m),league_name:current?.league_name||topRow?.league_name||entry.name,league_id:current?.league_id||topRow?.league_id||entry.id,league_icon:current?.league_icon||topRow?.league_icon||null,page:entry.page||null,points:finiteOrNull(current?.league_points)??finiteOrNull(topRow?.total_points)??finiteOrNull(topRow?.points)??0,gain_1h:sumCurrentGain(current,"gain_1h")??finiteOrNull(topRow?.gain_1h),gain_6h:sumCurrentGain(current,"gain_6h")??finiteOrNull(topRow?.gain_6h),gain_12h:sumCurrentGain(current,"gain_12h")??finiteOrNull(topRow?.gain_12h),gain_24h:sumCurrentGain(current,"gain_24h")??finiteOrNull(topRow?.gain_24h),c0ld_member_count:0,matches:[],snapshot_at:current?.snapshot_at||topRow?.fetched_at||null}}
+function leagueBase(entry,current,topRow=null){return {rank:current?.league_rank??topRow?.rank??entry.rank??null,previous_rank_5m:finiteOrNull(topRow?.previous_rank_5m),rank_move_5m:finiteOrNull(topRow?.rank_move_5m),league_name:current?.league_name||topRow?.league_name||entry.name,league_id:current?.league_id||topRow?.league_id||entry.id,league_icon:current?.league_icon||topRow?.league_icon||null,points:finiteOrNull(current?.league_points)??finiteOrNull(topRow?.total_points)??finiteOrNull(topRow?.points)??0,gain_1h:sumCurrentGain(current,"gain_1h")??finiteOrNull(topRow?.gain_1h),gain_6h:sumCurrentGain(current,"gain_6h")??finiteOrNull(topRow?.gain_6h),gain_12h:sumCurrentGain(current,"gain_12h")??finiteOrNull(topRow?.gain_12h),gain_24h:sumCurrentGain(current,"gain_24h")??finiteOrNull(topRow?.gain_24h),c0ld_member_count:0,matches:[],snapshot_at:current?.snapshot_at||topRow?.fetched_at||null}}
 function matchesFromCurrent(current){return (current?.rows||[]).filter(row=>isKnownC0ldMember(row.user_id)).map(row=>({user_id:row.user_id,username:bestName(row.user_id,row.username,row.display_name),display_name:row.display_name,rank:row.rank,points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h)})).sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0))}
 function buildStoredLeague(entry,current,topRow=null){const matches=matchesFromCurrent(current);return {...leagueBase(entry,current,topRow),c0ld_member_count:matches.length,matches}}
-function discoveredLeagueRow(row){return {rank:finiteOrNull(row.rank),previous_rank_5m:finiteOrNull(row.previous_rank_5m),rank_move_5m:finiteOrNull(row.rank_move_5m),league_name:row.league_name||row.display_name||"-",league_id:row.league_id||"",league_icon:row.league_icon||null,page:"league.html?league="+encodeURIComponent(row.league_name||""),points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h),c0ld_member_count:finiteOrNull(row.c0ld_member_count)??(row.matches||[]).length,matches:(row.matches||[]).map(m=>({user_id:m.user_id,username:bestName(m.user_id,m.username,m.display_name),display_name:m.display_name,rank:finiteOrNull(m.rank)??finiteOrNull(m.league_rank),points:finiteOrNull(m.points)??finiteOrNull(m.league_points)??0})),snapshot_at:row.fetched_at||null,discovered:true}}
+function discoveredLeagueRow(row){return {rank:finiteOrNull(row.rank),previous_rank_5m:finiteOrNull(row.previous_rank_5m),rank_move_5m:finiteOrNull(row.rank_move_5m),league_name:row.league_name||row.display_name||"-",league_id:row.league_id||"",league_icon:row.league_icon||null,points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h),c0ld_member_count:finiteOrNull(row.c0ld_member_count)??(row.matches||[]).length,matches:(row.matches||[]).map(m=>({user_id:m.user_id,username:bestName(m.user_id,m.username,m.display_name),display_name:m.display_name,rank:finiteOrNull(m.rank)??finiteOrNull(m.league_rank),points:finiteOrNull(m.points)??finiteOrNull(m.league_points)??0})),snapshot_at:row.fetched_at||null,discovered:true}}
 function leagueKey(row){return String(row.league_id||"").trim()||norm(row.league_name)}
 function rowTime(row){const ms=new Date(row?.snapshot_at||0).getTime();return Number.isFinite(ms)?ms:0}
 function mergeMatches(existing,row){const byUser=new Map();for(const match of existing.matches||[]){const key=String(match.user_id||norm(match.username));if(key)byUser.set(key,match)}for(const match of row.matches||[]){const key=String(match.user_id||norm(match.username));if(!key)continue;const current=byUser.get(key);if(!current||finiteOrNull(current.points)===null||rowTime(row)>=rowTime(existing))byUser.set(key,match)}return [...byUser.values()].sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0))}
@@ -205,7 +205,7 @@ function tableHeaders(){const leagues='<tr><th data-sort="rank">Rank</th><th dat
 function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);return list.sort(leaguePointsDesc)}
 function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
 function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US");document.getElementById("top3300-count").textContent=countRankRange(1401,3300).toLocaleString("en-US");document.getElementById("top8500-count").textContent=countRankRange(3301,8500).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(8501,10000).toLocaleString("en-US")}
-function renderMeta(){const updated=lastUpdated?" - Points last updated "+dt(lastUpdated):"";const cadence="Points refresh every 5 minutes. Top 1,000 ranks refresh from stored top snapshots; outside Top 1,000 ranks use seeded rank windows when that refresh runs.";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors - ":"")+leagueRows.length+" tracked leagues - "+memberRows.length+" c0ld members - "+cadence+updated}
+function renderMeta(){document.getElementById("table-meta").textContent=leagueRows.length+" leagues · "+memberRows.length+" c0ld members · Updated "+(lastUpdated?dt(lastUpdated):"-")}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No tracked c0ld leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+rankCell(r)+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
 function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="'+esc(leaguePage(r))+'"><strong>'+esc(bestName(r.user_id,r.username,r.display_name))+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
@@ -232,7 +232,7 @@ async function loadData(){
     });
     leagueRows=mergeLeagueRows(built,discoveredRows).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
     lastUpdated=leagueRows.map(row=>row.snapshot_at).filter(Boolean).sort().pop()||null;
-    memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank,page:row.page}))));
+    memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))));
     render();
   }catch(err){
     console.error(err);

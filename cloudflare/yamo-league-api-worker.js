@@ -40,6 +40,8 @@ export default {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
+        response = await handleTopLeaguesWindowIngest(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-overlap") {
         response = await handleC0ldLeagueOverlap(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-discovered") {
@@ -233,6 +235,39 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   }
 
   return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit, page_size: top.page_size }, 202);
+}
+
+async function handleTopLeaguesWindowIngest(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const runKey = requestedTopLeaguesRunKey(url, env);
+  const topLimit = clamp(Number(url.searchParams.get("top_limit") || env.COLD_LEAGUES_TOP_LIMIT || DEFAULT_ALL_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT);
+  const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, Math.max(0, topLimit - 1));
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 100);
+  const topContext = await fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit);
+  const rowsToPersist = topContext.persist_rows || topContext.rows || [];
+
+  if (rowsToPersist.length) {
+    await persistTopLeagueWindowRows(env, runKey, rowsToPersist, {
+      listName: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+      fetchedAt: topContext.snapshot_at || new Date().toISOString(),
+      source: "live:rank-baseline-window"
+    });
+  }
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    league_run_key: runKey,
+    league_name: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+    snapshot_at: topContext.snapshot_at,
+    offset,
+    limit,
+    top_leagues_requested: topLimit,
+    rows_inserted: rowsToPersist.length,
+    rows: (topContext.rows || []).map(publicLeagueRow),
+    next_offset: offset + limit < topLimit ? offset + limit : null
+  }, env);
 }
 
 async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey) {
@@ -580,7 +615,10 @@ async function handleC0ldDiscoveredLeagues(request, env) {
 
   const latest = latestMeta(rows);
   const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: COLD_DISCOVERED_LEAGUES_NAME }) : rows.map(addNullGains);
-  const publicRows = rowsWithGains.map(publicDiscoveredLeagueRow);
+  const publicRows = await enrichDiscoveredLeaguesWithTopRows(env, runKey, rowsWithGains.map(publicDiscoveredLeagueRow)).catch(err => {
+    console.warn("c0ld discovered top league enrichment failed", err?.message || String(err));
+    return rowsWithGains.map(publicDiscoveredLeagueRow);
+  });
 
   return cacheJson({
     ok: true,
@@ -590,6 +628,41 @@ async function handleC0ldDiscoveredLeagues(request, env) {
     league_name: COLD_DISCOVERED_LEAGUES_NAME,
     rows: publicRows
   }, env);
+}
+
+async function enrichDiscoveredLeaguesWithTopRows(env, runKey, rows) {
+  if (!rows.length) return rows;
+  const topRows = await fetchStoredTopLeagueRowsByNames(
+    env,
+    runKey,
+    ALL_TOP_LEAGUES_NAME,
+    rows.map(row => row.league_name),
+    Math.max(rows.length * 3, 100)
+  );
+  const latest = latestMeta(topRows);
+  const topRowsWithGains = latest ? await addGainFields(env, topRows, { ...latest, league_run_key: runKey, league_name: ALL_TOP_LEAGUES_NAME }) : topRows.map(addNullGains);
+  const lookup = topLeagueLookup(topRowsWithGains);
+
+  return rows.map(row => {
+    const topRow = topLeagueLookupRow(lookup, { league_name: row.league_name, league_id: row.league_id });
+    if (!topRow) return row;
+    const top = publicLeagueRow(topRow);
+    return {
+      ...row,
+      fetched_at: top.fetched_at || row.fetched_at,
+      rank: top.rank ?? row.rank,
+      previous_rank_5m: top.previous_rank_5m ?? row.previous_rank_5m,
+      rank_move_5m: top.rank_move_5m ?? row.rank_move_5m,
+      league_icon: row.league_icon || top.league_icon,
+      total_points: top.total_points ?? row.total_points,
+      points: top.points ?? row.points,
+      gain_5m: top.gain_5m ?? row.gain_5m,
+      gain_1h: top.gain_1h ?? row.gain_1h,
+      gain_6h: top.gain_6h ?? row.gain_6h,
+      gain_12h: top.gain_12h ?? row.gain_12h,
+      gain_24h: top.gain_24h ?? row.gain_24h
+    };
+  });
 }
 
 async function handleC0ldLeagueOverlap(request, env) {
@@ -1909,7 +1982,7 @@ function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; 
 function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
 function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
 function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
-function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS, false); }
+function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS, true); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
