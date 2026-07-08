@@ -48,8 +48,9 @@ export default {
         requireAdmin(request, env);
         const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
         const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
+        const requestedPageSize = url.searchParams.get("page_size") || url.searchParams.get("pageSize");
         const ingestPageSize = ingestListName === ALL_TOP_LEAGUES_NAME
-          ? clamp(Number(url.searchParams.get("page_size") || url.searchParams.get("pageSize") || allTopLeaguesPageSize(env)), 1, 100)
+          ? clamp(Number(requestedPageSize || DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE), 1, 100)
           : undefined;
         response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url), {
           listName: ingestListName,
@@ -1621,7 +1622,7 @@ function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT
 function topLeagueListNameForLimit(limit, env) { return Number(limit) > scheduledTopLeaguesLimit(env) ? ALL_TOP_LEAGUES_NAME : TOP_LEAGUES_NAME; }
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
-function allTopLeaguesPageSize(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_SIZE || DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE), 1, 100); }
+function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; }
 function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
 function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
 function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
