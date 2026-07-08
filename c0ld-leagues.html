@@ -141,7 +141,7 @@ const TRACKED_LEAGUES=[
   {name:"zee2",id:"341f28e8351940b4bcaf6cd0ca30c59a",page:"zee2.html",rank:31}
 ];
 const COLD_MEMBER_OVERRIDE_IDS=new Set(["1462748729"]);
-let leagueRows=[],memberRows=[],sortKey="rank",sortAsc=true,loading=false,lastUpdated=null,errors=[],knownPlayers=new Map(),knownC0ldMembers=new Set(COLD_MEMBER_OVERRIDE_IDS);
+let leagueRows=[],memberRows=[],sortKey="points",sortAsc=false,loading=false,lastUpdated=null,errors=[],knownPlayers=new Map(),knownC0ldMembers=new Set(COLD_MEMBER_OVERRIDE_IDS);
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
 function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"-"}
@@ -181,6 +181,7 @@ async function loadKnownC0ldMembers(){
 function isKnownC0ldMember(userId){return knownC0ldMembers.has(String(userId))}
 function getMode(){return document.getElementById("view-mode").value==="members"?"members":"leagues"}
 function scoreDesc(a,b){return (Number(b.points)||0)-(Number(a.points)||0)}
+function leaguePointsDesc(a,b){const p=(Number(b.points)||0)-(Number(a.points)||0);if(p)return p;return (Number(a.rank)||999999)-(Number(b.rank)||999999)}
 function rankMembers(rows){return rows.slice().sort(scoreDesc).map((row,index)=>({...row,score_rank:index+1}))}
 function trackedLeagueFor(row){return TRACKED_LEAGUES.find(entry=>String(row.league_id||"")===String(entry.id)||norm(row.league_name)===norm(entry.name))||null}
 function leaguePage(row){const entry=row.page?row:trackedLeagueFor(row);return entry?.page||"league-profile.html?league="+encodeURIComponent(row.league_name||"")}
@@ -196,7 +197,7 @@ function leagueBase(entry,current,topRow=null){return {rank:current?.league_rank
 function matchesFromCurrent(current){return (current?.rows||[]).filter(row=>isKnownC0ldMember(row.user_id)).map(row=>({user_id:row.user_id,username:bestName(row.user_id,row.username,row.display_name),display_name:row.display_name,rank:row.rank,points:finiteOrNull(row.total_points)??finiteOrNull(row.points)??0,gain_1h:finiteOrNull(row.gain_1h),gain_6h:finiteOrNull(row.gain_6h),gain_12h:finiteOrNull(row.gain_12h),gain_24h:finiteOrNull(row.gain_24h)})).sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0))}
 function buildStoredLeague(entry,current,topRow=null){const matches=matchesFromCurrent(current);return {...leagueBase(entry,current,topRow),c0ld_member_count:matches.length,matches}}
 function tableHeaders(){const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}))}
-function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
+function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);return list.sort(leaguePointsDesc)}
 function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
 function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US");document.getElementById("top3300-count").textContent=countRankRange(1401,3300).toLocaleString("en-US");document.getElementById("top8500-count").textContent=countRankRange(3301,8500).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(8501,10000).toLocaleString("en-US")}
 function renderMeta(){const updated=lastUpdated?" · Points last updated "+dt(lastUpdated):"";const cadence="Ranks update hourly from Top 10,000. Points update every 5 minutes.";document.getElementById("table-meta").textContent=(errors.length?errors.length+" league load errors · ":"")+leagueRows.length+" tracked leagues · "+memberRows.length+" c0ld members · "+cadence+updated}
@@ -240,7 +241,7 @@ async function loadData(){
   }
 }
 document.getElementById("refresh-btn").addEventListener("click",loadData);
-document.getElementById("view-mode").addEventListener("change",()=>{if(getMode()==="members"){sortKey="points";sortAsc=false}else{sortKey="rank";sortAsc=true}render()});
+document.getElementById("view-mode").addEventListener("change",()=>{sortKey="points";sortAsc=false;render()});
 document.getElementById("search-input").addEventListener("input",render);
 loadData();
 setInterval(loadData,REFRESH_INTERVAL_MS);
