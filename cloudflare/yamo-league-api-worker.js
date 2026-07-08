@@ -12,6 +12,7 @@ const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 10;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
+const DEFAULT_TOP_LEAGUES_PAGE_SIZE = 10;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE = 10;
 const DEFAULT_TRACKED_RANK_WINDOW_SIZE = 50;
@@ -32,7 +33,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -51,9 +52,8 @@ export default {
         const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
         const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
         const requestedPageSize = url.searchParams.get("page_size") || url.searchParams.get("pageSize");
-        const ingestPageSize = ingestListName === ALL_TOP_LEAGUES_NAME
-          ? clamp(Number(requestedPageSize || DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE), 1, 100)
-          : undefined;
+        const defaultPageSize = ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageSize(env) : topLeaguesPageSize(env);
+        const ingestPageSize = clamp(Number(requestedPageSize || defaultPageSize), 1, 100);
         response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url), {
           listName: ingestListName,
           limit: ingestLimit,
@@ -91,6 +91,7 @@ export default {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
           listName: TOP_LEAGUES_NAME,
           limit: scheduledTopLeaguesLimit(env),
+          pageSize: topLeaguesPageSize(env),
           pageDelayMs: topLeaguesPageDelayMs(env)
         }).catch(err => console.error("scheduled top 1000 leagues ingest failed", err?.message || String(err)));
       }
@@ -1794,6 +1795,7 @@ function requestedTopLeagueListName(url, limit, env) {
   if (["top", "1k", "1000", "top1000", "global_top_1000_leagues"].includes(requested)) return TOP_LEAGUES_NAME;
   return topLeagueListNameForLimit(limit, env);
 }
+function topLeaguesPageSize(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_SIZE || DEFAULT_TOP_LEAGUES_PAGE_SIZE), 1, 100); }
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; }

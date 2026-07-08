@@ -212,9 +212,6 @@ async function loadData(){
     await Promise.all([loadKnownPlayers(),loadKnownC0ldMembers()]);
     const topRows=await topRowsPromise;
     const discoveredRows=await discoveredPromise;
-    leagueRows=mergeLeagueRows(TRACKED_LEAGUES.map(entry=>leagueBase(entry,null,topRowFor(entry,topRows))),discoveredRows).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
-    memberRows=[];
-    render();
     const built=await mapLimit(TRACKED_LEAGUES,LEAGUE_FETCH_CONCURRENCY,async (entry,index)=>{
       try{
         if(index>0)await sleep(LEAGUE_FETCH_STAGGER_MS);

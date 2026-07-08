@@ -20,6 +20,7 @@
   let currentData = null;
   let topLeagueRow = null;
   let targetRankRow = null;
+  let topLeagueHistoryName = TOP_LEAGUES_NAME;
   let leagueRankHistoryRows = [];
   let sortKey = "rank";
   let sortAsc = true;
@@ -58,11 +59,27 @@
     return data;
   }
 
-  async function fetchTopLeagueContext(){
+  function snapshotTime(data){
+    const ms=new Date(data?.snapshot_at||0).getTime();
+    return Number.isFinite(ms)?ms:0;
+  }
+
+  async function fetchTopLeagueSnapshot(list){
     const url=new URL(API+"/api/leagues/top-leagues");
     url.searchParams.set("limit","1000");
+    if(list)url.searchParams.set("list",list);
     addRunParam(url);
-    const data=await getJson(url);
+    return getJson(url);
+  }
+
+  async function fetchTopLeagueContext(){
+    const [topData,allData]=await Promise.all([
+      fetchTopLeagueSnapshot("top").catch(()=>null),
+      fetchTopLeagueSnapshot("all").catch(()=>null)
+    ]);
+    if(!topData&&!allData)throw new Error("No stored top league snapshots are available.");
+    const data=allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData;
+    topLeagueHistoryName=data?.league_name||TOP_LEAGUES_NAME;
     const targetName=norm(currentData?.league_name||LEAGUE);
     const targetId=String(currentData?.league_id||"").trim();
     const topRows=data.rows||[];
@@ -201,7 +218,7 @@
     const stable=currentData?.league_id||currentData?.league_name||LEAGUE;
     const syntheticId=stableLeagueUserId(stable);
     const url=new URL(API+"/api/leagues/history");
-    url.searchParams.set("league",TOP_LEAGUES_NAME);
+    url.searchParams.set("league",topLeagueHistoryName||TOP_LEAGUES_NAME);
     url.searchParams.set("user_id",String(syntheticId));
     url.searchParams.set("hours","all");
     url.searchParams.set("limit","50000");
