@@ -233,7 +233,6 @@ async function loadData(){
     leagueRows=mergeLeagueRows(built,discoveredRows).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
     lastUpdated=leagueRows.map(row=>row.snapshot_at).filter(Boolean).sort().pop()||null;
     memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank,page:row.page}))));
-    setStatus("Points refresh every 5 minutes. Top 1,000 ranks refresh from stored top snapshots; outside Top 1,000 ranks use seeded rank windows"+(lastUpdated?" - Points last updated "+dt(lastUpdated):"")+".");
     render();
   }catch(err){
     console.error(err);
