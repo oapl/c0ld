@@ -815,9 +815,10 @@ async function fetchStoredTopLeagueRows(env, runKey, listName, limit, offset = 0
   const rows = [];
   let fetched = 0;
   const pageSize = 1000;
+  const rawLimit = Math.min(MAX_TOP_LEAGUES_LIMIT - offset, limit + Math.min(500, limit));
 
-  while (fetched < limit) {
-    const take = Math.min(pageSize, limit - fetched);
+  while (fetched < rawLimit) {
+    const take = Math.min(pageSize, rawLimit - fetched);
     const page = await supabaseSelect(env, CURRENT_TABLE, {
       select,
       league_run_key: `eq.${runKey}`,
@@ -831,7 +832,9 @@ async function fetchStoredTopLeagueRows(env, runKey, listName, limit, offset = 0
     fetched += page.length;
   }
 
-  return rows;
+  return dedupeStoredTopLeagueRows(rows)
+    .sort((a, b) => (toNumber(a.rank) || 999999) - (toNumber(b.rank) || 999999))
+    .slice(0, limit);
 }
 
 async function fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
@@ -1119,7 +1122,11 @@ function dedupeStoredTopLeagueRows(rows) {
     const id = String(row.league_id || row.user_id || row.display_name || "").trim();
     if (!id) continue;
     const existing = out.get(id);
-    if (!existing || (toNumber(row.rank) || 999999) < (toNumber(existing.rank) || 999999)) out.set(id, row);
+    const rowTime = new Date(row.fetched_at || 0).getTime();
+    const existingTime = new Date(existing?.fetched_at || 0).getTime();
+    const isNewer = Number.isFinite(rowTime) && (!Number.isFinite(existingTime) || rowTime > existingTime);
+    const isSameTimeBetterRank = rowTime === existingTime && (toNumber(row.rank) || 999999) < (toNumber(existing.rank) || 999999);
+    if (!existing || isNewer || isSameTimeBetterRank) out.set(id, row);
   }
   return [...out.values()];
 }
