@@ -346,6 +346,73 @@ async function persistTopLeagueWindowRows(env, runKey, rows, options = {}) {
   await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
 }
 
+async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
+  if (!rows?.length) return 0;
+  const fetchedAt = options.fetchedAt || new Date().toISOString();
+  const snapshotId = `c0ld_discovered:${runKey}:${fetchedAt}`;
+  const source = `${options.source || "overlap-matches"}:c0ld-discovered`;
+  const dbRows = rows.map(row => discoveredC0ldLeagueDbRow(row, {
+    snapshotId,
+    fetchedAt,
+    source,
+    runKey
+  }));
+
+  await supabaseUpsert(env, SNAPSHOT_TABLE, dbRows, "league_run_key,snapshot_id,user_id");
+  await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  return dbRows.length;
+}
+
+function discoveredC0ldLeagueDbRow(row, context) {
+  const stable = row.league_id || row.league_name;
+  const synthetic = stableLeagueUserId(stable);
+  const matches = (row.matches || []).map(member => ({
+    user_id: toNumber(member.user_id),
+    username: member.username || null,
+    display_name: member.display_name || member.username || null,
+    clan_rank: toNumber(member.clan_rank),
+    clan_points: toNumber(member.clan_points) || 0,
+    league_rank: toNumber(member.league_rank),
+    league_points: toNumber(member.league_points) || 0,
+    league_role: member.league_role || null,
+    last_contribution_at: member.last_contribution_at || null
+  }));
+  const rawLeague = {
+    Name: row.league_name,
+    ID: row.league_id,
+    Icon: row.league_icon,
+    Points: toNumber(row.total_points) || toNumber(row.points) || 0,
+    league_rank: toNumber(row.rank),
+    c0ld_member_count: toNumber(row.c0ld_member_count) || matches.length,
+    c0ld_league_points: toNumber(row.c0ld_league_points) || matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
+    c0ld_matches: matches
+  };
+
+  return {
+    snapshot_id: context.snapshotId,
+    fetched_at: context.fetchedAt,
+    source: context.source,
+    league_run_key: context.runKey,
+    league_name: COLD_DISCOVERED_LEAGUES_NAME,
+    league_id: row.league_id || null,
+    league_level: null,
+    league_points: rawLeague.Points,
+    league_icon: row.league_icon || null,
+    member_capacity: null,
+    rank: toNumber(row.rank) || 999999,
+    user_id: synthetic,
+    display_name: row.league_name,
+    points: rawLeague.Points,
+    last_contribution_at: null,
+    permission_level: null,
+    role: "Discovered c0ld League",
+    join_time: null,
+    raw_member: { league_name: row.league_name, league_id: row.league_id, league_rank: toNumber(row.rank), synthetic_user_id: synthetic },
+    raw_contribution: {},
+    raw_league: rawLeague
+  };
+}
+
 async function handleCurrent(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -1369,6 +1436,31 @@ function publicLeagueRow(row) {
   const raw = row.raw_league || {};
   const name = String(firstDefined(raw.Name, raw.name, raw.LeagueName, raw.leagueName, row.display_name) || "").trim();
   return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+}
+
+function publicDiscoveredLeagueRow(row) {
+  const raw = normalizeRawLeague(row.raw_league);
+  const base = publicLeagueRow(row);
+  const matches = firstArray(raw.c0ld_matches, raw.cold_matches).map(member => ({
+    user_id: toNumber(member.user_id),
+    username: member.username || member.display_name || null,
+    display_name: member.display_name || member.username || null,
+    clan_rank: toNumber(member.clan_rank),
+    clan_points: toNumber(member.clan_points) || 0,
+    league_rank: toNumber(member.league_rank),
+    rank: toNumber(member.league_rank),
+    league_points: toNumber(member.league_points) || 0,
+    points: toNumber(member.league_points) || 0,
+    league_role: member.league_role || null,
+    last_contribution_at: member.last_contribution_at || null
+  })).filter(member => member.user_id || member.username);
+
+  return {
+    ...base,
+    c0ld_member_count: toNumber(raw.c0ld_member_count) || matches.length,
+    c0ld_league_points: toNumber(raw.c0ld_league_points) || matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
+    matches
+  };
 }
 
 function projectGain1h(row) {
