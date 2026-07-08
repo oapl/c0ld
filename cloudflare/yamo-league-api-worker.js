@@ -6,6 +6,7 @@ const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
+const COLD_DISCOVERED_LEAGUES_NAME = "C0LD_DISCOVERED_LEAGUES";
 const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
 const DEFAULT_ALL_TOP_LEAGUES_LIMIT = 10000;
 const MAX_TOP_LEAGUES_LIMIT = 10000;
@@ -41,6 +42,8 @@ export default {
         response = await handleTopLeagues(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-overlap") {
         response = await handleC0ldLeagueOverlap(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-discovered") {
+        response = await handleC0ldDiscoveredLeagues(request, env);
       } else if (request.method === "POST" && (url.pathname === "/api/leagues/ingest" || url.pathname === "/api/ingest")) {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
@@ -325,6 +328,24 @@ function topLeagueDbRow(row, context) {
   };
 }
 
+async function persistTopLeagueWindowRows(env, runKey, rows, options = {}) {
+  if (!rows?.length) return;
+  const fetchedAt = options.fetchedAt || new Date().toISOString();
+  const listName = options.listName || ALL_TOP_LEAGUES_NAME;
+  const snapshotId = `top_league_window:${runKey}:${listName}:${fetchedAt}`;
+  const source = `${options.source || "live-window"}:top-leagues`;
+  const dbRows = rows.map(row => topLeagueDbRow(row, {
+    snapshotId,
+    fetchedAt,
+    source,
+    runKey,
+    listName
+  }));
+
+  await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
+  await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+}
+
 async function handleCurrent(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -444,6 +465,33 @@ async function handleTopLeagues(request, env) {
   }, env);
 }
 
+async function handleC0ldDiscoveredLeagues(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const runKey = requestedTopLeaguesRunKey(url, env);
+  const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 5000);
+  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${COLD_DISCOVERED_LEAGUES_NAME}`,
+    order: "rank.asc",
+    limit: String(limit)
+  });
+
+  const latest = latestMeta(rows);
+  const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: COLD_DISCOVERED_LEAGUES_NAME }) : rows.map(addNullGains);
+  const publicRows = rowsWithGains.map(publicDiscoveredLeagueRow);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: latest?.fetched_at || null,
+    league_run_key: runKey,
+    league_name: COLD_DISCOVERED_LEAGUES_NAME,
+    rows: publicRows
+  }, env);
+}
+
 async function handleC0ldLeagueOverlap(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -490,10 +538,26 @@ async function handleC0ldLeagueOverlap(request, env) {
   }
 
   const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
+  if (liveScan && batch.length) {
+    await persistTopLeagueWindowRows(env, runKey, batch, {
+      listName: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+      fetchedAt: topContext.snapshot_at || new Date().toISOString(),
+      source: "live:overlap-window"
+    }).catch(err => console.warn("persist live overlap top league rows failed", err?.message || String(err)));
+  }
   const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
   const matchedRows = scanned
     .filter(row => row.matches.length)
     .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
+  const discoveredUpserted = matchedRows.length
+    ? await persistDiscoveredC0ldLeagues(env, runKey, matchedRows, {
+      fetchedAt: topContext.snapshot_at || new Date().toISOString(),
+      source: liveScan ? "live:overlap-matches" : "stored:overlap-matches"
+    }).catch(err => {
+      console.warn("persist discovered c0ld leagues failed", err?.message || String(err));
+      return 0;
+    })
+    : 0;
 
   return cacheJson({
     ok: true,
@@ -514,6 +578,7 @@ async function handleC0ldLeagueOverlap(request, env) {
       : (offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null),
     scanned_count: batch.length,
     matched_count: matchedRows.length,
+    discovered_upserted: discoveredUpserted,
     scan_errors: scanned.filter(row => row.error).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
     rows: matchedRows
   }, env);
@@ -737,6 +802,7 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
 
 async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
   const pageSize = 100;
+  const listName = topLeagueListNameForLimit(topLimit, env);
   const start = clamp(offset, 0, Math.max(0, topLimit - 1));
   const end = Math.min(topLimit, start + limit);
   const startPage = Math.floor(start / pageSize) + 1;
@@ -765,7 +831,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
         fetched_at: now,
         source: "live:overlap-window",
         league_run_key: runKey,
-        league_name: TOP_LEAGUES_NAME,
+        league_name: listName,
         league_id: summary.league_id,
         league_level: summary.league_level,
         league_points: summary.league_points,
@@ -784,6 +850,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
 
   return {
     source: "live-window",
+    list_name: listName,
     snapshot_at: now,
     total_available: rows.length < limit ? start + rows.length : topLimit,
     rows: rows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999))
