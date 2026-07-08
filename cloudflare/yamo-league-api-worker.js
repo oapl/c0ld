@@ -12,7 +12,7 @@ const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 10;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
-const DEFAULT_TOP_LEAGUES_PAGE_SIZE = 10;
+const DEFAULT_TOP_LEAGUES_PAGE_SIZE = 100;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE = 10;
 const DEFAULT_TRACKED_RANK_WINDOW_SIZE = 50;
@@ -33,7 +33,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -44,6 +44,9 @@ export default {
         response = await handleC0ldLeagueOverlap(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-discovered") {
         response = await handleC0ldDiscoveredLeagues(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/leagues/ingest-all") {
+        requireAdmin(request, env);
+        response = await handleTrackedLeaguesIngest(env, "manual", runKeyParam(url));
       } else if (request.method === "POST" && (url.pathname === "/api/leagues/ingest" || url.pathname === "/api/ingest")) {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
@@ -73,19 +76,10 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
-        const leagues = leagueNames(env);
-        const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 4), 1, 8);
-        const results = await mapLimit(leagues, concurrency, async league => {
-          try {
-            const response = await handleIngest(env, "schedule", league, leagueRunKey(env));
-            const payload = await response.clone().json().catch(() => ({}));
-            return { league, ok: response.ok, rows_inserted: payload.rows_inserted ?? null };
-          } catch (err) {
-            console.error(`scheduled league ingest failed for ${league}`, err?.message || String(err));
-            return { league, ok: false, message: err?.message || String(err) };
-          }
-        });
-        console.log("scheduled tracked league ingest complete", JSON.stringify(results));
+        await handleTrackedLeaguesIngest(env, "schedule", leagueRunKey(env))
+          .then(response => response.clone().json().catch(() => ({})))
+          .then(payload => console.log("scheduled tracked league ingest complete", JSON.stringify(payload)))
+          .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
       }
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
@@ -145,6 +139,70 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   }
 
   return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, snapshot_retention: "permanent" }, 202);
+}
+
+async function handleTrackedLeaguesIngest(env, source, requestedRunKey) {
+  requireSupabase(env);
+  const fetchedAt = new Date().toISOString();
+  const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
+  const names = leagueNames(env);
+  const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 8), 1, 12);
+  const results = await mapLimit(names, concurrency, async requested => {
+    try {
+      const api = await fetchLeagueApi(requested);
+      const league = api.data || api;
+      const summary = summarizeLeague(league, requested);
+      const memberRows = normalizeLeagueRows(league);
+      const snapshotId = `league:${runKey}:${summary.league_name}:${fetchedAt}`;
+      const rows = memberRows.map(row => ({
+        snapshot_id: snapshotId,
+        fetched_at: fetchedAt,
+        source,
+        league_run_key: runKey,
+        league_name: summary.league_name,
+        league_id: summary.league_id,
+        league_level: summary.league_level,
+        league_points: summary.league_points,
+        league_icon: summary.league_icon,
+        member_capacity: summary.member_capacity,
+        rank: row.rank,
+        user_id: row.user_id,
+        display_name: row.display_name,
+        points: row.points,
+        last_contribution_at: row.last_contribution_at,
+        permission_level: row.permission_level,
+        role: row.role,
+        join_time: row.join_time,
+        raw_member: row.raw_member,
+        raw_contribution: row.raw_contribution,
+        raw_league: summary.raw_league
+      }));
+      return { requested, ok: true, league_name: summary.league_name, league_id: summary.league_id, rows_inserted: rows.length, rows };
+    } catch (err) {
+      return { requested, ok: false, message: err?.message || String(err), rows: [] };
+    }
+  });
+
+  const dbRows = results.flatMap(result => result.rows || []);
+  const leagueNamesWritten = [...new Set(results.filter(result => result.ok).map(result => result.league_name).filter(Boolean))];
+
+  if (dbRows.length) {
+    await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
+    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+    await deleteStaleCurrentLeagueRows(env, runKey, leagueNamesWritten, fetchedAt);
+  }
+
+  return json({
+    ok: results.every(result => result.ok),
+    league_run_key: runKey,
+    fetched_at: fetchedAt,
+    source,
+    requested_count: names.length,
+    leagues_written: leagueNamesWritten.length,
+    rows_inserted: dbRows.length,
+    failed_count: results.filter(result => !result.ok).length,
+    results: results.map(({ rows, ...result }) => result)
+  }, 202);
 }
 
 async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}) {
@@ -1767,6 +1825,15 @@ async function mapLimit(items, limit, fn) {
 }
 
 async function replaceCurrentRows(env, table, filters, rows) { await supabaseDelete(env, table, filters); if (rows.length) await supabaseInsert(env, table, rows); }
+async function deleteStaleCurrentLeagueRows(env, runKey, names, fetchedAt) {
+  const uniqueNames = [...new Set((names || []).map(name => String(name || "").trim()).filter(Boolean))];
+  if (!uniqueNames.length) return [];
+  return supabaseDelete(env, CURRENT_TABLE, {
+    league_run_key: `eq.${runKey}`,
+    league_name: `in.(${uniqueNames.map(postgrestFilterText).join(",")})`,
+    updated_at: `lt.${fetchedAt}`
+  });
+}
 async function supabaseSelect(env, table, params = {}, options = {}) { return supabaseFetch(env, table, { method: "GET", params, paramRename: options.paramRename }); }
 async function supabaseInsert(env, table, rows) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", body: rows, headers: { Prefer: "return=minimal" } }); }
 async function supabaseUpsert(env, table, rows, conflictColumns) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", params: { on_conflict: conflictColumns }, body: rows, headers: { Prefer: "resolution=merge-duplicates,return=minimal" } }); }
@@ -1809,7 +1876,7 @@ function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; 
 function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
 function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
 function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
-function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS ?? env.INGEST_ALL_TOP_LEAGUES, true); }
+function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS, false); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
