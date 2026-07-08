@@ -215,7 +215,7 @@
   function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>'}
 
   async function fetchLeagueRankHistory(){
-    const stable=currentData?.league_id||currentData?.league_name||LEAGUE;
+    const stable=currentData?.league_id||topLeagueRow?.league_id||currentData?.league_name||LEAGUE;
     const syntheticId=stableLeagueUserId(stable);
     const url=new URL(API+"/api/leagues/history");
     url.searchParams.set("league",topLeagueHistoryName||TOP_LEAGUES_NAME);

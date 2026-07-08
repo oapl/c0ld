@@ -63,6 +63,9 @@ export default {
           pageDelayMs: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageDelayMs(env) : topLeaguesPageDelayMs(env),
           pageSize: ingestPageSize
         });
+      } else if (request.method === "POST" && url.pathname === "/api/leagues/rank-windows/refresh") {
+        requireAdmin(request, env);
+        response = await handleTrackedLeagueRankWindowRefresh(env, "manual:rank-window", runKeyParam(url));
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -1515,13 +1518,13 @@ async function resolveRobloxAvatarHeadshots(userIds, env) {
 function publicMemberRow(row, usernameMap, avatarMap) {
   const id = toNumber(row.user_id);
   const name = displayUsername(row, usernameMap);
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
 function publicLeagueRow(row) {
   const raw = row.raw_league || {};
   const name = String(firstDefined(raw.Name, raw.name, raw.LeagueName, raw.leagueName, row.display_name) || "").trim();
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
 function publicDiscoveredLeagueRow(row) {
@@ -1565,6 +1568,7 @@ async function addGainFields(env, rows, latest) {
   const windows = [{ key: "gain_5m", minutes: 5, tolerance: 4, fallback: 20 }, { key: "gain_1h", minutes: 60, tolerance: 10, fallback: 90 }, { key: "gain_6h", minutes: 360, tolerance: 20 }, { key: "gain_12h", minutes: 720, tolerance: 25 }, { key: "gain_24h", minutes: 1440, tolerance: 45 }];
   const maps = {};
   for (const win of windows) maps[win.key] = await fetchClosestPointMap(env, latest.league_run_key, latest.league_name, latestMs, win.minutes, win.tolerance, win.fallback);
+  const rankMap5m = await fetchClosestRankMap(env, latest.league_run_key, latest.league_name, latestMs, 5, 4, 20);
   return rows.map(row => {
     const out = { ...row };
     const currentPoints = toNumber(row.points) || 0;
@@ -1572,11 +1576,15 @@ async function addGainFields(env, rows, latest) {
       const previous = maps[win.key].get(String(row.user_id));
       out[win.key] = previous === undefined ? null : currentPoints - previous;
     }
+    const currentRank = toNumber(row.rank);
+    const previousRank = rankMap5m.get(String(row.user_id));
+    out.previous_rank_5m = previousRank === undefined ? null : previousRank;
+    out.rank_move_5m = previousRank === undefined || currentRank === null ? null : previousRank - currentRank;
     return out;
   });
 }
 
-function addNullGains(row) { return { ...row, gain_5m: null, gain_1h: null, gain_6h: null, gain_12h: null, gain_24h: null }; }
+function addNullGains(row) { return { ...row, gain_5m: null, gain_1h: null, gain_6h: null, gain_12h: null, gain_24h: null, previous_rank_5m: null, rank_move_5m: null }; }
 
 async function maybeSendInactivityAlerts(env, context) {
   if (String(env.INACTIVE_ALERTS_ENABLED || "true").toLowerCase() === "false") return;
@@ -1777,6 +1785,15 @@ async function fetchClosestPointMap(env, runKey, league, latestMs, minutes, tole
   return fallbackRows.length ? closestSnapshotPointMap(fallbackRows, targetMs) : new Map();
 }
 
+async function fetchClosestRankMap(env, runKey, league, latestMs, minutes, toleranceMinutes, fallbackMinutes = 0) {
+  const targetMs = latestMs - minutes * 60 * 1000;
+  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,rank", league_run_key: `eq.${runKey}`, league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - toleranceMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs + toleranceMinutes * 60 * 1000).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
+  if (rows.length) return closestSnapshotRankMap(rows, targetMs);
+  if (!fallbackMinutes) return new Map();
+  const fallbackRows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,rank", league_run_key: `eq.${runKey}`, league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - fallbackMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
+  return fallbackRows.length ? closestSnapshotRankMap(fallbackRows, targetMs) : new Map();
+}
+
 function closestSnapshotPointMap(rows, targetMs) {
   const snapshots = new Map();
   for (const row of rows) {
@@ -1786,6 +1803,18 @@ function closestSnapshotPointMap(rows, targetMs) {
     snapshots.get(id).points.set(String(row.user_id), toNumber(row.points) || 0);
   }
   return (Array.from(snapshots.values()).sort((a, b) => a.distance - b.distance)[0]?.points) || new Map();
+}
+
+function closestSnapshotRankMap(rows, targetMs) {
+  const snapshots = new Map();
+  for (const row of rows) {
+    const id = String(row.snapshot_id || "");
+    if (!id) continue;
+    if (!snapshots.has(id)) snapshots.set(id, { distance: Math.abs(new Date(row.fetched_at).getTime() - targetMs), ranks: new Map() });
+    const rank = toNumber(row.rank);
+    if (rank !== null) snapshots.get(id).ranks.set(String(row.user_id), rank);
+  }
+  return (Array.from(snapshots.values()).sort((a, b) => a.distance - b.distance)[0]?.ranks) || new Map();
 }
 
 function latestMeta(rows) {
