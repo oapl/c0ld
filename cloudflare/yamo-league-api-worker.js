@@ -75,19 +75,20 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
-        await handleTrackedLeaguesIngest(env, "schedule", leagueRunKey(env))
-          .then(response => response.clone().json().catch(() => ({})))
-          .then(payload => console.log("scheduled tracked league ingest complete", JSON.stringify(payload)))
-          .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
-      }
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
           listName: TOP_LEAGUES_NAME,
           limit: scheduledTopLeaguesLimit(env),
           pageSize: topLeaguesPageSize(env),
-          pageDelayMs: topLeaguesPageDelayMs(env)
+          pageDelayMs: topLeaguesPageDelayMs(env),
+          allowApiFallback: false
         }).catch(err => console.error("scheduled top 1000 leagues ingest failed", err?.message || String(err)));
+      }
+      if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
+        await handleTrackedLeaguesIngest(env, "schedule", leagueRunKey(env), { allowApiFallback: false })
+          .then(response => response.clone().json().catch(() => ({})))
+          .then(payload => console.log("scheduled tracked league ingest complete", JSON.stringify(payload)))
+          .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
       }
       if (shouldRunTrackedRankWindowRefresh(env)) {
         await handleTrackedLeagueRankWindowRefresh(env, "schedule:rank-window", topLeaguesRunKey(env))
@@ -141,7 +142,7 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, snapshot_retention: "permanent" }, 202);
 }
 
-async function handleTrackedLeaguesIngest(env, source, requestedRunKey) {
+async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options = {}) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
@@ -149,7 +150,7 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey) {
   const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 8), 1, 12);
   const results = await mapLimit(names, concurrency, async requested => {
     try {
-      const api = await fetchLeagueApi(requested);
+      const api = await fetchLeagueApi(requested, { allowFallback: options.allowApiFallback !== false });
       const league = api.data || api;
       const summary = summarizeLeague(league, requested);
       const memberRows = normalizeLeagueRows(league);
@@ -211,7 +212,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
   const listName = options.listName || TOP_LEAGUES_NAME;
   const limit = clamp(Number(options.limit || (source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env))), 1, MAX_TOP_LEAGUES_LIMIT);
-  const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize });
+  const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize, allowApiFallback: options.allowApiFallback !== false });
   const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
   const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
 
@@ -1046,8 +1047,9 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
   };
 }
 
-async function fetchLeagueApi(league) {
-  const urls = [`https://ps99.biggamesapi.io/v1/leagues/${encodeURIComponent(league)}`, `https://biggamesapi.io/v1/leagues/${encodeURIComponent(league)}`];
+async function fetchLeagueApi(league, options = {}) {
+  const primary = `https://ps99.biggamesapi.io/v1/leagues/${encodeURIComponent(league)}`;
+  const urls = options.allowFallback === false ? [primary] : [primary, `https://biggamesapi.io/v1/leagues/${encodeURIComponent(league)}`];
   let lastError = null;
   for (const url of urls) {
     try {
@@ -1060,9 +1062,10 @@ async function fetchLeagueApi(league) {
   throw httpError(502, `Big Games league API failed for ${league}: ${lastError?.message || "unknown error"}`);
 }
 
-async function fetchLeagueListApi(page = 1, pageSize = 100) {
+async function fetchLeagueListApi(page = 1, pageSize = 100, options = {}) {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(Math.min(pageSize, 100)), sort: "Points", sortOrder: "desc" });
-  const urls = [`https://ps99.biggamesapi.io/v1/leagues?${qs.toString()}`, `https://biggamesapi.io/v1/leagues?${qs.toString()}`];
+  const primary = `https://ps99.biggamesapi.io/v1/leagues?${qs.toString()}`;
+  const urls = options.allowFallback === false ? [primary] : [primary, `https://biggamesapi.io/v1/leagues?${qs.toString()}`];
   let lastError = null;
   for (const url of urls) {
     try {
@@ -1347,13 +1350,14 @@ async function fetchTopLeagues(limit, options = {}) {
   const capped = clamp(Number(limit) || DEFAULT_TOP_LEAGUES_LIMIT, 1, MAX_TOP_LEAGUES_LIMIT);
   const pageDelayMs = clamp(Number(options.pageDelayMs || 0), 0, 5000);
   const pageSize = clamp(Number(options.pageSize || 100), 1, 100);
+  const allowFallback = options.allowApiFallback !== false;
   const pages = Math.ceil(capped / pageSize);
   const seen = new Set();
   const leagues = [];
 
   for (let page = 1; page <= pages; page += 1) {
     if (page > 1 && pageDelayMs > 0) await sleep(pageDelayMs);
-    const api = await fetchLeagueListApi(page, pageSize);
+    const api = await fetchLeagueListApi(page, pageSize, { allowFallback });
     const pageRows = leagueListFromResponse(api);
     if (!pageRows.length) break;
 
