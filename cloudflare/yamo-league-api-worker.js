@@ -12,7 +12,8 @@ const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
-const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 5000;
+const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
+const DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE = 25;
 const DEFAULT_TRACKED_RANK_WINDOW_SIZE = 50;
 const DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS = 2500;
 const DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS = 2500;
@@ -50,7 +51,8 @@ export default {
         response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url), {
           listName: ingestListName,
           limit: ingestLimit,
-          pageDelayMs: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageDelayMs(env) : topLeaguesPageDelayMs(env)
+          pageDelayMs: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageDelayMs(env) : topLeaguesPageDelayMs(env),
+          pageSize: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageSize(env) : undefined
         });
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
@@ -144,7 +146,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
   const listName = options.listName || TOP_LEAGUES_NAME;
   const limit = clamp(Number(options.limit || (source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env))), 1, MAX_TOP_LEAGUES_LIMIT);
-  const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env) });
+  const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize });
   const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
   const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
 
@@ -161,7 +163,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
     await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
   }
 
-  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit }, 202);
+  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit, page_size: top.page_size }, 202);
 }
 
 async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey) {
@@ -1124,7 +1126,7 @@ function pagesForRankRange(startRank, endRank) {
 async function fetchTopLeagues(limit, options = {}) {
   const capped = clamp(Number(limit) || DEFAULT_TOP_LEAGUES_LIMIT, 1, MAX_TOP_LEAGUES_LIMIT);
   const pageDelayMs = clamp(Number(options.pageDelayMs || 0), 0, 5000);
-  const pageSize = 100;
+  const pageSize = clamp(Number(options.pageSize || 100), 1, 100);
   const pages = Math.ceil(capped / pageSize);
   const seen = new Set();
   const leagues = [];
@@ -1172,7 +1174,7 @@ async function fetchTopLeagues(limit, options = {}) {
     };
   });
 
-  return { source: "league-list", rows };
+  return { source: "league-list", rows, page_size: pageSize };
 }
 
 function leagueListFromResponse(api) {
@@ -1616,6 +1618,7 @@ function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT
 function topLeagueListNameForLimit(limit, env) { return Number(limit) > scheduledTopLeaguesLimit(env) ? ALL_TOP_LEAGUES_NAME : TOP_LEAGUES_NAME; }
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
+function allTopLeaguesPageSize(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_SIZE || DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE), 1, 100); }
 function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
 function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
 function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
