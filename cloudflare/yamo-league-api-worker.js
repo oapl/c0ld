@@ -3,7 +3,6 @@ const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
-const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
 const COLD_DISCOVERED_LEAGUES_NAME = "C0LD_DISCOVERED_LEAGUES";
@@ -481,30 +480,6 @@ async function handleTopLeagues(request, env) {
   });
 
   let latest = latestMeta(rows);
-  const requestLiveFallback = boolParam(url.searchParams.get("live"), false) || boolParam(url.searchParams.get("fallback_live"), false);
-  const allowLiveFallback = allowTopLeaguesLiveFallback(env) || (requestLiveFallback && limit <= scheduledTopLeaguesLimit(env));
-  if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
-    const live = await fetchTopLeagues(limit);
-    const now = new Date().toISOString();
-    rows = live.rows.map(row => ({
-      snapshot_id: "live",
-      fetched_at: now,
-      source: rows.length ? "live:stale-fallback" : "live",
-      league_run_key: runKey,
-      league_name: listName,
-      league_id: row.league_id,
-      league_level: row.league_level,
-      league_points: row.points,
-      league_icon: row.league_icon,
-      member_capacity: row.member_capacity,
-      rank: row.rank,
-      user_id: row.user_id,
-      display_name: row.league_name,
-      points: row.points,
-      raw_league: row.raw_league
-    }));
-    latest = latestMeta(rows);
-  }
 
   if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: listName, rows: [] }, env);
 
@@ -839,29 +814,6 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
   });
 
   let latest = latestMeta(rows);
-  const allowLiveFallback = allowTopLeaguesLiveFallback(env);
-  if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
-    const live = await fetchTopLeagues(limit);
-    const now = new Date().toISOString();
-    rows = live.rows.map(row => ({
-      snapshot_id: "live",
-      fetched_at: now,
-      source: "live:overlap",
-      league_run_key: runKey,
-      league_name: listName,
-      league_id: row.league_id,
-      league_level: row.league_level,
-      league_points: row.points,
-      league_icon: row.league_icon,
-      member_capacity: row.member_capacity,
-      rank: row.rank,
-      user_id: row.user_id,
-      display_name: row.league_name,
-      points: row.points,
-      raw_league: row.raw_league
-    }));
-    latest = latestMeta(rows);
-  }
 
   const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName }) : rows.map(addNullGains);
   return { snapshot_at: latest?.fetched_at || null, source: listName, rows: rowsWithGains };
@@ -1708,13 +1660,6 @@ function latestMeta(rows) {
   return { snapshot_id: row.snapshot_id, fetched_at: row.fetched_at, league_run_key: row.league_run_key, league_name: row.league_name, league_id: row.league_id, league_level: row.league_level, league_points: row.league_points, league_icon: row.league_icon, member_capacity: row.member_capacity };
 }
 
-function isTopLeaguesStale(latest, env) {
-  if (!latest?.fetched_at) return true;
-  const maxMinutes = clamp(Number(env.TOP_LEAGUES_MAX_STALE_MINUTES || DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES), 1, 24 * 60 * 30);
-  const fetchedMs = new Date(latest.fetched_at).getTime();
-  return !Number.isFinite(fetchedMs) || Date.now() - fetchedMs > maxMinutes * 60 * 1000;
-}
-
 function normalizeRawLeague(raw) {
   if (!raw) return {};
   if (typeof raw === "string") {
@@ -1788,7 +1733,6 @@ function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TR
 function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS ?? env.INGEST_ALL_TOP_LEAGUES, true); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
-function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }
 function runKeyParam(url) { return url.searchParams.get("run") || url.searchParams.get("league_run_key") || url.searchParams.get("season"); }
 function requestedRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || leagueRunKey(env)); }
 function requestedTopLeaguesRunKey(url, env) { return normalizeRunKey(runKeyParam(url) || topLeaguesRunKey(env)); }
