@@ -11,8 +11,11 @@ const DEFAULT_ALL_TOP_LEAGUES_LIMIT = 10000;
 const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
-const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 300;
+const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 5000;
+const DEFAULT_TRACKED_RANK_WINDOW_SIZE = 50;
+const DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS = 2500;
+const DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS = 2500;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
@@ -83,12 +86,9 @@ export default {
           pageDelayMs: topLeaguesPageDelayMs(env)
         }).catch(err => console.error("scheduled top 1000 leagues ingest failed", err?.message || String(err)));
       }
-      if (shouldRunAllTopLeaguesIngest(event, env)) {
-        await handleTopLeaguesIngest(env, "schedule:hourly-all", topLeaguesRunKey(env), {
-          listName: ALL_TOP_LEAGUES_NAME,
-          limit: allTopLeaguesLimit(env),
-          pageDelayMs: allTopLeaguesPageDelayMs(env)
-        }).catch(err => console.error("scheduled top 10000 leagues ingest failed", err?.message || String(err)));
+      if (shouldRunTrackedRankWindowRefresh(env)) {
+        await handleTrackedLeagueRankWindowRefresh(env, "schedule:rank-window", topLeaguesRunKey(env))
+          .catch(err => console.error("scheduled tracked league rank-window refresh failed", err?.message || String(err)));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
@@ -148,12 +148,158 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
   const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
 
-  const dbRows = top.rows.map(row => ({
+  const dbRows = top.rows.map(row => topLeagueDbRow(row, {
+    snapshotId,
+    fetchedAt,
+    source: `${source}:top-leagues`,
+    runKey,
+    listName
+  }));
+
+  if (dbRows.length) {
+    await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
+    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+  }
+
+  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit }, 202);
+}
+
+async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey) {
+  requireSupabase(env);
+  const fetchedAt = new Date().toISOString();
+  const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
+  const trackedNames = leagueNames(env);
+  const scheduledLimit = scheduledTopLeaguesLimit(env);
+  const maxRank = allTopLeaguesLimit(env);
+  const windowSize = trackedRankWindowSize(env);
+  const pageDelayMs = trackedRankWindowPageDelayMs(env);
+  const expansionPageDelayMs = trackedRankWindowExpansionPageDelayMs(env);
+  const [topRows, seedRows] = await Promise.all([
+    fetchStoredTopLeagueRowsByNames(env, runKey, TOP_LEAGUES_NAME, trackedNames, Math.max(trackedNames.length * 2, 50)),
+    fetchStoredTopLeagueRowsByNames(env, runKey, ALL_TOP_LEAGUES_NAME, trackedNames, Math.max(trackedNames.length * 2, 50))
+  ]);
+  const topLookup = topLeagueLookup(topRows);
+  const seedLookup = topLeagueLookup(seedRows);
+
+  const targets = trackedNames.map(name => ({ requested_name: name, league_name: name, league_id: null }));
+
+  const skippedTop = [];
+  const queued = [];
+  const missingSeed = [];
+  const pageCache = new Map();
+  const rowsByUserId = new Map();
+  const pagePacing = {};
+  const initialPages = new Set();
+
+  for (const target of targets) {
+    const topRow = topLeagueLookupRow(topLookup, target);
+    const topRank = toNumber(topRow?.rank);
+    if (topRank !== null && topRank <= scheduledLimit) {
+      skippedTop.push({ league_name: target.league_name, rank: topRank });
+      continue;
+    }
+
+    const seedRow = topLeagueLookupRow(seedLookup, target);
+    const seedRank = toNumber(seedRow?.rank);
+    if (seedRank === null) {
+      missingSeed.push({ league_name: target.league_name, requested_name: target.requested_name, league_id: target.league_id });
+      continue;
+    }
+
+    const pageList = pagesForRankWindow(seedRank, windowSize, maxRank);
+    pageList.forEach(page => initialPages.add(page));
+    queued.push({
+      ...target,
+      league_name: seedRow.display_name || seedRow.league_name || target.league_name,
+      league_id: target.league_id || seedRow.league_id || null,
+      seed_rank: seedRank,
+      initial_pages: pageList,
+      found_rank: null,
+      found: false,
+      expansions: []
+    });
+  }
+
+  const pageNumbers = [...initialPages].sort((a, b) => a - b);
+  await fetchTopLeaguePages(pageNumbers, { pageDelayMs, pageCache, rowsByUserId, pacing: pagePacing });
+
+  for (const target of queued) {
+    let found = findTopLeagueRowForTarget(rowsByUserId.values(), target);
+    let currentWindow = windowSize;
+
+    while (!found && currentWindow < maxRank) {
+      const nextWindow = Math.min(maxRank, currentWindow * 2);
+      const nextPages = pagesForExpandedRankWindow(target.seed_rank, currentWindow, nextWindow, maxRank)
+        .filter(page => !pageCache.has(page));
+      currentWindow = nextWindow;
+
+      if (nextPages.length) {
+        const fetchedPages = [];
+        for (const page of nextPages) {
+          await fetchTopLeaguePages([page], { pageDelayMs: expansionPageDelayMs, pageCache, rowsByUserId, pacing: pagePacing });
+          fetchedPages.push(page);
+          found = findTopLeagueRowForTarget(rowsByUserId.values(), target);
+          if (found) break;
+        }
+        target.expansions.push({ window_size: currentWindow, pages: fetchedPages });
+      }
+
+      found = findTopLeagueRowForTarget(rowsByUserId.values(), target);
+      if (!nextPages.length && currentWindow >= maxRank) break;
+    }
+
+    if (found) {
+      target.found = true;
+      target.found_rank = toNumber(found.rank);
+      target.league_name = found.league_name || target.league_name;
+      target.league_id = found.league_id || target.league_id;
+    }
+  }
+
+  const rows = [...rowsByUserId.values()].sort((a, b) => (a.rank || 999999) - (b.rank || 999999));
+  const snapshotId = `rank_windows:${runKey}:${fetchedAt}`;
+  const dbRows = rows.map(row => topLeagueDbRow(row, {
+    snapshotId,
+    fetchedAt,
+    source: `${source}:top-leagues`,
+    runKey,
+    listName: ALL_TOP_LEAGUES_NAME
+  }));
+
+  if (dbRows.length) {
+    await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
+    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  }
+
+  return json({
+    ok: true,
+    league_run_key: runKey,
+    league_name: ALL_TOP_LEAGUES_NAME,
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
-    source: `${source}:top-leagues`,
-    league_run_key: runKey,
-    league_name: listName,
+    mode: "tracked-rank-windows",
+    tracked_count: targets.length,
+    skipped_top_1000: skippedTop.length,
+    queued_count: queued.length,
+    found_count: queued.filter(row => row.found).length,
+    requested_pages: pageNumbers,
+    pages_fetched: pageCache.size,
+    rows_inserted: dbRows.length,
+    window_size: windowSize,
+    page_delay_ms: pageDelayMs,
+    expansion_page_delay_ms: expansionPageDelayMs,
+    queued,
+    missing_seed: missingSeed
+  }, 202);
+}
+
+function topLeagueDbRow(row, context) {
+  return {
+    snapshot_id: context.snapshotId,
+    fetched_at: context.fetchedAt,
+    source: context.source,
+    league_run_key: context.runKey,
+    league_name: context.listName,
     league_id: row.league_id || null,
     league_level: row.league_level ?? null,
     league_points: row.points || 0,
@@ -170,14 +316,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
     raw_member: { league_name: row.league_name, league_id: row.league_id, league_rank: row.rank },
     raw_contribution: {},
     raw_league: row.raw_league
-  }));
-
-  if (dbRows.length) {
-    await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
-  }
-
-  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit }, 202);
+  };
 }
 
 async function handleCurrent(request, env) {
@@ -736,7 +875,7 @@ async function readJsonResponse(res, url) {
 }
 
 async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = null) {
-  const labels = [ALL_TOP_LEAGUES_NAME, TOP_LEAGUES_NAME];
+  const labels = [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME];
   const name = String(leagueNameValue || "").trim();
   const id = String(leagueId || "").trim();
 
@@ -782,6 +921,85 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
   return null;
 }
 
+async function fetchStoredTopLeagueRowsByNames(env, runKey, listName, names, limit = 100) {
+  const uniqueNames = [...new Set((names || []).map(name => String(name || "").trim()).filter(Boolean))];
+  if (!uniqueNames.length) return [];
+
+  const select = "rank,fetched_at,source,league_run_key,league_name,league_id,user_id,display_name,points";
+  const filters = {
+    select,
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${listName}`,
+    or: `(${uniqueNames.map(name => `display_name.ilike.${postgrestFilterText(name)}`).join(",")})`,
+    order: "rank.asc",
+    limit: String(Math.max(limit, uniqueNames.length))
+  };
+
+  try {
+    return dedupeStoredTopLeagueRows(await supabaseSelect(env, CURRENT_TABLE, filters));
+  } catch (err) {
+    console.warn("stored top league bulk lookup failed", err?.message || String(err));
+  }
+
+  const rows = [];
+  for (const name of uniqueNames) {
+    const found = await supabaseSelect(env, CURRENT_TABLE, {
+      select,
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${listName}`,
+      display_name: `ilike.${name}`,
+      order: "rank.asc",
+      limit: "2"
+    }).catch(() => []);
+    rows.push(...found);
+  }
+  return dedupeStoredTopLeagueRows(rows);
+}
+
+function dedupeStoredTopLeagueRows(rows) {
+  const out = new Map();
+  for (const row of rows || []) {
+    const id = String(row.league_id || row.user_id || row.display_name || "").trim();
+    if (!id) continue;
+    const existing = out.get(id);
+    if (!existing || (toNumber(row.rank) || 999999) < (toNumber(existing.rank) || 999999)) out.set(id, row);
+  }
+  return [...out.values()];
+}
+
+function topLeagueLookup(rows) {
+  const byId = new Map();
+  const byName = new Map();
+  for (const row of rows || []) {
+    const id = String(row.league_id || "").trim();
+    const nameKey = key(row.display_name || "");
+    if (id && !byId.has(id)) byId.set(id, row);
+    if (nameKey && !byName.has(nameKey)) byName.set(nameKey, row);
+  }
+  return { byId, byName };
+}
+
+function topLeagueLookupRow(lookup, target) {
+  const id = String(target?.league_id || "").trim();
+  if (id && lookup.byId.has(id)) return lookup.byId.get(id);
+  for (const name of [target?.league_name, target?.requested_name]) {
+    const row = lookup.byName.get(key(name));
+    if (row) return row;
+  }
+  return null;
+}
+
+function findTopLeagueRowForTarget(rows, target) {
+  const list = Array.isArray(rows) ? rows : [...rows];
+  const id = String(target?.league_id || "").trim();
+  if (id) {
+    const byId = list.find(row => String(row.league_id || "").trim() === id);
+    if (byId) return byId;
+  }
+  const names = new Set([target?.league_name, target?.requested_name].map(name => key(name)).filter(Boolean));
+  return list.find(row => names.has(key(row.league_name))) || null;
+}
+
 async function fetchLeagueRank(leagueNameValue) {
   const api = await fetchLeagueListApi(1, 100);
   const leagues = leagueListFromResponse(api).map((item, i) => ({
@@ -795,6 +1013,112 @@ async function fetchLeagueRank(leagueNameValue) {
   const found = leagues.find(x => key(x.name) === key(leagueNameValue));
   if (!found) return null;
   return found.explicitRank && found.explicitRank > 0 ? found.explicitRank : leagues.indexOf(found) + 1;
+}
+
+async function fetchTopLeaguePages(pageNumbers, options = {}) {
+  const pageSize = 100;
+  const pageCache = options.pageCache || new Map();
+  const rowsByUserId = options.rowsByUserId || null;
+  const pacing = options.pacing || {};
+  const pageDelayMs = clamp(Number(options.pageDelayMs || 0), 0, 10000);
+  const initialDelayMs = clamp(Number(options.initialDelayMs || 0), 0, 10000);
+  const pages = [...new Set((pageNumbers || []).map(page => Math.max(1, Math.floor(Number(page) || 1))))].sort((a, b) => a - b);
+  const hasNewPages = pages.some(page => !pageCache.has(page));
+  const rows = [];
+  let fetchedNew = 0;
+
+  if (hasNewPages && initialDelayMs > 0) await sleep(initialDelayMs);
+
+  for (const page of pages) {
+    if (pageCache.has(page)) {
+      rows.push(...pageCache.get(page));
+      continue;
+    }
+
+    if ((fetchedNew > 0 || pacing.fetched) && pageDelayMs > 0) await sleep(pageDelayMs);
+    const api = await fetchLeagueListApi(page, pageSize);
+    pacing.fetched = true;
+    const pageRows = leagueListFromResponse(api);
+    const normalized = [];
+
+    pageRows.forEach((item, index) => {
+      const globalIndex = (page - 1) * pageSize + index;
+      const summary = summarizeLeague(item, lname(item) || `League ${globalIndex + 1}`);
+      if (!summary.league_name) return;
+      const explicitRank = toNumber(firstDefined(item.Rank, item.rank, item.Place, item.place, item.Position, item.position));
+      const rank = explicitRank && explicitRank > 0 ? explicitRank : globalIndex + 1;
+      const stable = summary.league_id || summary.league_name;
+      const synthetic = stableLeagueUserId(stable);
+      normalized.push({
+        rank,
+        user_id: synthetic,
+        league_name: summary.league_name,
+        league_id: summary.league_id,
+        league_level: summary.league_level,
+        league_icon: summary.league_icon,
+        member_capacity: summary.member_capacity,
+        points: summary.league_points,
+        raw_league: { ...summary.raw_league, league_rank: rank, synthetic_user_id: synthetic }
+      });
+    });
+
+    pageCache.set(page, normalized);
+    for (const row of normalized) rowsByUserId?.set(String(row.user_id), row);
+    rows.push(...normalized);
+    fetchedNew += 1;
+    if (pageRows.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+function pagesForRankWindow(rank, windowSize, maxRank) {
+  const pageSize = 100;
+  const center = clamp(Number(rank) || 1, 1, Math.max(1, Number(maxRank) || MAX_TOP_LEAGUES_LIMIT));
+  const size = Math.max(0, Number(windowSize) || 0);
+  const max = Math.max(1, Number(maxRank) || MAX_TOP_LEAGUES_LIMIT);
+  const startRank = clamp(center - size, 1, max);
+  const endRank = clamp(center + size, 1, max);
+  const startPage = Math.floor((startRank - 1) / pageSize) + 1;
+  const endPage = Math.floor((endRank - 1) / pageSize) + 1;
+  const pages = [];
+  for (let page = startPage; page <= endPage; page += 1) pages.push(page);
+  return pages;
+}
+
+function pagesForExpandedRankWindow(rank, previousWindowSize, nextWindowSize, maxRank) {
+  const center = clamp(Number(rank) || 1, 1, Math.max(1, Number(maxRank) || MAX_TOP_LEAGUES_LIMIT));
+  const previous = Math.max(0, Number(previousWindowSize) || 0);
+  const next = Math.max(previous, Number(nextWindowSize) || previous);
+  const max = Math.max(1, Number(maxRank) || MAX_TOP_LEAGUES_LIMIT);
+  const lowerStart = clamp(center - next, 1, max);
+  const lowerEnd = clamp(center - previous - 1, 1, max);
+  const upperStart = clamp(center + previous + 1, 1, max);
+  const upperEnd = clamp(center + next, 1, max);
+  const lowerPages = lowerStart <= lowerEnd ? pagesForRankRange(lowerStart, lowerEnd).sort((a, b) => b - a) : [];
+  const upperPages = upperStart <= upperEnd ? pagesForRankRange(upperStart, upperEnd).sort((a, b) => a - b) : [];
+  const out = [];
+  const seen = new Set();
+  const maxLen = Math.max(lowerPages.length, upperPages.length);
+
+  for (let i = 0; i < maxLen; i += 1) {
+    for (const page of [lowerPages[i], upperPages[i]]) {
+      if (!page || seen.has(page)) continue;
+      seen.add(page);
+      out.push(page);
+    }
+  }
+
+  return out;
+}
+
+function pagesForRankRange(startRank, endRank) {
+  const pageSize = 100;
+  const startPage = Math.floor((Math.max(1, startRank) - 1) / pageSize) + 1;
+  const endPage = Math.floor((Math.max(1, endRank) - 1) / pageSize) + 1;
+  const pages = [];
+  for (let page = startPage; page <= endPage; page += 1) pages.push(page);
+  return pages;
 }
 
 async function fetchTopLeagues(limit, options = {}) {
@@ -1292,13 +1616,10 @@ function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT
 function topLeagueListNameForLimit(limit, env) { return Number(limit) > scheduledTopLeaguesLimit(env) ? ALL_TOP_LEAGUES_NAME : TOP_LEAGUES_NAME; }
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
-function shouldRunAllTopLeaguesIngest(event, env) {
-  if (String(env.INGEST_ALL_TOP_LEAGUES || "true").toLowerCase() === "false") return false;
-  const minute = clamp(Number(env.ALL_TOP_LEAGUES_RUN_MINUTE || 0), 0, 59);
-  const scheduledMs = Number(event?.scheduledTime);
-  const date = Number.isFinite(scheduledMs) ? new Date(scheduledMs) : new Date();
-  return date.getUTCMinutes() === minute;
-}
+function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
+function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
+function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
+function shouldRunTrackedRankWindowRefresh(env) { return boolEnv(env.INGEST_TRACKED_RANK_WINDOWS ?? env.INGEST_ALL_TOP_LEAGUES, true); }
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }
@@ -1313,6 +1634,7 @@ function firstArray(...values) { for (const value of values) if (Array.isArray(v
 function firstDefined(...values) { for (const value of values) if (value !== undefined && value !== null && value !== "") return value; return null; }
 function toNumber(value) { if (value === null || value === undefined || value === "") return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
 function stringOrNull(value) { const text = String(value ?? "").trim(); return text || null; }
+function postgrestFilterText(value) { return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`; }
 function parseJsonObject(raw) { if (!raw) return {}; try { const parsed = JSON.parse(raw); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
 function c0ldMemberOverrides(env) {
   const raw = String(env.COLD_MEMBER_OVERRIDES_JSON || env.COLD_LEAGUES_MEMBER_OVERRIDES_JSON || "").trim();
