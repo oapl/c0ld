@@ -468,16 +468,10 @@ async function handleTopLeagues(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const limit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
+  const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, MAX_TOP_LEAGUES_LIMIT - 1);
   const runKey = requestedTopLeaguesRunKey(url, env);
-  const listName = topLeagueListNameForLimit(limit, env);
-
-  let rows = await supabaseSelect(env, CURRENT_TABLE, {
-    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
-    league_run_key: `eq.${runKey}`,
-    league_name: `eq.${listName}`,
-    order: "rank.asc",
-    limit: String(limit)
-  });
+  const listName = requestedTopLeagueListName(url, limit, env);
+  const rows = await fetchStoredTopLeagueRows(env, runKey, listName, limit, offset);
 
   let latest = latestMeta(rows);
 
@@ -501,6 +495,7 @@ async function handleTopLeagues(request, env) {
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
     league_name: listName,
+    offset,
     source: "ps99-league-api-worker",
     projection: "Projected rank uses current league points plus best available one-hour-equivalent gain.",
     rows: publicRows
@@ -806,18 +801,36 @@ async function fetchClanCurrentFromSupabase(env, clan) {
 
 async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
   const listName = topLeagueListNameForLimit(limit, env);
-  let rows = await supabaseSelect(env, CURRENT_TABLE, {
-    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
-    league_run_key: `eq.${runKey}`,
-    league_name: `eq.${listName}`,
-    order: "rank.asc",
-    limit: String(limit)
-  });
+  const rows = await fetchStoredTopLeagueRows(env, runKey, listName, limit);
 
   let latest = latestMeta(rows);
 
   const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName }) : rows.map(addNullGains);
   return { snapshot_at: latest?.fetched_at || null, source: listName, rows: rowsWithGains };
+}
+
+async function fetchStoredTopLeagueRows(env, runKey, listName, limit, offset = 0) {
+  const select = "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league";
+  const rows = [];
+  let fetched = 0;
+  const pageSize = 1000;
+
+  while (fetched < limit) {
+    const take = Math.min(pageSize, limit - fetched);
+    const page = await supabaseSelect(env, CURRENT_TABLE, {
+      select,
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${listName}`,
+      order: "rank.asc",
+      limit: String(take),
+      offset: String(offset + fetched)
+    });
+    rows.push(...page);
+    if (page.length < take) break;
+    fetched += page.length;
+  }
+
+  return rows;
 }
 
 async function fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
@@ -1775,6 +1788,12 @@ function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEF
 function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
 function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_ALL_LIMIT || DEFAULT_ALL_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function topLeagueListNameForLimit(limit, env) { return Number(limit) > scheduledTopLeaguesLimit(env) ? ALL_TOP_LEAGUES_NAME : TOP_LEAGUES_NAME; }
+function requestedTopLeagueListName(url, limit, env) {
+  const requested = String(url.searchParams.get("list") || url.searchParams.get("scope") || "").trim().toLowerCase();
+  if (["all", "10k", "10000", "top10000", "global_top_10000_leagues"].includes(requested)) return ALL_TOP_LEAGUES_NAME;
+  if (["top", "1k", "1000", "top1000", "global_top_1000_leagues"].includes(requested)) return TOP_LEAGUES_NAME;
+  return topLeagueListNameForLimit(limit, env);
+}
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; }

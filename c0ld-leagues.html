@@ -180,9 +180,9 @@ async function getJson(url){url.searchParams.set("v",Date.now());const res=await
 function addRun(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
 async function fetchLeagueCurrent(entry){const url=new URL(API+"/api/leagues/current");url.searchParams.set("league",entry.apiName||entry.name);url.searchParams.set("rank_lookup","false");addRun(url);return getJson(url)}
 function snapshotTime(data){const ms=new Date(data?.snapshot_at||0).getTime();return Number.isFinite(ms)?ms:0}
-async function fetchTopLeagueSnapshot(limit){const url=new URL(API+"/api/leagues/top-leagues");url.searchParams.set("limit",String(limit));addRun(url);return getJson(url)}
+async function fetchTopLeagueSnapshot(limit,list){const url=new URL(API+"/api/leagues/top-leagues");url.searchParams.set("limit",String(limit));if(list)url.searchParams.set("list",list);addRun(url);return getJson(url)}
 function topLeagueMap(data){return new Map((data?.rows||[]).flatMap(row=>[[norm(row.league_name),row],[String(row.league_id||""),row]].filter(pair=>pair[0])))}
-async function fetchTopLeagueContext(){try{const [topData,allData]=await Promise.all([fetchTopLeagueSnapshot(1000),fetchTopLeagueSnapshot(10000).catch(()=>null)]);return topLeagueMap(allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData)}catch{return new Map()}}
+async function fetchTopLeagueContext(){try{const [topData,allData]=await Promise.all([fetchTopLeagueSnapshot(1000,"top"),fetchTopLeagueSnapshot(1000,"all").catch(()=>null)]);return topLeagueMap(allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData)}catch{return new Map()}}
 async function fetchDiscoveredLeagues(){try{const url=new URL(API+"/api/leagues/c0ld-discovered");url.searchParams.set("limit","1000");addRun(url);const data=await getJson(url);return (data.rows||[]).map(discoveredLeagueRow)}catch{return []}}
 function topRowFor(entry,topRows){return topRows.get(norm(entry.name))||topRows.get(String(entry.id||""))||null}
 function finiteOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
