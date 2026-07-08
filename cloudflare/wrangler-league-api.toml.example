@@ -7,14 +7,21 @@ LEAGUE_NAME = "YAMO"
 # Change this when a new league run starts. Existing database rows are "legacy".
 LEAGUE_RUN_KEY = "active"
 # Comma-separated league list used for scheduled pulls.
-LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr"
+LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr,zee2"
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
 INGEST_LEAGUES = "true"
 INGEST_TOP_LEAGUES = "true"
 LEAGUE_INGEST_CONCURRENCY = "4"
+# The */5 cron updates tracked league rosters/points and Top 1000. The Worker only
+# runs the Top 10000 rank sweep when the scheduled minute matches ALL_TOP_LEAGUES_RUN_MINUTE.
 TOP_LEAGUES_LIMIT = "1000"
 SCHEDULED_TOP_LEAGUES_LIMIT = "1000"
+INGEST_ALL_TOP_LEAGUES = "true"
+ALL_TOP_LEAGUES_LIMIT = "10000"
+ALL_TOP_LEAGUES_RUN_MINUTE = "0"
+TOP_LEAGUES_PAGE_DELAY_MS = "300"
+ALL_TOP_LEAGUES_PAGE_DELAY_MS = "200"
 TOP_LEAGUES_STRICT_DB_ONLY = "true"
 TOP_LEAGUES_LIVE_FALLBACK = "false"
 TOP_LEAGUES_MAX_STALE_MINUTES = "15"

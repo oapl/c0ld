@@ -5,10 +5,14 @@ const DEFAULT_LEAGUE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TOP_LEAGUES_MAX_STALE_MINUTES = 15;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
+const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
 const DEFAULT_TOP_LEAGUES_LIMIT = 1000;
+const DEFAULT_ALL_TOP_LEAGUES_LIMIT = 10000;
 const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
+const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 300;
+const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 200;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
@@ -24,7 +28,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -38,7 +42,13 @@ export default {
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
       } else if (request.method === "POST" && url.pathname === "/api/leagues/top-leagues/ingest") {
         requireAdmin(request, env);
-        response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url));
+        const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
+        const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
+        response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url), {
+          listName: ingestListName,
+          limit: ingestLimit,
+          pageDelayMs: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageDelayMs(env) : topLeaguesPageDelayMs(env)
+        });
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -67,7 +77,18 @@ export default {
         console.log("scheduled tracked league ingest complete", JSON.stringify(results));
       }
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
-        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env)).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
+        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
+          listName: TOP_LEAGUES_NAME,
+          limit: scheduledTopLeaguesLimit(env),
+          pageDelayMs: topLeaguesPageDelayMs(env)
+        }).catch(err => console.error("scheduled top 1000 leagues ingest failed", err?.message || String(err)));
+      }
+      if (shouldRunAllTopLeaguesIngest(event, env)) {
+        await handleTopLeaguesIngest(env, "schedule:hourly-all", topLeaguesRunKey(env), {
+          listName: ALL_TOP_LEAGUES_NAME,
+          limit: allTopLeaguesLimit(env),
+          pageDelayMs: allTopLeaguesPageDelayMs(env)
+        }).catch(err => console.error("scheduled top 10000 leagues ingest failed", err?.message || String(err)));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
@@ -117,19 +138,22 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, snapshot_retention: "permanent" }, 202);
 }
 
-async function handleTopLeaguesIngest(env, source, requestedRunKey) {
+async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
-  const top = await fetchTopLeagues(source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env));
-  const snapshotId = `top_leagues:${runKey}:${fetchedAt}`;
+  const listName = options.listName || TOP_LEAGUES_NAME;
+  const limit = clamp(Number(options.limit || (source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env))), 1, MAX_TOP_LEAGUES_LIMIT);
+  const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env) });
+  const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
+  const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
 
   const dbRows = top.rows.map(row => ({
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
     source: `${source}:top-leagues`,
     league_run_key: runKey,
-    league_name: TOP_LEAGUES_NAME,
+    league_name: listName,
     league_id: row.league_id || null,
     league_level: row.league_level ?? null,
     league_points: row.points || 0,
@@ -150,10 +174,10 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey) {
 
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${TOP_LEAGUES_NAME}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
   }
 
-  return json({ ok: true, league_run_key: runKey, league_name: TOP_LEAGUES_NAME, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source }, 202);
+  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit }, 202);
 }
 
 async function handleCurrent(request, env) {
@@ -181,8 +205,9 @@ async function handleCurrent(request, env) {
   const latest = latestMeta(rows);
   if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: requested, rows: [] }, env);
 
-  const [rowsWithGains, leagueRank] = await Promise.all([
+  const [rowsWithGains, storedLeagueRank, liveLeagueRank] = await Promise.all([
     addGainFields(env, rows, latest),
+    fetchStoredLeagueRank(env, runKey, requested, latest.league_id).catch(() => null),
     boolParam(url.searchParams.get("rank_lookup"), true) ? fetchLeagueRank(requested).catch(() => null) : Promise.resolve(null)
   ]);
   const ids = rowsWithGains.map(row => row.user_id);
@@ -200,7 +225,7 @@ async function handleCurrent(request, env) {
     league_points: toNumber(latest.league_points) || 0,
     league_icon: latest.league_icon || null,
     member_capacity: latest.member_capacity ?? null,
-    league_rank: leagueRank,
+    league_rank: storedLeagueRank ?? liveLeagueRank,
     source: "ps99-league-api-worker",
     snapshot_retention: "permanent",
     rows: rowsWithGains.map(row => publicMemberRow(row, usernameMap, avatarMap))
@@ -212,11 +237,12 @@ async function handleTopLeagues(request, env) {
   const url = new URL(request.url);
   const limit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
   const runKey = requestedTopLeaguesRunKey(url, env);
+  const listName = topLeagueListNameForLimit(limit, env);
 
   let rows = await supabaseSelect(env, CURRENT_TABLE, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
     league_run_key: `eq.${runKey}`,
-    league_name: `eq.${TOP_LEAGUES_NAME}`,
+    league_name: `eq.${listName}`,
     order: "rank.asc",
     limit: String(limit)
   });
@@ -231,7 +257,7 @@ async function handleTopLeagues(request, env) {
       fetched_at: now,
       source: rows.length ? "live:stale-fallback" : "live",
       league_run_key: runKey,
-      league_name: TOP_LEAGUES_NAME,
+      league_name: listName,
       league_id: row.league_id,
       league_level: row.league_level,
       league_points: row.points,
@@ -246,9 +272,9 @@ async function handleTopLeagues(request, env) {
     latest = latestMeta(rows);
   }
 
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: TOP_LEAGUES_NAME, rows: [] }, env);
+  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: listName, rows: [] }, env);
 
-  const rowsWithGains = await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: TOP_LEAGUES_NAME });
+  const rowsWithGains = await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName });
   const publicRows = rowsWithGains.map(row => {
     const out = publicLeagueRow(row);
     out.projected_gain_1h = projectGain1h(out);
@@ -265,7 +291,7 @@ async function handleTopLeagues(request, env) {
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
-    league_name: TOP_LEAGUES_NAME,
+    league_name: listName,
     source: "ps99-league-api-worker",
     projection: "Projected rank uses current league points plus best available one-hour-equivalent gain.",
     rows: publicRows
@@ -525,10 +551,11 @@ async function fetchClanCurrentFromSupabase(env, clan) {
 }
 
 async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
+  const listName = topLeagueListNameForLimit(limit, env);
   let rows = await supabaseSelect(env, CURRENT_TABLE, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
     league_run_key: `eq.${runKey}`,
-    league_name: `eq.${TOP_LEAGUES_NAME}`,
+    league_name: `eq.${listName}`,
     order: "rank.asc",
     limit: String(limit)
   });
@@ -543,7 +570,7 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
       fetched_at: now,
       source: "live:overlap",
       league_run_key: runKey,
-      league_name: TOP_LEAGUES_NAME,
+      league_name: listName,
       league_id: row.league_id,
       league_level: row.league_level,
       league_points: row.points,
@@ -558,8 +585,8 @@ async function fetchTopLeagueRowsForOverlap(env, runKey, limit) {
     latest = latestMeta(rows);
   }
 
-  const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: TOP_LEAGUES_NAME }) : rows.map(addNullGains);
-  return { snapshot_at: latest?.fetched_at || null, rows: rowsWithGains };
+  const rowsWithGains = latest ? await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName }) : rows.map(addNullGains);
+  return { snapshot_at: latest?.fetched_at || null, source: listName, rows: rowsWithGains };
 }
 
 async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit) {
@@ -707,6 +734,53 @@ async function readJsonResponse(res, url) {
   }
 }
 
+async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = null) {
+  const labels = [ALL_TOP_LEAGUES_NAME, TOP_LEAGUES_NAME];
+  const name = String(leagueNameValue || "").trim();
+  const id = String(leagueId || "").trim();
+
+  for (const label of labels) {
+    if (id) {
+      const byId = await supabaseSelect(env, CURRENT_TABLE, {
+        select: "rank,fetched_at,display_name,league_id",
+        league_run_key: `eq.${runKey}`,
+        league_name: `eq.${label}`,
+        league_id: `eq.${id}`,
+        order: "fetched_at.desc",
+        limit: "1"
+      });
+      const rank = toNumber(byId[0]?.rank);
+      if (rank !== null) return rank;
+    }
+
+    if (name) {
+      const byName = await supabaseSelect(env, CURRENT_TABLE, {
+        select: "rank,fetched_at,display_name,league_id",
+        league_run_key: `eq.${runKey}`,
+        league_name: `eq.${label}`,
+        display_name: `eq.${name}`,
+        order: "fetched_at.desc",
+        limit: "1"
+      });
+      const exactRank = toNumber(byName[0]?.rank);
+      if (exactRank !== null) return exactRank;
+
+      const byLooseName = await supabaseSelect(env, CURRENT_TABLE, {
+        select: "rank,fetched_at,display_name,league_id",
+        league_run_key: `eq.${runKey}`,
+        league_name: `eq.${label}`,
+        display_name: `ilike.${name}`,
+        order: "fetched_at.desc",
+        limit: "1"
+      });
+      const looseRank = toNumber(byLooseName[0]?.rank);
+      if (looseRank !== null) return looseRank;
+    }
+  }
+
+  return null;
+}
+
 async function fetchLeagueRank(leagueNameValue) {
   const api = await fetchLeagueListApi(1, 100);
   const leagues = leagueListFromResponse(api).map((item, i) => ({
@@ -722,14 +796,16 @@ async function fetchLeagueRank(leagueNameValue) {
   return found.explicitRank && found.explicitRank > 0 ? found.explicitRank : leagues.indexOf(found) + 1;
 }
 
-async function fetchTopLeagues(limit) {
+async function fetchTopLeagues(limit, options = {}) {
   const capped = clamp(Number(limit) || DEFAULT_TOP_LEAGUES_LIMIT, 1, MAX_TOP_LEAGUES_LIMIT);
+  const pageDelayMs = clamp(Number(options.pageDelayMs || 0), 0, 5000);
   const pageSize = 100;
   const pages = Math.ceil(capped / pageSize);
   const seen = new Set();
   const leagues = [];
 
   for (let page = 1; page <= pages; page += 1) {
+    if (page > 1 && pageDelayMs > 0) await sleep(pageDelayMs);
     const api = await fetchLeagueListApi(page, pageSize);
     const pageRows = leagueListFromResponse(api);
     if (!pageRows.length) break;
@@ -1211,6 +1287,17 @@ function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LE
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
+function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_ALL_LIMIT || DEFAULT_ALL_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
+function topLeagueListNameForLimit(limit, env) { return Number(limit) > scheduledTopLeaguesLimit(env) ? ALL_TOP_LEAGUES_NAME : TOP_LEAGUES_NAME; }
+function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
+function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
+function shouldRunAllTopLeaguesIngest(event, env) {
+  if (String(env.INGEST_ALL_TOP_LEAGUES || "true").toLowerCase() === "false") return false;
+  const minute = clamp(Number(env.ALL_TOP_LEAGUES_RUN_MINUTE || 0), 0, 59);
+  const scheduledMs = Number(event?.scheduledTime);
+  const date = Number.isFinite(scheduledMs) ? new Date(scheduledMs) : new Date();
+  return date.getUTCMinutes() === minute;
+}
 function boolEnv(value, defaultValue = false) { if (value === undefined || value === null || value === "") return defaultValue; return !FALSEY_ENV_VALUES.has(String(value).trim().toLowerCase()); }
 function boolParam(value, defaultValue = false) { return value === null || value === undefined || value === "" ? defaultValue : boolEnv(value, defaultValue); }
 function allowTopLeaguesLiveFallback(env) { return !boolEnv(env.TOP_LEAGUES_STRICT_DB_ONLY, true) && boolEnv(env.TOP_LEAGUES_LIVE_FALLBACK, false); }
@@ -1248,6 +1335,7 @@ function isFallbackUsername(username, userId) { const text = String(username || 
 function bestUsernameForOverlap(userId, ...values) { const names = values.map(value => String(value || "").trim()).filter(Boolean); return names.find(name => !isFallbackUsername(name, userId)) || names[0] || `user_${userId}`; }
 function displayUsername(row, usernameMap) { const id = toNumber(row.user_id); const existing = String(row.display_name || "").trim(); const resolved = id ? String(usernameMap.get(id) || "").trim() : ""; if (resolved && !isFallbackUsername(resolved, id)) return resolved; if (existing && !isFallbackUsername(existing, id)) return existing; return existing || (id ? `user_${id}` : ""); }
 function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function json(payload, status = 200, headers = {}) { return new Response(JSON.stringify(payload, null, 2), { status, headers: { "Content-Type": "application/json; charset=utf-8", ...headers } }); }
 function cacheJson(payload, env) { const seconds = clamp(Number(env.PUBLIC_CACHE_SECONDS || DEFAULT_PUBLIC_CACHE_SECONDS), 0, 3600); return json(payload, 200, { "Cache-Control": seconds > 0 ? `public, max-age=${seconds}` : "no-store" }); }
 function withCors(response, request, env) { const origin = request.headers.get("Origin") || ""; const allowed = allowedOrigins(env); const allowOrigin = !origin ? "*" : (allowed.has("*") || allowed.has(origin) ? origin : Array.from(allowed)[0] || "*"); const headers = new Headers(response.headers); headers.set("Access-Control-Allow-Origin", allowOrigin); headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS"); headers.set("Access-Control-Allow-Headers", "Content-Type,Authorization"); headers.set("Vary", "Origin"); return new Response(response.body, { status: response.status, statusText: response.statusText, headers }); }
