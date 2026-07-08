@@ -12,7 +12,7 @@ const MAX_TOP_LEAGUES_LIMIT = 10000;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 30;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 40;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 300;
-const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 200;
+const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 5000;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
@@ -248,7 +248,8 @@ async function handleTopLeagues(request, env) {
   });
 
   let latest = latestMeta(rows);
-  const allowLiveFallback = allowTopLeaguesLiveFallback(env);
+  const requestLiveFallback = boolParam(url.searchParams.get("live"), false) || boolParam(url.searchParams.get("fallback_live"), false);
+  const allowLiveFallback = allowTopLeaguesLiveFallback(env) || (requestLiveFallback && limit <= scheduledTopLeaguesLimit(env));
   if (allowLiveFallback && (!rows.length || rows.length < limit || isTopLeaguesStale(latest, env))) {
     const live = await fetchTopLeagues(limit);
     const now = new Date().toISOString();
