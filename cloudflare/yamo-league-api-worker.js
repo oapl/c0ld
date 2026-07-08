@@ -32,7 +32,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -48,11 +48,14 @@ export default {
         requireAdmin(request, env);
         const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
         const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
+        const ingestPageSize = ingestListName === ALL_TOP_LEAGUES_NAME
+          ? clamp(Number(url.searchParams.get("page_size") || url.searchParams.get("pageSize") || allTopLeaguesPageSize(env)), 1, 100)
+          : undefined;
         response = await handleTopLeaguesIngest(env, "manual", runKeyParam(url), {
           listName: ingestListName,
           limit: ingestLimit,
           pageDelayMs: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageDelayMs(env) : topLeaguesPageDelayMs(env),
-          pageSize: ingestListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageSize(env) : undefined
+          pageSize: ingestPageSize
         });
       } else {
         response = json({ ok: false, message: "Not found" }, 404);

@@ -14,7 +14,7 @@ INGEST_LEAGUES = "true"
 INGEST_TOP_LEAGUES = "true"
 LEAGUE_INGEST_CONCURRENCY = "4"
 # The */5 cron updates tracked league rosters/points and Top 1000.
-# Run POST /api/leagues/top-leagues/ingest?limit=10000 manually once to seed
+# Run POST /api/leagues/top-leagues/ingest?limit=10000&page_size=25 manually once to seed
 # outside-Top-1000 ranks. After that, the cron only refreshes small neighborhoods
 # around tracked leagues that are outside the Top 1000.
 TOP_LEAGUES_LIMIT = "1000"
