@@ -82,6 +82,10 @@ async function handleInteraction(request, env) {
     return interactionJson(messageResponse(`Unknown command: ${commandName || "none"}`));
   }
 
+  if (!memberHasAllowedRole(interaction, env)) {
+    return interactionJson(messageResponse("You do not have access to use `/search`.", true));
+  }
+
   const username = getCommandOption(interaction, "username");
   if (!username) {
     return interactionJson(messageResponse("Use `/search username:<roblox username>`.", true));
@@ -533,6 +537,7 @@ function searchCommandPayload() {
     name: "search",
     type: APPLICATION_COMMAND_CHAT_INPUT,
     description: "Search stored global rank data by Roblox username.",
+    dm_permission: false,
     options: [
       {
         name: "username",
@@ -542,6 +547,24 @@ function searchCommandPayload() {
       }
     ]
   };
+}
+
+function memberHasAllowedRole(interaction, env) {
+  const allowedRoleIds = parseCsv(env.DISCORD_ALLOWED_ROLE_IDS);
+  if (!allowedRoleIds.length) return true;
+
+  const memberRoles = Array.isArray(interaction?.member?.roles)
+    ? interaction.member.roles.map(role => String(role))
+    : [];
+
+  return memberRoles.some(roleId => allowedRoleIds.includes(roleId));
+}
+
+function parseCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 async function verifyDiscordRequest(request, env, body) {

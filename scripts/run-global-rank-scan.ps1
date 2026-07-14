@@ -26,6 +26,21 @@ $base = $WorkerUrl.TrimEnd("/")
 $headers = @{ Authorization = "Bearer $Token" }
 $forceNextCall = [bool]$Force
 
+function First-Value {
+  param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [object[]]$Values
+  )
+
+  foreach ($value in $Values) {
+    if ($null -ne $value -and "$value" -ne "") {
+      return $value
+    }
+  }
+
+  return $null
+}
+
 for ($call = 1; $call -le $MaxCalls; $call += 1) {
   $query = @()
   if ($Clan) {
@@ -41,9 +56,9 @@ for ($call = 1; $call -le $MaxCalls; $call += 1) {
   }
 
   $result = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers
-  $scanned = [int]($result.scanned_clan_count ?? $result.scanned_count ?? 0)
-  $limit = [int]($result.clan_scan_limit ?? 0)
-  $candidates = [int]($result.candidate_player_count ?? 0)
+  $scanned = [int](First-Value $result.scanned_clan_count $result.scanned_count 0)
+  $limit = [int](First-Value $result.clan_scan_limit 0)
+  $candidates = [int](First-Value $result.candidate_player_count 0)
   $status = [string]$result.status
   $stopReason = [string]$result.stop_reason
 

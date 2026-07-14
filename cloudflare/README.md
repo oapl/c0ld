@@ -139,7 +139,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
-| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `60`; starts a new global scan on this interval boundary. Running scans continue on each 5-minute cron tick until finished. |
+| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `60`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
+| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Offset inside the schedule interval. With `GLOBAL_RANK_SCHEDULE_MINUTES=60`, use `57` to start on the cron tick immediately before minute `:57`, normally `:55` with a `*/5` cron. |
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; maximum clan detail pulls per Worker invocation. Increase carefully. |
@@ -169,6 +170,8 @@ crons = ["*/5 * * * *"]
 ```
 
 That runs the Worker every 5 minutes. In the Cloudflare dashboard, add the same cron trigger under the Worker trigger settings if you are not using Wrangler.
+
+Do not change the Cloudflare cron itself to hourly for global ranks. The Worker uses `GLOBAL_RANK_SCHEDULE_MINUTES=60` to start a fresh scan once per hour, then each 5-minute cron tick resumes the running scan until `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached. If `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=57`, the `*/5` cron starts the fresh scan on the `:55` tick because that is the last cron tick before `:57`.
 
 ## Manual test
 
@@ -241,6 +244,7 @@ Required Worker variables:
 | `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
+| `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
 
 Required Worker secrets:
 
@@ -280,6 +284,18 @@ Invoke-RestMethod -Method Post `
 Use `guild_id` while testing because it usually appears immediately in that
 server. Omit `?guild_id=...` once you want a global command, but expect Discord's
 global command cache to take longer to appear.
+
+To hide `/search` from users without the c0ld/WMSY roles, open Discord
+**Server Settings > Integrations > Oapl's C0LD Bot > /search**. Disable
+`@everyone`, then allow only these role IDs:
+
+```text
+1489032328855556096
+1501632370082840576
+```
+
+The Worker also enforces `DISCORD_ALLOWED_ROLE_IDS`, so users without one of
+those roles are denied even if Discord still shows a cached command entry.
 
 List registered commands:
 

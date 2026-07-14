@@ -105,11 +105,12 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduledIngests(env));
+    const scheduledAt = event?.scheduledTime ? new Date(event.scheduledTime) : null;
+    ctx.waitUntil(runScheduledIngests(env, false, scheduledAt));
   }
 };
 
-async function runScheduledIngests(env, force = false) {
+async function runScheduledIngests(env, force = false, scheduledAt = null) {
   const jobs = clanNames(env).map(clan => ({
     label: `members:${clan}`,
     run: () => handleIngest(env, "schedule", clan, force)
@@ -126,7 +127,7 @@ async function runScheduledIngests(env, force = false) {
     const globalClan = clanName(env);
     const hasRunningGlobalScan = await hasRunningGlobalRankRun(env, globalClan).catch(() => false);
 
-    if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env)) {
+    if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env, scheduledAt)) {
       jobs.push({
         label: "global-ranks",
         run: () => handleGlobalRankIngest(env, "schedule", globalClan, force)
@@ -148,7 +149,14 @@ async function runScheduledIngests(env, force = false) {
         reason: payload?.reason || null,
         battle_key: payload?.battle_key || null,
         rows_inserted: payload?.rows_inserted ?? null,
+        status_text: payload?.status || null,
+        clan_scan_limit: payload?.clan_scan_limit ?? null,
         scanned_count: payload?.scanned_count ?? null,
+        scanned_clan_count: payload?.scanned_clan_count ?? null,
+        processed_clans: payload?.processed_clans ?? null,
+        next_clan_offset: payload?.next_clan_offset ?? null,
+        candidate_player_count: payload?.candidate_player_count ?? null,
+        total_global_players: payload?.total_global_players ?? null,
         message: payload?.message || null
       };
       results.push(result);
@@ -3344,12 +3352,23 @@ function globalRankClanDelayMs(env) {
   );
 }
 
-function shouldRunGlobalRankSchedule(env) {
+function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
   const interval = clamp(Number(env.GLOBAL_RANK_SCHEDULE_MINUTES || 60), 5, 1440);
-  const now = new Date();
+  const offset = normalizedScheduleOffset(env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES, interval);
+  const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
   const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minuteInInterval = minuteOfDay % interval;
+  const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minuteOfDay % interval < 5;
+  return minutesUntilOffset < 5;
+}
+
+function normalizedScheduleOffset(value, interval) {
+  const raw = Number(value || 0);
+  if (!Number.isFinite(raw)) return 0;
+  return ((Math.floor(raw) % interval) + interval) % interval;
 }
 
 function normalizeGlobalSearchKey(value) {

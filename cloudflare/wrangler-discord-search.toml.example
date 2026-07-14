@@ -12,6 +12,9 @@ DISCORD_EPHEMERAL_RESPONSES = "false"
 DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
 # Optional. Use this while testing so the command appears in one server quickly.
 DISCORD_GUILD_ID = ""
+# Optional. Comma-separated Discord role IDs allowed to use /search.
+# Leave blank to allow everyone who can see the command.
+DISCORD_ALLOWED_ROLE_IDS = "1489032328855556096,1501632370082840576"
 
 [[services]]
 binding = "CLAN_API_WORKER"
