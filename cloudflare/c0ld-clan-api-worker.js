@@ -149,7 +149,6 @@ async function runScheduledIngests(env, force = false) {
         battle_key: payload?.battle_key || null,
         rows_inserted: payload?.rows_inserted ?? null,
         scanned_count: payload?.scanned_count ?? null,
-        found_member_count: payload?.found_member_count ?? null,
         message: payload?.message || null
       };
       results.push(result);
@@ -420,14 +419,43 @@ async function handleGlobalCurrent(request, env) {
     });
 
   const run = runRows[0] || null;
+  const displayRows = await overlayGlobalCurrentRowsFromCandidates(env, rows, run);
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     clan_name: clan,
-    snapshot_at: run?.finished_at || run?.updated_at || rows[0]?.fetched_at || null,
+    snapshot_at: run?.finished_at || run?.updated_at || displayRows[0]?.fetched_at || rows[0]?.fetched_at || null,
     run,
-    rows: rows.map(row => normalizeGlobalCurrentOutput(row))
+    rows: displayRows.map(row => normalizeGlobalCurrentOutput(row))
   }, env);
+}
+
+async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
+  if (!run?.run_key || !Array.isArray(rows) || !rows.length) return rows;
+
+  const needsOverlay = rows.some(row => !(toNumber(row.global_rank) > 0));
+  if (!needsOverlay) return rows;
+
+  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key).catch(() => []);
+  if (!rankedCandidates.length) return rows;
+
+  const totalGlobalPlayers = rankedCandidates.length;
+  const byUserId = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
+
+  return rows.map(row => {
+    const match = byUserId.get(String(row.user_id));
+    if (!match) return row;
+
+    return {
+      ...row,
+      global_rank: toNumber(match.global_rank),
+      global_points: toNumber(match.points),
+      total_global_players: totalGlobalPlayers,
+      found: true,
+      fetched_at: row.fetched_at || match.fetched_at || run.updated_at || run.started_at || null,
+      updated_at: run.updated_at || row.updated_at || match.updated_at || null
+    };
+  });
 }
 
 async function handleGlobalSearch(request, env) {
@@ -462,6 +490,28 @@ async function handleGlobalSearch(request, env) {
     return cacheJson(await searchGlobalRankCandidates(env, clan, query), env);
   }
 
+  if (!(toNumber(found.global_rank) > 0)) {
+    const candidateResult = await searchGlobalRankCandidates(env, clan, query);
+    if (candidateResult?.ok && candidateResult.row) {
+      const run = candidateResult.run || null;
+      return cacheJson({
+        ...candidateResult,
+        row: {
+          ...candidateResult.row,
+          clan_name: found.clan_name || clan,
+          username: found.username || candidateResult.row.username,
+          display_name: found.display_name || candidateResult.row.display_name,
+          avatar_url: found.avatar_url || candidateResult.row.avatar_url,
+          clan_rank: toNumber(found.clan_rank) || candidateResult.row.clan_rank,
+          clan_points: toNumber(found.clan_points) || candidateResult.row.clan_points,
+          clan_member_count: toNumber(run?.clan_member_count) || null,
+          source_clan: found.clan_name || clan
+        },
+        run
+      }, env);
+    }
+  }
+
   const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
     select: "run_key,fetched_at,event_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
     clan_name: `eq.${clan}`,
@@ -481,7 +531,10 @@ async function handleGlobalSearch(request, env) {
     ok: true,
     query,
     clan_name: clan,
-    row: normalizeGlobalCurrentOutput(found),
+    row: {
+      ...normalizeGlobalCurrentOutput(found),
+      clan_member_count: toNumber(runRows[0]?.clan_member_count) || null
+    },
     run: runRows[0] || null,
     history: history.map(row => ({
       ...row,
@@ -562,6 +615,7 @@ async function searchGlobalRankCandidates(env, clan, query) {
     ok: true,
     query,
     clan_name: clan,
+    run,
     row: normalizeGlobalCandidateSearchOutput(candidate, {
       run,
       globalRank: higherCount + tiedBeforeCount + 1,
@@ -674,8 +728,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
     updated_at: fetchedAt
   });
 
-  await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, clanMembers, "clan_name,user_id");
-
   let processedClans = 0;
   let foundMemberCount = 0;
 
@@ -725,14 +777,14 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
       }
     }
 
-    candidatePlayerCount = await countGlobalRankCandidates(env, runKey);
+    candidatePlayerCount = await countGlobalRankUniqueCandidates(env, runKey);
+    foundMemberCount = await countGlobalRankMatchedClanMembers(env, runKey, clanMembers);
 
     if (!stopReason && nextClanOffset >= clanScanLimit) {
       stopReason = "max_clan_scan_limit";
     }
 
     if (stopReason) {
-      candidatePlayerCount = await countGlobalRankUniqueCandidates(env, runKey);
       const finalized = await finalizeGlobalRankRun(env, {
         runKey,
         clan,
@@ -789,7 +841,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
         cutoff_points: cutoffPoints,
         candidate_player_count: candidatePlayerCount,
         clan_member_count: clanMembers.length,
-        found_member_count: foundMemberCount,
         total_global_players: candidatePlayerCount
       }, 202);
     }
@@ -838,7 +889,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
       cutoff_points: cutoffPoints,
       candidate_player_count: candidatePlayerCount,
       clan_member_count: clanMembers.length,
-      found_member_count: 0,
       total_global_players: candidatePlayerCount
     }, 202);
   } catch (err) {
@@ -1797,6 +1847,23 @@ async function countGlobalRankUniqueCandidates(env, runKey) {
     run_key: `eq.${runKey}`,
     order: "user_id.asc"
   }, globalRankCandidateReadLimit(env));
+
+  return new Set(rows.map(row => String(row.user_id || "").trim()).filter(Boolean)).size;
+}
+
+async function countGlobalRankMatchedClanMembers(env, runKey, clanMembers) {
+  const memberIds = [...new Set((clanMembers || [])
+    .map(row => toNumber(row.user_id))
+    .filter(Boolean))];
+
+  if (!memberIds.length) return 0;
+
+  const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    select: "user_id",
+    run_key: `eq.${runKey}`,
+    user_id: `in.(${memberIds.join(",")})`,
+    order: "user_id.asc"
+  }, memberIds.length * 10);
 
   return new Set(rows.map(row => String(row.user_id || "").trim()).filter(Boolean)).size;
 }
@@ -2774,7 +2841,7 @@ async function supabaseCount(env, tableName, params) {
 }
 
 async function supabaseSelectPaged(env, tableName, params, limit, pageSize = 1000) {
-  const requested = clamp(Number(limit || 1000), 1, 250000);
+  const requested = clamp(Number(limit || 1000), 1, 2000000);
   const size = clamp(Number(pageSize || 1000), 1, 1000);
   const baseOffset = Number(params.offset || 0);
   const rows = [];
@@ -3250,7 +3317,7 @@ function globalRankClansPerRun(env) {
 }
 
 function globalRankCandidateReadLimit(env) {
-  return clamp(globalRankClanScanLimit(env) * 100, 1000, 250000);
+  return clamp(globalRankClanScanLimit(env) * 100, 1000, 2000000);
 }
 
 function globalRankRetryAttempts(env) {

@@ -111,7 +111,7 @@ async function buildSearchResponse(query, env) {
   const row = payload.row;
   const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
   const primaryClanName = String(scanClan).toLowerCase();
-  const isPrimaryClanMember = !row.source_clan && String(row.clan_name || "").toLowerCase() === primaryClanName;
+  const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
   const clanRankText = formatClanRank(row, payload.run);
   const clanRankLine = isPrimaryClanMember
     ? `🔰 Rank in ${resultClan.toUpperCase()}: **${clanRankText}**`
