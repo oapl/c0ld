@@ -13,6 +13,10 @@ DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
 # Optional. Use this while testing so the command appears in one server quickly.
 DISCORD_GUILD_ID = ""
 
+[[services]]
+binding = "CLAN_API_WORKER"
+service = "c0ld-clan-api-worker"
+
 # Set these with `wrangler secret put ...` or in Cloudflare Worker settings:
 # DISCORD_PUBLIC_KEY
 # DISCORD_BOT_TOKEN

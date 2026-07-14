@@ -30,6 +30,16 @@ export default {
         return await listCommands(url, env);
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/discord-debug") {
+        requireAdmin(request, env);
+        return await discordDebug(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/search-debug") {
+        requireAdmin(request, env);
+        return await searchDebug(url, env);
+      }
+
       if ((request.method === "POST" || request.method === "DELETE") && url.pathname === "/admin/delete-command") {
         requireAdmin(request, env);
         return await deleteCommand(url, env);
@@ -88,24 +98,11 @@ async function handleInteraction(request, env) {
 }
 
 async function buildSearchResponse(query, env) {
-  const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
-  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
-  const url = new URL("/api/global/search", apiBase);
-  url.searchParams.set("clan", scanClan);
-  url.searchParams.set("q", query);
+  const { payload, status, ok } = await fetchGlobalSearchPayload(query, env);
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "c0ld-Discord-Search-Worker"
-    },
-    cf: { cacheTtl: 0, cacheEverything: false }
-  });
-  const payload = await res.json().catch(() => ({}));
-
-  if (!res.ok || payload.ok === false || !payload.row) {
+  if (!ok || payload.ok === false || !payload.row) {
     return messageResponse(
-      payload.message || `No global-rank result found for ${query}.`,
+      payload.message || `No global-rank result found for ${query}. ${status ? `(API ${status})` : ""}`.trim(),
       true
     );
   }
@@ -173,7 +170,7 @@ async function registerSearchCommand(url, env) {
     return json({
       ok: false,
       status: res.status,
-      message: payload.message || "Discord command registration failed.",
+      message: discordApiErrorMessage(res.status, payload.message || "Discord command registration failed."),
       details: payload
     }, 502);
   }
@@ -251,6 +248,229 @@ async function deleteCommand(url, env) {
   return json({ ok: true, deleted });
 }
 
+async function discordDebug(url, env) {
+  const configuredApplicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
+  const guildId = String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
+  const [botUser, botApplication, guildCheck] = await Promise.all([
+    fetchDiscordDebugEndpoint(env, "/users/@me"),
+    fetchDiscordDebugEndpoint(env, "/oauth2/applications/@me"),
+    guildId ? fetchDiscordDebugEndpoint(env, `/guilds/${encodeURIComponent(guildId)}`) : Promise.resolve(null)
+  ]);
+
+  const tokenApplicationId = String(botApplication?.payload?.id || "");
+  return json({
+    ok: true,
+    configured_application_id: configuredApplicationId,
+    token_application_id: tokenApplicationId || null,
+    application_id_matches_token: Boolean(tokenApplicationId) && tokenApplicationId === configuredApplicationId,
+    guild_id: guildId || null,
+    guild_access_ok: guildCheck ? guildCheck.ok : null,
+    bot_user: botUser.ok ? {
+      id: botUser.payload.id,
+      username: botUser.payload.username,
+      global_name: botUser.payload.global_name || null
+    } : null,
+    application: botApplication.ok ? {
+      id: botApplication.payload.id,
+      name: botApplication.payload.name,
+      bot_public: botApplication.payload.bot_public ?? null,
+      bot_require_code_grant: botApplication.payload.bot_require_code_grant ?? null
+    } : null,
+    checks: {
+      bot_token: summarizeDiscordDebugResult(botUser),
+      application: summarizeDiscordDebugResult(botApplication),
+      guild: guildCheck ? summarizeDiscordDebugResult(guildCheck) : null
+    }
+  });
+}
+
+async function searchDebug(url, env) {
+  const query = String(url.searchParams.get("q") || url.searchParams.get("username") || "").trim();
+  if (!query) {
+    throw httpError(400, "Missing ?q=username.");
+  }
+
+  const result = await fetchGlobalSearchPayload(query, env);
+  return json({
+    ok: result.ok && result.payload.ok !== false && Boolean(result.payload.row),
+    configured: result.configured,
+    api_status: result.status,
+    api_ok: result.apiOk,
+    payload_ok: result.payload.ok ?? null,
+    payload_message: result.payload.message || null,
+    fallback_used: result.fallbackUsed,
+    fallback_status: result.fallbackStatus,
+    row_found: Boolean(result.payload.row),
+    row: result.payload.row || null
+  });
+}
+
+async function fetchGlobalSearchPayload(query, env) {
+  const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/global/search", apiBase);
+  apiUrl.searchParams.set("clan", scanClan);
+  apiUrl.searchParams.set("q", query);
+
+  const res = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Search-Worker-Debug"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await res.json().catch(() => ({}));
+
+  if (res.ok && payload.ok !== false && payload.row) {
+    return {
+      ok: true,
+      apiOk: true,
+      status: res.status,
+      payload,
+      fallbackUsed: false,
+      fallbackStatus: null,
+      configured: {
+        scan_clan: scanClan,
+        clan_api_base: apiBase,
+        service_binding_enabled: hasClanApiServiceBinding(env),
+        api_url: apiUrl.toString()
+      }
+    };
+  }
+
+  const fallback = await fetchGlobalCurrentFallback(env, apiBase, scanClan, query);
+  if (fallback.payload.row) {
+    return {
+      ok: true,
+      apiOk: res.ok,
+      status: res.status,
+      payload: fallback.payload,
+      fallbackUsed: true,
+      fallbackStatus: fallback.status,
+      configured: {
+        scan_clan: scanClan,
+        clan_api_base: apiBase,
+        service_binding_enabled: hasClanApiServiceBinding(env),
+        api_url: apiUrl.toString()
+      }
+    };
+  }
+
+  return {
+    ok: false,
+    apiOk: res.ok,
+    status: res.status,
+    payload: payload.ok === false || payload.message ? payload : fallback.payload,
+    fallbackUsed: fallback.used,
+    fallbackStatus: fallback.status,
+    configured: {
+      scan_clan: scanClan,
+      clan_api_base: apiBase,
+      service_binding_enabled: hasClanApiServiceBinding(env),
+      api_url: apiUrl.toString()
+    }
+  };
+}
+
+async function fetchGlobalCurrentFallback(env, apiBase, scanClan, query) {
+  const currentUrl = clanApiUrl(env, "/api/global/current", apiBase);
+  currentUrl.searchParams.set("clan", scanClan);
+  currentUrl.searchParams.set("limit", "1000");
+
+  const res = await fetchClanApi(env, currentUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Search-Worker-Fallback"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await res.json().catch(() => ({}));
+
+  if (!res.ok || !Array.isArray(payload.rows)) {
+    return {
+      used: true,
+      status: res.status,
+      payload: {
+        ok: false,
+        message: `Global search endpoint failed and current fallback failed (${res.status}).`
+      }
+    };
+  }
+
+  const searchKey = normalizeSearchKey(query);
+  const row = payload.rows.find(item => {
+    const userId = String(item.user_id || "").trim();
+    return (
+      userId === String(query).trim() ||
+      normalizeSearchKey(item.username) === searchKey ||
+      normalizeSearchKey(item.display_name) === searchKey
+    );
+  }) || null;
+
+  return {
+    used: true,
+    status: res.status,
+    payload: row ? {
+      ok: true,
+      query,
+      clan_name: scanClan,
+      row,
+      history: []
+    } : {
+      ok: false,
+      query,
+      clan_name: scanClan,
+      message: `No current global-rank row matched "${query}".`
+    }
+  };
+}
+
+function normalizeSearchKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+}
+
+function clanApiUrl(env, path, fallbackBase) {
+  const base = hasClanApiServiceBinding(env)
+    ? "https://c0ld-clan-api-worker.service"
+    : fallbackBase;
+  return new URL(path, base);
+}
+
+function hasClanApiServiceBinding(env) {
+  return Boolean(env?.CLAN_API_WORKER && typeof env.CLAN_API_WORKER.fetch === "function");
+}
+
+async function fetchClanApi(env, url, init) {
+  const request = new Request(url.toString(), init);
+  if (hasClanApiServiceBinding(env)) {
+    return env.CLAN_API_WORKER.fetch(request);
+  }
+  return fetch(request);
+}
+
+async function fetchDiscordDebugEndpoint(env, path) {
+  const res = await fetch(`${DISCORD_API_BASE}${path}`, {
+    headers: discordBotHeaders(env)
+  });
+  const payload = await res.json().catch(() => ({}));
+  return {
+    ok: res.ok,
+    status: res.status,
+    payload
+  };
+}
+
+function summarizeDiscordDebugResult(result) {
+  if (!result) return null;
+  if (result.ok) return { ok: true, status: result.status };
+  return {
+    ok: false,
+    status: result.status,
+    code: result.payload?.code ?? null,
+    message: result.payload?.message || "Discord API request failed."
+  };
+}
+
 async function fetchCommands(env, guildId) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const endpoint = discordCommandsEndpoint(applicationId, guildId);
@@ -260,7 +480,7 @@ async function fetchCommands(env, guildId) {
   const payload = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw httpError(502, payload.message || `Discord command list failed (${res.status}).`);
+    throw httpError(502, discordApiErrorMessage(res.status, payload.message || `Discord command list failed (${res.status}).`));
   }
 
   return payload;
@@ -276,8 +496,20 @@ async function deleteCommandById(env, guildId, commandId) {
 
   if (!res.ok && res.status !== 404) {
     const payload = await res.json().catch(() => ({}));
-    throw httpError(502, payload.message || `Discord command delete failed (${res.status}).`);
+    throw httpError(502, discordApiErrorMessage(res.status, payload.message || `Discord command delete failed (${res.status}).`));
   }
+}
+
+function discordApiErrorMessage(status, message) {
+  if (status === 401) {
+    return "Discord API rejected DISCORD_BOT_TOKEN. Set the raw Bot token from Discord Developer Portal > Bot on this Worker; do not include the word Bot.";
+  }
+
+  if (status === 403) {
+    return "Discord API rejected access. Confirm DISCORD_APPLICATION_ID belongs to the same app as DISCORD_BOT_TOKEN and the bot is installed in the guild.";
+  }
+
+  return message;
 }
 
 function discordCommandsEndpoint(applicationId, guildId) {
@@ -413,16 +645,22 @@ function ephemeralResponses(env) {
 }
 
 function requireAdmin(request, env) {
-  const expected = String(env.REGISTER_ADMIN_TOKEN || env.INGEST_ADMIN_TOKEN || "").trim();
-  if (!expected) {
+  const expectedTokens = [
+    env.REGISTER_ADMIN_TOKEN,
+    env.INGEST_ADMIN_TOKEN
+  ]
+    .map(value => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!expectedTokens.length) {
     throw httpError(500, "Missing REGISTER_ADMIN_TOKEN.");
   }
 
   const header = request.headers.get("Authorization") || "";
   const match = header.match(/^Bearer\s+(.+)$/i);
-  const token = match?.[1] || request.headers.get("X-C0LD-Admin-Token") || "";
+  const token = String(match?.[1] || request.headers.get("X-C0LD-Admin-Token") || "").trim();
 
-  if (token !== expected) {
+  if (!expectedTokens.includes(token)) {
     throw httpError(401, "Unauthorized.");
   }
 }
