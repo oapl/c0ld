@@ -201,7 +201,7 @@ Useful endpoints:
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
 | `/api/global/ingest` | Manual protected global rank scan. `POST` only. Scans ranked clans in chunks and resumes a running scan unless `?force=1` is used. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
-| `/api/global/search?q=Cinnamowopal` | Cached c0ld global rank lookup for Discord `!search` style commands. |
+| `/api/global/search?q=Cinnamowopal` | Cached c0ld global rank lookup for Discord `/search` commands. |
 
 The Big Games API does not expose the player-level global leaderboard directly.
 The global rank scanner derives it by paging `/api/clans` sorted by clan points,
@@ -214,6 +214,83 @@ c0ld members are found, and it does not use the mathematical safe-cutoff
 shortcut. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the clan
 leaderboard is exhausted. Set `GLOBAL_RANK_STOP_ON_SAFE_CUTOFF=true` only if you
 want to trade the full Top 500 player total for a faster rank-only scan.
+
+## Discord `/search` Worker
+
+`discord-search-interactions-worker.js` is the Cloudflare-only Discord command
+Worker. It does not use a Gateway bot process. Discord sends slash command
+interactions to the Worker over HTTPS, and the Worker reads cached global-rank
+data from `c0ld-clan-api-worker`.
+
+Create a separate Cloudflare Worker, for example:
+
+```text
+c0ld-discord-search
+```
+
+Paste in:
+
+```text
+cloudflare/discord-search-interactions-worker.js
+```
+
+Use `wrangler-discord-search.toml.example` as the variable reference if
+deploying through Wrangler.
+
+Required Worker variables:
+
+| Variable | Purpose |
+|---|---|
+| `CLAN_API_BASE` | Base URL for `c0ld-clan-api-worker`, such as `https://c0ld-clan-api-worker.opal-dde.workers.dev`. |
+| `CLAN_NAME` | Usually `c0ld`. |
+| `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
+| `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
+| `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
+
+Required Worker secrets:
+
+| Secret | Purpose |
+|---|---|
+| `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
+| `DISCORD_BOT_TOKEN` | Bot token used only by the admin registration endpoint to create/update the slash command. |
+| `REGISTER_ADMIN_TOKEN` | Your private bearer token for `/admin/register-search-command`. |
+
+In the Discord Developer Portal, open the application's **General Information**
+page and set the **Interactions Endpoint URL** to:
+
+```text
+https://YOUR-DISCORD-WORKER.workers.dev/discord/interactions
+```
+
+This is not the Webhooks page. Discord will immediately test the endpoint with a
+PING interaction. If the public key is correct and the Worker is deployed, the
+endpoint saves successfully.
+
+Invite the application with the `applications.commands` scope. With the existing
+permission integer you generated, the URL shape is:
+
+```text
+https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=84992&scope=bot%20applications.commands
+```
+
+Register or update the slash command:
+
+```powershell
+$token = "YOUR_REGISTER_ADMIN_TOKEN"
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-search-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Use `guild_id` while testing because it usually appears immediately in that
+server. Omit `?guild_id=...` once you want a global command, but expect Discord's
+global command cache to take longer to appear.
+
+The command users run is:
+
+```text
+/search username:Cinnamowopal
+```
 
 ## League API Worker
 

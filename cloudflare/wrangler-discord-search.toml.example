@@ -1,0 +1,16 @@
+name = "c0ld-discord-search"
+main = "discord-search-interactions-worker.js"
+compatibility_date = "2026-07-14"
+
+[vars]
+CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
+CLAN_NAME = "c0ld"
+DISCORD_EPHEMERAL_RESPONSES = "false"
+DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
+# Optional. Use this while testing so the command appears in one server quickly.
+DISCORD_GUILD_ID = ""
+
+# Set these with `wrangler secret put ...` or in Cloudflare Worker settings:
+# DISCORD_PUBLIC_KEY
+# DISCORD_BOT_TOKEN
+# REGISTER_ADMIN_TOKEN

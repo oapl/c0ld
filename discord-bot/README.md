@@ -3,6 +3,10 @@
 `global-search-bot.example.mjs` is a small Discord.js example for the c0ld global
 rank cache.
 
+This is only for a traditional always-running Gateway bot and prefix command.
+For the Cloudflare-only `/search username` slash command, use
+`cloudflare/discord-search-interactions-worker.js` instead.
+
 It listens for:
 
 ```text
