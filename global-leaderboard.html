@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Global Leaderboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--danger:#f85149;--danger-bg:rgba(248,81,73,.12)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+a{color:var(--link);text-decoration:none}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}
+.logo-wrap{display:flex;justify-content:center;align-items:center;width:100%}
+.site-logo{display:block;width:76px;border-radius:10px;margin:0 auto}
+.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.menu a{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel-2);color:var(--text);font-size:13px}
+.menu a.active{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
+main{max-width:1360px;margin:0 auto;padding:22px 24px 28px}
+.hero,.section,.card{background:var(--panel);border:1px solid var(--border);border-radius:10px}
+.hero{padding:18px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+.hero h1{margin:0 0 4px;font-size:28px}
+.subtle{color:var(--muted);font-size:13px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+button{cursor:pointer}
+button:hover,input:focus{border-color:var(--link);background:var(--hover)}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
+.label{color:var(--muted);font-size:13px;margin-bottom:6px}
+.value{font-size:20px;font-weight:700;line-height:1.25}
+.section{overflow:hidden}
+.section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.section-title{margin:0;font-size:18px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:1060px}
+th,td{padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
+th{color:var(--muted);font-size:13px;text-align:left;cursor:pointer;font-weight:500}
+.numeric{text-align:right;font-variant-numeric:tabular-nums}
+.rank{font-weight:700}
+.player-cell{display:flex;align-items:center;gap:10px}
+.avatar{width:38px;height:38px;border-radius:8px;background:#21262d;object-fit:cover;flex:0 0 auto}
+.avatar-fallback{width:38px;height:38px;border-radius:8px;background:#21262d;display:inline-flex;align-items:center;justify-content:center;color:#c9d1d9;font-weight:700;flex:0 0 auto}
+.meta{color:var(--muted);font-size:12px;margin-top:2px}
+.positive{color:var(--good);font-weight:700}
+.negative{color:var(--danger);font-weight:700}
+.zero,.unknown{color:var(--muted)}
+.empty,.error{padding:20px}
+.error{color:#ffb4ad;background:var(--danger-bg)}
+tbody tr:hover{background:rgba(255,255,255,.02)}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.hero{align-items:stretch}.controls>*{width:100%}}
+@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Top Clans</a>
+    <a class="active" href="global-leaderboard.html">Global Leaderboard</a>
+    <a href="c0ld-leagues.html">c0ld Leagues</a>
+    <a href="top-leagues.html">Top Leagues</a>
+    <a href="live-clan.html">Clan Lookup</a>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <h1>Global Leaderboard</h1>
+      <div id="status" class="subtle">Top players from the latest scanned clan pool.</div>
+    </div>
+    <div class="controls">
+      <input id="search-input" placeholder="Search clan or player..." autocomplete="off">
+      <button id="refresh-btn" type="button">Refresh</button>
+    </div>
+  </section>
+
+  <section class="cards">
+    <div class="card"><div class="label">Showing</div><div class="value" id="showing-count">-</div></div>
+    <div class="card"><div class="label">Player Pool</div><div class="value" id="pool-count">-</div></div>
+    <div class="card"><div class="label">Battle</div><div class="value" id="battle-name">-</div></div>
+    <div class="card"><div class="label">Last DB Update</div><div class="value" id="last-db-update">-</div></div>
+  </section>
+
+  <section class="section">
+    <div class="section-header">
+      <h2 class="section-title">Top Global Players</h2>
+      <div id="table-meta" class="subtle">Loading...</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="global_rank">Global Rank</th>
+            <th data-sort="clan">Clan</th>
+            <th data-sort="username">Player</th>
+            <th data-sort="points" class="numeric">Points</th>
+            <th data-sort="gain_5m" class="numeric">5 Minutes</th>
+            <th data-sort="gain_1h" class="numeric">1 Hour</th>
+            <th data-sort="gain_12h" class="numeric">12 Hours</th>
+            <th data-sort="gain_24h" class="numeric">24 Hours</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"><tr><td colspan="8" class="empty">Loading global leaderboard...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
+const LIMIT=500;
+const REFRESH_INTERVAL_MS=5*60*1000;
+let rows=[],sortKey="global_rank",sortAsc=true,loading=false,lastPayload=null;
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
+function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"-"}
+function dt(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?"-":d.toLocaleString()}
+function initials(s){const t=String(s||"?").trim();return t.slice(0,2).toUpperCase()}
+function delta(v){if(v===null||v===undefined)return'<span class="unknown">-</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">-</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
+function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
+function avatar(row){if(row.avatar_url)return'<img class="avatar" src="'+esc(row.avatar_url)+'" alt="">';return'<span class="avatar-fallback">'+esc(initials(row.username))+'</span>'}
+function playerCell(row){const name=row.username||row.display_name||("user_"+row.user_id);const href=row.user_id?"https://www.roblox.com/users/"+encodeURIComponent(row.user_id)+"/profile":"#";return'<div class="player-cell">'+avatar(row)+'<span><a href="'+esc(href)+'" target="_blank" rel="noopener">'+esc(name)+'</a><div class="meta">'+esc(row.user_id||"")+'</div></span></div>'}
+function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=rows.slice();if(q)list=list.filter(row=>String(row.clan||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||String(row.display_name||"").toLowerCase().includes(q)||String(row.user_id||"").includes(q));list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
+function renderCards(){document.getElementById("showing-count").textContent=rows.length.toLocaleString("en-US");document.getElementById("pool-count").textContent=Number(lastPayload?.total_global_players||0).toLocaleString("en-US")||"-";document.getElementById("battle-name").textContent=lastPayload?.run?.event_name||lastPayload?.run?.battle_display_name||lastPayload?.run?.battle_key||"-";document.getElementById("last-db-update").textContent=dt(lastPayload?.snapshot_at)}
+function render(){const tbody=document.getElementById("tbody"),list=visible();renderCards();document.getElementById("table-meta").textContent=(lastPayload?.run?.run_key?"Run "+lastPayload.run.run_key:"Latest completed scan");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No global players found.</td></tr>';return}tbody.innerHTML=list.map(row=>'<tr><td class="rank">#'+esc(row.global_rank||"-")+'</td><td><strong>'+esc(row.clan||"-")+'</strong></td><td>'+playerCell(row)+'</td><td class="numeric" title="'+esc(fullNum(row.points))+'">'+esc(shortNum(row.points))+'</td><td class="numeric">'+delta(row.gain_5m)+'</td><td class="numeric">'+delta(row.gain_1h)+'</td><td class="numeric">'+delta(row.gain_12h)+'</td><td class="numeric">'+delta(row.gain_24h)+'</td></tr>').join("")}
+function showError(msg){document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>';document.getElementById("table-meta").textContent="Error"}
+async function loadData(){if(loading)return;loading=true;document.getElementById("refresh-btn").disabled=true;try{const url=new URL(API+"/api/global/leaderboard");url.searchParams.set("limit",String(LIMIT));url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);lastPayload=data;rows=data.rows||[];document.getElementById("status").textContent="Showing the top "+rows.length.toLocaleString("en-US")+" players from the latest scanned clan pool.";render()}catch(e){console.error(e);showError(e.message||String(e))}finally{loading=false;document.getElementById("refresh-btn").disabled=false}}
+document.getElementById("refresh-btn").addEventListener("click",loadData);
+document.getElementById("search-input").addEventListener("input",render);
+document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const key=th.dataset.sort;if(sortKey===key)sortAsc=!sortAsc;else{sortKey=key;sortAsc=key==="global_rank"||key==="clan"||key==="username"}render()}));
+loadData();
+setInterval(loadData,REFRESH_INTERVAL_MS);
+</script>
+</body>
+</html>

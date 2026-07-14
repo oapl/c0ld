@@ -61,7 +61,8 @@ export default {
           active_battle_started_at: activeBattleMeta?.startedAt || null,
           active_battle_ended_at: activeBattleMeta?.endedAt || null,
           ingest_open: gate.allowed,
-          ingest_skip_reason: gate.allowed ? null : gate.reason
+          ingest_skip_reason: gate.allowed ? null : gate.reason,
+          global_rank_config: globalRankRuntimeConfig(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -79,6 +80,8 @@ export default {
         response = await handleTopClanThresholds(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/current") {
         response = await handleGlobalCurrent(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/global/leaderboard") {
+        response = await handleGlobalLeaderboard(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
@@ -444,6 +447,264 @@ async function handleGlobalCurrent(request, env) {
     run,
     rows: displayRows.map(row => normalizeGlobalCurrentOutput(row))
   }, env);
+}
+
+async function handleGlobalLeaderboard(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 1000);
+  const run = await findLatestGlobalRankSearchRun(env, clan);
+
+  if (!run?.run_key) {
+    return cacheJson({
+      ok: false,
+      message: "No completed global rank scan is available yet.",
+      clan_name: clan,
+      rows: []
+    }, env);
+  }
+
+  const rankedCandidates = await readGlobalRankLeaderboardCandidates(env, run.run_key, limit);
+  const rows = rankedCandidates.slice(0, limit);
+  const userIds = rows.map(row => toNumber(row.user_id)).filter(Boolean);
+  const snapshotAt = run.finished_at || run.updated_at || run.started_at || rows[0]?.fetched_at || null;
+  const totalGlobalPlayers =
+    toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    await countGlobalRankCandidates(env, run.run_key);
+
+  const [usernameMap, avatarMap, gainMaps] = await Promise.all([
+    resolveRobloxUsernames(userIds, env).catch(() => new Map()),
+    resolveRobloxAvatarHeadshots(userIds, env).catch(() => new Map()),
+    buildGlobalLeaderboardGainMaps(env, {
+      clan,
+      battleKey: run.battle_key,
+      snapshotAt,
+      userIds
+    }).catch(() => ({}))
+  ]);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    snapshot_at: snapshotAt,
+    run,
+    total_global_players: totalGlobalPlayers,
+    rows: rows.map(row => normalizeGlobalLeaderboardOutput(row, {
+      run,
+      usernameMap,
+      avatarMap,
+      gainMaps,
+      totalGlobalPlayers
+    }))
+  }, env);
+}
+
+async function readGlobalRankLeaderboardCandidates(env, runKey, limit) {
+  const desired = clamp(Number(limit || 500), 1, 1000);
+  const readLimit = Math.min(globalRankCandidateReadLimit(env), Math.max(1000, desired * 4));
+  const pageSize = 1000;
+  const rows = [];
+  let offset = 0;
+  let ranked = [];
+
+  while (offset < readLimit && ranked.length < desired) {
+    const pageLimit = Math.min(pageSize, readLimit - offset);
+    const page = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
+      run_key: `eq.${runKey}`,
+      order: "points.desc,user_id.asc",
+      limit: String(pageLimit),
+      offset: String(offset)
+    });
+
+    rows.push(...page);
+    ranked = dedupeGlobalCandidateRows(rows)
+      .sort(sortGlobalCandidateRows)
+      .map((row, index) => ({
+        ...row,
+        global_rank: index + 1
+      }));
+
+    if (page.length < pageLimit) break;
+    offset += page.length;
+  }
+
+  return ranked;
+}
+
+async function buildGlobalLeaderboardGainMaps(env, { clan, battleKey, snapshotAt, userIds }) {
+  const snapshotMs = new Date(snapshotAt || 0).getTime();
+  if (!Number.isFinite(snapshotMs) || !userIds.length) return {};
+
+  const runRows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "run_key,finished_at,updated_at,started_at,battle_key",
+    clan_name: `eq.${clan}`,
+    battle_key: battleKey ? `eq.${battleKey}` : undefined,
+    status: "in.(ok,completed)",
+    finished_at: `lt.${new Date(snapshotMs).toISOString()}`,
+    order: "finished_at.desc",
+    limit: "200"
+  });
+
+  const windows = [
+    { key: "gain_5m", minutes: 5, toleranceMinutes: 10 },
+    { key: "gain_1h", minutes: 60, toleranceMinutes: 30 },
+    { key: "gain_12h", minutes: 12 * 60, toleranceMinutes: 90 },
+    { key: "gain_24h", minutes: 24 * 60, toleranceMinutes: 120 }
+  ];
+  const selectedRuns = new Map();
+
+  for (const window of windows) {
+    const targetMs = snapshotMs - window.minutes * 60 * 1000;
+    const toleranceMs = window.toleranceMinutes * 60 * 1000;
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (const row of runRows) {
+      const rowMs = new Date(row.finished_at || row.updated_at || row.started_at || 0).getTime();
+      if (!Number.isFinite(rowMs)) continue;
+
+      const distance = Math.abs(rowMs - targetMs);
+      if (distance <= toleranceMs && distance < bestDistance) {
+        best = row;
+        bestDistance = distance;
+      }
+    }
+
+    if (best?.run_key) selectedRuns.set(window.key, best.run_key);
+  }
+
+  const entries = await Promise.all([...selectedRuns.entries()].map(async ([key, runKey]) => [
+    key,
+    await readGlobalRankCandidatePointsMap(env, runKey, userIds)
+  ]));
+
+  return Object.fromEntries(entries);
+}
+
+async function readGlobalRankCandidatePointsMap(env, runKey, userIds) {
+  const map = new Map();
+  const ids = [...new Set(userIds.map(Number).filter(Boolean))];
+
+  for (const batch of chunkValues(ids, 100)) {
+    const rows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      select: "user_id,points",
+      run_key: `eq.${runKey}`,
+      user_id: `in.(${batch.join(",")})`,
+      order: "points.desc,user_id.asc",
+      limit: String(batch.length * 5)
+    });
+
+    for (const row of rows) {
+      const userId = toNumber(row.user_id);
+      const points = toNumber(row.points);
+      if (!userId || points === null) continue;
+
+      const existing = map.get(userId);
+      if (existing === undefined || points > existing) map.set(userId, points);
+    }
+  }
+
+  return map;
+}
+
+function chunkValues(values, size) {
+  const chunks = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function normalizeGlobalLeaderboardOutput(row, {
+  run,
+  usernameMap,
+  avatarMap,
+  gainMaps,
+  totalGlobalPlayers
+}) {
+  const userId = toNumber(row.user_id);
+  const points = toNumber(row.points) || 0;
+  const previous = key => {
+    const map = gainMaps?.[key];
+    if (!map || !userId || !map.has(userId)) return null;
+    return points - (toNumber(map.get(userId)) || 0);
+  };
+
+  return {
+    global_rank: toNumber(row.global_rank),
+    clan: String(row.source_clan || "").trim(),
+    source_clan: String(row.source_clan || "").trim(),
+    user_id: userId,
+    username: globalCandidateUsername(row, usernameMap),
+    display_name: globalCandidateDisplayName(row),
+    avatar_url: avatarMap.get(userId) || null,
+    points,
+    battle_key: row.battle_key || run?.battle_key || null,
+    battle_display_name: cleanBattleDisplayName(
+      row.battle_key || run?.battle_key,
+      row.battle_display_name || run?.battle_display_name
+    ),
+    event_name: run?.event_name || row.battle_display_name || run?.battle_display_name || run?.battle_key || null,
+    total_global_players: toNumber(totalGlobalPlayers),
+    fetched_at: row.fetched_at || run?.finished_at || run?.updated_at || null,
+    run_key: run?.run_key || null,
+    gain_5m: previous("gain_5m"),
+    gain_1h: previous("gain_1h"),
+    gain_12h: previous("gain_12h"),
+    gain_24h: previous("gain_24h")
+  };
+}
+
+function globalCandidateUsername(row, usernameMap) {
+  const userId = toNumber(row.user_id);
+  const resolved = String(usernameMap.get(userId) || "").trim();
+  if (resolved && !isFallbackUsername(resolved, userId)) return resolved;
+
+  const raw = parseGlobalCandidateRaw(row.raw_candidate);
+  const rawName = String(firstDefined(
+    raw.member?.Username,
+    raw.member?.username,
+    raw.member?.Name,
+    raw.member?.name,
+    raw.member?.DisplayName,
+    raw.member?.displayName,
+    raw.contribution?.Username,
+    raw.contribution?.username,
+    raw.contribution?.Name,
+    raw.contribution?.name
+  ) || "").trim();
+
+  if (rawName && !isFallbackUsername(rawName, userId)) return rawName;
+  return userId ? `user_${userId}` : "";
+}
+
+function globalCandidateDisplayName(row) {
+  const raw = parseGlobalCandidateRaw(row.raw_candidate);
+  return String(firstDefined(
+    raw.member?.DisplayName,
+    raw.member?.displayName,
+    raw.member?.Display,
+    raw.member?.display,
+    raw.contribution?.DisplayName,
+    raw.contribution?.displayName
+  ) || "").trim() || null;
+}
+
+function parseGlobalCandidateRaw(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
@@ -3873,6 +4134,26 @@ function globalRankCandidateReadLimit(env) {
   return clamp(globalRankClanScanLimit(env) * 100, 1000, 2000000);
 }
 
+function globalRankRuntimeConfig(env) {
+  const shardCount = globalRankShardCount(env);
+
+  return {
+    ingest_global_ranks: String(env.INGEST_GLOBAL_RANKS || "false").toLowerCase() === "true",
+    scan_mode: shardCount > 1 ? "sharded" : "linear",
+    shard_count: shardCount,
+    shard_concurrency: globalRankShardConcurrency(env, shardCount),
+    clans_per_shard_run: globalRankClansPerShardRun(env, shardCount),
+    clan_scan_limit: globalRankClanScanLimit(env),
+    clan_page_size: globalRankClanPageSize(env),
+    clans_per_run: globalRankClansPerRun(env),
+    clan_delay_ms: globalRankClanDelayMs(env),
+    retry_attempts: globalRankRetryAttempts(env),
+    retry_base_ms: globalRankRetryBaseMs(env),
+    schedule_minutes: globalRankScheduleMinutes(env),
+    schedule_offset_minutes: globalRankScheduleOffsetMinutes(env)
+  };
+}
+
 function globalRankRetryAttempts(env) {
   return clamp(
     Number(env.GLOBAL_RANK_RETRY_ATTEMPTS || DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS),
@@ -3897,16 +4178,26 @@ function globalRankClanDelayMs(env) {
   );
 }
 
-function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
-  const interval = clamp(
+function globalRankScheduleMinutes(env) {
+  return clamp(
     Number(env.GLOBAL_RANK_SCHEDULE_MINUTES || DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES),
     5,
     1440
   );
+}
+
+function globalRankScheduleOffsetMinutes(env) {
+  const interval = globalRankScheduleMinutes(env);
   const offsetValue = env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES === undefined || env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES === ""
     ? DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES
     : env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES;
-  const offset = normalizedScheduleOffset(offsetValue, interval);
+
+  return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
+  const interval = globalRankScheduleMinutes(env);
+  const offset = globalRankScheduleOffsetMinutes(env);
   const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
     ? scheduledAt
     : new Date();
