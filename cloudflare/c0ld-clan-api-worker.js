@@ -22,6 +22,8 @@ const CLANS_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT = 500;
 const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
+const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
+const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 27;
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
@@ -3896,8 +3898,15 @@ function globalRankClanDelayMs(env) {
 }
 
 function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
-  const interval = clamp(Number(env.GLOBAL_RANK_SCHEDULE_MINUTES || 60), 5, 1440);
-  const offset = normalizedScheduleOffset(env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES, interval);
+  const interval = clamp(
+    Number(env.GLOBAL_RANK_SCHEDULE_MINUTES || DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+  const offsetValue = env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES === undefined || env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES === ""
+    ? DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES
+    : env.GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES;
+  const offset = normalizedScheduleOffset(offsetValue, interval);
   const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
     ? scheduledAt
     : new Date();

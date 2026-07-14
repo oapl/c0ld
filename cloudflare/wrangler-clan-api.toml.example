@@ -31,8 +31,8 @@ CLAN_BATTLES_SCAN_LIMIT = "20000"
 # chunks, stores candidate player contribution rows, then ranks every unique
 # player found inside the configured clan scan limit.
 INGEST_GLOBAL_RANKS = "false"
-GLOBAL_RANK_SCHEDULE_MINUTES = "60"
-GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = "0"
+GLOBAL_RANK_SCHEDULE_MINUTES = "30"
+GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = "27"
 GLOBAL_RANK_CLAN_SCAN_LIMIT = "500"
 GLOBAL_RANK_CLAN_PAGE_SIZE = "100"
 GLOBAL_RANK_CLANS_PER_RUN = "25"

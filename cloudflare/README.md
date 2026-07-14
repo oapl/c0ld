@@ -139,8 +139,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
-| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `60`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
-| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Offset inside the schedule interval. With `GLOBAL_RANK_SCHEDULE_MINUTES=60`, use `57` to start on the cron tick immediately before minute `:57`, normally `:55` with a `*/5` cron. |
+| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
+| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `27`. Offset inside the schedule interval. With `GLOBAL_RANK_SCHEDULE_MINUTES=30`, use `27` to start on the cron tick immediately before minute `:27`/`:57`, normally `:25`/`:55` with a `*/5` cron. |
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; maximum clan detail pulls per Worker invocation. Increase carefully. |
@@ -174,7 +174,7 @@ crons = ["*/5 * * * *"]
 
 That runs the Worker every 5 minutes. In the Cloudflare dashboard, add the same cron trigger under the Worker trigger settings if you are not using Wrangler.
 
-Do not change the Cloudflare cron itself to hourly for global ranks. The Worker uses `GLOBAL_RANK_SCHEDULE_MINUTES=60` to start a fresh scan once per hour, then each 5-minute cron tick resumes the running scan until `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached. If `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=57`, the `*/5` cron starts the fresh scan on the `:55` tick because that is the last cron tick before `:57`.
+Do not change the Cloudflare cron itself to the global-rank cadence. The Worker uses `GLOBAL_RANK_SCHEDULE_MINUTES=30` to start a fresh scan every 30 minutes, then each 5-minute cron tick resumes the running scan until `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached. If `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=27`, the `*/5` cron starts fresh scans on the `:25` and `:55` ticks because those are the last cron ticks before `:27` and `:57`.
 
 ## Manual test
 
