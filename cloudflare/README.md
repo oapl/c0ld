@@ -140,13 +140,10 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
 | `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `60`; starts a new global scan on this interval boundary. Running scans continue on each 5-minute cron tick until finished. |
-| `GLOBAL_RANK_TARGET_RANK` | Optional. Defaults to `3000`; c0ld members are ranked only if they land within this derived global player rank. `GLOBAL_RANK_SCAN_LIMIT` is still accepted as a legacy alias for this value only. |
-| `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; maximum ranked clans to inspect before finalizing anyway. |
+| `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; maximum clan detail pulls per Worker invocation. Increase carefully. |
 | `GLOBAL_RANK_CLAN_DELAY_MS` | Optional. Defaults to `1000`; delay between clan detail pulls to avoid hammering the API. |
-| `GLOBAL_RANK_CANDIDATE_READ_LIMIT` | Optional. Defaults to `target rank * 3`; top candidate rows read when calculating the final c0ld ranks. |
-| `GLOBAL_RANK_STOP_ON_SAFE_CUTOFF` | Optional. Defaults to `false`; leave false to scan the full configured Top 500 clan slice for CW_Bot-style totals. |
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional display override such as `LunarBattle2026`. |
@@ -209,11 +206,9 @@ pulling each clan detail, collecting current battle contribution rows, and
 sorting all candidate players by points. With the default Top 500 clan scan,
 the `total_global_players` value is the unique player count found in those 500
 clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
-"Better than 99.50% of players." By default it does not stop early when all
-c0ld members are found, and it does not use the mathematical safe-cutoff
-shortcut. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the clan
-leaderboard is exhausted. Set `GLOBAL_RANK_STOP_ON_SAFE_CUTOFF=true` only if you
-want to trade the full Top 500 player total for a faster rank-only scan.
+"Better than 99.50% of players." It does not stop early when all c0ld members
+are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
+clan leaderboard is exhausted.
 
 ## Discord `/search` Worker
 

@@ -18,7 +18,6 @@ const ARCHIVE_PRUNE_BATCH_SIZE = 500;
 const ARCHIVE_PRUNE_MAX_BATCHES = 10;
 const ROBLOX_BATCH_SIZE = 100;
 const CLANS_PAGE_SIZE = 100;
-const DEFAULT_GLOBAL_RANK_TARGET_RANK = 3000;
 const DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT = 500;
 const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
@@ -470,12 +469,20 @@ async function handleGlobalSearch(request, env) {
     order: "fetched_at.desc",
     limit: "24"
   });
+  const runRows = found.run_key
+    ? await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "*",
+      run_key: `eq.${found.run_key}`,
+      limit: "1"
+    })
+    : [];
 
   return cacheJson({
     ok: true,
     query,
     clan_name: clan,
     row: normalizeGlobalCurrentOutput(found),
+    run: runRows[0] || null,
     history: history.map(row => ({
       ...row,
       global_rank: toNumber(row.global_rank),
@@ -572,7 +579,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
 
   const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
   const fetchedAt = new Date().toISOString();
-  const targetRank = globalRankTargetRank(env);
   const clanScanLimit = globalRankClanScanLimit(env);
   const pageSize = globalRankClanPageSize(env);
   const clansPerRun = globalRankClansPerRun(env);
@@ -598,7 +604,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
     0
   );
   let candidatePlayerCount = force ? 0 : (toNumber(runningRun?.candidate_player_count) || 0);
-  let cutoffPoints = force ? null : toNumber(runningRun?.cutoff_points);
+  let cutoffPoints = null;
   let stopReason = null;
 
   const avatarMap = await resolveRobloxAvatarHeadshots(
@@ -652,7 +658,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
     started_at: startedAt,
     finished_at: null,
     status: "running",
-    scan_limit: targetRank,
+    scan_limit: clanScanLimit,
     page_size: pageSize,
     scanned_count: scannedClanCount,
     scanned_clan_count: scannedClanCount,
@@ -672,7 +678,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
 
   let processedClans = 0;
   let foundMemberCount = 0;
-  let nextClanPoints = null;
 
   try {
     while (processedClans < clansPerRun && nextClanOffset < clanScanLimit) {
@@ -721,22 +726,9 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
     }
 
     candidatePlayerCount = await countGlobalRankCandidates(env, runKey);
-    const cutoff = await readGlobalRankCutoff(env, runKey, targetRank);
-    cutoffPoints = cutoff.cutoffPoints;
 
     if (!stopReason && nextClanOffset >= clanScanLimit) {
       stopReason = "max_clan_scan_limit";
-    }
-
-    if (!stopReason && cutoff.hasCutoff && globalRankStopOnSafeCutoff(env)) {
-      const nextClan = await fetchClanRankRowAtOffset(env, nextClanOffset, pageSize);
-      nextClanPoints = toNumber(nextClan?.points);
-
-      if (nextClan && nextClanPoints !== null && nextClanPoints < cutoffPoints) {
-        stopReason = "safe_cutoff_reached";
-      } else if (!nextClan) {
-        stopReason = "clan_leaderboard_exhausted";
-      }
     }
 
     if (stopReason) {
@@ -748,7 +740,6 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
         latest,
         eventName,
         fetchedAt,
-        targetRank,
         candidatePlayerCount
       });
       foundMemberCount = finalized.foundMemberCount;
@@ -763,7 +754,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
         started_at: startedAt,
         finished_at: finishedAt,
         status: "ok",
-        scan_limit: targetRank,
+        scan_limit: clanScanLimit,
         page_size: pageSize,
         scanned_count: scannedClanCount,
         scanned_clan_count: scannedClanCount,
@@ -790,12 +781,11 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
         fetched_at: fetchedAt,
         status: "ok",
         stop_reason: stopReason,
-        target_rank: targetRank,
+        clan_scan_limit: clanScanLimit,
         scanned_count: scannedClanCount,
         scanned_clan_count: scannedClanCount,
         processed_clans: processedClans,
         next_clan_offset: nextClanOffset,
-        next_clan_points: nextClanPoints,
         cutoff_points: cutoffPoints,
         candidate_player_count: candidatePlayerCount,
         clan_member_count: clanMembers.length,
@@ -814,7 +804,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
       started_at: startedAt,
       finished_at: null,
       status: "running",
-      scan_limit: targetRank,
+      scan_limit: clanScanLimit,
       page_size: pageSize,
       scanned_count: scannedClanCount,
       scanned_clan_count: scannedClanCount,
@@ -840,7 +830,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
       run_key: runKey,
       fetched_at: fetchedAt,
       status: "running",
-      target_rank: targetRank,
+      clan_scan_limit: clanScanLimit,
       scanned_count: scannedClanCount,
       scanned_clan_count: scannedClanCount,
       processed_clans: processedClans,
@@ -862,7 +852,7 @@ async function handleGlobalRankIngest(env, source, requestedClan, force = false)
       started_at: startedAt,
       finished_at: failedAt,
       status: "failed",
-      scan_limit: targetRank,
+      scan_limit: clanScanLimit,
       page_size: pageSize,
       scanned_count: scannedClanCount,
       scanned_clan_count: scannedClanCount,
@@ -1806,24 +1796,13 @@ async function countGlobalRankUniqueCandidates(env, runKey) {
     select: "user_id",
     run_key: `eq.${runKey}`,
     order: "user_id.asc"
-  }, 50000);
+  }, globalRankCandidateReadLimit(env));
 
   return new Set(rows.map(row => String(row.user_id || "").trim()).filter(Boolean)).size;
 }
 
-async function readGlobalRankCutoff(env, runKey, targetRank) {
-  const candidates = await readGlobalRankTopCandidates(env, runKey, targetRank);
-  const cutoff = candidates[targetRank - 1];
-
-  return {
-    hasCutoff: Boolean(cutoff),
-    cutoffPoints: cutoff ? toNumber(cutoff.points) : null,
-    candidates
-  };
-}
-
-async function readGlobalRankTopCandidates(env, runKey, targetRank) {
-  const readLimit = globalRankCandidateReadLimit(env, targetRank);
+async function readGlobalRankRankedCandidates(env, runKey) {
+  const readLimit = globalRankCandidateReadLimit(env);
   const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
     select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,raw_candidate",
     run_key: `eq.${runKey}`,
@@ -1832,7 +1811,6 @@ async function readGlobalRankTopCandidates(env, runKey, targetRank) {
 
   return dedupeGlobalCandidateRows(rows)
     .sort(sortGlobalCandidateRows)
-    .slice(0, targetRank)
     .map((row, index) => ({
       ...row,
       global_rank: index + 1
@@ -1875,10 +1853,9 @@ async function finalizeGlobalRankRun(env, {
   latest,
   eventName,
   fetchedAt,
-  targetRank,
   candidatePlayerCount
 }) {
-  const topCandidates = await readGlobalRankTopCandidates(env, runKey, targetRank);
+  const topCandidates = await readGlobalRankRankedCandidates(env, runKey);
   const candidateById = new Map(topCandidates.map(row => [String(row.user_id), row]));
   const finalRows = clanMembers.map(member => {
     const match = candidateById.get(String(member.user_id));
@@ -1900,8 +1877,7 @@ async function finalizeGlobalRankRun(env, {
         source_clan_points: match.source_clan_points,
         candidate: match.raw_candidate || {}
       } : {
-        target_rank: targetRank,
-        reason: "not_found_at_or_above_target_rank"
+        reason: "not_found_in_scanned_clans"
       },
       updated_at: new Date().toISOString()
     };
@@ -2798,7 +2774,7 @@ async function supabaseCount(env, tableName, params) {
 }
 
 async function supabaseSelectPaged(env, tableName, params, limit, pageSize = 1000) {
-  const requested = clamp(Number(limit || 1000), 1, 50000);
+  const requested = clamp(Number(limit || 1000), 1, 250000);
   const size = clamp(Number(pageSize || 1000), 1, 1000);
   const baseOffset = Number(params.offset || 0);
   const rows = [];
@@ -3249,14 +3225,6 @@ function globalRankEventName(env, latest) {
   ).trim();
 }
 
-function globalRankTargetRank(env) {
-  return clamp(
-    Number(env.GLOBAL_RANK_TARGET_RANK || env.GLOBAL_RANK_SCAN_LIMIT || DEFAULT_GLOBAL_RANK_TARGET_RANK),
-    1,
-    3000
-  );
-}
-
 function globalRankClanScanLimit(env) {
   return clamp(
     Number(env.GLOBAL_RANK_CLAN_SCAN_LIMIT || DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT),
@@ -3281,13 +3249,8 @@ function globalRankClansPerRun(env) {
   );
 }
 
-function globalRankCandidateReadLimit(env, targetRank) {
-  const defaultLimit = Math.max(targetRank, Math.min(50000, targetRank * 3));
-  return clamp(
-    Number(env.GLOBAL_RANK_CANDIDATE_READ_LIMIT || defaultLimit),
-    targetRank,
-    50000
-  );
+function globalRankCandidateReadLimit(env) {
+  return clamp(globalRankClanScanLimit(env) * 100, 1000, 250000);
 }
 
 function globalRankRetryAttempts(env) {
@@ -3312,10 +3275,6 @@ function globalRankClanDelayMs(env) {
     0,
     120000
   );
-}
-
-function globalRankStopOnSafeCutoff(env) {
-  return String(env.GLOBAL_RANK_STOP_ON_SAFE_CUTOFF || "false").toLowerCase() === "true";
 }
 
 function shouldRunGlobalRankSchedule(env) {

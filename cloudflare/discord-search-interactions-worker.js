@@ -98,7 +98,8 @@ async function handleInteraction(request, env) {
 }
 
 async function buildSearchResponse(query, env) {
-  const { payload, status, ok } = await fetchGlobalSearchPayload(query, env);
+  const { payload, status, ok, configured } = await fetchGlobalSearchPayload(query, env);
+  const scanClan = configured?.scan_clan || String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
 
   if (!ok || payload.ok === false || !payload.row) {
     return messageResponse(
@@ -111,22 +112,23 @@ async function buildSearchResponse(query, env) {
   const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = !row.source_clan && String(row.clan_name || "").toLowerCase() === primaryClanName;
+  const clanRankText = formatClanRank(row, payload.run);
   const clanRankLine = isPrimaryClanMember
-    ? `Rank in ${resultClan.toUpperCase()}: **${rank(row.clan_rank)}**`
+    ? `🔰 Rank in ${resultClan.toUpperCase()}: **${clanRankText}**`
     : row.clan_rank
-      ? `Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
+      ? `🔰 Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
       : null;
   const embed = {
     title: "Global Search Results",
     color: 0x58a6ff,
     description: [
-      `Name: **${displayName(row)}**`,
-      `Clan: **${resultClan.toUpperCase()}**`,
+      `🧑 Name: **${displayName(row)}**`,
+      `🏰 Clan: **${resultClan.toUpperCase()}**`,
       clanRankLine,
       "",
-      `Event: **${row.event_name || row.battle_display_name || row.battle_key || "Current Event"}**`,
-      `Stars: **${shortNumber(row.global_points ?? row.clan_points)}**`,
-      `Global Rank: **${rank(row.global_rank)}${row.total_global_players ? ` of ${shortNumber(row.total_global_players)}` : ""}**`,
+      `🎉 Event: **${row.event_name || row.battle_display_name || row.battle_key || "Current Event"}**`,
+      `🌟 Stars: **${shortNumber(row.global_points ?? row.clan_points)}** ⭐`,
+      `🏆 Global Rank: **${rank(row.global_rank)}${row.total_global_players ? ` of ${shortNumber(row.total_global_players)}` : ""}**`,
       betterThanLine(row),
       "",
       `Last Update: ${discordTime(row.fetched_at)}`,
@@ -601,6 +603,26 @@ function rank(value) {
   return Number.isFinite(n) && n > 0 ? `#${n.toLocaleString("en-US")}` : "Unranked";
 }
 
+function formatClanRank(row, run) {
+  const rankValue = positiveInteger(row.clan_rank);
+  if (!rankValue) return "Unranked";
+
+  const memberCount = positiveInteger(
+    row.clan_member_count ||
+    row.total_clan_members ||
+    run?.clan_member_count
+  );
+
+  return memberCount
+    ? `${rankValue.toLocaleString("en-US")}/${memberCount.toLocaleString("en-US")}`
+    : rank(rankValue);
+}
+
+function positiveInteger(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
 function shortNumber(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
@@ -631,7 +653,7 @@ function betterThanLine(row) {
 
   const betterThan = Math.max(0, total - rankValue) / total * 100;
   const better = Math.max(0, rankValue - 1) / total * 100;
-  return `Better than **${betterThan.toFixed(2)}%** of players; **${better.toFixed(2)}%** are better`;
+  return `💠 Better than **${betterThan.toFixed(2)}%** of players; **${better.toFixed(2)}%** are better`;
 }
 
 function discordTime(value) {
