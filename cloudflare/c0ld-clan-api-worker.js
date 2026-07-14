@@ -78,6 +78,8 @@ export default {
         response = await handleClansBattles(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/top-clan-thresholds") {
         response = await handleTopClanThresholds(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/global/status") {
+        response = await handleGlobalRankStatus(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/current") {
         response = await handleGlobalCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/leaderboard") {
@@ -501,6 +503,34 @@ async function handleGlobalLeaderboard(request, env) {
       totalGlobalPlayers
     }))
   }, env);
+}
+
+async function handleGlobalRankStatus(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const runKey = url.searchParams.get("run_key");
+  const battle = url.searchParams.get("battle");
+  const run = runKey
+    ? await findGlobalRankRunByKey(env, runKey)
+    : await findLatestGlobalRankRun(env, clan, battle);
+  const shards = run?.run_key ? await fetchGlobalRankShards(env, run.run_key).catch(() => []) : [];
+  const shardSummary = summarizeGlobalRankShards(shards);
+  const resumable = run ? await isResumableGlobalRankRun(env, run, shards).catch(() => false) : false;
+
+  return json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    runtime_config: globalRankRuntimeConfig(env),
+    run,
+    resumable,
+    shard_summary: shardSummary,
+    shards: shardSummary.rows
+  }, 200, {
+    "Cache-Control": "no-store"
+  });
 }
 
 async function readGlobalRankLeaderboardCandidates(env, runKey, limit) {
@@ -1227,7 +1257,7 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
   const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
-  const existingRunningRun = await findRunningGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
+  const existingRunningRun = await findResumableGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
   const runningRun = force ? null : existingRunningRun;
   const runKey = runningRun?.run_key || `${clan}:global:${latest?.battle_key || "battle"}:${fetchedAt}`;
   const startedAt = runningRun?.started_at || fetchedAt;
@@ -2593,15 +2623,10 @@ async function processGlobalRankShard(env, {
 }
 
 async function hasRunningGlobalRankRun(env, clan) {
-  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
-    select: "run_key",
-    clan_name: `eq.${clan}`,
-    status: "eq.running",
-    order: "started_at.desc",
-    limit: "1"
-  });
-
-  return rows.length > 0;
+  return Boolean(
+    await findRunningGlobalRankRun(env, clan).catch(() => null) ||
+    await findResumableGlobalRankRun(env, clan).catch(() => null)
+  );
 }
 
 async function findRunningGlobalRankRun(env, clan, battleKeyValue) {
@@ -2619,6 +2644,87 @@ async function findRunningGlobalRankRun(env, clan, battleKeyValue) {
 
   const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
   return rows[0] || null;
+}
+
+async function findResumableGlobalRankRun(env, clan, battleKeyValue) {
+  const params = {
+    select: "*",
+    clan_name: `eq.${clan}`,
+    scan_kind: "eq.clan_contribution_sharded",
+    order: "started_at.desc",
+    limit: "8"
+  };
+
+  if (battleKeyValue) {
+    params.battle_key = `eq.${battleKeyValue}`;
+  }
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
+
+  for (const row of rows) {
+    const status = String(row.status || "").toLowerCase();
+    if (status === "failed" || status === "superseded") continue;
+
+    if (status === "running") {
+      return row;
+    }
+
+    if (await isResumableGlobalRankRun(env, row).catch(() => false)) {
+      return row;
+    }
+  }
+
+  return null;
+}
+
+async function findGlobalRankRunByKey(env, runKey) {
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "*",
+    run_key: `eq.${runKey}`,
+    limit: "1"
+  });
+
+  return rows[0] || null;
+}
+
+async function findLatestGlobalRankRun(env, clan, battleKeyValue) {
+  const params = {
+    select: "*",
+    clan_name: `eq.${clan}`,
+    order: "started_at.desc",
+    limit: "1"
+  };
+
+  if (battleKeyValue) {
+    params.battle_key = `eq.${battleKeyValue}`;
+  }
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
+  return rows[0] || null;
+}
+
+async function isResumableGlobalRankRun(env, run, knownShards = null) {
+  if (!run?.run_key) return false;
+
+  const status = String(run.status || "").toLowerCase();
+  if (status === "failed" || status === "superseded") return false;
+
+  const shards = knownShards || await fetchGlobalRankShards(env, run.run_key);
+  if (!shards.length) return false;
+
+  for (const shard of shards) {
+    const shardStatus = String(shard.status || "running").toLowerCase();
+    const startOffset = toNumber(shard.start_offset) || 0;
+    const endOffset = toNumber(shard.end_offset) || startOffset;
+    const nextOffset = clamp(toNumber(shard.next_offset) || startOffset, startOffset, endOffset);
+    const stopReason = String(shard.stop_reason || "").toLowerCase();
+
+    if (shardStatus === "failed") return false;
+    if (shardStatus === "running") return true;
+    if (nextOffset < endOffset && stopReason !== "clan_leaderboard_exhausted") return true;
+  }
+
+  return false;
 }
 
 async function countGlobalRankCandidates(env, runKey) {

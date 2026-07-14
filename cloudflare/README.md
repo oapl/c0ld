@@ -203,6 +203,7 @@ Useful endpoints:
 | `/api/clans/current` | Latest all-clans leaderboard from Supabase. |
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
 | `/api/global/ingest` | Manual protected global rank scan. `POST` only. Scans ranked clans in chunks and resumes a running scan unless `?force=1` is used. |
+| `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
 
