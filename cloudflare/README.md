@@ -143,10 +143,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `27`. Offset inside the schedule interval. With `GLOBAL_RANK_SCHEDULE_MINUTES=30`, use `27` to start on the cron tick immediately before minute `:27`/`:57`, normally `:25`/`:55` with a `*/5` cron. |
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
-| `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; maximum clan detail pulls per Worker invocation. Increase carefully. |
-| `GLOBAL_RANK_SHARD_COUNT` | Optional. Defaults to `1`. Set to `5` to split a Top 500 scan into five fixed 100-clan shards. |
-| `GLOBAL_RANK_SHARD_CONCURRENCY` | Optional. Defaults to `1`. Number of active shards the Worker may process at the same time during one invocation. Start with `2`. |
-| `GLOBAL_RANK_CLANS_PER_SHARD_RUN` | Optional. If set, each active shard processes this many clans per invocation. If blank, the Worker divides `GLOBAL_RANK_CLANS_PER_RUN` across shards. |
+| `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; fallback maximum clan detail pulls per Worker invocation when no per-shard value is set. |
+| `GLOBAL_RANK_SHARD_COUNT` | Optional. Defaults to `1`. Use `10` to split a Top 500 scan into ten fixed 50-clan shards. |
+| `GLOBAL_RANK_SHARD_CONCURRENCY` | Optional. Defaults to `1`. Number of active shards processed at the same time. Use `10` for the one-pass Top 500 configuration below. |
+| `GLOBAL_RANK_CLANS_PER_SHARD_RUN` | Optional. If set, each active shard processes this many clans per invocation. Set it to the shard size (`50` for ten Top 500 shards) to eliminate 5-minute resume gaps. |
+| `GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE` | Optional. Defaults to `10`; number of completed clan detail pulls combined before candidate rows are written to Supabase. |
 | `GLOBAL_RANK_CLAN_DELAY_MS` | Optional. Defaults to `1000`; delay between clan detail pulls to avoid hammering the API. |
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
@@ -227,28 +228,33 @@ clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
 are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
 clan leaderboard is exhausted.
 
-For faster controlled pulls, enable sharding. With:
+For the fastest controlled Top 500 pull, use one-pass sharding. With:
 
 ```text
 GLOBAL_RANK_CLAN_SCAN_LIMIT=500
 GLOBAL_RANK_CLAN_PAGE_SIZE=100
-GLOBAL_RANK_SHARD_COUNT=5
-GLOBAL_RANK_SHARD_CONCURRENCY=2
-GLOBAL_RANK_CLANS_PER_SHARD_RUN=10
+GLOBAL_RANK_SHARD_COUNT=10
+GLOBAL_RANK_SHARD_CONCURRENCY=10
+GLOBAL_RANK_CLANS_PER_SHARD_RUN=50
+GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE=10
+GLOBAL_RANK_CLAN_DELAY_MS=750
 ```
 
-the Worker creates five fixed shards:
+the Worker creates ten fixed 50-clan shards. The first five are:
 
 ```text
-Shard 0: ranks 1-100
-Shard 1: ranks 101-200
-Shard 2: ranks 201-300
-Shard 3: ranks 301-400
-Shard 4: ranks 401-500
+Shard 0: ranks 1-50
+Shard 1: ranks 51-100
+Shard 2: ranks 101-150
+Shard 3: ranks 151-200
+Shard 4: ranks 201-250
 ```
 
 All shards write candidates into the same `run_key`; the Worker finalizes the
-global ranks only after every shard is complete.
+global ranks only after every shard is complete. Batched candidate writes keep
+the one-pass scan below the request count produced by one Supabase write per
+clan. Completed consumers select by scan start time, so an older slow request
+cannot replace a newer complete result merely by finishing later.
 
 ## Discord `/search` Worker
 

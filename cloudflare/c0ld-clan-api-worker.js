@@ -29,6 +29,7 @@ const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
+const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
 
 export default {
   async fetch(request, env) {
@@ -425,22 +426,17 @@ async function handleGlobalCurrent(request, env) {
     limit: String(limit)
   });
 
-  const runKey = rows.find(row => row.run_key)?.run_key || null;
-  const runRows = runKey
-    ? await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
-      select: "*",
-      run_key: `eq.${runKey}`,
-      limit: "1"
-    })
-    : await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
-      select: "*",
-      clan_name: `eq.${clan}`,
-      order: "started_at.desc",
-      limit: "1"
-    });
-
-  const run = runRows[0] || null;
-  const displayRows = await overlayGlobalCurrentRowsFromCandidates(env, rows, run);
+  const run = await findLatestGlobalRankSearchRun(env, clan);
+  const displayRows = run
+    ? await overlayGlobalCurrentRowsFromCandidates(env, rows, run)
+    : rows.map(row => ({
+      ...row,
+      global_rank: null,
+      global_points: null,
+      total_global_players: null,
+      found: false,
+      run_key: null
+    }));
 
   return cacheJson({
     generated_at: new Date().toISOString(),
@@ -742,18 +738,41 @@ function parseGlobalCandidateRaw(value) {
 async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
   if (!run?.run_key || !Array.isArray(rows) || !rows.length) return rows;
 
-  const needsOverlay = rows.some(row => !(toNumber(row.global_rank) > 0));
-  if (!needsOverlay) return rows;
+  const alreadyCurrent = rows.every(row => row.run_key === run.run_key);
+  if (alreadyCurrent) return rows;
 
-  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key).catch(() => []);
-  if (!rankedCandidates.length) return rows;
+  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+  if (!rankedCandidates.length) {
+    return rows.map(row => ({
+      ...row,
+      global_rank: null,
+      global_points: null,
+      total_global_players: null,
+      found: false,
+      run_key: run.run_key
+    }));
+  }
 
-  const totalGlobalPlayers = rankedCandidates.length;
+  const totalGlobalPlayers =
+    toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    rankedCandidates.length;
   const byUserId = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
 
   return rows.map(row => {
     const match = byUserId.get(String(row.user_id));
-    if (!match) return row;
+    if (!match) {
+      return {
+        ...row,
+        global_rank: null,
+        global_points: null,
+        total_global_players: totalGlobalPlayers,
+        found: false,
+        fetched_at: run.finished_at || run.updated_at || row.fetched_at || null,
+        run_key: run.run_key,
+        updated_at: run.updated_at || row.updated_at || null
+      };
+    }
 
     return {
       ...row,
@@ -761,7 +780,8 @@ async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
       global_points: toNumber(match.points),
       total_global_players: totalGlobalPlayers,
       found: true,
-      fetched_at: row.fetched_at || match.fetched_at || run.updated_at || run.started_at || null,
+      fetched_at: run.finished_at || run.updated_at || match.fetched_at || row.fetched_at || null,
+      run_key: run.run_key,
       updated_at: run.updated_at || row.updated_at || match.updated_at || null
     };
   });
@@ -799,7 +819,10 @@ async function handleGlobalSearch(request, env) {
     return cacheJson(await searchGlobalRankCandidates(env, clan, query), env);
   }
 
-  if (!(toNumber(found.global_rank) > 0)) {
+  const latestRun = await findLatestGlobalRankSearchRun(env, clan);
+  const foundUsesLatestRun = Boolean(latestRun?.run_key && found.run_key === latestRun.run_key);
+
+  if (!foundUsesLatestRun || !(toNumber(found.global_rank) > 0)) {
     const candidateResult = await searchGlobalRankCandidates(env, clan, query);
     if (candidateResult?.ok && candidateResult.row) {
       const run = candidateResult.run || null;
@@ -819,6 +842,8 @@ async function handleGlobalSearch(request, env) {
         run
       }, env);
     }
+
+    return cacheJson(candidateResult, env);
   }
 
   const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
@@ -1102,6 +1127,22 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
     }
 
     if (stopReason) {
+      await validateGlobalRankRunCompleteness(env, {
+        clan,
+        clanMembers,
+        clanScanLimit,
+        candidatePlayerCount,
+        foundMemberCount,
+        shardSummary: {
+          processedCount: scannedClanCount,
+          stopReasons: [stopReason]
+        }
+      });
+      const publishCurrent = await shouldPublishGlobalRankCurrent(env, {
+        runKey,
+        clan,
+        startedAt
+      });
       const finalized = await finalizeGlobalRankRun(env, {
         runKey,
         clan,
@@ -1109,7 +1150,8 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
         latest,
         eventName,
         fetchedAt,
-        candidatePlayerCount
+        candidatePlayerCount,
+        publishCurrent
       });
       foundMemberCount = finalized.foundMemberCount;
 
@@ -1158,7 +1200,8 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
         cutoff_points: cutoffPoints,
         candidate_player_count: candidatePlayerCount,
         clan_member_count: clanMembers.length,
-        total_global_players: candidatePlayerCount
+        total_global_players: candidatePlayerCount,
+        published_current: publishCurrent
       }, 202);
     }
 
@@ -1260,7 +1303,29 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
   const existingRunningRun = await findResumableGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
-  const runningRun = force ? null : existingRunningRun;
+  const existingShards = existingRunningRun?.run_key
+    ? await fetchGlobalRankShards(env, existingRunningRun.run_key).catch(() => [])
+    : [];
+  const compatibleRunningRun = existingRunningRun && globalRankRunMatchesRuntimeConfig({
+    run: existingRunningRun,
+    shards: existingShards,
+    clanScanLimit,
+    pageSize,
+    shardCount
+  });
+
+  if (existingRunningRun && !compatibleRunningRun && !force) {
+    await upsertGlobalRankRun(env, {
+      run_key: existingRunningRun.run_key,
+      clan_name: existingRunningRun.clan_name || clan,
+      status: "superseded",
+      finished_at: fetchedAt,
+      stop_reason: "runtime_config_changed",
+      updated_at: fetchedAt
+    });
+  }
+
+  const runningRun = force ? null : (compatibleRunningRun ? existingRunningRun : null);
   const runKey = runningRun?.run_key || `${clan}:global:${latest?.battle_key || "battle"}:${fetchedAt}`;
   const startedAt = runningRun?.started_at || fetchedAt;
 
@@ -1293,12 +1358,6 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
     .filter(row => row.user_id);
 
   if (force && existingRunningRun?.run_key) {
-    await supabaseDelete(env, GLOBAL_RANK_CANDIDATES_TABLE, {
-      run_key: `eq.${existingRunningRun.run_key}`
-    });
-    await supabaseDelete(env, GLOBAL_RANK_SHARDS_TABLE, {
-      run_key: `eq.${existingRunningRun.run_key}`
-    });
     await upsertGlobalRankRun(env, {
       run_key: existingRunningRun.run_key,
       clan_name: existingRunningRun.clan_name || clan,
@@ -1320,10 +1379,10 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
     status: "running",
     scan_limit: clanScanLimit,
     page_size: pageSize,
-    scanned_count: 0,
-    scanned_clan_count: 0,
-    next_clan_offset: 0,
-    candidate_player_count: 0,
+    scanned_count: toNumber(runningRun?.scanned_count) || 0,
+    scanned_clan_count: toNumber(runningRun?.scanned_clan_count) || 0,
+    next_clan_offset: toNumber(runningRun?.next_clan_offset) || 0,
+    candidate_player_count: toNumber(runningRun?.candidate_player_count) || 0,
     clan_member_count: clanMembers.length,
     found_member_count: 0,
     total_global_players: null,
@@ -1350,6 +1409,7 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
       .filter(shard => String(shard.status || "running") === "running")
       .sort((a, b) => toNumber(a.shard_index) - toNumber(b.shard_index))
       .slice(0, shardConcurrency);
+    const leaderboardPageCache = new Map();
 
     const shardResults = await runLimited(activeShards, shardConcurrency, shard => processGlobalRankShard(env, {
       runKey,
@@ -1358,7 +1418,8 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
       clansPerShardRun,
       configuredBattleKey,
       activeBattleKey: activeBattleMeta?.battleKey || "",
-      fetchedAt
+      fetchedAt,
+      leaderboardPageCache
     }));
 
     processedClans = shardResults.reduce((total, result) => total + (toNumber(result.processed_clans) || 0), 0);
@@ -1375,6 +1436,19 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
     }
 
     if (allDone) {
+      await validateGlobalRankRunCompleteness(env, {
+        clan,
+        clanMembers,
+        clanScanLimit,
+        candidatePlayerCount,
+        foundMemberCount,
+        shardSummary
+      });
+      const publishCurrent = await shouldPublishGlobalRankCurrent(env, {
+        runKey,
+        clan,
+        startedAt
+      });
       const finalized = await finalizeGlobalRankRun(env, {
         runKey,
         clan,
@@ -1382,7 +1456,8 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
         latest,
         eventName,
         fetchedAt,
-        candidatePlayerCount
+        candidatePlayerCount,
+        publishCurrent
       });
       foundMemberCount = finalized.foundMemberCount;
 
@@ -1437,6 +1512,7 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
         candidate_player_count: candidatePlayerCount,
         clan_member_count: clanMembers.length,
         total_global_players: candidatePlayerCount,
+        published_current: publishCurrent,
         shards: shardSummary.rows
       }, 202);
     }
@@ -2287,9 +2363,31 @@ async function fetchTopClans(env, requestedTopN = null) {
   throw httpError(502, `Big Games clans API failed: ${lastError?.message || "unknown error"}`);
 }
 
-async function fetchClanLeaderboardPage(env, { page, pageSize }) {
+async function fetchClanLeaderboardPage(env, { page, pageSize, cache = null }) {
   const safePage = Math.max(1, Math.round(Number(page) || 1));
   const safePageSize = globalRankClanPageSize({ GLOBAL_RANK_CLAN_PAGE_SIZE: pageSize });
+  const cacheKey = `${safePage}:${safePageSize}`;
+
+  if (cache?.has(cacheKey)) {
+    return cache.get(cacheKey);
+  }
+
+  const request = fetchClanLeaderboardPageUncached(env, {
+    page: safePage,
+    pageSize: safePageSize
+  });
+
+  if (cache) cache.set(cacheKey, request);
+
+  try {
+    return await request;
+  } catch (err) {
+    if (cache?.get(cacheKey) === request) cache.delete(cacheKey);
+    throw err;
+  }
+}
+
+async function fetchClanLeaderboardPageUncached(env, { page: safePage, pageSize: safePageSize }) {
   const hosts = [
     "https://biggamesapi.io/api/clans",
     "https://ps99.biggamesapi.io/api/clans"
@@ -2408,6 +2506,17 @@ async function collectGlobalRankCandidatesForClan(env, {
   return [...byUser.values()];
 }
 
+async function upsertGlobalRankCandidateRows(env, rows) {
+  for (const batch of chunkValues(rows || [], 500)) {
+    await supabaseUpsert(
+      env,
+      GLOBAL_RANK_CANDIDATES_TABLE,
+      batch,
+      "run_key,source_clan,user_id"
+    );
+  }
+}
+
 async function ensureGlobalRankShards(env, {
   runKey,
   shardCount,
@@ -2463,6 +2572,33 @@ function buildGlobalRankShardRows({
   }
 
   return rows;
+}
+
+function globalRankRunMatchesRuntimeConfig({ run, shards, clanScanLimit, pageSize, shardCount }) {
+  if (!run?.run_key) return false;
+  if ((toNumber(run.scan_limit) || clanScanLimit) !== clanScanLimit) return false;
+  if ((toNumber(run.page_size) || pageSize) !== pageSize) return false;
+
+  const expected = buildGlobalRankShardRows({
+    runKey: run.run_key,
+    shardCount,
+    clanScanLimit,
+    startedAt: run.started_at || new Date(0).toISOString()
+  });
+  const actual = (shards || []).slice().sort((a, b) => (
+    (toNumber(a.shard_index) || 0) - (toNumber(b.shard_index) || 0)
+  ));
+
+  if (actual.length !== expected.length) return false;
+
+  return expected.every((row, index) => {
+    const shard = actual[index];
+    return (
+      toNumber(shard.shard_index) === row.shard_index &&
+      toNumber(shard.start_offset) === row.start_offset &&
+      toNumber(shard.end_offset) === row.end_offset
+    );
+  });
 }
 
 async function fetchGlobalRankShards(env, runKey) {
@@ -2604,15 +2740,29 @@ async function processGlobalRankShard(env, {
   clansPerShardRun,
   configuredBattleKey,
   activeBattleKey,
-  fetchedAt
+  fetchedAt,
+  leaderboardPageCache = null
 }) {
   const shardIndex = toNumber(shard.shard_index) || 0;
   const startOffset = toNumber(shard.start_offset) || 0;
   const endOffset = toNumber(shard.end_offset) || startOffset;
   let nextOffset = clamp(toNumber(shard.next_offset) || startOffset, startOffset, endOffset);
+  let committedNextOffset = nextOffset;
   let processedClans = 0;
   let stopReason = null;
   const startedAt = shard.started_at || fetchedAt;
+  const candidateClanBatchSize = globalRankCandidateClanBatchSize(env);
+  let pendingCandidateRows = [];
+  let pendingClanCount = 0;
+
+  const flushPendingCandidates = async () => {
+    if (pendingCandidateRows.length) {
+      await upsertGlobalRankCandidateRows(env, pendingCandidateRows);
+    }
+    committedNextOffset = nextOffset;
+    pendingCandidateRows = [];
+    pendingClanCount = 0;
+  };
 
   try {
     while (processedClans < clansPerShardRun && nextOffset < endOffset) {
@@ -2620,7 +2770,8 @@ async function processGlobalRankShard(env, {
       const pageIndex = nextOffset % pageSize;
       const pageRows = await fetchClanLeaderboardPage(env, {
         page: pageNumber,
-        pageSize
+        pageSize,
+        cache: leaderboardPageCache
       });
 
       if (!pageRows.length || pageIndex >= pageRows.length) {
@@ -2640,23 +2791,25 @@ async function processGlobalRankShard(env, {
           fetchedAt
         });
 
-        if (candidateRows.length) {
-          await supabaseUpsert(
-            env,
-            GLOBAL_RANK_CANDIDATES_TABLE,
-            candidateRows,
-            "run_key,source_clan,user_id"
-          );
-        }
+        pendingCandidateRows.push(...candidateRows);
 
         processedClans += 1;
+        pendingClanCount += 1;
         nextOffset += 1;
+
+        if (pendingClanCount >= candidateClanBatchSize) {
+          await flushPendingCandidates();
+        }
 
         const delayMs = globalRankClanDelayMs(env);
         if (delayMs > 0 && processedClans < clansPerShardRun && nextOffset < endOffset) {
           await sleep(delayMs);
         }
       }
+    }
+
+    if (pendingClanCount) {
+      await flushPendingCandidates();
     }
 
     if (!stopReason && nextOffset >= endOffset) {
@@ -2695,8 +2848,8 @@ async function processGlobalRankShard(env, {
       shard_index: shardIndex,
       start_offset: startOffset,
       end_offset: endOffset,
-      next_offset: nextOffset,
-      processed_count: Math.max(0, nextOffset - startOffset),
+      next_offset: committedNextOffset,
+      processed_count: Math.max(0, committedNextOffset - startOffset),
       status: "failed",
       started_at: startedAt,
       finished_at: failedAt,
@@ -2863,6 +3016,78 @@ async function readGlobalRankRankedCandidates(env, runKey) {
     }));
 }
 
+async function validateGlobalRankRunCompleteness(env, {
+  clan,
+  clanMembers,
+  clanScanLimit,
+  candidatePlayerCount,
+  foundMemberCount,
+  shardSummary
+}) {
+  const processedCount = toNumber(shardSummary?.processedCount) || 0;
+  const exhausted = (shardSummary?.stopReasons || []).includes("clan_leaderboard_exhausted");
+
+  if (!exhausted && processedCount < clanScanLimit) {
+    throw httpError(502, `Global rank scan covered only ${processedCount} of ${clanScanLimit} ranked clans.`);
+  }
+
+  if (!(candidatePlayerCount > 0)) {
+    throw httpError(502, "Global rank scan produced no candidate players.");
+  }
+
+  const previousRun = await findLatestGlobalRankSearchRun(env, clan).catch(() => null);
+  const previousCandidateCount =
+    toNumber(previousRun?.total_global_players) ||
+    toNumber(previousRun?.candidate_player_count) ||
+    0;
+  const previousScanLimit = toNumber(previousRun?.scan_limit) || 0;
+
+  if (
+    previousCandidateCount > 0 &&
+    previousScanLimit === clanScanLimit &&
+    candidatePlayerCount < Math.floor(previousCandidateCount * 0.6)
+  ) {
+    throw httpError(
+      502,
+      `Global rank scan produced only ${candidatePlayerCount} unique players versus ${previousCandidateCount} in the previous complete Top ${clanScanLimit} scan.`
+    );
+  }
+
+  const trackedClan = await fetchTrackedClanCurrent(env, clan).catch(() => null);
+  const trackedRank = toNumber(trackedClan?.rank);
+  const memberCount = (clanMembers || []).length;
+
+  if (
+    trackedRank !== null &&
+    trackedRank <= clanScanLimit &&
+    memberCount > 0 &&
+    foundMemberCount < memberCount
+  ) {
+    throw httpError(
+      502,
+      `Global rank scan found only ${foundMemberCount} of ${memberCount} ${clan} members even though the clan is rank ${trackedRank} inside the scanned Top ${clanScanLimit}.`
+    );
+  }
+}
+
+async function shouldPublishGlobalRankCurrent(env, { runKey, clan, startedAt }) {
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "run_key,started_at,status",
+    clan_name: `eq.${clan}`,
+    status: "not.in.(failed,superseded)",
+    order: "started_at.desc",
+    limit: "1"
+  });
+  const latest = rows[0] || null;
+
+  if (!latest?.run_key) return true;
+  if (latest.run_key === runKey) return true;
+
+  const latestStartedMs = isoToMs(latest.started_at);
+  const currentStartedMs = isoToMs(startedAt);
+  return !latestStartedMs || !currentStartedMs || latestStartedMs <= currentStartedMs;
+}
+
 function dedupeGlobalCandidateRows(rows) {
   const byUser = new Map();
 
@@ -2899,7 +3124,8 @@ async function finalizeGlobalRankRun(env, {
   latest,
   eventName,
   fetchedAt,
-  candidatePlayerCount
+  candidatePlayerCount,
+  publishCurrent = true
 }) {
   const topCandidates = await readGlobalRankRankedCandidates(env, runKey);
   const candidateById = new Map(topCandidates.map(row => [String(row.user_id), row]));
@@ -2929,7 +3155,9 @@ async function finalizeGlobalRankRun(env, {
     };
   });
 
-  await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, finalRows, "clan_name,user_id");
+  if (publishCurrent) {
+    await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, finalRows, "clan_name,user_id");
+  }
   await supabaseUpsert(env, GLOBAL_RANK_HISTORY_TABLE, finalRows.map(row => ({
     run_key: runKey,
     clan_name: row.clan_name,
@@ -4203,20 +4431,35 @@ async function findLatestGlobalRankSearchRun(env, clan) {
     select: "*",
     clan_name: `eq.${clan}`,
     status: "in.(ok,completed)",
-    order: "finished_at.desc",
-    limit: "1"
-  });
-
-  if (completed[0]) return completed[0];
-
-  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
-    select: "*",
-    clan_name: `eq.${clan}`,
     order: "started_at.desc",
-    limit: "1"
+    limit: "20"
   });
 
-  return rows[0] || null;
+  const usableCompleted = completed.find(isUsableCompletedGlobalRankRun);
+  if (usableCompleted) return usableCompleted;
+  return null;
+}
+
+function isUsableCompletedGlobalRankRun(run) {
+  if (!run?.run_key) return false;
+
+  const candidateCount =
+    toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    0;
+  const scanLimit = toNumber(run.scan_limit) || 0;
+  const scannedCount =
+    toNumber(run.scanned_clan_count) ||
+    toNumber(run.scanned_count) ||
+    0;
+  const stopReason = String(run.stop_reason || "").toLowerCase();
+  const clanMemberCount = toNumber(run.clan_member_count) || 0;
+  const foundMemberCount = toNumber(run.found_member_count) || 0;
+
+  if (!(candidateCount > 0)) return false;
+  if (scanLimit > 0 && scannedCount < scanLimit && stopReason !== "clan_leaderboard_exhausted") return false;
+  if (clanMemberCount > 0 && foundMemberCount <= 0) return false;
+  return true;
 }
 
 async function resolveGlobalSearchIdentity(query, env) {
@@ -4323,6 +4566,14 @@ function globalRankClansPerShardRun(env, shardCount = globalRankShardCount(env))
   );
 }
 
+function globalRankCandidateClanBatchSize(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE || DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE),
+    1,
+    50
+  );
+}
+
 function globalRankCandidateReadLimit(env) {
   return clamp(globalRankClanScanLimit(env) * 100, 1000, 2000000);
 }
@@ -4336,6 +4587,7 @@ function globalRankRuntimeConfig(env) {
     shard_count: shardCount,
     shard_concurrency: globalRankShardConcurrency(env, shardCount),
     clans_per_shard_run: globalRankClansPerShardRun(env, shardCount),
+    candidate_clan_batch_size: globalRankCandidateClanBatchSize(env),
     clan_scan_limit: globalRankClanScanLimit(env),
     clan_page_size: globalRankClanPageSize(env),
     clans_per_run: globalRankClansPerRun(env),
