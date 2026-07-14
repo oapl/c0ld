@@ -25,6 +25,16 @@ export default {
         return await registerSearchCommand(url, env);
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/commands") {
+        requireAdmin(request, env);
+        return await listCommands(url, env);
+      }
+
+      if ((request.method === "POST" || request.method === "DELETE") && url.pathname === "/admin/delete-command") {
+        requireAdmin(request, env);
+        return await deleteCommand(url, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/discord/interactions") {
         return await handleInteraction(request, env);
       }
@@ -78,10 +88,10 @@ async function handleInteraction(request, env) {
 }
 
 async function buildSearchResponse(query, env) {
-  const clan = String(env.CLAN_NAME || "c0ld").trim() || "c0ld";
+  const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const url = new URL("/api/global/search", apiBase);
-  url.searchParams.set("clan", clan);
+  url.searchParams.set("clan", scanClan);
   url.searchParams.set("q", query);
 
   const res = await fetch(url.toString(), {
@@ -95,19 +105,27 @@ async function buildSearchResponse(query, env) {
 
   if (!res.ok || payload.ok === false || !payload.row) {
     return messageResponse(
-      payload.message || `No ${clan} global-rank result found for ${query}.`,
+      payload.message || `No global-rank result found for ${query}.`,
       true
     );
   }
 
   const row = payload.row;
+  const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
+  const primaryClanName = String(scanClan).toLowerCase();
+  const isPrimaryClanMember = !row.source_clan && String(row.clan_name || "").toLowerCase() === primaryClanName;
+  const clanRankLine = isPrimaryClanMember
+    ? `Rank in ${resultClan.toUpperCase()}: **${rank(row.clan_rank)}**`
+    : row.clan_rank
+      ? `Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
+      : null;
   const embed = {
     title: "Global Search Results",
     color: 0x58a6ff,
     description: [
       `Name: **${displayName(row)}**`,
-      `Clan: **${String(row.clan_name || clan).toUpperCase()}**`,
-      `Rank in ${String(row.clan_name || clan).toUpperCase()}: **${rank(row.clan_rank)}**`,
+      `Clan: **${resultClan.toUpperCase()}**`,
+      clanRankLine,
       "",
       `Event: **${row.event_name || row.battle_display_name || row.battle_key || "Current Event"}**`,
       `Stars: **${shortNumber(row.global_points ?? row.clan_points)}**`,
@@ -168,11 +186,119 @@ async function registerSearchCommand(url, env) {
   });
 }
 
+async function listCommands(url, env) {
+  const scope = String(url.searchParams.get("scope") || "both").toLowerCase();
+  const results = [];
+
+  if (scope === "both" || scope === "guild") {
+    const guildId = String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
+    if (guildId) {
+      results.push({
+        scope: "guild",
+        guild_id: guildId,
+        commands: await fetchCommands(env, guildId)
+      });
+    }
+  }
+
+  if (scope === "both" || scope === "global") {
+    results.push({
+      scope: "global",
+      guild_id: null,
+      commands: await fetchCommands(env, null)
+    });
+  }
+
+  return json({ ok: true, results });
+}
+
+async function deleteCommand(url, env) {
+  const id = String(url.searchParams.get("id") || "").trim();
+  const name = String(url.searchParams.get("name") || "").trim().toLowerCase();
+  const scope = String(url.searchParams.get("scope") || "both").toLowerCase();
+  const targets = [];
+
+  if (!id && !name) {
+    throw httpError(400, "Provide ?id=COMMAND_ID or ?name=COMMAND_NAME.");
+  }
+
+  if (scope === "both" || scope === "guild") {
+    const guildId = String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
+    if (guildId) targets.push({ scope: "guild", guildId });
+  }
+
+  if (scope === "both" || scope === "global") {
+    targets.push({ scope: "global", guildId: null });
+  }
+
+  const deleted = [];
+  for (const target of targets) {
+    const commands = id
+      ? [{ id, name: name || null }]
+      : (await fetchCommands(env, target.guildId)).filter(command => String(command.name || "").toLowerCase() === name);
+
+    for (const command of commands) {
+      await deleteCommandById(env, target.guildId, command.id);
+      deleted.push({
+        scope: target.scope,
+        guild_id: target.guildId,
+        id: command.id,
+        name: command.name
+      });
+    }
+  }
+
+  return json({ ok: true, deleted });
+}
+
+async function fetchCommands(env, guildId) {
+  const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
+  const endpoint = discordCommandsEndpoint(applicationId, guildId);
+  const res = await fetch(endpoint, {
+    headers: discordBotHeaders(env)
+  });
+  const payload = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw httpError(502, payload.message || `Discord command list failed (${res.status}).`);
+  }
+
+  return payload;
+}
+
+async function deleteCommandById(env, guildId, commandId) {
+  const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
+  const endpoint = `${discordCommandsEndpoint(applicationId, guildId)}/${encodeURIComponent(commandId)}`;
+  const res = await fetch(endpoint, {
+    method: "DELETE",
+    headers: discordBotHeaders(env)
+  });
+
+  if (!res.ok && res.status !== 404) {
+    const payload = await res.json().catch(() => ({}));
+    throw httpError(502, payload.message || `Discord command delete failed (${res.status}).`);
+  }
+}
+
+function discordCommandsEndpoint(applicationId, guildId) {
+  return guildId
+    ? `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`
+    : `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/commands`;
+}
+
+function discordBotHeaders(env, extra = {}) {
+  return {
+    Authorization: `Bot ${requiredEnv(env, "DISCORD_BOT_TOKEN")}`,
+    Accept: "application/json",
+    ...extra
+  };
+}
+
 function searchCommandPayload() {
   return {
     name: "search",
     type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "Search c0ld global rank data by Roblox username.",
+    description: "Search stored global rank data by Roblox username.",
     options: [
       {
         name: "username",

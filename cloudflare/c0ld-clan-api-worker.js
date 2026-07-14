@@ -460,12 +460,7 @@ async function handleGlobalSearch(request, env) {
   });
 
   if (!found) {
-    return cacheJson({
-      ok: false,
-      message: `No ${clan} member matched "${query}".`,
-      query,
-      clan_name: clan
-    }, env);
+    return cacheJson(await searchGlobalRankCandidates(env, clan, query), env);
   }
 
   const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
@@ -490,6 +485,86 @@ async function handleGlobalSearch(request, env) {
       clan_points: toNumber(row.clan_points)
     }))
   }, env);
+}
+
+async function searchGlobalRankCandidates(env, clan, query) {
+  const run = await findLatestGlobalRankSearchRun(env, clan);
+
+  if (!run?.run_key) {
+    return {
+      ok: false,
+      message: "No completed global rank scan is available yet.",
+      query,
+      clan_name: clan
+    };
+  }
+
+  const lookup = await resolveGlobalSearchIdentity(query, env);
+  if (!lookup.user_id) {
+    return {
+      ok: false,
+      message: `No Roblox user matched "${query}".`,
+      query,
+      clan_name: clan,
+      run
+    };
+  }
+
+  const candidateRows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
+    run_key: `eq.${run.run_key}`,
+    user_id: `eq.${lookup.user_id}`,
+    order: "points.desc,user_id.asc",
+    limit: "10"
+  });
+  const candidate = dedupeGlobalCandidateRows(candidateRows).sort(sortGlobalCandidateRows)[0] || null;
+
+  if (!candidate) {
+    return {
+      ok: false,
+      message: `No global-rank row matched "${query}" in the latest Top ${toNumber(run.scan_limit) || 500} clan scan.`,
+      query,
+      clan_name: clan,
+      run
+    };
+  }
+
+  const points = toNumber(candidate.points) || 0;
+  const userId = toNumber(candidate.user_id);
+  const [higherCount, tiedBeforeCount, avatarMap] = await Promise.all([
+    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      run_key: `eq.${run.run_key}`,
+      points: `gt.${points}`
+    }),
+    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      run_key: `eq.${run.run_key}`,
+      points: `eq.${points}`,
+      user_id: `lt.${userId}`
+    }),
+    resolveRobloxAvatarHeadshots([userId], env).catch(() => new Map())
+  ]);
+  const total = toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    await countGlobalRankCandidates(env, run.run_key);
+
+  const username = lookup.username || (await resolveRobloxUsernames([userId], env)
+    .then(map => map.get(userId))
+    .catch(() => `user_${userId}`));
+
+  return {
+    ok: true,
+    query,
+    clan_name: clan,
+    row: normalizeGlobalCandidateSearchOutput(candidate, {
+      run,
+      globalRank: higherCount + tiedBeforeCount + 1,
+      totalGlobalPlayers: total,
+      username,
+      displayName: lookup.display_name,
+      avatarUrl: avatarMap.get(userId) || null
+    }),
+    history: []
+  };
 }
 
 async function handleGlobalRankIngest(env, source, requestedClan, force = false) {
@@ -3063,6 +3138,106 @@ function normalizeGlobalCurrentOutput(row) {
     run_key: row.run_key,
     updated_at: row.updated_at
   };
+}
+
+function normalizeGlobalCandidateSearchOutput(row, {
+  run,
+  globalRank,
+  totalGlobalPlayers,
+  username,
+  displayName,
+  avatarUrl
+}) {
+  const userId = toNumber(row.user_id);
+  const sourceClan = String(row.source_clan || "").trim();
+
+  return {
+    clan_name: sourceClan,
+    user_id: userId,
+    username: username || `user_${userId}`,
+    display_name: displayName || username || `user_${userId}`,
+    avatar_url: avatarUrl || null,
+    clan_rank: toNumber(row.source_clan_rank),
+    clan_points: toNumber(row.source_clan_points) || 0,
+    battle_key: row.battle_key || run?.battle_key || null,
+    battle_display_name: cleanBattleDisplayName(
+      row.battle_key || run?.battle_key,
+      row.battle_display_name || run?.battle_display_name
+    ),
+    event_name: run?.event_name || row.battle_display_name || run?.battle_display_name || run?.battle_key || null,
+    global_rank: toNumber(globalRank),
+    global_points: toNumber(row.points),
+    total_global_players: toNumber(totalGlobalPlayers),
+    found: true,
+    fetched_at: row.fetched_at || run?.finished_at || run?.updated_at || null,
+    run_key: run?.run_key || null,
+    updated_at: row.updated_at || run?.updated_at || null,
+    source_clan: sourceClan
+  };
+}
+
+async function findLatestGlobalRankSearchRun(env, clan) {
+  const completed = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "*",
+    clan_name: `eq.${clan}`,
+    status: "eq.completed",
+    order: "finished_at.desc",
+    limit: "1"
+  });
+
+  if (completed[0]) return completed[0];
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "*",
+    clan_name: `eq.${clan}`,
+    order: "started_at.desc",
+    limit: "1"
+  });
+
+  return rows[0] || null;
+}
+
+async function resolveGlobalSearchIdentity(query, env) {
+  const text = String(query || "").trim();
+  const directId = toNumber(text);
+
+  if (directId) {
+    const usernameMap = await resolveRobloxUsernames([directId], env).catch(() => new Map());
+    return {
+      user_id: directId,
+      username: usernameMap.get(directId) || `user_${directId}`,
+      display_name: null
+    };
+  }
+
+  try {
+    const res = await fetch("https://users.roblox.com/v1/usernames/users", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "c0ld-Clan-API-Worker"
+      },
+      body: JSON.stringify({
+        usernames: [text],
+        excludeBannedUsers: false
+      })
+    });
+
+    if (!res.ok) return { user_id: null, username: null, display_name: null };
+
+    const payload = await res.json();
+    const user = firstArray(payload?.data)[0] || null;
+    const id = toNumber(user?.id);
+
+    return {
+      user_id: id,
+      username: user?.name || text,
+      display_name: user?.displayName || null
+    };
+  } catch {
+    return { user_id: null, username: null, display_name: null };
+  }
 }
 
 function globalRankEventName(env, latest) {

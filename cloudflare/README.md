@@ -201,7 +201,7 @@ Useful endpoints:
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
 | `/api/global/ingest` | Manual protected global rank scan. `POST` only. Scans ranked clans in chunks and resumes a running scan unless `?force=1` is used. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
-| `/api/global/search?q=Cinnamowopal` | Cached c0ld global rank lookup for Discord `/search` commands. |
+| `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
 
 The Big Games API does not expose the player-level global leaderboard directly.
 The global rank scanner derives it by paging `/api/clans` sorted by clan points,
@@ -242,7 +242,7 @@ Required Worker variables:
 | Variable | Purpose |
 |---|---|
 | `CLAN_API_BASE` | Base URL for `c0ld-clan-api-worker`, such as `https://c0ld-clan-api-worker.opal-dde.workers.dev`. |
-| `CLAN_NAME` | Usually `c0ld`. |
+| `GLOBAL_SCAN_CLAN` | Usually `c0ld`. Selects which global scan cache to read; it does not restrict results to c0ld members. |
 | `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
@@ -285,6 +285,28 @@ Invoke-RestMethod -Method Post `
 Use `guild_id` while testing because it usually appears immediately in that
 server. Omit `?guild_id=...` once you want a global command, but expect Discord's
 global command cache to take longer to appear.
+
+List registered commands:
+
+```powershell
+$token = "YOUR_REGISTER_ADMIN_TOKEN"
+Invoke-RestMethod `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/commands?scope=both&guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Delete old commands by name:
+
+```powershell
+$token = "YOUR_REGISTER_ADMIN_TOKEN"
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/delete-command?scope=both&guild_id=YOUR_GUILD_ID&name=machine" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/delete-command?scope=both&guild_id=YOUR_GUILD_ID&name=stock" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
 
 The command users run is:
 
