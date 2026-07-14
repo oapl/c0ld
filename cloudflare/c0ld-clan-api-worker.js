@@ -518,6 +518,7 @@ async function handleGlobalRankStatus(request, env) {
   const shards = run?.run_key ? await fetchGlobalRankShards(env, run.run_key).catch(() => []) : [];
   const shardSummary = summarizeGlobalRankShards(shards);
   const resumable = run ? await isResumableGlobalRankRun(env, run, shards).catch(() => false) : false;
+  const timing = summarizeGlobalRankTiming(run, shardSummary);
 
   return json({
     ok: true,
@@ -526,6 +527,7 @@ async function handleGlobalRankStatus(request, env) {
     runtime_config: globalRankRuntimeConfig(env),
     run,
     resumable,
+    timing,
     shard_summary: shardSummary,
     shards: shardSummary.rows
   }, 200, {
@@ -2482,6 +2484,19 @@ function summarizeGlobalRankShards(shards) {
       const endOffset = toNumber(shard.end_offset) || startOffset;
       const nextOffset = clamp(toNumber(shard.next_offset) || startOffset, startOffset, endOffset);
       const processedCount = toNumber(shard.processed_count) || Math.max(0, nextOffset - startOffset);
+      const startedAt = shard.started_at || null;
+      const updatedAt = shard.updated_at || null;
+      const finishedAt = shard.finished_at || null;
+      const startedMs = isoToMs(startedAt);
+      const updatedMs = isoToMs(updatedAt);
+      const finishedMs = isoToMs(finishedAt);
+      const effectiveEndMs = finishedMs || updatedMs;
+      const activeSeconds = startedMs && effectiveEndMs
+        ? Math.max(0, (effectiveEndMs - startedMs) / 1000)
+        : null;
+      const clansPerMinute = activeSeconds && activeSeconds > 0
+        ? processedCount / (activeSeconds / 60)
+        : null;
 
       return {
         shard_index: toNumber(shard.shard_index) || 0,
@@ -2490,7 +2505,12 @@ function summarizeGlobalRankShards(shards) {
         next_offset: nextOffset,
         processed_count: processedCount,
         status: shard.status || "running",
-        stop_reason: shard.stop_reason || null
+        stop_reason: shard.stop_reason || null,
+        started_at: startedAt,
+        updated_at: updatedAt,
+        finished_at: finishedAt,
+        active_elapsed_seconds: activeSeconds === null ? null : Math.round(activeSeconds),
+        clans_per_minute: clansPerMinute === null ? null : roundMetric(clansPerMinute, 2)
       };
     })
     .sort((a, b) => a.shard_index - b.shard_index);
@@ -2508,6 +2528,73 @@ function summarizeGlobalRankShards(shards) {
     nextOffset,
     stopReasons
   };
+}
+
+function summarizeGlobalRankTiming(run, shardSummary) {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const startedAt = run?.started_at || null;
+  const updatedAt = run?.updated_at || null;
+  const finishedAt = run?.finished_at || null;
+  const startedMs = isoToMs(startedAt);
+  const updatedMs = isoToMs(updatedAt);
+  const finishedMs = isoToMs(finishedAt);
+  const totalClans = toNumber(run?.scan_limit) ||
+    (shardSummary?.rows || []).reduce((total, shard) => {
+      return total + Math.max(0, (toNumber(shard.end_offset) || 0) - (toNumber(shard.start_offset) || 0));
+    }, 0);
+  const processedClans = toNumber(shardSummary?.processedCount) ||
+    toNumber(run?.scanned_clan_count) ||
+    toNumber(run?.scanned_count) ||
+    0;
+  const remainingClans = Math.max(0, totalClans - processedClans);
+  const activeEndMs = finishedMs || updatedMs || nowMs;
+  const activeElapsedSeconds = startedMs
+    ? Math.max(0, (activeEndMs - startedMs) / 1000)
+    : null;
+  const wallElapsedSeconds = startedMs
+    ? Math.max(0, (nowMs - startedMs) / 1000)
+    : null;
+  const durationSeconds = startedMs && finishedMs
+    ? Math.max(0, (finishedMs - startedMs) / 1000)
+    : null;
+  const activeClansPerMinute = activeElapsedSeconds && activeElapsedSeconds > 0
+    ? processedClans / (activeElapsedSeconds / 60)
+    : null;
+  const wallClansPerMinute = wallElapsedSeconds && wallElapsedSeconds > 0
+    ? processedClans / (wallElapsedSeconds / 60)
+    : null;
+  const estimatedRemainingSeconds = activeClansPerMinute && activeClansPerMinute > 0
+    ? remainingClans / (activeClansPerMinute / 60)
+    : null;
+  const estimatedFinishAt = estimatedRemainingSeconds === null
+    ? null
+    : new Date(nowMs + estimatedRemainingSeconds * 1000).toISOString();
+
+  return {
+    started_at: startedAt,
+    updated_at: updatedAt,
+    finished_at: finishedAt,
+    now: now.toISOString(),
+    status: run?.status || null,
+    total_clans: totalClans,
+    processed_clans: processedClans,
+    remaining_clans: remainingClans,
+    percent_complete: totalClans > 0 ? roundMetric((processedClans / totalClans) * 100, 2) : null,
+    active_elapsed_seconds: activeElapsedSeconds === null ? null : Math.round(activeElapsedSeconds),
+    wall_elapsed_seconds: wallElapsedSeconds === null ? null : Math.round(wallElapsedSeconds),
+    duration_seconds: durationSeconds === null ? null : Math.round(durationSeconds),
+    active_clans_per_minute: activeClansPerMinute === null ? null : roundMetric(activeClansPerMinute, 2),
+    wall_clans_per_minute: wallClansPerMinute === null ? null : roundMetric(wallClansPerMinute, 2),
+    estimated_remaining_seconds: estimatedRemainingSeconds === null ? null : Math.round(estimatedRemainingSeconds),
+    estimated_finish_at: estimatedFinishAt
+  };
+}
+
+function roundMetric(value, decimals = 2) {
+  if (!Number.isFinite(value)) return null;
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 async function processGlobalRankShard(env, {

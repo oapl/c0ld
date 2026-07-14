@@ -207,6 +207,16 @@ Useful endpoints:
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
 
+To compare global-rank scan configs, deploy the Worker and run:
+
+```powershell
+.\scripts\watch-global-rank-status.ps1 `
+  -WorkerUrl "https://c0ld-clan-api-worker.opal-dde.workers.dev" `
+  -OutputPath ".\global-rank-status-log.csv"
+```
+
+`/api/global/status` reports `timing.started_at`, `timing.finished_at`, `timing.percent_complete`, `timing.active_clans_per_minute`, and `timing.estimated_finish_at`. The watcher writes those snapshots to CSV so shard counts, per-shard clan counts, and delays can be compared cleanly.
+
 The Big Games API does not expose the player-level global leaderboard directly.
 The global rank scanner derives it by paging `/api/clans` sorted by clan points,
 pulling each clan detail, collecting current battle contribution rows, and
