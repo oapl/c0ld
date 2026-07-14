@@ -528,7 +528,7 @@
     const maxT = Math.max(...allPoints.map(point => point.t));
     const minYRaw = Math.min(...allPoints.map(point => point.pointsGained));
     const maxYRaw = Math.max(...allPoints.map(point => point.pointsGained));
-    const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 20_000);
+    const paddingY = Math.max((maxYRaw - minYRaw) * 0.10, 1_000);
     const minY = Math.max(0, minYRaw - paddingY);
     const maxY = maxYRaw + paddingY;
 
