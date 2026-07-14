@@ -144,6 +144,9 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; maximum clan detail pulls per Worker invocation. Increase carefully. |
+| `GLOBAL_RANK_SHARD_COUNT` | Optional. Defaults to `1`. Set to `5` to split a Top 500 scan into five fixed 100-clan shards. |
+| `GLOBAL_RANK_SHARD_CONCURRENCY` | Optional. Defaults to `1`. Number of active shards the Worker may process at the same time during one invocation. Start with `2`. |
+| `GLOBAL_RANK_CLANS_PER_SHARD_RUN` | Optional. If set, each active shard processes this many clans per invocation. If blank, the Worker divides `GLOBAL_RANK_CLANS_PER_RUN` across shards. |
 | `GLOBAL_RANK_CLAN_DELAY_MS` | Optional. Defaults to `1000`; delay between clan detail pulls to avoid hammering the API. |
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
@@ -212,6 +215,29 @@ clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
 "Better than 99.50% of players." It does not stop early when all c0ld members
 are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
 clan leaderboard is exhausted.
+
+For faster controlled pulls, enable sharding. With:
+
+```text
+GLOBAL_RANK_CLAN_SCAN_LIMIT=500
+GLOBAL_RANK_CLAN_PAGE_SIZE=100
+GLOBAL_RANK_SHARD_COUNT=5
+GLOBAL_RANK_SHARD_CONCURRENCY=2
+GLOBAL_RANK_CLANS_PER_SHARD_RUN=10
+```
+
+the Worker creates five fixed shards:
+
+```text
+Shard 0: ranks 1-100
+Shard 1: ranks 101-200
+Shard 2: ranks 201-300
+Shard 3: ranks 301-400
+Shard 4: ranks 401-500
+```
+
+All shards write candidates into the same `run_key`; the Worker finalizes the
+global ranks only after every shard is complete.
 
 ## Discord `/search` Worker
 
