@@ -5,6 +5,10 @@ const BATTLE_RUNS_TABLE = "c0ld_battle_runs";
 const CLANS_SNAPSHOT_TABLE = "c0ld_clans_snapshots";
 const CLANS_SNAPSHOT_ARCHIVE_TABLE = "c0ld_clans_snapshots_archive";
 const CLANS_CURRENT_TABLE = "c0ld_clans_current";
+const GLOBAL_RANK_RUNS_TABLE = "c0ld_global_rank_runs";
+const GLOBAL_RANK_CANDIDATES_TABLE = "c0ld_global_rank_candidates";
+const GLOBAL_RANK_CURRENT_TABLE = "c0ld_global_ranks_current";
+const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -14,6 +18,13 @@ const ARCHIVE_PRUNE_BATCH_SIZE = 500;
 const ARCHIVE_PRUNE_MAX_BATCHES = 10;
 const ROBLOX_BATCH_SIZE = 100;
 const CLANS_PAGE_SIZE = 100;
+const DEFAULT_GLOBAL_RANK_TARGET_RANK = 3000;
+const DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT = 500;
+const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
+const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
+const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
+const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
+const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 
 export default {
   async fetch(request, env) {
@@ -62,12 +73,19 @@ export default {
         response = await handleClansBattles(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/top-clan-thresholds") {
         response = await handleTopClanThresholds(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/global/current") {
+        response = await handleGlobalCurrent(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/global/search") {
+        response = await handleGlobalSearch(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
       } else if (request.method === "POST" && url.pathname === "/api/clans/ingest") {
         requireAdmin(request, env);
         response = await handleClansIngest(env, "manual", isForceRequest(url));
+      } else if (request.method === "POST" && url.pathname === "/api/global/ingest") {
+        requireAdmin(request, env);
+        response = await handleGlobalRankIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -105,6 +123,18 @@ async function runScheduledIngests(env, force = false) {
     });
   }
 
+  if (String(env.INGEST_GLOBAL_RANKS || "false").toLowerCase() === "true") {
+    const globalClan = clanName(env);
+    const hasRunningGlobalScan = await hasRunningGlobalRankRun(env, globalClan).catch(() => false);
+
+    if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env)) {
+      jobs.push({
+        label: "global-ranks",
+        run: () => handleGlobalRankIngest(env, "schedule", globalClan, force)
+      });
+    }
+  }
+
   const results = [];
 
   for (const job of jobs) {
@@ -119,6 +149,8 @@ async function runScheduledIngests(env, force = false) {
         reason: payload?.reason || null,
         battle_key: payload?.battle_key || null,
         rows_inserted: payload?.rows_inserted ?? null,
+        scanned_count: payload?.scanned_count ?? null,
+        found_member_count: payload?.found_member_count ?? null,
         message: payload?.message || null
       };
       results.push(result);
@@ -358,6 +390,420 @@ async function handleCurrent(request, env) {
       gain_24h: row.gain_24h
     }))
   }, env);
+}
+
+async function handleGlobalCurrent(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const limit = clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000);
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
+    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,updated_at",
+    clan_name: `eq.${clan}`,
+    order: "clan_rank.asc",
+    limit: String(limit)
+  });
+
+  const runKey = rows.find(row => row.run_key)?.run_key || null;
+  const runRows = runKey
+    ? await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "*",
+      run_key: `eq.${runKey}`,
+      limit: "1"
+    })
+    : await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "*",
+      clan_name: `eq.${clan}`,
+      order: "started_at.desc",
+      limit: "1"
+    });
+
+  const run = runRows[0] || null;
+
+  return cacheJson({
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    snapshot_at: run?.finished_at || run?.updated_at || rows[0]?.fetched_at || null,
+    run,
+    rows: rows.map(row => normalizeGlobalCurrentOutput(row))
+  }, env);
+}
+
+async function handleGlobalSearch(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const query = String(url.searchParams.get("q") || url.searchParams.get("username") || "").trim();
+
+  if (!query) {
+    throw httpError(400, "Missing search query. Use ?q=username.");
+  }
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
+    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,updated_at",
+    clan_name: `eq.${clan}`,
+    order: "clan_rank.asc",
+    limit: "1000"
+  });
+
+  const key = normalizeGlobalSearchKey(query);
+  const found = rows.find(row => {
+    const id = String(row.user_id || "").trim();
+    return (
+      id === query ||
+      normalizeGlobalSearchKey(row.username) === key ||
+      normalizeGlobalSearchKey(row.display_name) === key
+    );
+  });
+
+  if (!found) {
+    return cacheJson({
+      ok: false,
+      message: `No ${clan} member matched "${query}".`,
+      query,
+      clan_name: clan
+    }, env);
+  }
+
+  const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
+    select: "run_key,fetched_at,event_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
+    clan_name: `eq.${clan}`,
+    user_id: `eq.${found.user_id}`,
+    order: "fetched_at.desc",
+    limit: "24"
+  });
+
+  return cacheJson({
+    ok: true,
+    query,
+    clan_name: clan,
+    row: normalizeGlobalCurrentOutput(found),
+    history: history.map(row => ({
+      ...row,
+      global_rank: toNumber(row.global_rank),
+      global_points: toNumber(row.global_points),
+      total_global_players: toNumber(row.total_global_players),
+      clan_rank: toNumber(row.clan_rank),
+      clan_points: toNumber(row.clan_points)
+    }))
+  }, env);
+}
+
+async function handleGlobalRankIngest(env, source, requestedClan, force = false) {
+  requireSupabase(env);
+
+  const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
+  const fetchedAt = new Date().toISOString();
+  const targetRank = globalRankTargetRank(env);
+  const clanScanLimit = globalRankClanScanLimit(env);
+  const pageSize = globalRankClanPageSize(env);
+  const clansPerRun = globalRankClansPerRun(env);
+  const currentRows = await fetchCurrentRows(env, clan);
+
+  if (!currentRows.length) {
+    throw httpError(409, `No current ${clan} member rows found. Run /api/ingest first.`);
+  }
+
+  const latest = latestMetaFromRows(currentRows);
+  const configuredBattleKey = latest?.battle_key || battleKey(env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const eventName = globalRankEventName(env, latest);
+  const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
+  const existingRunningRun = await findRunningGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
+  const runningRun = force ? null : existingRunningRun;
+  const runKey = runningRun?.run_key || `${clan}:global:${latest?.battle_key || "battle"}:${fetchedAt}`;
+  const startedAt = runningRun?.started_at || fetchedAt;
+  let nextClanOffset = force ? 0 : (toNumber(runningRun?.next_clan_offset) || 0);
+  let scannedClanCount = force ? 0 : (
+    toNumber(runningRun?.scanned_clan_count) ||
+    toNumber(runningRun?.scanned_count) ||
+    0
+  );
+  let candidatePlayerCount = force ? 0 : (toNumber(runningRun?.candidate_player_count) || 0);
+  let cutoffPoints = force ? null : toNumber(runningRun?.cutoff_points);
+  let stopReason = null;
+
+  const avatarMap = await resolveRobloxAvatarHeadshots(
+    currentRows.map(row => row.user_id),
+    env
+  ).catch(() => new Map());
+  const usernameMap = await resolveMissingUsernames(currentRows, env);
+  const clanMembers = currentRows
+    .map(row => ({
+      clan_name: clan,
+      user_id: toNumber(row.user_id),
+      username: displayUsername(row, usernameMap) || `user_${row.user_id}`,
+      display_name: null,
+      avatar_url: avatarMap.get(String(row.user_id)) || null,
+      clan_rank: toNumber(row.rank),
+      clan_points: toNumber(row.total_points) || 0,
+      battle_key: latest?.battle_key || null,
+      battle_display_name: battleDisplayName,
+      event_name: eventName,
+      global_rank: null,
+      global_points: null,
+      total_global_players: null,
+      found: false,
+      fetched_at: fetchedAt,
+      run_key: runKey,
+      raw_global: {},
+      updated_at: fetchedAt
+    }))
+    .filter(row => row.user_id);
+
+  if (force && existingRunningRun?.run_key) {
+    await supabaseDelete(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      run_key: `eq.${existingRunningRun.run_key}`
+    });
+    await upsertGlobalRankRun(env, {
+      run_key: existingRunningRun.run_key,
+      clan_name: existingRunningRun.clan_name || clan,
+      status: "superseded",
+      finished_at: fetchedAt,
+      stop_reason: "force_restart",
+      updated_at: fetchedAt
+    });
+  }
+
+  await upsertGlobalRankRun(env, {
+    run_key: runKey,
+    clan_name: clan,
+    battle_key: latest?.battle_key || null,
+    battle_display_name: battleDisplayName,
+    event_name: eventName,
+    started_at: startedAt,
+    finished_at: null,
+    status: "running",
+    scan_limit: targetRank,
+    page_size: pageSize,
+    scanned_count: scannedClanCount,
+    scanned_clan_count: scannedClanCount,
+    next_clan_offset: nextClanOffset,
+    candidate_player_count: candidatePlayerCount,
+    clan_member_count: clanMembers.length,
+    found_member_count: 0,
+    total_global_players: null,
+    cutoff_points: cutoffPoints,
+    stop_reason: null,
+    scan_kind: "clan_contribution_scan",
+    last_error: null,
+    updated_at: fetchedAt
+  });
+
+  await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, clanMembers, "clan_name,user_id");
+
+  let processedClans = 0;
+  let foundMemberCount = 0;
+  let nextClanPoints = null;
+
+  try {
+    while (processedClans < clansPerRun && nextClanOffset < clanScanLimit) {
+      const pageNumber = Math.floor(nextClanOffset / pageSize) + 1;
+      const pageIndex = nextClanOffset % pageSize;
+      const pageRows = await fetchClanLeaderboardPage(env, {
+        page: pageNumber,
+        pageSize
+      });
+
+      if (!pageRows.length || pageIndex >= pageRows.length) {
+        stopReason = "clan_leaderboard_exhausted";
+        break;
+      }
+
+      for (let index = pageIndex; index < pageRows.length && processedClans < clansPerRun; index += 1) {
+        if (nextClanOffset >= clanScanLimit) break;
+
+        const clanRow = pageRows[index];
+        const candidateRows = await collectGlobalRankCandidatesForClan(env, {
+          runKey,
+          clanRow,
+          configuredBattleKey,
+          activeBattleKey: activeBattleMeta?.battleKey || "",
+          fetchedAt
+        });
+
+        if (candidateRows.length) {
+          await supabaseUpsert(
+            env,
+            GLOBAL_RANK_CANDIDATES_TABLE,
+            candidateRows,
+            "run_key,source_clan,user_id"
+          );
+        }
+
+        processedClans += 1;
+        scannedClanCount += 1;
+        nextClanOffset += 1;
+
+        const delayMs = globalRankClanDelayMs(env);
+        if (delayMs > 0 && processedClans < clansPerRun && nextClanOffset < clanScanLimit) {
+          await sleep(delayMs);
+        }
+      }
+    }
+
+    candidatePlayerCount = await countGlobalRankCandidates(env, runKey);
+    const cutoff = await readGlobalRankCutoff(env, runKey, targetRank);
+    cutoffPoints = cutoff.cutoffPoints;
+
+    if (!stopReason && nextClanOffset >= clanScanLimit) {
+      stopReason = "max_clan_scan_limit";
+    }
+
+    if (!stopReason && cutoff.hasCutoff && globalRankStopOnSafeCutoff(env)) {
+      const nextClan = await fetchClanRankRowAtOffset(env, nextClanOffset, pageSize);
+      nextClanPoints = toNumber(nextClan?.points);
+
+      if (nextClan && nextClanPoints !== null && nextClanPoints < cutoffPoints) {
+        stopReason = "safe_cutoff_reached";
+      } else if (!nextClan) {
+        stopReason = "clan_leaderboard_exhausted";
+      }
+    }
+
+    if (stopReason) {
+      candidatePlayerCount = await countGlobalRankUniqueCandidates(env, runKey);
+      const finalized = await finalizeGlobalRankRun(env, {
+        runKey,
+        clan,
+        clanMembers,
+        latest,
+        eventName,
+        fetchedAt,
+        targetRank,
+        candidatePlayerCount
+      });
+      foundMemberCount = finalized.foundMemberCount;
+
+      const finishedAt = new Date().toISOString();
+      await upsertGlobalRankRun(env, {
+        run_key: runKey,
+        clan_name: clan,
+        battle_key: latest?.battle_key || null,
+        battle_display_name: battleDisplayName,
+        event_name: eventName,
+        started_at: startedAt,
+        finished_at: finishedAt,
+        status: "ok",
+        scan_limit: targetRank,
+        page_size: pageSize,
+        scanned_count: scannedClanCount,
+        scanned_clan_count: scannedClanCount,
+        next_clan_offset: nextClanOffset,
+        candidate_player_count: candidatePlayerCount,
+        clan_member_count: clanMembers.length,
+        found_member_count: foundMemberCount,
+        total_global_players: candidatePlayerCount,
+        cutoff_points: cutoffPoints,
+        stop_reason: stopReason,
+        scan_kind: "clan_contribution_scan",
+        last_error: null,
+        updated_at: finishedAt
+      });
+
+      return json({
+        ok: true,
+        source,
+        clan_name: clan,
+        battle_key: latest?.battle_key || null,
+        battle_display_name: battleDisplayName,
+        event_name: eventName,
+        run_key: runKey,
+        fetched_at: fetchedAt,
+        status: "ok",
+        stop_reason: stopReason,
+        target_rank: targetRank,
+        scanned_count: scannedClanCount,
+        scanned_clan_count: scannedClanCount,
+        processed_clans: processedClans,
+        next_clan_offset: nextClanOffset,
+        next_clan_points: nextClanPoints,
+        cutoff_points: cutoffPoints,
+        candidate_player_count: candidatePlayerCount,
+        clan_member_count: clanMembers.length,
+        found_member_count: foundMemberCount,
+        total_global_players: candidatePlayerCount
+      }, 202);
+    }
+
+    const updatedAt = new Date().toISOString();
+    await upsertGlobalRankRun(env, {
+      run_key: runKey,
+      clan_name: clan,
+      battle_key: latest?.battle_key || null,
+      battle_display_name: battleDisplayName,
+      event_name: eventName,
+      started_at: startedAt,
+      finished_at: null,
+      status: "running",
+      scan_limit: targetRank,
+      page_size: pageSize,
+      scanned_count: scannedClanCount,
+      scanned_clan_count: scannedClanCount,
+      next_clan_offset: nextClanOffset,
+      candidate_player_count: candidatePlayerCount,
+      clan_member_count: clanMembers.length,
+      found_member_count: 0,
+      total_global_players: candidatePlayerCount,
+      cutoff_points: cutoffPoints,
+      stop_reason: null,
+      scan_kind: "clan_contribution_scan",
+      last_error: null,
+      updated_at: updatedAt
+    });
+
+    return json({
+      ok: true,
+      source,
+      clan_name: clan,
+      battle_key: latest?.battle_key || null,
+      battle_display_name: battleDisplayName,
+      event_name: eventName,
+      run_key: runKey,
+      fetched_at: fetchedAt,
+      status: "running",
+      target_rank: targetRank,
+      scanned_count: scannedClanCount,
+      scanned_clan_count: scannedClanCount,
+      processed_clans: processedClans,
+      next_clan_offset: nextClanOffset,
+      cutoff_points: cutoffPoints,
+      candidate_player_count: candidatePlayerCount,
+      clan_member_count: clanMembers.length,
+      found_member_count: 0,
+      total_global_players: candidatePlayerCount
+    }, 202);
+  } catch (err) {
+    const failedAt = new Date().toISOString();
+    await upsertGlobalRankRun(env, {
+      run_key: runKey,
+      clan_name: clan,
+      battle_key: latest?.battle_key || null,
+      battle_display_name: battleDisplayName,
+      event_name: eventName,
+      started_at: startedAt,
+      finished_at: failedAt,
+      status: "failed",
+      scan_limit: targetRank,
+      page_size: pageSize,
+      scanned_count: scannedClanCount,
+      scanned_clan_count: scannedClanCount,
+      next_clan_offset: nextClanOffset,
+      candidate_player_count: candidatePlayerCount,
+      clan_member_count: clanMembers.length,
+      found_member_count: foundMemberCount,
+      total_global_players: candidatePlayerCount,
+      cutoff_points: cutoffPoints,
+      stop_reason: "failed",
+      scan_kind: "clan_contribution_scan",
+      last_error: err?.message || String(err),
+      updated_at: failedAt
+    });
+    throw err;
+  }
 }
 
 async function handleHistory(request, env) {
@@ -1122,6 +1568,295 @@ async function fetchTopClans(env, requestedTopN = null) {
   }
 
   throw httpError(502, `Big Games clans API failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function fetchClanLeaderboardPage(env, { page, pageSize }) {
+  const safePage = Math.max(1, Math.round(Number(page) || 1));
+  const safePageSize = globalRankClanPageSize({ GLOBAL_RANK_CLAN_PAGE_SIZE: pageSize });
+  const hosts = [
+    "https://biggamesapi.io/api/clans",
+    "https://ps99.biggamesapi.io/api/clans"
+  ];
+  let lastError = null;
+
+  for (const host of hosts) {
+    try {
+      const url = new URL(host);
+      url.searchParams.set("page", String(safePage));
+      url.searchParams.set("pageSize", String(safePageSize));
+      url.searchParams.set("sort", "Points");
+      url.searchParams.set("sortOrder", "desc");
+
+      const payload = await fetchJsonWithRetry(url, `clans page ${safePage}`, {
+        attempts: globalRankRetryAttempts(env),
+        baseDelayMs: globalRankRetryBaseMs(env)
+      });
+      const arrays = extractClanArrays(payload);
+      const rows = arrays[0] || [];
+
+      return rows
+        .map((clan, index) => normalizeClanRankRow(clan, (safePage - 1) * safePageSize + index + 1))
+        .filter(row => row.clan_name && Number.isFinite(row.points))
+        .sort((a, b) => {
+          if (a.rank !== b.rank) return a.rank - b.rank;
+          if (b.points !== a.points) return b.points - a.points;
+          return a.clan_name.localeCompare(b.clan_name);
+        });
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw httpError(502, `Big Games clans page ${safePage} failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function fetchClanRankRowAtOffset(env, offset, pageSize) {
+  if (offset < 0) return null;
+
+  const page = Math.floor(offset / pageSize) + 1;
+  const pageIndex = offset % pageSize;
+  const rows = await fetchClanLeaderboardPage(env, { page, pageSize });
+  return rows[pageIndex] || null;
+}
+
+async function fetchClanApiWithRetry(env, clan) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= globalRankRetryAttempts(env); attempt += 1) {
+    try {
+      return await fetchClanApi(clan);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= globalRankRetryAttempts(env)) break;
+
+      const delay = Math.min(120000, attempt * attempt * globalRankRetryBaseMs(env));
+      await sleep(delay);
+    }
+  }
+
+  throw lastError || httpError(502, `Big Games clan API failed for ${clan}`);
+}
+
+async function collectGlobalRankCandidatesForClan(env, {
+  runKey,
+  clanRow,
+  configuredBattleKey,
+  activeBattleKey,
+  fetchedAt
+}) {
+  const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
+  const data = api.data || {};
+  const battles = data.Battles || data.battles || {};
+  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleKey);
+  const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+
+  if (!battle) {
+    return [];
+  }
+
+  const battleMeta = extractBattleMeta(battle, resolvedBattleKey, env, {
+    allowEnvDisplayName: false,
+    allowEnvTiming: false
+  });
+  const rows = normalizeMembers(data, battle);
+  const byUser = new Map();
+
+  for (const row of rows) {
+    const userId = toNumber(row.user_id);
+    const points = toNumber(row.total_points) || 0;
+    if (!userId || points <= 0) continue;
+
+    const existing = byUser.get(userId);
+    if (existing && existing.points >= points) continue;
+
+    byUser.set(userId, {
+      run_key: runKey,
+      user_id: userId,
+      points,
+      source_clan: clanRow.clan_name,
+      source_clan_rank: toNumber(clanRow.rank),
+      source_clan_points: toNumber(clanRow.points) || 0,
+      battle_key: resolvedBattleKey || null,
+      battle_display_name: cleanBattleDisplayName(resolvedBattleKey, battleMeta.displayName),
+      fetched_at: fetchedAt,
+      raw_candidate: {
+        clan: clanRow.raw_clan || {},
+        member: row.raw_member || {},
+        contribution: row.raw_contribution || {}
+      },
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  return [...byUser.values()];
+}
+
+async function hasRunningGlobalRankRun(env, clan) {
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "run_key",
+    clan_name: `eq.${clan}`,
+    status: "eq.running",
+    order: "started_at.desc",
+    limit: "1"
+  });
+
+  return rows.length > 0;
+}
+
+async function findRunningGlobalRankRun(env, clan, battleKeyValue) {
+  const params = {
+    select: "*",
+    clan_name: `eq.${clan}`,
+    status: "eq.running",
+    order: "started_at.desc",
+    limit: "1"
+  };
+
+  if (battleKeyValue) {
+    params.battle_key = `eq.${battleKeyValue}`;
+  }
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
+  return rows[0] || null;
+}
+
+async function countGlobalRankCandidates(env, runKey) {
+  return supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    run_key: `eq.${runKey}`
+  });
+}
+
+async function countGlobalRankUniqueCandidates(env, runKey) {
+  const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    select: "user_id",
+    run_key: `eq.${runKey}`,
+    order: "user_id.asc"
+  }, 50000);
+
+  return new Set(rows.map(row => String(row.user_id || "").trim()).filter(Boolean)).size;
+}
+
+async function readGlobalRankCutoff(env, runKey, targetRank) {
+  const candidates = await readGlobalRankTopCandidates(env, runKey, targetRank);
+  const cutoff = candidates[targetRank - 1];
+
+  return {
+    hasCutoff: Boolean(cutoff),
+    cutoffPoints: cutoff ? toNumber(cutoff.points) : null,
+    candidates
+  };
+}
+
+async function readGlobalRankTopCandidates(env, runKey, targetRank) {
+  const readLimit = globalRankCandidateReadLimit(env, targetRank);
+  const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,raw_candidate",
+    run_key: `eq.${runKey}`,
+    order: "points.desc,user_id.asc"
+  }, readLimit);
+
+  return dedupeGlobalCandidateRows(rows)
+    .sort(sortGlobalCandidateRows)
+    .slice(0, targetRank)
+    .map((row, index) => ({
+      ...row,
+      global_rank: index + 1
+    }));
+}
+
+function dedupeGlobalCandidateRows(rows) {
+  const byUser = new Map();
+
+  for (const row of rows || []) {
+    const userId = toNumber(row.user_id);
+    const points = toNumber(row.points) || 0;
+    if (!userId) continue;
+
+    const existing = byUser.get(userId);
+    if (
+      !existing ||
+      points > (toNumber(existing.points) || 0) ||
+      (points === (toNumber(existing.points) || 0) && String(row.source_clan || "").localeCompare(String(existing.source_clan || "")) < 0)
+    ) {
+      byUser.set(userId, { ...row, user_id: userId, points });
+    }
+  }
+
+  return [...byUser.values()];
+}
+
+function sortGlobalCandidateRows(a, b) {
+  const ap = toNumber(a.points) || 0;
+  const bp = toNumber(b.points) || 0;
+  if (bp !== ap) return bp - ap;
+
+  return (toNumber(a.user_id) || 0) - (toNumber(b.user_id) || 0);
+}
+
+async function finalizeGlobalRankRun(env, {
+  runKey,
+  clan,
+  clanMembers,
+  latest,
+  eventName,
+  fetchedAt,
+  targetRank,
+  candidatePlayerCount
+}) {
+  const topCandidates = await readGlobalRankTopCandidates(env, runKey, targetRank);
+  const candidateById = new Map(topCandidates.map(row => [String(row.user_id), row]));
+  const finalRows = clanMembers.map(member => {
+    const match = candidateById.get(String(member.user_id));
+
+    return {
+      ...member,
+      battle_key: latest?.battle_key || member.battle_key || null,
+      battle_display_name: cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name) || member.battle_display_name || null,
+      event_name: eventName,
+      global_rank: match ? toNumber(match.global_rank) : null,
+      global_points: match ? toNumber(match.points) : null,
+      total_global_players: candidatePlayerCount,
+      found: Boolean(match),
+      fetched_at: fetchedAt,
+      run_key: runKey,
+      raw_global: match ? {
+        source_clan: match.source_clan,
+        source_clan_rank: match.source_clan_rank,
+        source_clan_points: match.source_clan_points,
+        candidate: match.raw_candidate || {}
+      } : {
+        target_rank: targetRank,
+        reason: "not_found_at_or_above_target_rank"
+      },
+      updated_at: new Date().toISOString()
+    };
+  });
+
+  await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, finalRows, "clan_name,user_id");
+  await supabaseUpsert(env, GLOBAL_RANK_HISTORY_TABLE, finalRows.map(row => ({
+    run_key: runKey,
+    clan_name: row.clan_name,
+    user_id: row.user_id,
+    username: row.username,
+    display_name: row.display_name,
+    avatar_url: row.avatar_url,
+    clan_rank: row.clan_rank,
+    clan_points: row.clan_points,
+    battle_key: row.battle_key,
+    battle_display_name: row.battle_display_name,
+    event_name: row.event_name,
+    global_rank: row.global_rank,
+    global_points: row.global_points,
+    total_global_players: row.total_global_players,
+    found: row.found,
+    fetched_at: row.fetched_at,
+    raw_global: row.raw_global
+  })), "run_key,user_id");
+
+  return {
+    rows: finalRows,
+    foundMemberCount: finalRows.filter(row => row.found).length
+  };
 }
 
 function normalizeClanRankRow(clan, fallbackRank) {
@@ -1919,6 +2654,10 @@ async function upsertBattleRun(env, row) {
   await supabaseUpsert(env, BATTLE_RUNS_TABLE, [row], "clan_name,battle_key");
 }
 
+async function upsertGlobalRankRun(env, row) {
+  await supabaseUpsert(env, GLOBAL_RANK_RUNS_TABLE, [row], "run_key");
+}
+
 async function supabaseSelect(env, tableName, params) {
   const url = supabaseUrl(env, tableName);
 
@@ -2222,6 +2961,205 @@ function chooseBattleKey(battles) {
   });
 
   return candidates[0].key;
+}
+
+async function fetchJsonWithRetry(url, label, { attempts, baseDelayMs }) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "c0ld-Clan-API-Worker"
+        },
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+      const text = await res.text();
+      let payload = {};
+
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        payload = { message: text || "Invalid JSON response" };
+      }
+
+      if (!res.ok || payload.ok === false || payload.status === "error") {
+        const retryAfter = parseRetryAfterSeconds(res.headers.get("Retry-After"));
+        const err = httpError(
+          res.status || 502,
+          payload.message || payload.error || `${label} failed with HTTP ${res.status}`
+        );
+        err.retryAfterMs = retryAfter ? retryAfter * 1000 : null;
+        throw err;
+      }
+
+      return payload;
+    } catch (err) {
+      lastError = err;
+      if (attempt >= attempts) break;
+
+      const retryAfterMs = Number(err?.retryAfterMs);
+      const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+        ? retryAfterMs
+        : Math.min(120000, attempt * attempt * baseDelayMs);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError || httpError(502, `${label} failed`);
+}
+
+function parseRetryAfterSeconds(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const numeric = Number(text);
+  if (Number.isFinite(numeric)) return Math.max(0, numeric);
+
+  const ms = new Date(text).getTime() - Date.now();
+  return Number.isFinite(ms) && ms > 0 ? Math.ceil(ms / 1000) : null;
+}
+
+function parseLeaderboardNumber(value) {
+  const direct = toNumber(value);
+  if (direct !== null) return direct;
+
+  const text = String(value || "").replace(/,/g, "").trim();
+  const match = text.match(/(-?\d+(?:\.\d+)?)\s*([KMBT])?/i);
+  if (!match) return null;
+
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) return null;
+
+  const multipliers = {
+    "": 1,
+    K: 1e3,
+    M: 1e6,
+    B: 1e9,
+    T: 1e12
+  };
+  const multiplier = multipliers[String(match[2] || "").toUpperCase()] || 1;
+  return Math.round(base * multiplier);
+}
+
+function normalizeGlobalCurrentOutput(row) {
+  return {
+    clan_name: row.clan_name,
+    user_id: toNumber(row.user_id),
+    username: row.username,
+    display_name: row.display_name,
+    avatar_url: row.avatar_url,
+    clan_rank: toNumber(row.clan_rank),
+    clan_points: toNumber(row.clan_points) || 0,
+    battle_key: row.battle_key,
+    battle_display_name: row.battle_display_name,
+    event_name: row.event_name,
+    global_rank: toNumber(row.global_rank),
+    global_points: toNumber(row.global_points),
+    total_global_players: toNumber(row.total_global_players),
+    found: Boolean(row.found),
+    fetched_at: row.fetched_at,
+    run_key: row.run_key,
+    updated_at: row.updated_at
+  };
+}
+
+function globalRankEventName(env, latest) {
+  return String(
+    env.GLOBAL_RANK_EVENT_NAME ||
+    cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name) ||
+    latest?.battle_key ||
+    battleDisplayName(env, battleKey(env))
+  ).trim();
+}
+
+function globalRankTargetRank(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_TARGET_RANK || env.GLOBAL_RANK_SCAN_LIMIT || DEFAULT_GLOBAL_RANK_TARGET_RANK),
+    1,
+    3000
+  );
+}
+
+function globalRankClanScanLimit(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_CLAN_SCAN_LIMIT || DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT),
+    1,
+    20000
+  );
+}
+
+function globalRankClanPageSize(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_CLAN_PAGE_SIZE || env.GLOBAL_RANK_PAGE_SIZE || DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE),
+    1,
+    500
+  );
+}
+
+function globalRankClansPerRun(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_CLANS_PER_RUN || DEFAULT_GLOBAL_RANK_CLANS_PER_RUN),
+    1,
+    500
+  );
+}
+
+function globalRankCandidateReadLimit(env, targetRank) {
+  const defaultLimit = Math.max(targetRank, Math.min(50000, targetRank * 3));
+  return clamp(
+    Number(env.GLOBAL_RANK_CANDIDATE_READ_LIMIT || defaultLimit),
+    targetRank,
+    50000
+  );
+}
+
+function globalRankRetryAttempts(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_RETRY_ATTEMPTS || DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS),
+    1,
+    12
+  );
+}
+
+function globalRankRetryBaseMs(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_RETRY_BASE_MS || DEFAULT_GLOBAL_RANK_RETRY_BASE_MS),
+    1000,
+    120000
+  );
+}
+
+function globalRankClanDelayMs(env) {
+  return clamp(
+    Number(env.GLOBAL_RANK_CLAN_DELAY_MS || env.GLOBAL_RANK_SCAN_DELAY_MS || DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS),
+    0,
+    120000
+  );
+}
+
+function globalRankStopOnSafeCutoff(env) {
+  return String(env.GLOBAL_RANK_STOP_ON_SAFE_CUTOFF || "false").toLowerCase() === "true";
+}
+
+function shouldRunGlobalRankSchedule(env) {
+  const interval = clamp(Number(env.GLOBAL_RANK_SCHEDULE_MINUTES || 60), 5, 1440);
+  const now = new Date();
+  const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+  return minuteOfDay % interval < 5;
+}
+
+function normalizeGlobalSearchKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function clanName(env) {

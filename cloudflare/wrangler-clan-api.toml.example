@@ -26,6 +26,21 @@ SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 INGEST_CLANS_LEADERBOARD = "true"
 CLAN_RANK_TOP_N = "200"
 CLAN_BATTLES_SCAN_LIMIT = "20000"
+# Optional global player rank cache for /api/global/current and /api/global/search.
+# This stays off unless explicitly enabled. It scans ranked clans in controlled
+# chunks, stores candidate player contribution rows, then ranks c0ld members.
+INGEST_GLOBAL_RANKS = "false"
+GLOBAL_RANK_SCHEDULE_MINUTES = "60"
+GLOBAL_RANK_TARGET_RANK = "3000"
+GLOBAL_RANK_CLAN_SCAN_LIMIT = "500"
+GLOBAL_RANK_CLAN_PAGE_SIZE = "100"
+GLOBAL_RANK_CLANS_PER_RUN = "25"
+GLOBAL_RANK_CLAN_DELAY_MS = "1000"
+GLOBAL_RANK_CANDIDATE_READ_LIMIT = "9000"
+GLOBAL_RANK_STOP_ON_SAFE_CUTOFF = "false"
+GLOBAL_RANK_RETRY_ATTEMPTS = "6"
+GLOBAL_RANK_RETRY_BASE_MS = "15000"
+GLOBAL_RANK_EVENT_NAME = ""
 
 # Set these with `wrangler secret put ...`
 # SUPABASE_SERVICE_KEY

@@ -464,6 +464,7 @@
               <th data-sort="gain_1h" class="num">1 Hour</th>
               <th data-sort="gain_12h" class="num">12 Hours</th>
               <th data-sort="gain_24h" class="num">24 Hours</th>
+              <th data-sort="global_rank" class="num">Global Rank</th>
             </tr>
           </thead>
           <tbody id="leaderboard-body"></tbody>
@@ -477,6 +478,7 @@
     const AUTO_REFRESH_MS = 60 * 1000;
     const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
     const MEMBER_API_BATTLES_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
+    const GLOBAL_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/current";
     const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
     const TRACKED_CLAN = getRequestedClanName();
     const TRACKED_CLAN_KEY = normalizeKey(TRACKED_CLAN);
@@ -494,11 +496,13 @@
     let currentData = null;
     let clanData = null;
     let clansCurrentData = null;
+    let globalRankData = null;
     let currentRows = [];
     let battles = [];
     let c0ldHistoryData = [];
     let playerIndex = [];
     let liveAvatarUrls = new Map();
+    let globalRankByUserId = new Map();
 
     let playerIndexByUserId = new Map();
     let playerIndexByProfileKey = new Map();
@@ -705,6 +709,25 @@
       return String(num);
     }
 
+    function fmtGlobalRank(row) {
+      const rank = toFiniteNumber(row?.global_rank);
+      return rank ? `#${rank.toLocaleString("en-US")}` : "—";
+    }
+
+    function globalRankTitle(row) {
+      const rank = toFiniteNumber(row?.global_rank);
+      if (!rank) return "No cached global rank yet";
+
+      const parts = [`Global rank #${rank.toLocaleString("en-US")}`];
+      const points = toFiniteNumber(row?.global_points);
+      const updated = row?.global_fetched_at;
+
+      if (points !== null) parts.push(`Global points: ${fmtNum(points)}`);
+      if (updated) parts.push(`Updated: ${fmtDateTime(updated)}`);
+
+      return parts.join(" | ");
+    }
+
     function fmtDate(s) {
       if (!s) return "—";
       const d = new Date(s);
@@ -842,6 +865,16 @@
         if (userId) playerIndexByUserId.set(userId, p);
         if (profileKey) playerIndexByProfileKey.set(profileKey, p);
         if (usernameKey) playerIndexByUsername.set(usernameKey, p);
+      }
+    }
+
+    function rebuildGlobalRankMap() {
+      globalRankByUserId = new Map();
+
+      for (const row of globalRankData?.rows || []) {
+        const userId = String(row.user_id || "").trim();
+        if (!userId) continue;
+        globalRankByUserId.set(userId, row);
       }
     }
 
@@ -1061,10 +1094,14 @@
 
     function normalizeCurrentRows(rows) {
       return rows.map(row => {
+        const global = globalRankByUserId.get(String(row.user_id || ""));
         return {
           ...row,
           profile_key: row.profile_key || row.user_id || row.username,
-          avatar_url: row.avatar_url || null
+          avatar_url: row.avatar_url || global?.avatar_url || null,
+          global_rank: global?.global_rank ?? null,
+          global_points: global?.global_points ?? null,
+          global_fetched_at: global?.fetched_at || null
         };
       });
     }
@@ -1119,6 +1156,13 @@
       list.sort((a, b) => {
         const av = a[sortKey];
         const bv = b[sortKey];
+        const aMissing = av === null || av === undefined || av === "";
+        const bMissing = bv === null || bv === undefined || bv === "";
+
+        if (aMissing || bMissing) {
+          if (aMissing && bMissing) return 0;
+          return aMissing ? 1 : -1;
+        }
 
         const an = Number(av);
         const bn = Number(bv);
@@ -1295,7 +1339,7 @@
       if (!visible.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="7" style="text-align:center;padding:32px;color:#8b949e;">
+            <td colspan="8" style="text-align:center;padding:32px;color:#8b949e;">
               No players found.
             </td>
           </tr>
@@ -1322,6 +1366,7 @@
           <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
           <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
           <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
+          <td class="num" title="${globalRankTitle(row)}">${fmtGlobalRank(row)}</td>
         `;
 
         tbody.appendChild(tr);
@@ -1523,9 +1568,10 @@
 
       try {
         const cacheBust = Date.now();
-        const [currentJson, clansJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
+        const [currentJson, clansJson, globalJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
           fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`),
           fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard"),
+          fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`).catch(() => ({ rows: [] })),
           fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`).catch(() => ({ rows: [] })),
           fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
           fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
@@ -1534,6 +1580,8 @@
 
         currentData = currentJson;
         clansCurrentData = withClanProjections(clansJson);
+        globalRankData = globalJson && Array.isArray(globalJson.rows) ? globalJson : { rows: [] };
+        rebuildGlobalRankMap();
 
         if (!currentData || !Array.isArray(currentData.rows)) {
           throw new Error(`Live ${TRACKED_CLAN_DISPLAY} leaderboard does not contain a rows array.`);
