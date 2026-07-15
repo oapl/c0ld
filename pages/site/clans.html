@@ -415,7 +415,6 @@
             <option value="current">Current Clan Battle</option>
           </select>
           <input id="search-input" type="text" placeholder="Search clans..." />
-          <button id="refresh-btn" type="button">Duck Chart</button>
         </div>
       </div>
 
@@ -1159,9 +1158,6 @@
         renderTable();
       });
 
-      document.getElementById("refresh-btn").addEventListener("click", event => {
-        event.preventDefault();
-      });
     }
 
     async function init() {

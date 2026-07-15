@@ -25,23 +25,27 @@
       }
 
       .duck-race-section {
-        margin-bottom: 24px;
         overflow: hidden;
+        padding: 14px 16px 16px;
       }
 
       .duck-race-meta {
         color: var(--muted, #8b949e);
         font-size: 13px;
+        margin-bottom: 10px;
       }
 
       .duck-race-track {
         position: relative;
-        min-height: 690px;
+        height: 370px;
+        min-height: 0;
         overflow: hidden;
-        border-top: 1px solid var(--border, #30363d);
+        border: 1px solid var(--border, #30363d);
+        border-radius: 8px;
         background:
           linear-gradient(180deg, rgba(70, 190, 255, .15), rgba(70, 190, 255, 0) 36%),
-          repeating-linear-gradient(180deg, rgba(255, 255, 255, .04) 0 1px, transparent 1px 67px),
+          repeating-linear-gradient(90deg, rgba(107, 205, 255, .16) 0 18px, rgba(107, 205, 255, .04) 18px 36px),
+          repeating-linear-gradient(180deg, rgba(255, 255, 255, .035) 0 1px, transparent 1px 54px),
           linear-gradient(180deg, #142434 0%, #0f1b2a 22%, #092237 23%, #0a314a 100%);
       }
 
@@ -49,7 +53,7 @@
         content: "";
         position: absolute;
         inset: 0 0 auto;
-        height: 72px;
+        height: 58px;
         background:
           radial-gradient(circle at 12% 46%, #5fbd4e 0 22px, transparent 23px),
           radial-gradient(circle at 17% 38%, #5fbd4e 0 27px, transparent 28px),
@@ -61,8 +65,8 @@
       .duck-race-track::after {
         content: "";
         position: absolute;
-        top: 72px;
-        right: 54px;
+        top: 58px;
+        right: 38px;
         bottom: 0;
         width: 18px;
         background:
@@ -76,33 +80,32 @@
       }
 
       .duck-lane {
-        position: relative;
-        height: 67px;
-        margin-top: 1px;
+        position: absolute;
+        inset: 0;
+        height: auto;
+        margin: 0;
+        pointer-events: none;
       }
 
       .duck-lane:first-child {
-        margin-top: 80px;
+        margin-top: 0;
       }
 
       .duck-waterline {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 2px;
-        height: 16px;
-        background: repeating-linear-gradient(90deg, rgba(107, 205, 255, .18) 0 18px, rgba(107, 205, 255, .04) 18px 36px);
-        opacity: .75;
+        display: none;
       }
 
       .duck-racer {
         --lane-left: 10%;
-        --duck-width: 104px;
+        --duck-width: 142px;
+        --label-lift: 0px;
         position: absolute;
         left: 2%;
-        top: 7px;
+        top: auto;
+        bottom: 52px;
         width: var(--duck-width);
-        height: 54px;
+        height: 74px;
+        pointer-events: auto;
         transition: left 900ms cubic-bezier(.2, .75, .2, 1);
         z-index: 1;
       }
@@ -113,18 +116,18 @@
 
       .duck-svg {
         display: block;
-        width: 104px;
-        height: 54px;
+        width: 142px;
+        height: 74px;
         filter: drop-shadow(0 2px 0 rgba(0, 0, 0, .65));
       }
 
       .duck-logo {
         position: absolute;
-        left: 29px;
-        top: 27px;
-        width: 23px;
-        height: 23px;
-        border-radius: 5px;
+        left: 40px;
+        top: 37px;
+        width: 34px;
+        height: 34px;
+        border-radius: 7px;
         object-fit: cover;
         background: #0d1117;
         border: 1px solid rgba(0, 0, 0, .6);
@@ -132,29 +135,35 @@
 
       .duck-racer-label {
         position: absolute;
-        left: 106px;
-        top: 9px;
+        left: 50%;
+        top: calc(-50px - var(--label-lift));
+        transform: translateX(-50%);
         display: flex;
         flex-direction: column;
         gap: 1px;
-        min-width: 170px;
+        min-width: 126px;
+        max-width: 150px;
         padding: 5px 7px;
         border: 1px solid rgba(255, 255, 255, .12);
         border-radius: 7px;
         background: rgba(13, 17, 23, .78);
         box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+        text-align: center;
       }
 
       .duck-racer-name {
         color: var(--text, #e6edf3);
         font-weight: 800;
         line-height: 1.1;
+        font-size: 13px;
+        white-space: nowrap;
       }
 
       .duck-racer-stats {
         color: var(--muted, #8b949e);
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1.2;
+        white-space: nowrap;
       }
 
       .duck-race-empty {
@@ -165,12 +174,26 @@
       }
 
       @media (max-width: 760px) {
-        .duck-race-track { min-height: 800px; }
-        .duck-lane { height: 72px; }
+        .duck-race-section { padding: 14px 12px 14px; }
+        .duck-race-track { height: 310px; }
+        .duck-racer {
+          --duck-width: 122px;
+          bottom: 48px;
+          height: 64px;
+        }
+        .duck-svg {
+          width: 122px;
+          height: 64px;
+        }
+        .duck-logo {
+          left: 34px;
+          top: 32px;
+          width: 29px;
+          height: 29px;
+        }
         .duck-racer-label {
-          left: 58px;
-          top: 39px;
-          min-width: 135px;
+          min-width: 112px;
+          max-width: 124px;
           font-size: 12px;
         }
         .duck-racer-stats { font-size: 11px; }
@@ -227,29 +250,30 @@
     let panel = document.getElementById("duck-race-section");
     if (panel) return panel;
 
-    panel = document.createElement("section");
+    panel = document.createElement("div");
     panel.id = "duck-race-section";
-    panel.className = "section duck-race-section";
+    panel.className = "duck-race-section";
     panel.hidden = true;
     panel.innerHTML = `
-      <div class="section-header">
-        <h2 class="section-title">Top 10 Duck Chart</h2>
-        <div id="duck-race-meta" class="duck-race-meta">Waiting for the race.</div>
-      </div>
+      <div id="duck-race-meta" class="duck-race-meta">Waiting for the race.</div>
       <div id="duck-race-track" class="duck-race-track">
         <div class="duck-race-empty">Click Duck Chart to load the race.</div>
       </div>
     `;
 
     const rewardPanel = document.getElementById("reward-threshold-section");
-    const firstSection = document.querySelector("main > .section");
-    const main = document.querySelector("main");
-    if (rewardPanel && rewardPanel.parentNode) {
-      rewardPanel.parentNode.insertBefore(panel, rewardPanel);
-    } else if (firstSection && firstSection.parentNode) {
-      firstSection.parentNode.insertBefore(panel, firstSection);
-    } else if (main) {
-      main.appendChild(panel);
+    const rewardBody = rewardPanel?.querySelector(".reward-threshold-body");
+    if (rewardPanel && rewardBody) {
+      rewardPanel.insertBefore(panel, rewardBody);
+    } else {
+      const firstSection = document.querySelector("main > .section");
+      const main = document.querySelector("main");
+      panel.classList.add("section");
+      if (firstSection && firstSection.parentNode) {
+        firstSection.parentNode.insertBefore(panel, firstSection);
+      } else if (main) {
+        main.appendChild(panel);
+      }
     }
     return panel;
   }
@@ -279,12 +303,14 @@
     const lead = next ? points - Number(next.points || 0) : null;
     const logo = iconUrl(row);
 
-    const laneLeft = 2 + Math.max(0.08, Math.min(0.92, progress)) * 78;
+    const laneLeft = 7 + Math.max(0.08, Math.min(0.92, progress)) * 82;
+    const labelLift = (index % 4) * 18;
+    const zIndex = 40 - index;
 
     return `
       <div class="duck-lane">
         <div class="duck-waterline"></div>
-        <div class="duck-racer" style="--lane-left:${laneLeft.toFixed(2)}%">
+        <div class="duck-racer" style="--lane-left:${laneLeft.toFixed(2)}%;--label-lift:${labelLift}px;z-index:${zIndex}">
           ${duckSvg()}
           ${logo ? `<img class="duck-logo" src="${escapeHtml(logo)}" alt="">` : ""}
           <div class="duck-racer-label">
@@ -349,12 +375,15 @@
   function setVisible(visible) {
     state.visible = visible;
     const panel = ensurePanel();
-    const reward = document.getElementById("reward-threshold-section");
-    const button = document.getElementById("refresh-btn");
+    const rewardBody = document.querySelector("#reward-threshold-section .reward-threshold-body");
+    const button = document.getElementById("reward-threshold-refresh");
 
     panel.hidden = !visible;
-    if (reward) reward.hidden = visible;
-    if (button) button.setAttribute("aria-pressed", String(visible));
+    if (rewardBody) rewardBody.hidden = visible;
+    if (button) {
+      button.setAttribute("aria-pressed", String(visible));
+      button.textContent = visible ? "Line Chart" : "Duck Chart";
+    }
 
     if (visible) {
       loadRace(true);
@@ -370,7 +399,7 @@
     css();
     ensurePanel();
 
-    const button = document.getElementById("refresh-btn");
+    const button = document.getElementById("reward-threshold-refresh");
     if (button) {
       button.textContent = "Duck Chart";
       button.classList.add("duck-chart-button");
