@@ -185,5 +185,5 @@ without breaking anything. To swap in a different emoji, update the constant.
 Once you've confirmed a few successful runs with Supabase data you can:
 
 1. Delete the AppScript trigger in Google Sheets.
-2. Remove the `update-readme.js` file (or leave it — it is no longer called).
-3. The `SOURCE_CSV_URL` in `update-readme.js` no longer needs to be maintained.
+2. Remove `scripts/legacy/update-readme.js` if you no longer want to keep the old Google Sheet helper around for reference.
+3. The `SOURCE_CSV_URL` in `scripts/legacy/update-readme.js` no longer needs to be maintained.

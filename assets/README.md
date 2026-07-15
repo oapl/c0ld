@@ -24,3 +24,8 @@ Referenced in `ingest.js` via the `EMBED_SPACER_IMAGE_URL` constant:
 ```
 https://raw.githubusercontent.com/oapl/c0ld/main/assets/embed-spacer.png
 ```
+
+## audio/
+
+`assets/audio/` holds audio files that were previously duplicated in the repository root and
+`assets/`. Keep a single copy here if those files are needed again.
