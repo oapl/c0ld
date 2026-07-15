@@ -30,6 +30,7 @@ const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
+const TOP_CLAN_REBIRTH_POINTS = 120;
 
 export default {
   async fetch(request, env) {
@@ -1968,23 +1969,30 @@ async function handleClansBattles(request, env) {
 async function handleTopClanThresholds(request, env) {
   const url = new URL(request.url);
   const top = clamp(Math.round(parseThresholdNumber(url.searchParams.get("top")) || 10), 1, 25);
-  const highThreshold = parseThresholdNumber(
-    firstDefined(url.searchParams.get("high"), url.searchParams.get("highThreshold"), "72.5M")
+  const filter1Threshold = parseRebirthThreshold(
+    firstDefined(url.searchParams.get("filter1"), url.searchParams.get("high"), url.searchParams.get("highThreshold"), "100")
   );
-  const lowThreshold = parseThresholdNumber(
-    firstDefined(url.searchParams.get("low"), url.searchParams.get("lowThreshold"), "70M")
+  const filter2Threshold = parseRebirthThreshold(
+    firstDefined(url.searchParams.get("filter2"), url.searchParams.get("mid"), "90")
+  );
+  const filter3Threshold = parseRebirthThreshold(
+    firstDefined(url.searchParams.get("filter3"), url.searchParams.get("low"), url.searchParams.get("lowThreshold"), "75")
   );
 
-  if (!Number.isFinite(highThreshold) || highThreshold <= 0) {
-    throw httpError(400, "High threshold is invalid.");
+  if (!Number.isFinite(filter1Threshold) || filter1Threshold <= 0) {
+    throw httpError(400, "Filter 1 is invalid.");
   }
 
-  if (!Number.isFinite(lowThreshold) || lowThreshold <= 0) {
-    throw httpError(400, "Low threshold is invalid.");
+  if (!Number.isFinite(filter2Threshold) || filter2Threshold <= 0) {
+    throw httpError(400, "Filter 2 is invalid.");
   }
 
-  if (lowThreshold >= highThreshold) {
-    throw httpError(400, "Low threshold must be lower than high threshold.");
+  if (!Number.isFinite(filter3Threshold) || filter3Threshold <= 0) {
+    throw httpError(400, "Filter 3 is invalid.");
+  }
+
+  if (!(filter1Threshold > filter2Threshold && filter2Threshold > filter3Threshold)) {
+    throw httpError(400, "Filters must be ordered from highest to lowest.");
   }
 
   const configuredBattleKey = battleKey(env);
@@ -2017,7 +2025,13 @@ async function handleTopClanThresholds(request, env) {
         resolvedBattleKey
       );
       const members = normalizeMembers(data, battle);
-      const counts = countThresholdMembers(members, highThreshold, lowThreshold);
+      const counts = countThresholdMembers(
+        members,
+        filter1Threshold,
+        filter2Threshold,
+        filter3Threshold,
+        generatedAt
+      );
 
       selectedBattleKey = resolvedBattleKey || selectedBattleKey;
       selectedBattleDisplayName = battleMeta.displayName || selectedBattleDisplayName;
@@ -2031,6 +2045,12 @@ async function handleTopClanThresholds(request, env) {
         battle_points: counts.total_points,
         battle_key: resolvedBattleKey,
         battle_display_name: battleMeta.displayName,
+        active_count: counts.active_count,
+        hatching_count: counts.hatching_count,
+        filter1_count: counts.filter1_count,
+        filter2_count: counts.filter2_count,
+        filter3_count: counts.filter3_count,
+        under_filter3_count: counts.under_filter3_count,
         high_count: counts.high_count,
         low_count: counts.low_count,
         below_low_count: counts.below_low_count,
@@ -2046,8 +2066,10 @@ async function handleTopClanThresholds(request, env) {
     ok: true,
     generated_at: generatedAt,
     top,
-    highThreshold,
-    lowThreshold,
+    filter1Threshold,
+    filter2Threshold,
+    filter3Threshold,
+    rebirthDivisor: TOP_CLAN_REBIRTH_POINTS,
     battle: selectedBattleKey,
     display_name: cleanBattleDisplayName(selectedBattleKey, selectedBattleDisplayName),
     activeBattle: {
@@ -2068,6 +2090,12 @@ function topClanThresholdErrorRow(clan, error) {
     battle_points: null,
     battle_key: null,
     battle_display_name: null,
+    active_count: 0,
+    hatching_count: 0,
+    filter1_count: 0,
+    filter2_count: 0,
+    filter3_count: 0,
+    under_filter3_count: 0,
     high_count: 0,
     low_count: 0,
     below_low_count: 0,
@@ -2076,8 +2104,16 @@ function topClanThresholdErrorRow(clan, error) {
   };
 }
 
-function countThresholdMembers(members, highThreshold, lowThreshold) {
+function countThresholdMembers(members, filter1Threshold, filter2Threshold, filter3Threshold, referenceIso) {
+  const referenceMs = isoToMs(referenceIso) || Date.now();
+  const activeAfterMs = referenceMs - 60 * 60 * 1000;
   const counts = {
+    active_count: 0,
+    hatching_count: 0,
+    filter1_count: 0,
+    filter2_count: 0,
+    filter3_count: 0,
+    under_filter3_count: 0,
     high_count: 0,
     low_count: 0,
     below_low_count: 0,
@@ -2087,18 +2123,65 @@ function countThresholdMembers(members, highThreshold, lowThreshold) {
 
   for (const member of members) {
     const points = toNumber(member.total_points) || 0;
+    const rebirths = points / TOP_CLAN_REBIRTH_POINTS;
+    const contributionMs = contributionTimestampMs(member);
     counts.total_points += points;
 
-    if (points >= highThreshold) {
-      counts.high_count += 1;
-    } else if (points >= lowThreshold) {
-      counts.low_count += 1;
+    if (points > 0 && contributionMs && contributionMs >= activeAfterMs) {
+      counts.active_count += 1;
     } else {
-      counts.below_low_count += 1;
+      counts.hatching_count += 1;
+    }
+
+    if (rebirths >= filter1Threshold) {
+      counts.filter1_count += 1;
+    } else if (rebirths >= filter2Threshold) {
+      counts.filter2_count += 1;
+    } else if (rebirths >= filter3Threshold) {
+      counts.filter3_count += 1;
+    } else {
+      counts.under_filter3_count += 1;
     }
   }
 
+  counts.high_count = counts.filter2_count;
+  counts.low_count = counts.filter3_count;
+  counts.below_low_count = counts.under_filter3_count;
+
   return counts;
+}
+
+function contributionTimestampMs(member) {
+  const raw = member?.raw_contribution || {};
+  const rawMember = member?.raw_member || {};
+  const candidate = firstDefined(
+    raw.LastContributionAt,
+    raw.lastContributionAt,
+    raw.LastContribution,
+    raw.lastContribution,
+    raw.LastContributedAt,
+    raw.lastContributedAt,
+    raw.Timestamp,
+    raw.timestamp,
+    raw.UpdatedAt,
+    raw.updatedAt,
+    raw.Updated,
+    raw.updated,
+    rawMember.LastContributionAt,
+    rawMember.lastContributionAt,
+    rawMember.LastContribution,
+    rawMember.lastContribution,
+    rawMember.LastContributedAt,
+    rawMember.lastContributedAt,
+    rawMember.Timestamp,
+    rawMember.timestamp,
+    rawMember.UpdatedAt,
+    rawMember.updatedAt,
+    rawMember.Updated,
+    rawMember.updated
+  );
+  const iso = safeIso(candidate);
+  return iso ? isoToMs(iso) : null;
 }
 
 async function addBattleRowCounts(env, rows, tableName, filtersForRow) {
@@ -4961,6 +5044,15 @@ function parseThresholdNumber(value) {
 
   const valueNumber = Math.round(base * (multipliers[match[2] || ""] || 1));
   return Number.isFinite(valueNumber) ? valueNumber : null;
+}
+
+function parseRebirthThreshold(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const cleaned = raw.replace(/,/g, "").replace(/\s+/g, "").replace(/\+$/, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
 }
 
 function historyHours(url, env, defaultHours) {

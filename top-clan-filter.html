@@ -241,7 +241,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1080px;
+      min-width: 1180px;
     }
 
     th, td {
@@ -265,6 +265,18 @@
     .numeric {
       text-align: right;
       font-variant-numeric: tabular-nums;
+    }
+
+    .activity-start {
+      border-left: 1px solid var(--border);
+    }
+
+    .activity-divider {
+      border-left: 1px solid var(--border);
+    }
+
+    .activity-end {
+      border-right: 1px solid var(--border);
     }
 
     .sort-btn {
@@ -382,19 +394,18 @@
       </div>
 
       <div class="card">
-        <div class="label">I was curious.</div>
-        <div class="value" id="elite-threshold">75M</div>
-        <div class="card-help">Hi Merc</div>
+        <div class="label">Filter 1</div>
+        <input id="filter1-input" class="card-input" type="text" value="100" />
       </div>
 
       <div class="card">
-        <div class="label">72.5M+</div>
-        <input id="high-input" class="card-input" type="text" value="72.5M" />
+        <div class="label">Filter 2</div>
+        <input id="filter2-input" class="card-input" type="text" value="90" />
       </div>
 
       <div class="card">
-        <div class="label">70M & Below</div>
-        <input id="low-input" class="card-input" type="text" value="70M" />
+        <div class="label">Filter 3</div>
+        <input id="filter3-input" class="card-input" type="text" value="75" />
       </div>
     </section>
 
@@ -414,15 +425,17 @@
               <th>Rank</th>
               <th>Clan</th>
               <th class="numeric">Points</th>
-              <th class="numeric">75M+</th>
-              <th class="numeric">72.5M+</th>
-              <th class="numeric">72.5M-70M</th>
-              <th class="numeric">Under 70M</th>
+              <th class="numeric activity-start">Active</th>
+              <th class="numeric activity-divider activity-end">Hatching</th>
+              <th class="numeric">100+</th>
+              <th class="numeric">90+</th>
+              <th class="numeric">75+</th>
+              <th class="numeric">Under 75</th>
             </tr>
           </thead>
           <tbody id="tbody">
             <tr>
-              <td colspan="7" class="empty-state">No data loaded yet.</td>
+              <td colspan="9" class="empty-state">No data loaded yet.</td>
             </tr>
           </tbody>
         </table>
@@ -432,10 +445,9 @@
 
   <script>
     const THRESHOLDS_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/top-clan-thresholds";
-    const LEGACY_WORKER_URL = "https://top-clan-thresholds.opal-dde.workers.dev/";
-    const ELITE_THRESHOLD = 75000000;
+    const DEFAULT_FILTERS = { filter1: 100, filter2: 90, filter3: 75 };
     let currentPayload = null;
-    let sortState = { key: "elite", direction: "desc" };
+    let sortState = { key: "filter1", direction: "desc" };
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
       encodeURIComponent(`
@@ -447,8 +459,9 @@
 
     const STORAGE_KEYS = {
       top: "ps99_top_clan_member_thresholds_top",
-      high: "ps99_top_clan_member_thresholds_high",
-      low: "ps99_top_clan_member_thresholds_low"
+      filter1: "ps99_top_clan_rebirth_filter_1",
+      filter2: "ps99_top_clan_rebirth_filter_2",
+      filter3: "ps99_top_clan_rebirth_filter_3"
     };
 
     function htmlEscape(value) {
@@ -536,41 +549,65 @@
       return Math.min(Math.max(Math.round(n), 1), 25);
     }
 
-    function saveInputs(top, high, low) {
+    function parseRebirthThreshold(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return null;
+
+      const cleaned = raw.replace(/,/g, "").replace(/\s+/g, "").replace(/\+$/, "");
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function formatRebirthThreshold(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "";
+      return stripZeros(n.toFixed(2));
+    }
+
+    function saveInputs(top, filter1, filter2, filter3) {
       localStorage.setItem(STORAGE_KEYS.top, String(top));
-      localStorage.setItem(STORAGE_KEYS.high, String(high));
-      localStorage.setItem(STORAGE_KEYS.low, String(low));
+      localStorage.setItem(STORAGE_KEYS.filter1, String(filter1));
+      localStorage.setItem(STORAGE_KEYS.filter2, String(filter2));
+      localStorage.setItem(STORAGE_KEYS.filter3, String(filter3));
     }
 
     function loadSavedInputs() {
       const top = localStorage.getItem(STORAGE_KEYS.top);
-      const high = localStorage.getItem(STORAGE_KEYS.high);
-      const low = localStorage.getItem(STORAGE_KEYS.low);
+      const filter1 = localStorage.getItem(STORAGE_KEYS.filter1);
+      const filter2 = localStorage.getItem(STORAGE_KEYS.filter2);
+      const filter3 = localStorage.getItem(STORAGE_KEYS.filter3);
 
       if (top) document.getElementById("top-input").value = top;
-      if (high) document.getElementById("high-input").value = high;
-      if (low) document.getElementById("low-input").value = low;
+      if (filter1) document.getElementById("filter1-input").value = filter1;
+      if (filter2) document.getElementById("filter2-input").value = filter2;
+      if (filter3) document.getElementById("filter3-input").value = filter3;
     }
 
     function normalizeInputDisplays() {
       const topRaw = document.getElementById("top-input").value;
-      const highRaw = document.getElementById("high-input").value;
-      const lowRaw = document.getElementById("low-input").value;
+      const filter1Raw = document.getElementById("filter1-input").value;
+      const filter2Raw = document.getElementById("filter2-input").value;
+      const filter3Raw = document.getElementById("filter3-input").value;
 
       const top = parseTopCount(topRaw);
-      const high = parseFlexibleNumber(highRaw);
-      const low = parseFlexibleNumber(lowRaw);
+      const filter1 = parseRebirthThreshold(filter1Raw);
+      const filter2 = parseRebirthThreshold(filter2Raw);
+      const filter3 = parseRebirthThreshold(filter3Raw);
 
       if (Number.isFinite(top)) {
         document.getElementById("top-input").value = String(top);
       }
 
-      if (Number.isFinite(high)) {
-        document.getElementById("high-input").value = formatCompactNumber(high);
+      if (Number.isFinite(filter1)) {
+        document.getElementById("filter1-input").value = formatRebirthThreshold(filter1);
       }
 
-      if (Number.isFinite(low)) {
-        document.getElementById("low-input").value = formatCompactNumber(low);
+      if (Number.isFinite(filter2)) {
+        document.getElementById("filter2-input").value = formatRebirthThreshold(filter2);
+      }
+
+      if (Number.isFinite(filter3)) {
+        document.getElementById("filter3-input").value = formatRebirthThreshold(filter3);
       }
     }
 
@@ -581,14 +618,17 @@
       document.getElementById("top-input").value =
         String(payload?.top || document.getElementById("top-input").value || "10");
 
-      document.getElementById("elite-threshold").textContent =
-        formatCompactNumber(payload?.eliteThreshold || ELITE_THRESHOLD);
+      document.getElementById("filter1-input").value = formatRebirthThreshold(
+        payload?.filter1Threshold || parseRebirthThreshold(document.getElementById("filter1-input").value) || DEFAULT_FILTERS.filter1
+      );
 
-      document.getElementById("high-input").value =
-        formatCompactNumber(payload?.highThreshold || parseFlexibleNumber(document.getElementById("high-input").value) || 72500000);
+      document.getElementById("filter2-input").value = formatRebirthThreshold(
+        payload?.filter2Threshold || parseRebirthThreshold(document.getElementById("filter2-input").value) || DEFAULT_FILTERS.filter2
+      );
 
-      document.getElementById("low-input").value =
-        formatCompactNumber(payload?.lowThreshold || parseFlexibleNumber(document.getElementById("low-input").value) || 70000000);
+      document.getElementById("filter3-input").value = formatRebirthThreshold(
+        payload?.filter3Threshold || parseRebirthThreshold(document.getElementById("filter3-input").value) || DEFAULT_FILTERS.filter3
+      );
     }
 
     function sortMark(key) {
@@ -603,22 +643,26 @@
     }
 
     function rowMetrics(row) {
-      const eliteCount = Number(row.elite_count || 0);
-      const highCount = Number(row.high_count || 0);
-      const lowCount = Number(row.low_count || 0);
+      const filter1Count = Number(row.filter1_count ?? row.elite_count ?? 0);
+      const filter2Count = Number(row.filter2_count ?? row.high_count ?? 0);
+      const filter3Count = Number(row.filter3_count ?? row.low_count ?? 0);
       const memberCount = Number(row.member_count || 0);
-      const belowLowCount = Number.isFinite(Number(row.below_low_count))
-        ? Number(row.below_low_count)
-        : Math.max(0, memberCount - highCount - lowCount);
+      const underCount = Number.isFinite(Number(row.under_filter3_count))
+        ? Number(row.under_filter3_count)
+        : Number.isFinite(Number(row.below_low_count))
+          ? Number(row.below_low_count)
+          : Math.max(0, memberCount - filter1Count - filter2Count - filter3Count);
 
       return {
         rank: Number(row.rank || 999999),
         clan: String(row.clan_name || "").toLowerCase(),
         points: Number(row.battle_points ?? row.points ?? row.clan_points ?? 0),
-        elite: eliteCount,
-        high: highCount,
-        mid: lowCount,
-        under: belowLowCount
+        active: Number(row.active_count || 0),
+        hatching: Number(row.hatching_count || 0),
+        filter1: filter1Count,
+        filter2: filter2Count,
+        filter3: filter3Count,
+        under: underCount
       };
     }
 
@@ -671,23 +715,25 @@
       const tbody = document.getElementById("tbody");
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
-      const eliteLabel = formatCompactNumber(payload?.eliteThreshold || ELITE_THRESHOLD);
-      const highLabel = formatCompactNumber(payload?.highThreshold || 0);
-      const lowLabel = formatCompactNumber(payload?.lowThreshold || 0);
+      const filter1Label = formatRebirthThreshold(payload?.filter1Threshold || DEFAULT_FILTERS.filter1);
+      const filter2Label = formatRebirthThreshold(payload?.filter2Threshold || DEFAULT_FILTERS.filter2);
+      const filter3Label = formatRebirthThreshold(payload?.filter3Threshold || DEFAULT_FILTERS.filter3);
 
       document.getElementById("table-head-row").innerHTML = `
         <th>${sortHeader("rank", "Rank")}</th>
         <th>${sortHeader("clan", "Clan")}</th>
         <th class="numeric">${sortHeader("points", "Points", true)}</th>
-        <th class="numeric">${sortHeader("elite", `${eliteLabel}+`, true)}</th>
-        <th class="numeric">${sortHeader("high", `${highLabel}+`, true)}</th>
-        <th class="numeric">${sortHeader("mid", `${highLabel}-${lowLabel}`, true)}</th>
-        <th class="numeric">${sortHeader("under", `Under ${lowLabel}`, true)}</th>
+        <th class="numeric activity-start">${sortHeader("active", "Active", true)}</th>
+        <th class="numeric activity-divider activity-end">${sortHeader("hatching", "Hatching", true)}</th>
+        <th class="numeric">${sortHeader("filter1", `${filter1Label}+`, true)}</th>
+        <th class="numeric">${sortHeader("filter2", `${filter2Label}+`, true)}</th>
+        <th class="numeric">${sortHeader("filter3", `${filter3Label}+`, true)}</th>
+        <th class="numeric">${sortHeader("under", `Under ${filter3Label}`, true)}</th>
       `;
       wireSortHeaders();
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No rows returned.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No rows returned.</td></tr>`;
         return;
       }
 
@@ -709,9 +755,11 @@
               </div>
             </td>
             <td class="numeric">${fmtShortNumber(metrics.points)}</td>
-            <td class="numeric">${htmlEscape(metrics.elite)}</td>
-            <td class="numeric">${htmlEscape(metrics.high)}</td>
-            <td class="numeric">${htmlEscape(metrics.mid)}</td>
+            <td class="numeric activity-start">${htmlEscape(metrics.active)}</td>
+            <td class="numeric activity-divider activity-end">${htmlEscape(metrics.hatching)}</td>
+            <td class="numeric">${htmlEscape(metrics.filter1)}</td>
+            <td class="numeric">${htmlEscape(metrics.filter2)}</td>
+            <td class="numeric">${htmlEscape(metrics.filter3)}</td>
             <td class="numeric">${htmlEscape(metrics.under)}</td>
           </tr>
         `;
@@ -720,65 +768,39 @@
 
     function getParsedInputs() {
       const top = parseTopCount(document.getElementById("top-input").value);
-      const high = parseFlexibleNumber(document.getElementById("high-input").value);
-      const low = parseFlexibleNumber(document.getElementById("low-input").value);
+      const filter1 = parseRebirthThreshold(document.getElementById("filter1-input").value);
+      const filter2 = parseRebirthThreshold(document.getElementById("filter2-input").value);
+      const filter3 = parseRebirthThreshold(document.getElementById("filter3-input").value);
 
       if (!Number.isFinite(top)) {
         throw new Error("Top Clans Scanned must be a whole number between 1 and 25.");
       }
 
-      if (!Number.isFinite(high)) {
-        throw new Error("72.5M+ Threshold is invalid. Try values like 70M, 72.5M, or 10,000,000.");
+      if (!Number.isFinite(filter1)) {
+        throw new Error("Filter 1 is invalid. Try values like 100, 90, or 75.");
       }
 
-      if (!Number.isFinite(low)) {
-        throw new Error("70M Threshold is invalid. Try values like 70M, 72.5M, or 10,000,000.");
+      if (!Number.isFinite(filter2)) {
+        throw new Error("Filter 2 is invalid. Try values like 100, 90, or 75.");
       }
 
-      if (low >= high) {
-        throw new Error("70M Threshold must be lower than 72.5M+ Threshold.");
+      if (!Number.isFinite(filter3)) {
+        throw new Error("Filter 3 is invalid. Try values like 100, 90, or 75.");
       }
 
-      return { top, high, low };
+      if (!(filter1 > filter2 && filter2 > filter3)) {
+        throw new Error("Filters must be ordered from highest to lowest: Filter 1 > Filter 2 > Filter 3.");
+      }
+
+      return { top, filter1, filter2, filter3 };
     }
 
-    function clanKey(row) {
-      return String(row?.clan_name || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "");
-    }
-
-    function mergeEliteCounts(payload, elitePayload) {
-      const eliteRows = new Map();
-
-      for (const row of elitePayload?.rows || []) {
-        const key = clanKey(row);
-        if (key) eliteRows.set(key, Number(row.high_count || 0));
-      }
-
-      return {
-        ...payload,
-        eliteThreshold: ELITE_THRESHOLD,
-        rows: (payload?.rows || []).map(row => {
-          const key = clanKey(row);
-          const eliteCount = Number.isFinite(Number(row.elite_count))
-            ? Number(row.elite_count)
-            : eliteRows.get(key);
-
-          return {
-            ...row,
-            elite_count: Number.isFinite(eliteCount) ? eliteCount : 0
-          };
-        })
-      };
-    }
-
-    function buildThresholdUrl(baseUrl, top, high, low) {
+    function buildThresholdUrl(baseUrl, top, filter1, filter2, filter3) {
       const url = new URL(baseUrl);
       url.searchParams.set("top", String(top));
-      url.searchParams.set("high", String(high));
-      url.searchParams.set("low", String(low));
+      url.searchParams.set("filter1", String(filter1));
+      url.searchParams.set("filter2", String(filter2));
+      url.searchParams.set("filter3", String(filter3));
       return url.toString();
     }
 
@@ -804,22 +826,8 @@
       return payload;
     }
 
-    async function fetchThresholds(top, high, low) {
-      try {
-        return await fetchJsonOrThrow(buildThresholdUrl(THRESHOLDS_URL, top, high, low));
-      } catch (primaryError) {
-        const legacyUrl =
-          `${LEGACY_WORKER_URL}?mode=top-thresholds` +
-          `&top=${encodeURIComponent(top)}` +
-          `&high=${encodeURIComponent(high)}` +
-          `&low=${encodeURIComponent(low)}`;
-
-        try {
-          return await fetchJsonOrThrow(legacyUrl);
-        } catch {
-          throw primaryError;
-        }
-      }
+    async function fetchThresholds(top, filter1, filter2, filter3) {
+      return fetchJsonOrThrow(buildThresholdUrl(THRESHOLDS_URL, top, filter1, filter2, filter3));
     }
 
     async function loadThresholds() {
@@ -832,29 +840,22 @@
         return;
       }
 
-      const { top, high, low } = parsed;
+      const { top, filter1, filter2, filter3 } = parsed;
 
-      saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
+      saveInputs(String(top), formatRebirthThreshold(filter1), formatRebirthThreshold(filter2), formatRebirthThreshold(filter3));
       normalizeInputDisplays();
-      setStatus("Loading top clan threshold counts...", "info");
+      setStatus("Loading top clan rebirth counts...", "info");
 
       try {
-        const payloadRequest = fetchThresholds(top, high, low);
-        const eliteRequest = Number(high) === ELITE_THRESHOLD
-          ? payloadRequest
-          : fetchThresholds(top, ELITE_THRESHOLD, low);
-        const [payload, elitePayload] = await Promise.all([
-          payloadRequest,
-          eliteRequest
-        ]);
-        const mergedPayload = mergeEliteCounts(payload, elitePayload);
+        const payload = await fetchThresholds(top, filter1, filter2, filter3);
 
-        renderCards(mergedPayload);
-        renderTable(mergedPayload);
+        renderCards(payload);
+        renderTable(payload);
         saveInputs(
-          String(mergedPayload.top || top),
-          formatCompactNumber(mergedPayload.highThreshold || high),
-          formatCompactNumber(mergedPayload.lowThreshold || low)
+          String(payload.top || top),
+          formatRebirthThreshold(payload.filter1Threshold || filter1),
+          formatRebirthThreshold(payload.filter2Threshold || filter2),
+          formatRebirthThreshold(payload.filter3Threshold || filter3)
         );
         setStatus("", "info");
       } catch (err) {
@@ -864,99 +865,11 @@
     }
 
     async function postThresholds() {
-      let parsed;
-
-      try {
-        parsed = getParsedInputs();
-      } catch (err) {
-        setStatus(err?.message || String(err), "error");
-        return;
-      }
-
-      const { top, high, low } = parsed;
-      const postBtn = document.getElementById("post-btn");
-
-      postBtn.disabled = true;
-      saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
-      normalizeInputDisplays();
-      setStatus("Posting top clan thresholds to Discord...", "info");
-
-      try {
-        const url =
-          `${LEGACY_WORKER_URL}?mode=post-top-thresholds` +
-          `&top=${encodeURIComponent(top)}` +
-          `&high=${encodeURIComponent(high)}` +
-          `&low=${encodeURIComponent(low)}`;
-
-        const res = await fetch(url, { cache: "no-store" });
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Worker request failed (${res.status}).`);
-        }
-
-        const payload = await res.json();
-
-        if (!payload?.ok) {
-          throw new Error(payload?.error || "Discord post failed.");
-        }
-
-        const messageId = payload?.discord_message_id ? ` Message ID: ${payload.discord_message_id}` : "";
-        setStatus(`Posted to Discord successfully.${messageId}`, "info");
-      } catch (err) {
-        console.error(err);
-        setStatus(err?.message || String(err), "error");
-      } finally {
-        postBtn.disabled = false;
-      }
+      setStatus("Discord posting is not configured for rebirth filters yet.", "error");
     }
 
     async function postThresholdImageBoard() {
-      let parsed;
-
-      try {
-        parsed = getParsedInputs();
-      } catch (err) {
-        setStatus(err?.message || String(err), "error");
-        return;
-      }
-
-      const { top, high, low } = parsed;
-      const postImageBtn = document.getElementById("post-image-btn");
-
-      postImageBtn.disabled = true;
-      saveInputs(String(top), formatCompactNumber(high), formatCompactNumber(low));
-      normalizeInputDisplays();
-      setStatus("Posting image board to Discord...", "info");
-
-      try {
-        const url =
-          `${LEGACY_WORKER_URL}?mode=post-top-thresholds-image` +
-          `&top=${encodeURIComponent(top)}` +
-          `&high=${encodeURIComponent(high)}` +
-          `&low=${encodeURIComponent(low)}`;
-
-        const res = await fetch(url, { cache: "no-store" });
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Worker request failed (${res.status}).`);
-        }
-
-        const payload = await res.json();
-
-        if (!payload?.ok) {
-          throw new Error(payload?.error || "Discord image post failed.");
-        }
-
-        const messageId = payload?.discord_message_id ? ` Message ID: ${payload.discord_message_id}` : "";
-        setStatus(`Image posted to Discord successfully.${messageId}`, "info");
-      } catch (err) {
-        console.error(err);
-        setStatus(err?.message || String(err), "error");
-      } finally {
-        postImageBtn.disabled = false;
-      }
+      setStatus("Discord image posting is not configured for rebirth filters yet.", "error");
     }
 
     function wireEvents() {
@@ -968,7 +881,7 @@
       const postImageBtn = document.getElementById("post-image-btn");
       if (postImageBtn) postImageBtn.addEventListener("click", postThresholdImageBoard);
 
-      ["top-input", "high-input", "low-input"].forEach(id => {
+      ["top-input", "filter1-input", "filter2-input", "filter3-input"].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
 
