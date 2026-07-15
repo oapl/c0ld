@@ -155,6 +155,24 @@ function fmtDateTime(value){
   return Number.isNaN(d.getTime())?"—":d.toLocaleString(undefined,{dateStyle:"short",timeStyle:"medium"});
 }
 
+function ordinalDay(day){
+  const mod100=day%100;
+  if(mod100>=11&&mod100<=13)return`${day}th`;
+  const suffix={1:"st",2:"nd",3:"rd"}[day%10]||"th";
+  return`${day}${suffix}`;
+}
+
+function fmtJoinedDate(value){
+  if(!value)return"—";
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return"—";
+
+  const month=d.toLocaleString(undefined,{month:"long"});
+  const year=d.getFullYear();
+  const time=d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+  return`${month} ${ordinalDay(d.getDate())}, ${year}, ${time}`;
+}
+
 function formatPercent(value){
   return Number.isFinite(value)?`${value.toFixed(1).replace(/\.0$/,"")}%`:"—";
 }
@@ -401,6 +419,7 @@ async function loadLiveProfile(id){
   let latestPoints=currentRow?rowPoints(currentRow):null;
   let latestRank=currentRow?.rank??null;
   let latestSeen=currentRow?.fetched_at||current.snapshot_at||current.generated_at||null;
+  let joinedAt=currentRow?.join_time||currentRow?.joined_at||null;
 
   for(const battleMeta of battleMap.values()){
     let history={rows:[]};
@@ -446,6 +465,7 @@ async function loadLiveProfile(id){
       latestPoints=isCurrentBattle&&currentRow?rowPoints(currentRow):rowPoints(last);
       latestRank=isCurrentBattle&&currentRow?currentRow.rank:last.rank??latestRank;
       latestSeen=(isCurrentBattle&&currentRow?currentRow.fetched_at:null)||last.fetched_at||latestSeen;
+      joinedAt=(isCurrentBattle&&currentRow?(currentRow.join_time||currentRow.joined_at):null)||joinedAt;
     }
 
     battles.push(recalcBattle({
@@ -481,6 +501,7 @@ async function loadLiveProfile(id){
     latest_rank:latestRank,
     latest_points:latestPoints,
     latest_seen:latestSeen,
+    joined_at:joinedAt,
     battles
   };
 }
@@ -601,6 +622,7 @@ function mergeProfiles(staticProfile,liveProfile){
     latest_rank:liveProfile.latest_rank??staticProfile.latest_rank??null,
     latest_points:liveProfile.latest_points??staticProfile.latest_points??null,
     latest_seen:liveProfile.latest_seen??staticProfile.latest_seen??null,
+    joined_at:liveProfile.joined_at??staticProfile.joined_at??null,
     source_clan:liveProfile.source_clan??staticProfile.source_clan??null,
     source_clan_rank:liveProfile.source_clan_rank??staticProfile.source_clan_rank??null,
     source_clan_points:liveProfile.source_clan_points??staticProfile.source_clan_points??null,
@@ -754,7 +776,7 @@ function renderProfileCards(){
     <div class="card"><div class="label">Clan</div><div class="value">${sourceClanDisplay()}</div></div>
     <div class="card"><div class="label">${rankLabel}</div><div class="value">${hasGlobalRank?rankDisplay(rankValue,profile.total_global_players):fmt(rankValue)}</div></div>
     <div class="card"><div class="label">Current Points</div><div class="value">${fmt(currentPoints())}</div></div>
-    <div class="card"><div class="label">Latest Seen</div><div class="value">${fmtDateTime(profile.latest_seen)}</div></div>
+    <div class="card"><div class="label">Joined</div><div class="value">${fmtJoinedDate(profile.joined_at)}</div></div>
   `;
 }
 
@@ -1155,6 +1177,7 @@ async function main(){
         total_global_players:globalProfile.total_global_players??profile.total_global_players??null,
         latest_seen:globalProfile.latest_seen??profile.latest_seen??null,
         latest_points:globalProfile.latest_points??profile.latest_points??null,
+        joined_at:profile.joined_at??globalProfile.joined_at??null,
         battles:globalBattles.length?[...globalBattles,...existingBattles]:existingBattles,
         is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
       };

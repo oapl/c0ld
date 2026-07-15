@@ -404,6 +404,7 @@ async function handleCurrent(request, env) {
       username: displayUsername(row, usernameMap),
       user_id: toNumber(row.user_id),
       avatar_url: avatarMap.get(String(row.user_id)) || null,
+      join_time: memberJoinIso(row),
       total_points: toNumber(row.total_points) || 0,
       gain_5m: row.gain_5m,
       gain_1h: row.gain_1h,
@@ -2343,6 +2344,22 @@ function topClanMemberPointKey(clanKey, userId) {
   return `${clanKey}:${String(userId || "").trim()}`;
 }
 
+function memberJoinIso(member) {
+  const rawMember = member?.raw_member || {};
+  return safeIso(firstDefined(
+    member?.join_time,
+    member?.joined_at,
+    rawMember.JoinTime,
+    rawMember.joinTime,
+    rawMember.join_time,
+    rawMember.JoinedAt,
+    rawMember.joinedAt,
+    rawMember.joined_at,
+    rawMember.Joined,
+    rawMember.joined
+  ));
+}
+
 function contributionTimestampMs(member) {
   const raw = member?.raw_contribution || {};
   const rawMember = member?.raw_member || {};
@@ -4058,7 +4075,7 @@ async function fetchLatestSnapshotMeta(env, clan, battle) {
 
 async function fetchCurrentRows(env, clan) {
   return supabaseSelect(env, CURRENT_TABLE, {
-    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points",
+    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points,raw_member",
     clan_name: `eq.${clan}`,
     order: "rank.asc",
     limit: "1000"
@@ -4106,7 +4123,7 @@ async function fetchTrackedClanCurrent(env, clan) {
 
 async function fetchSnapshotRows(env, snapshotId) {
   return supabaseSelect(env, SNAPSHOT_TABLE, {
-    select: "fetched_at,rank,username,user_id,total_points",
+    select: "fetched_at,rank,username,user_id,total_points,raw_member",
     snapshot_id: `eq.${snapshotId}`,
     order: "rank.asc",
     limit: "1000"
