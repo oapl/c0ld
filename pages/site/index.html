@@ -476,6 +476,7 @@
               <th data-sort="rank">Rank</th>
               <th data-sort="username">Player</th>
               <th data-sort="total_points" class="num">Total Points</th>
+              <th data-sort="downtime_minutes" class="num">Downtime</th>
               <th data-sort="gain_5m" class="num">5 Minutes</th>
               <th data-sort="gain_1h" class="num">1 Hour</th>
               <th data-sort="gain_12h" class="num">12 Hours</th>
@@ -728,6 +729,30 @@
     function fmtGlobalRank(row) {
       const rank = toFiniteNumber(row?.global_rank);
       return rank ? `#${rank.toLocaleString("en-US")}` : "—";
+    }
+
+    function fmtDowntime(minutes) {
+      const value = toFiniteNumber(minutes);
+      if (value === null) return "—";
+      if (value < 5) return "<5m";
+
+      const totalMinutes = Math.floor(value);
+      const days = Math.floor(totalMinutes / 1440);
+      const hours = Math.floor((totalMinutes % 1440) / 60);
+      const mins = totalMinutes % 60;
+
+      if (days > 0) return `${days}d ${hours}h`;
+      if (hours > 0) return `${hours}h ${mins}m`;
+      return `${mins}m`;
+    }
+
+    function downtimeTitle(row) {
+      const value = toFiniteNumber(row?.downtime_minutes);
+      if (value === null) return "No downtime data yet";
+
+      const parts = [`No point gain for ${fmtDowntime(value)}`];
+      if (row?.last_gain_at) parts.push(`Last gain: ${fmtDateTime(row.last_gain_at)}`);
+      return parts.join(" | ");
     }
 
     function globalRankTitle(row) {
@@ -1355,7 +1380,7 @@
       if (!visible.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="8" style="text-align:center;padding:32px;color:#8b949e;">
+            <td colspan="9" style="text-align:center;padding:32px;color:#8b949e;">
               No players found.
             </td>
           </tr>
@@ -1378,6 +1403,7 @@
             </a>
           </td>
           <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
+          <td class="num" title="${downtimeTitle(row)}">${fmtDowntime(row.downtime_minutes)}</td>
           <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
           <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
           <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>

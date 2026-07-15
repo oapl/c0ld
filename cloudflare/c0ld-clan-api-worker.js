@@ -406,13 +406,19 @@ async function handleCurrent(request, env) {
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
+  const rowsWithDowntime = await addDowntimeFields(env, rowsWithGains, latest)
+    .catch(() => rowsWithGains.map(row => ({
+      ...row,
+      last_gain_at: null,
+      downtime_minutes: null
+    })));
   const activeBattleMeta = !explicitBattle
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
   latest = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
-  const usernameMap = await resolveMissingUsernames(rowsWithGains, env);
+  const usernameMap = await resolveMissingUsernames(rowsWithDowntime, env);
   const avatarMap = await resolveRobloxAvatarHeadshots(
-    rowsWithGains.map(row => row.user_id),
+    rowsWithDowntime.map(row => row.user_id),
     env
   ).catch(() => new Map());
   const trackedClan = await fetchTrackedClanCurrent(env, clan).catch(() => null);
@@ -428,7 +434,7 @@ async function handleCurrent(request, env) {
     clan_rank: trackedClan?.rank ?? null,
     clan_points: trackedClan?.points ?? null,
     source: "c0ld-clan-api-worker",
-    rows: rowsWithGains.map(row => ({
+    rows: rowsWithDowntime.map(row => ({
       fetched_at: row.fetched_at,
       rank: toNumber(row.rank),
       username: displayUsername(row, usernameMap),
@@ -436,6 +442,8 @@ async function handleCurrent(request, env) {
       avatar_url: avatarMap.get(String(row.user_id)) || null,
       join_time: memberJoinIso(row),
       total_points: toNumber(row.total_points) || 0,
+      last_gain_at: row.last_gain_at || null,
+      downtime_minutes: row.downtime_minutes,
       gain_5m: row.gain_5m,
       gain_1h: row.gain_1h,
       gain_12h: row.gain_12h,
@@ -729,7 +737,7 @@ function normalizeGlobalLeaderboardOutput(row, {
     user_id: userId,
     username: globalCandidateUsername(row, usernameMap),
     display_name: globalCandidateDisplayName(row),
-    avatar_url: avatarMap.get(userId) || null,
+    avatar_url: avatarMap.get(String(userId)) || null,
     points,
     battle_key: row.battle_key || run?.battle_key || null,
     battle_display_name: cleanBattleDisplayName(
@@ -3035,8 +3043,8 @@ function clanActivityEvent({
     current_value: currentValue,
     previous_rank: previousRank,
     current_rank: currentRank,
-    previous_role: eventType === "member_promoted" || eventType === "member_demoted" ? previousValue : null,
-    current_role: eventType === "member_promoted" || eventType === "member_demoted" ? currentValue : null,
+    previous_member_role: eventType === "member_promoted" || eventType === "member_demoted" ? previousValue : null,
+    current_member_role: eventType === "member_promoted" || eventType === "member_demoted" ? currentValue : null,
     previous_permission_level: previousPermissionLevel,
     current_permission_level: currentPermissionLevel,
     details: {
@@ -3223,8 +3231,8 @@ function normalizeClanActivityEventOutput(row) {
     current_value: row.current_value || null,
     previous_rank: toNumber(row.previous_rank),
     current_rank: toNumber(row.current_rank),
-    previous_role: row.previous_role || null,
-    current_role: row.current_role || null,
+    previous_member_role: row.previous_member_role || null,
+    current_member_role: row.current_member_role || null,
     previous_permission_level: toNumber(row.previous_permission_level),
     current_permission_level: toNumber(row.current_permission_level),
     details: row.details || {}
@@ -4597,6 +4605,22 @@ async function resolveRobloxUsernames(userIds, env) {
     }
   });
 
+  const unresolved = ids.filter(id => isFallbackUsername(result.get(id), id));
+  if (unresolved.length) {
+    const repairBatchSize = clamp(Number(env.ROBLOX_LOOKUP_REPAIR_BATCH_SIZE || 25), 1, ROBLOX_BATCH_SIZE);
+    const repairDelayMs = clamp(Number(env.ROBLOX_LOOKUP_REPAIR_DELAY_MS || 350), 0, 10000);
+
+    for (const batch of chunkValues(unresolved, repairBatchSize)) {
+      if (repairDelayMs > 0) await sleep(repairDelayMs);
+
+      try {
+        await lookupBatch(batch);
+      } catch {
+        // Keep fallback user_ID labels if the repair pass also fails.
+      }
+    }
+  }
+
   return result;
 }
 
@@ -4712,6 +4736,88 @@ async function addGainFields(env, rows, latest) {
     }
 
     return out;
+  });
+}
+
+async function addDowntimeFields(env, rows, latest) {
+  if (!rows.length) return [];
+
+  const latestMs = new Date(latest.fetched_at).getTime();
+  if (!Number.isFinite(latestMs)) {
+    return rows.map(row => ({
+      ...row,
+      last_gain_at: null,
+      downtime_minutes: null
+    }));
+  }
+
+  const userIds = [...new Set(rows.map(row => toNumber(row.user_id)).filter(Boolean))];
+  if (!userIds.length) {
+    return rows.map(row => ({
+      ...row,
+      last_gain_at: null,
+      downtime_minutes: null
+    }));
+  }
+
+  const sinceIso = latest.battle_started_at || new Date(latestMs - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const historyRows = [];
+
+  for (const batch of chunkValues(userIds, 100)) {
+    const batchRows = await supabaseSelectPaged(env, SNAPSHOT_TABLE, {
+      select: "fetched_at,user_id,total_points",
+      clan_name: `eq.${latest.clan_name}`,
+      battle_key: `eq.${latest.battle_key}`,
+      user_id: `in.(${batch.join(",")})`,
+      fetched_at: [`gte.${sinceIso}`, `lte.${latest.fetched_at}`],
+      order: "user_id.asc,fetched_at.asc"
+    }, 200000);
+
+    historyRows.push(...batchRows);
+  }
+
+  const stateByUser = new Map();
+
+  for (const row of historyRows) {
+    const userId = toNumber(row.user_id);
+    const points = toNumber(row.total_points);
+    const at = row.fetched_at;
+    const atMs = new Date(at).getTime();
+    if (!userId || points === null || !Number.isFinite(atMs)) continue;
+
+    const state = stateByUser.get(userId) || {
+      first_seen_at: at,
+      latest_seen_at: at,
+      previous_points: null,
+      last_gain_at: null
+    };
+
+    if (!state.first_seen_at) state.first_seen_at = at;
+    state.latest_seen_at = at;
+
+    if (state.previous_points !== null && points > state.previous_points) {
+      state.last_gain_at = at;
+    }
+
+    state.previous_points = points;
+    stateByUser.set(userId, state);
+  }
+
+  return rows.map(row => {
+    const userId = toNumber(row.user_id);
+    const state = stateByUser.get(userId);
+    const lastGainAt = state?.last_gain_at || null;
+    const fallbackAt = state?.first_seen_at || row.fetched_at || latest.fetched_at;
+    const anchorMs = new Date(lastGainAt || fallbackAt).getTime();
+    const downtimeMinutes = Number.isFinite(anchorMs)
+      ? Math.max(0, Math.floor((latestMs - anchorMs) / 60000))
+      : null;
+
+    return {
+      ...row,
+      last_gain_at: lastGainAt,
+      downtime_minutes: downtimeMinutes
+    };
   });
 }
 
