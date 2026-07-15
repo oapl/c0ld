@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Player Lookup</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--danger:#f85149;--danger-bg:rgba(248,81,73,.12)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+a{color:var(--link);text-decoration:none}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}
+.logo-wrap{display:flex;justify-content:center;align-items:center;width:100%}
+.site-logo{display:block;width:76px;border-radius:10px;margin:0 auto}
+.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.menu a{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel-2);color:var(--text);font-size:13px}
+.menu a.active{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
+main{max-width:1200px;margin:0 auto;padding:22px 24px 28px}
+.hero,.profile-shell{background:var(--panel);border:1px solid var(--border);border-radius:10px}
+.hero{padding:18px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+.hero h1{margin:0 0 4px;font-size:28px}
+.subtle{color:var(--muted);font-size:13px}
+.lookup-form{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+input{min-width:min(360px,70vw)}
+button{cursor:pointer}
+button:hover,input:focus{border-color:var(--link);background:var(--hover)}
+.profile-shell{overflow:hidden;min-height:180px}
+.profile-shell.empty{display:flex;align-items:center;padding:20px;color:var(--muted)}
+.profile-shell iframe{width:100%;border:0;display:block;min-height:540px;background:transparent}
+.error{padding:20px;color:#ffb4ad;background:var(--danger-bg)}
+@media(max-width:650px){main{padding:16px}.lookup-form>*{width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Top Clans</a>
+    <a href="global-leaderboard.html">Global Leaderboard</a>
+    <a class="active" href="player-lookup.html">Player Lookup</a>
+    <a href="c0ld-leagues.html">c0ld Leagues</a>
+    <a href="top-leagues.html">Top Leagues</a>
+    <a href="top-clan-filter.html">Top Clan Filter</a>
+    <a href="live-clan.html">Clan Lookup</a>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <h1>Player Lookup</h1>
+      <div id="status" class="subtle">Search by Roblox username or user ID.</div>
+    </div>
+    <form id="lookup-form" class="lookup-form">
+      <input id="lookup-input" placeholder="Username or user ID..." autocomplete="off" autofocus>
+      <button type="submit">Lookup</button>
+    </form>
+  </section>
+  <section id="profile-shell" class="profile-shell empty">Search for a player to load their profile here.</section>
+</main>
+<script>
+const PROFILE_PAGE="profile.html";
+const DEFAULT_HEIGHT=540;
+const shell=document.getElementById("profile-shell");
+const form=document.getElementById("lookup-form");
+const input=document.getElementById("lookup-input");
+const statusEl=document.getElementById("status");
+let frame=null;
+
+function queryValue(){
+  return new URLSearchParams(location.search).get("q")||"";
+}
+
+function setStatus(text){
+  statusEl.textContent=text;
+}
+
+function makeProfileUrl(query){
+  const url=new URL(PROFILE_PAGE,location.href);
+  url.searchParams.set("id",query);
+  url.searchParams.set("embed","1");
+  return url.toString();
+}
+
+function ensureFrame(){
+  if(frame)return frame;
+  shell.classList.remove("empty");
+  shell.innerHTML='<iframe id="profile-frame" title="Player profile"></iframe>';
+  frame=document.getElementById("profile-frame");
+  frame.addEventListener("load",()=>setStatus(input.value.trim()?`Loaded profile for ${input.value.trim()}.`:"Search by Roblox username or user ID."));
+  return frame;
+}
+
+function loadProfile(query,updateUrl=true){
+  const value=String(query||"").trim();
+
+  if(!value){
+    frame=null;
+    shell.classList.add("empty");
+    shell.textContent="Search for a player to load their profile here.";
+    setStatus("Search by Roblox username or user ID.");
+    return;
+  }
+
+  input.value=value;
+  setStatus(`Loading profile for ${value}...`);
+  const iframe=ensureFrame();
+  iframe.style.height=DEFAULT_HEIGHT+"px";
+  iframe.src=makeProfileUrl(value);
+
+  if(updateUrl){
+    const url=new URL(location.href);
+    url.searchParams.set("q",value);
+    history.replaceState(null,"",url);
+  }
+}
+
+form.addEventListener("submit",event=>{
+  event.preventDefault();
+  loadProfile(input.value,true);
+});
+
+window.addEventListener("message",event=>{
+  if(event.data?.type!=="c0ld-profile-height")return;
+  const height=Number(event.data.height);
+  if(!frame||!Number.isFinite(height))return;
+  frame.style.height=Math.max(DEFAULT_HEIGHT,height)+"px";
+});
+
+loadProfile(queryValue(),false);
+</script>
+</body>
+</html>

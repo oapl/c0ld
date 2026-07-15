@@ -16,6 +16,10 @@
     .menu-btn{padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel2);color:var(--text);font-size:13px}
     .menu-btn:hover,.menu-btn.active{border-color:var(--link);color:var(--link);background:#1f2630}
     main{max-width:1200px;margin:auto;padding:22px 24px}
+    body.embedded{background:transparent}
+    body.embedded header{display:none}
+    body.embedded main{max-width:none;padding:0}
+    body.embedded .profile-header{margin-top:0}
     .profile-header,.card,.battle-card,.empty,.error{border:1px solid var(--border);border-radius:10px;background:var(--panel)}
     .profile-header{display:flex;gap:18px;align-items:center;padding:18px;margin-bottom:24px}
     .avatar{width:96px;height:96px;border-radius:10px;background:#21262d;object-fit:cover}
@@ -63,6 +67,7 @@
       <a class="menu-btn" data-page="index.html" href="index.html">c0ld Leaderboard</a>
       <a class="menu-btn" data-page="clans.html" href="clans.html">Top Clans</a>
       <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       <a class="menu-btn" href="c0ld-leagues.html">c0ld Leagues</a>
       <a class="menu-btn" href="top-leagues.html">Top Leagues</a>
       <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
@@ -83,6 +88,7 @@ const CLANS={
 const MEMBER_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
+const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/search";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 
 const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
@@ -104,6 +110,7 @@ function normalize(value){return String(value||"").trim().toLowerCase().replace(
 function normalizeProfile(value){return String(value||"").trim().toLowerCase().replace(/\s+/g,"").replace(/[^a-z0-9_]/g,"")}
 function clan(){return CLANS[normalize(new URLSearchParams(location.search).get("clan"))]||CLANS.c0ld}
 function profileId(){return new URLSearchParams(location.search).get("id")||""}
+function isEmbedded(){return new URLSearchParams(location.search).get("embed")==="1"}
 function prettifyBattleName(value){return String(value||"").trim().replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/(\D)(20\d{2})$/i,"$1 $2").replace(/\s+/g," ").trim()}
 function isLegacyNongBattle(battle){const keys=[battle?.battle,battle?.battle_key,battle?.api_battle_key,battle?.display_name,battle?.battle_display_name,battle?.source_table,battle?.c0ld_results_table,battle?.clan_results_table].map(normalize),isApiSource=String(battle?.source||"").toLowerCase()==="api",isAlwaysLegacy=keys.some(key=>key==="safetybattle"||key==="poisonbattle"||key==="poisonturtlebattle"||key==="abstractbattle"||key==="abstractc0ld"||key==="spring2026"),isStaticOnlyLegacy=!isApiSource&&keys.some(key=>key==="angelbattle2026"||key==="angelbattle2026c0ld"||key==="angelbattle2026clans"||key==="starrybattle"||key==="starryc0ld"||key==="starryclans");return isAlwaysLegacy||isStaticOnlyLegacy}
 function battleName(battle){const key=String(battle?.battle||battle?.battle_key||battle?.api_battle_key||"").trim(),raw=String(battle?.display_name||battle?.battle_display_name||"").trim(),pretty=prettifyBattleName(key);if(key&&raw&&normalize(raw).includes("backrooms")&&!normalize(key).includes("backrooms"))return pretty||key;return raw||pretty||key}
@@ -188,6 +195,8 @@ function setupChrome(){
   const currentClan=clan();
   const switchClan=CLANS[normalize(currentClan.switchTarget)]||CLANS.c0ld;
 
+  if(isEmbedded())document.body.classList.add("embedded");
+
   document.documentElement.style.setProperty("--link",currentClan.color);
 
   const logo=document.getElementById("site-mascot");
@@ -201,6 +210,22 @@ function setupChrome(){
     const page=link.dataset.page;
     link.href=pageUrl(page);
     if(page==="index.html")link.textContent=`${currentClan.label} Leaderboard`;
+  });
+}
+
+function notifyEmbedHeight(){
+  if(!isEmbedded()||window.parent===window)return;
+
+  requestAnimationFrame(()=>{
+    window.parent.postMessage({
+      type:"c0ld-profile-height",
+      height:Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.offsetHeight
+      )
+    },"*");
   });
 }
 
@@ -444,6 +469,46 @@ async function loadLiveProfile(id){
 async function loadStaticProfile(id){
   const res=await fetch(`Data/players/${encodeURIComponent(id)}.json?v=${Date.now()}`,{cache:"no-store"});
   return res.ok?res.json():null;
+}
+
+async function loadGlobalProfile(id){
+  const payload=await optionalJson(`${GLOBAL_SEARCH}?clan=c0ld&q=${encodeURIComponent(id)}`);
+  const row=payload?.row;
+
+  if(!payload?.ok||!row)return null;
+
+  const seen=row.fetched_at||row.updated_at||payload.run?.finished_at||payload.run?.updated_at||null;
+  const points=finite(row.global_points??row.clan_points)??0;
+  const rank=finite(row.global_rank??row.clan_rank);
+  const displayName=row.event_name||row.battle_display_name||row.battle_key||"Global Scan";
+
+  return{
+    aliases:[String(id)],
+    username:row.username||row.display_name||`user_${row.user_id}`,
+    user_id:row.user_id||null,
+    avatar_url:row.avatar_url||null,
+    profile_url:row.user_id?`https://www.roblox.com/users/${row.user_id}/profile`:null,
+    total_battles:1,
+    latest_rank:rank,
+    latest_points:points,
+    latest_seen:seen,
+    source_clan:row.source_clan||row.clan_name||null,
+    global_rank:row.global_rank??null,
+    total_global_players:row.total_global_players??null,
+    battles:[recalcBattle({
+      battle:row.battle_key||"global-scan",
+      source:"global",
+      display_name:displayName,
+      battle_first_snapshot:seen,
+      battle_last_snapshot:seen,
+      first_seen:seen,
+      last_seen:seen,
+      starting_rank:rank,
+      ending_rank:rank,
+      ending_points:points,
+      series:seen?[{t:seen,rank,points}]:[]
+    })]
+  };
 }
 
 function filterProfileBattles(source){
@@ -990,6 +1055,7 @@ async function main(){
       :null;
 
     profile=mergeProfiles(staticProfile,live);
+    if(!profile)profile=await loadGlobalProfile(id).catch(()=>null);
 
     if(!profile)throw new Error(`Could not load profile ${id}.`);
 
@@ -1007,15 +1073,20 @@ async function main(){
 
     document.title=`${profile.username||"Player"} - ${clan().label} Profile`;
     render();
+    notifyEmbedHeight();
   }catch(error){
     console.error(error);
     app.innerHTML=`<div class="error">${escapeHtml(error.message)}</div>`;
+    notifyEmbedHeight();
   }
 }
 
 window.addEventListener("resize",()=>{
   clearTimeout(window.__profileResize);
-  window.__profileResize=setTimeout(drawChart,100);
+  window.__profileResize=setTimeout(()=>{
+    drawChart();
+    notifyEmbedHeight();
+  },100);
 });
 
 main();
