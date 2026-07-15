@@ -375,6 +375,7 @@
         <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
         <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+        <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
         <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
       </div>
@@ -414,7 +415,7 @@
             <option value="current">Current Clan Battle</option>
           </select>
           <input id="search-input" type="text" placeholder="Search clans..." />
-          <button id="refresh-btn" type="button">Refresh</button>
+          <button id="refresh-btn" type="button">Duck Chart</button>
         </div>
       </div>
 
@@ -1158,8 +1159,8 @@
         renderTable();
       });
 
-      document.getElementById("refresh-btn").addEventListener("click", () => {
-        loadData(true);
+      document.getElementById("refresh-btn").addEventListener("click", event => {
+        event.preventDefault();
       });
     }
 
@@ -1189,5 +1190,6 @@
   <script src="assets/clan-row-final-links.js"></script>
   <script src="assets/profile-stat-cleanup.js"></script>
   <script src="assets/reward-threshold-chart.js"></script>
+  <script src="assets/duck-race-chart.js"></script>
 </body>
 </html>

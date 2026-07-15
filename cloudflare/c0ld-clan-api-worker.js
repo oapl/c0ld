@@ -1681,13 +1681,16 @@ async function handleHistory(request, env) {
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const orderDir = String(url.searchParams.get("order_dir") || url.searchParams.get("order") || "desc").toLowerCase() === "asc"
+    ? "asc"
+    : "desc";
 
   const params = {
     select: "snapshot_id,fetched_at,clan_name,battle_key,rank,user_id,username,total_points",
     clan_name: `eq.${clan}`,
     battle_key: `eq.${battle}`,
     fetched_at: `gte.${afterIso}`,
-    order: "fetched_at.desc,rank.asc",
+    order: `fetched_at.${orderDir},rank.asc`,
     limit: String(limit)
   };
 
@@ -1943,12 +1946,15 @@ async function handleClansHistory(request, env) {
   const rankMinParam = boundedIntegerParam(url, "rank_min", 1, 500);
   const rankMaxParam = boundedIntegerParam(url, "rank_max", 1, 500);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const orderDir = String(url.searchParams.get("order_dir") || url.searchParams.get("order") || "desc").toLowerCase() === "asc"
+    ? "asc"
+    : "desc";
 
   const params = {
     select: "snapshot_id,fetched_at,battle_key,rank,clan_name,points,icon_id,icon_url",
     battle_key: `eq.${battle}`,
     fetched_at: `gte.${afterIso}`,
-    order: "fetched_at.desc,rank.asc",
+    order: `fetched_at.${orderDir},rank.asc`,
     limit: String(limit)
   };
 

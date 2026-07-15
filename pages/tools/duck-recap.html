@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Duck Recap</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--bad:#f85149}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+a{color:var(--link);text-decoration:none}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}
+.logo-wrap{display:flex;justify-content:center;align-items:center;width:100%}
+.site-logo{display:block;width:76px;border-radius:10px;margin:0 auto}
+.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.menu a,.menu-btn,.lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel-2);color:var(--text);font-size:13px;line-height:1}
+.menu a.active,.lookup-summary.active{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
+.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:165px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--panel);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
+main{max-width:1380px;margin:0 auto;padding:22px 24px 32px}
+.hero,.section,.card{background:var(--panel);border:1px solid var(--border);border-radius:10px}
+.hero{padding:18px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+h1{margin:0 0 5px;font-size:30px}
+.subtle{color:var(--muted);font-size:13px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+select,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+button{cursor:pointer}
+button:hover,select:focus{border-color:var(--link);background:var(--hover)}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
+.label{color:var(--muted);font-size:13px;margin-bottom:6px}
+.value{font-size:20px;font-weight:800;line-height:1.25}
+.section{overflow:hidden}
+.section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.section-title{margin:0;font-size:18px}
+.duck-track{position:relative;min-height:620px;overflow:hidden;background:linear-gradient(180deg,rgba(80,180,255,.16),rgba(80,180,255,0) 34%),repeating-linear-gradient(180deg,rgba(255,255,255,.045) 0 1px,transparent 1px 66px),linear-gradient(180deg,#152535 0,#0e1c2c 22%,#092239 23%,#0a3149 100%)}
+.duck-track::before{content:"";position:absolute;left:0;right:0;top:0;height:72px;background:radial-gradient(circle at 10% 50%,#5fbd4e 0 20px,transparent 21px),radial-gradient(circle at 16% 38%,#5fbd4e 0 27px,transparent 28px),linear-gradient(#52a245,#3d7f33);border-bottom:4px solid #7b4f26}
+.duck-track::after{content:"";position:absolute;top:72px;right:54px;bottom:0;width:18px;background:linear-gradient(45deg,#f5f5f5 25%,transparent 25% 75%,#f5f5f5 75%),linear-gradient(45deg,#111 25%,transparent 25% 75%,#111 75%);background-size:18px 18px;background-position:0 0,9px 9px;border-left:1px solid rgba(255,255,255,.35);border-right:1px solid rgba(255,255,255,.35);opacity:.9}
+.duck-lane{position:relative;height:66px;margin-top:1px}
+.duck-lane:first-child{margin-top:80px}
+.duck-waterline{position:absolute;left:0;right:0;bottom:2px;height:16px;background:repeating-linear-gradient(90deg,rgba(107,205,255,.18) 0 18px,rgba(107,205,255,.04) 18px 36px);opacity:.75}
+.duck-racer{--lane-left:10%;position:absolute;left:2%;top:7px;width:108px;height:55px;transition:left 1200ms cubic-bezier(.2,.75,.2,1);z-index:1}
+.duck-track.is-ready .duck-racer{left:var(--lane-left)}
+.duck-svg{display:block;width:104px;height:54px;filter:drop-shadow(0 2px 0 rgba(0,0,0,.65))}
+.duck-logo{position:absolute;left:29px;top:27px;width:23px;height:23px;border-radius:5px;object-fit:cover;background:#0d1117;border:1px solid rgba(0,0,0,.6)}
+.duck-label{position:absolute;left:108px;top:6px;min-width:220px;padding:6px 8px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:rgba(13,17,23,.8);box-shadow:0 2px 8px rgba(0,0,0,.28)}
+.duck-name{font-weight:800;line-height:1.15}
+.duck-stats{color:var(--muted);font-size:12px;line-height:1.3;margin-top:2px}
+.good{color:var(--good);font-weight:800}.bad{color:var(--bad);font-weight:800}
+.message{padding:24px;color:var(--muted)}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.duck-track{min-height:760px}.duck-label{left:60px;top:39px;min-width:150px}}
+@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Clans Leaderboard</a>
+    <a href="global-leaderboard.html">Global Leaderboard</a>
+    <details class="lookup-menu">
+      <summary class="lookup-summary active">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+        <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+        <a class="menu-btn active" href="duck-recap.html">Duck Recap</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div>
+      <h1>Duck Recap</h1>
+      <div id="status" class="subtle">Pick a recap type and battle, then start the race.</div>
+    </div>
+    <div class="controls">
+      <select id="mode-select">
+        <option value="members">c0ld Recap</option>
+        <option value="clans">Top Clans Recap</option>
+      </select>
+      <select id="battle-select">
+        <option value="current">Current Battle</option>
+      </select>
+      <button id="run-btn" type="button">Run Recap</button>
+    </div>
+  </section>
+
+  <section class="cards">
+    <div class="card"><div class="label">Racers</div><div class="value" id="racer-count">-</div></div>
+    <div class="card"><div class="label">Best Gain</div><div class="value" id="best-gain">-</div></div>
+    <div class="card"><div class="label">Best Rank Move</div><div class="value" id="best-rank">-</div></div>
+    <div class="card"><div class="label">Latest Data</div><div class="value" id="latest-data">-</div></div>
+  </section>
+
+  <section class="section">
+    <div class="section-header">
+      <h2 class="section-title" id="race-title">Race Recap</h2>
+      <div id="race-meta" class="subtle">Waiting to start.</div>
+    </div>
+    <div id="duck-track" class="duck-track">
+      <div class="message">No recap loaded yet.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
+let battles=[];
+
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
+function fmtDate(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?"-":d.toLocaleString()}
+function asNumber(v){const n=Number(v);return Number.isFinite(n)?n:0}
+function duckSvg(){return '<svg class="duck-svg" viewBox="0 0 130 68" aria-hidden="true"><path d="M9 46c3-17 21-27 40-22 8-17 35-15 41 2 8 0 17 3 22 10l14 1-13 10c-5 13-23 19-45 18H28C15 65 6 58 9 46z" fill="#f2cd24" stroke="#1b1b1b" stroke-width="4" stroke-linejoin="round"/><path d="M33 44c11 7 27 8 43 2l-4 16H34c-8 0-15-3-19-8 6-7 12-10 18-10z" fill="#fff" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/><path d="M45 20c-4-11 2-18 13-19 9-1 15 4 18 11-9-4-18-2-31 8z" fill="#4fa94c" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/><circle cx="78" cy="18" r="10" fill="#fff" stroke="#1b1b1b" stroke-width="3"/><circle cx="82" cy="18" r="4" fill="#1b1b1b"/><path d="M91 26l29 3-25 11c-4-4-5-8-4-14z" fill="#ff7a20" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/></svg>'}
+function icon(row){if(row.icon_url)return row.icon_url;if(row.icon_id)return "https://ps99.biggamesapi.io/image/"+encodeURIComponent(row.icon_id);return row.avatar_url||""}
+async function getJson(url){const res=await fetch(url,{cache:"default"});if(!res.ok)throw new Error("HTTP "+res.status+" from "+url);return res.json()}
+function battleHours(battle){const found=battles.find(row=>row.battle===battle);const start=found?.battle_start_iso||found?.first_snapshot;const startTime=new Date(start||0).getTime();if(!Number.isFinite(startTime)||!startTime)return 100000;return Math.ceil((Date.now()-startTime)/(60*60*1000))+12}
+function setStatus(text){document.getElementById("status").textContent=text}
+
+async function loadBattles(){
+  const [memberBattles, clanBattles]=await Promise.all([
+    getJson(API+"/api/battles?clan=c0ld&limit=100").catch(()=>({rows:[]})),
+    getJson(API+"/api/clans/battles?limit=100&scan_limit=20000").catch(()=>({rows:[]}))
+  ]);
+  const byKey=new Map();
+  for(const row of [...(memberBattles.rows||[]),...(clanBattles.rows||[])]){
+    const key=row.battle||row.battle_key;
+    if(!key)continue;
+    byKey.set(key,{...byKey.get(key),...row,battle:key,display_name:row.display_name||row.battle_display_name||key});
+  }
+  battles=[...byKey.values()].sort((a,b)=>new Date(b.last_snapshot||b.latest_snapshot_at||0)-new Date(a.last_snapshot||a.latest_snapshot_at||0));
+  const select=document.getElementById("battle-select");
+  select.innerHTML='<option value="current">Current Battle</option>'+battles.map(row=>'<option value="'+esc(row.battle)+'">'+esc(row.display_name||row.battle)+'</option>').join("");
+}
+
+function firstByKey(rows,keyFn){
+  const map=new Map();
+  for(const row of rows){
+    const key=keyFn(row);
+    if(!key||map.has(key))continue;
+    map.set(key,row);
+  }
+  return map;
+}
+
+async function buildMemberRecap(battle){
+  const battleParam=battle==="current"?"":"&battle="+encodeURIComponent(battle);
+  const current=await getJson(API+"/api/current?clan=c0ld"+battleParam);
+  const effectiveBattle=battle==="current"?(current.battle||"current"):battle;
+  const hours=battleHours(effectiveBattle);
+  const history=await getJson(API+"/api/history?clan=c0ld&battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&limit=50000&order=asc");
+  const starts=firstByKey(history.rows||[],row=>String(row.user_id||""));
+  const racers=(current.rows||[]).map(row=>{
+    const start=starts.get(String(row.user_id||""));
+    return {
+      key:String(row.user_id||row.username),
+      label:row.username||("user_"+row.user_id),
+      icon_url:row.avatar_url,
+      startRank:asNumber(start?.rank)||asNumber(row.rank),
+      endRank:asNumber(row.rank),
+      startPoints:asNumber(start?.total_points),
+      endPoints:asNumber(row.total_points),
+      latestAt:row.fetched_at||current.snapshot_at,
+      note:"c0ld member"
+    };
+  });
+  return {title:"c0ld Recap",battle:current.display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
+}
+
+async function buildClanRecap(battle){
+  const battleParam=battle==="current"?"":"?battle="+encodeURIComponent(battle);
+  const current=await getJson(API+"/api/clans/current"+battleParam);
+  const effectiveBattle=battle==="current"?(current.battle||"current"):battle;
+  const hours=battleHours(effectiveBattle);
+  const history=await getJson(API+"/api/clans/history?battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&rank_min=1&rank_max=10&limit=50000&order=asc");
+  const starts=firstByKey(history.rows||[],row=>String(row.clan_name||"").toLowerCase());
+  const racers=(current.rows||[]).filter(row=>asNumber(row.rank)<=10).sort((a,b)=>asNumber(a.rank)-asNumber(b.rank)).slice(0,10).map(row=>{
+    const start=starts.get(String(row.clan_name||"").toLowerCase());
+    return {
+      key:String(row.clan_name),
+      label:row.clan_name||"Unknown",
+      icon_url:icon(row),
+      startRank:asNumber(start?.rank)||asNumber(row.rank),
+      endRank:asNumber(row.rank),
+      startPoints:asNumber(start?.points),
+      endPoints:asNumber(row.points),
+      latestAt:row.fetched_at||current.snapshot_at,
+      note:"top clan"
+    };
+  });
+  return {title:"Top Clans Recap",battle:current.display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
+}
+
+function prepareRacers(racers){
+  return racers.map(row=>({
+    ...row,
+    gain:Math.max(0,row.endPoints-row.startPoints),
+    rankMove:row.startRank-row.endRank
+  })).sort((a,b)=>b.gain-a.gain||b.rankMove-a.rankMove||a.endRank-b.endRank);
+}
+
+function renderRecap(payload){
+  const track=document.getElementById("duck-track");
+  const racers=prepareRacers(payload.racers||[]);
+  document.getElementById("race-title").textContent=payload.title;
+  document.getElementById("race-meta").textContent=payload.battle+" - "+(payload.historyRows?payload.historyRows.toLocaleString("en-US")+" history rows":"No history rows");
+  document.getElementById("racer-count").textContent=racers.length.toLocaleString("en-US");
+  document.getElementById("best-gain").textContent=racers[0]?shortNum(racers[0].gain):"-";
+  const bestRank=racers.slice().sort((a,b)=>b.rankMove-a.rankMove)[0];
+  document.getElementById("best-rank").textContent=bestRank&&bestRank.rankMove?("+"+bestRank.rankMove):"-";
+  document.getElementById("latest-data").textContent=fmtDate(payload.latest);
+
+  if(!payload.historyRows){
+    track.classList.remove("is-ready");
+    track.innerHTML='<div class="message">No history found.</div>';
+    return;
+  }
+  if(!racers.length){
+    track.classList.remove("is-ready");
+    track.innerHTML='<div class="message">No racers found.</div>';
+    return;
+  }
+
+  const maxGain=Math.max(1,...racers.map(row=>row.gain));
+  track.classList.remove("is-ready");
+  track.innerHTML=racers.map((row,index)=>{
+    const progress=.1+(row.gain/maxGain)*.82;
+    const laneLeft=2+Math.max(.08,Math.min(.92,progress))*78;
+    const rankClass=row.rankMove>0?"good":row.rankMove<0?"bad":"";
+    return '<div class="duck-lane"><div class="duck-waterline"></div><div class="duck-racer" style="--lane-left:'+laneLeft.toFixed(2)+'%">'+duckSvg()+(row.icon_url?'<img class="duck-logo" src="'+esc(row.icon_url)+'" alt="">':'')+'<div class="duck-label"><div class="duck-name">#'+(index+1)+' '+esc(row.label)+'</div><div class="duck-stats">Gain '+esc(shortNum(row.gain))+' - Rank <span class="'+rankClass+'">'+esc(row.startRank||"-")+' -> '+esc(row.endRank||"-")+'</span></div><div class="duck-stats">'+esc(shortNum(row.startPoints))+' -> '+esc(shortNum(row.endPoints))+'</div></div></div></div>';
+  }).join("");
+  requestAnimationFrame(()=>track.classList.add("is-ready"));
+}
+
+async function runRecap(){
+  const mode=document.getElementById("mode-select").value;
+  const battle=document.getElementById("battle-select").value;
+  setStatus("Loading recap data...");
+  document.getElementById("duck-track").innerHTML='<div class="message">Loading ducks...</div>';
+  try{
+    const payload=mode==="clans"?await buildClanRecap(battle):await buildMemberRecap(battle);
+    renderRecap(payload);
+    setStatus("Loaded "+payload.title+" for "+payload.battle+".");
+  }catch(error){
+    console.error(error);
+    setStatus("Recap failed.");
+    document.getElementById("duck-track").innerHTML='<div class="message">'+esc(error.message)+'</div>';
+  }
+}
+
+document.getElementById("run-btn").addEventListener("click",runRecap);
+loadBattles().then(()=>setStatus("Pick a recap type and battle, then start the race.")).catch(error=>setStatus("Battle list failed: "+error.message));
+</script>
+</body>
+</html>
