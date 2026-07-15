@@ -10,6 +10,10 @@ const GLOBAL_RANK_SHARDS_TABLE = "c0ld_global_rank_shards";
 const GLOBAL_RANK_CANDIDATES_TABLE = "c0ld_global_rank_candidates";
 const GLOBAL_RANK_CURRENT_TABLE = "c0ld_global_ranks_current";
 const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
+const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
+const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
+const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
+const CLAN_ACTIVITY_SUMMARY_TABLE = "c0ld_clan_activity_summary";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -30,6 +34,10 @@ const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
+const DEFAULT_CLAN_ACTIVITY_TOP_N = 100;
+const DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES = 30;
+const DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 
 export default {
@@ -64,7 +72,8 @@ export default {
           active_battle_ended_at: activeBattleMeta?.endedAt || null,
           ingest_open: gate.allowed,
           ingest_skip_reason: gate.allowed ? null : gate.reason,
-          global_rank_config: globalRankRuntimeConfig(env)
+          global_rank_config: globalRankRuntimeConfig(env),
+          clan_activity_config: clanActivityRuntimeConfig(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -88,6 +97,12 @@ export default {
         response = await handleGlobalLeaderboard(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
+        response = await handleClanActivitySummary(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/clans/activity/detail") {
+        response = await handleClanActivityDetail(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/clans/activity/feed") {
+        response = await handleClanActivityFeed(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
@@ -97,6 +112,9 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/global/ingest") {
         requireAdmin(request, env);
         response = await handleGlobalRankIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
+      } else if (request.method === "POST" && url.pathname === "/api/clans/activity/ingest") {
+        requireAdmin(request, env);
+        response = await handleClanActivityIngest(env, "manual", isForceRequest(url));
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -147,6 +165,15 @@ async function runScheduledIngests(env, force = false, scheduledAt = null) {
     }
   }
 
+  if (String(env.INGEST_CLAN_ACTIVITY || "false").toLowerCase() === "true") {
+    if (force || shouldRunClanActivitySchedule(env, scheduledAt)) {
+      jobs.push({
+        label: "clan-activity",
+        run: () => handleClanActivityIngest(env, "schedule", force)
+      });
+    }
+  }
+
   const results = [];
 
   for (const job of jobs) {
@@ -172,6 +199,9 @@ async function runScheduledIngests(env, force = false, scheduledAt = null) {
         next_clan_offset: payload?.next_clan_offset ?? null,
         candidate_player_count: payload?.candidate_player_count ?? null,
         total_global_players: payload?.total_global_players ?? null,
+        clans_fetched: payload?.clans_fetched ?? null,
+        roster_rows_inserted: payload?.roster_rows_inserted ?? null,
+        events_inserted: payload?.events_inserted ?? null,
         message: payload?.message || null
       };
       results.push(result);
@@ -2420,6 +2450,787 @@ function contributionTimestampMs(member) {
   return iso ? isoToMs(iso) : null;
 }
 
+async function handleClanActivityIngest(env, source, force = false) {
+  requireSupabase(env);
+
+  const fetchedAt = new Date().toISOString();
+  const configuredBattleKey = battleKey(env);
+  const trackedClan = clanName(env);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta: activeBattleMeta,
+    battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+    env,
+    force
+  });
+
+  if (!activeGate.allowed) {
+    return skippedIngestResponse({
+      scope: "clan-activity",
+      source,
+      clan: trackedClan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey: activeBattleMeta?.battleKey || configuredBattleKey,
+      battleMeta: activeBattleMeta,
+      gate: activeGate
+    });
+  }
+
+  const topN = clanActivityTopN(env);
+  const topClans = await fetchTopClans(env, topN);
+  const trackedApi = await fetchClanApiWithRetry(env, trackedClan);
+  const trackedBattles = trackedApi.data?.Battles || trackedApi.data?.battles || {};
+  const resolvedBattleKey = resolveBattleKey(
+    trackedBattles,
+    configuredBattleKey,
+    env,
+    activeBattleMeta?.battleKey
+  );
+  const trackedBattle = resolvedBattleKey ? trackedBattles[resolvedBattleKey] : null;
+  const battleMeta = mergeBattleMeta(
+    extractBattleMeta(trackedBattle || {}, resolvedBattleKey, env, {
+      allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
+      allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
+    }),
+    activeBattleMeta,
+    resolvedBattleKey
+  );
+  const ingestGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey: resolvedBattleKey,
+    env,
+    force
+  });
+
+  if (!ingestGate.allowed) {
+    return skippedIngestResponse({
+      scope: "clan-activity",
+      source,
+      clan: trackedClan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey,
+      battleMeta,
+      gate: ingestGate
+    });
+  }
+
+  const previousRows = await fetchClanActivityCurrentRows(env, resolvedBattleKey).catch(() => []);
+  const previousSummaries = await fetchClanActivitySummaryRows(env, resolvedBattleKey).catch(() => []);
+  const previousByClanUser = new Map(previousRows.map(row => [clanActivityMemberKey(row.clan_name, row.user_id), row]));
+  const previousByClan = groupRowsByNormalizedClan(previousRows);
+  const previousSummaryByClan = new Map(previousSummaries.map(row => [normalizeText(row.clan_name), row]));
+  const snapshotId = `clan-activity:${resolvedBattleKey}:${fetchedAt}`;
+  const delayMs = clanActivityClanDelayMs(env);
+  const rosterRows = [];
+  const summaryRows = [];
+  const eventRows = [];
+  let fetchedClans = 0;
+
+  for (let index = 0; index < topClans.length; index += 1) {
+    const clanRow = topClans[index];
+    if (index > 0 && delayMs > 0) await sleep(delayMs);
+
+    const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
+    const data = api.data || {};
+    const battles = data.Battles || data.battles || {};
+    const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+    const members = battle ? normalizeMembers(data, battle) : [];
+    const usernameMap = await resolveRobloxUsernames(members.map(member => member.user_id), env)
+      .catch(() => new Map());
+    const clanKey = normalizeText(clanRow.clan_name);
+    const previousClanRows = previousByClan.get(clanKey) || [];
+    const previousClanByUser = new Map(previousClanRows.map(row => [String(row.user_id), row]));
+    const currentClanRows = [];
+    const currentByUser = new Map();
+    const kickAvailable = extractKickAvailable(data);
+    const memberCount = members.length;
+
+    fetchedClans += 1;
+
+    for (const [memberIndex, member] of members.entries()) {
+      const row = clanActivityRosterRow({
+        snapshotId,
+        fetchedAt,
+        source,
+        battleKey: resolvedBattleKey,
+        battleMeta,
+        clanRow,
+        clanData: data,
+        member,
+        memberRank: memberIndex + 1,
+        usernameMap,
+        kickAvailable,
+        memberCount
+      });
+
+      rosterRows.push(row);
+      currentClanRows.push(row);
+      currentByUser.set(String(row.user_id), row);
+    }
+
+    const previousSummary = previousSummaryByClan.get(clanKey);
+    const firstSeen = previousSummary?.first_seen_at || fetchedAt;
+    const startingMembers = toNumber(previousSummary?.starting_members) ?? (
+      previousClanRows.length ? previousClanRows.length : memberCount
+    );
+    const increments = clanActivityIncrements({
+      clanRow,
+      currentByUser,
+      previousClanByUser,
+      previousSummary,
+      fetchedAt,
+      battleKey: resolvedBattleKey,
+      battleMeta,
+      source,
+      kickAvailable
+    });
+
+    eventRows.push(...increments.events);
+
+    summaryRows.push({
+      battle_key: resolvedBattleKey,
+      battle_display_name: battleMeta.displayName,
+      battle_started_at: battleMeta.startedAt,
+      battle_ended_at: battleMeta.endedAt,
+      clan_name: clanRow.clan_name,
+      clan_key: clanKey,
+      clan_rank: clanRow.rank,
+      previous_clan_rank: toNumber(previousSummary?.clan_rank),
+      clan_points: clanRow.points,
+      icon_id: clanRow.icon_id || null,
+      icon_url: clanRow.icon_url || null,
+      kick_available: kickAvailable,
+      starting_members: startingMembers,
+      current_members: memberCount,
+      new_members: (toNumber(previousSummary?.new_members) || 0) + increments.newMembers,
+      lost_members: (toNumber(previousSummary?.lost_members) || 0) + increments.lostMembers,
+      promotions: (toNumber(previousSummary?.promotions) || 0) + increments.promotions,
+      demotions: (toNumber(previousSummary?.demotions) || 0) + increments.demotions,
+      rank_changes: (toNumber(previousSummary?.rank_changes) || 0) + increments.rankChanges,
+      first_seen_at: firstSeen,
+      last_seen_at: fetchedAt,
+      latest_snapshot_id: snapshotId,
+      updated_at: fetchedAt,
+      raw_clan: clanRow.raw_clan || {}
+    });
+  }
+
+  await supabaseInsertChunked(env, CLAN_ACTIVITY_ROSTER_TABLE, rosterRows, 500);
+  await supabaseUpsertChunked(env, CLAN_ACTIVITY_CURRENT_TABLE, rosterRows.map(row => ({
+    ...row,
+    updated_at: fetchedAt
+  })), "battle_key,clan_key,user_id", 500);
+  await supabaseDelete(env, CLAN_ACTIVITY_CURRENT_TABLE, {
+    battle_key: `eq.${resolvedBattleKey}`,
+    snapshot_id: `neq.${snapshotId}`
+  });
+
+  if (eventRows.length) {
+    await supabaseUpsertChunked(env, CLAN_ACTIVITY_EVENTS_TABLE, eventRows, "event_id", 500);
+  }
+
+  await supabaseUpsertChunked(env, CLAN_ACTIVITY_SUMMARY_TABLE, summaryRows, "battle_key,clan_key", 500);
+  await supabaseDelete(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+    battle_key: `eq.${resolvedBattleKey}`,
+    latest_snapshot_id: `neq.${snapshotId}`
+  });
+
+  return json({
+    ok: true,
+    source,
+    battle_key: resolvedBattleKey,
+    battle_display_name: battleMeta.displayName,
+    snapshot_id: snapshotId,
+    fetched_at: fetchedAt,
+    clans_requested: topClans.length,
+    clans_fetched: fetchedClans,
+    roster_rows_inserted: rosterRows.length,
+    events_inserted: eventRows.length,
+    summary_rows_inserted: summaryRows.length
+  }, 202);
+}
+
+async function handleClanActivitySummary(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const requestedBattle = url.searchParams.get("battle") || "";
+  const battle = await resolveActivityBattleKey(env, requestedBattle);
+  const rows = await supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+    select: "battle_key,battle_display_name,battle_started_at,battle_ended_at,clan_name,clan_rank,previous_clan_rank,clan_points,icon_id,icon_url,kick_available,starting_members,current_members,new_members,lost_members,promotions,demotions,rank_changes,first_seen_at,last_seen_at,latest_snapshot_id,updated_at",
+    battle_key: `eq.${battle}`,
+    order: "clan_rank.asc",
+    limit: String(limit)
+  });
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    battle,
+    display_name: cleanBattleDisplayName(battle, rows[0]?.battle_display_name),
+    snapshot_at: rows[0]?.last_seen_at || null,
+    rows: rows.map(normalizeClanActivitySummaryOutput)
+  }, env);
+}
+
+async function handleClanActivityDetail(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = String(url.searchParams.get("clan") || "").trim();
+  if (!clan) throw httpError(400, "Missing required clan.");
+
+  const requestedBattle = url.searchParams.get("battle") || "";
+  const limit = clamp(Number(url.searchParams.get("limit") || 250), 1, 1000);
+  const battle = await resolveActivityBattleKey(env, requestedBattle);
+  const summaryRows = await supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+    select: "*",
+    battle_key: `eq.${battle}`,
+    clan_key: `eq.${normalizeText(clan)}`,
+    limit: "1"
+  });
+  const rosterRows = await supabaseSelect(env, CLAN_ACTIVITY_CURRENT_TABLE, {
+    select: "user_id,username,display_name,avatar_url,role,permission_level,join_time,points,member_rank,fetched_at",
+    battle_key: `eq.${battle}`,
+    clan_key: `eq.${normalizeText(clan)}`,
+    order: "points.desc,username.asc",
+    limit: "100"
+  });
+  const eventRows = await supabaseSelect(env, CLAN_ACTIVITY_EVENTS_TABLE, {
+    select: "*",
+    battle_key: `eq.${battle}`,
+    clan_key: `eq.${normalizeText(clan)}`,
+    order: "event_at.desc,created_at.desc",
+    limit: String(limit)
+  });
+
+  const clanEventTypes = new Set([
+    "member_joined",
+    "member_left",
+    "member_promoted",
+    "member_demoted",
+    "kick_available",
+    "kick_used",
+    "kick_available_changed"
+  ]);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    battle,
+    display_name: cleanBattleDisplayName(battle, summaryRows[0]?.battle_display_name),
+    clan_name: summaryRows[0]?.clan_name || clan,
+    summary: summaryRows[0] ? normalizeClanActivitySummaryOutput(summaryRows[0]) : null,
+    roster: rosterRows.map(normalizeClanActivityRosterOutput),
+    clan_events: eventRows.filter(row => clanEventTypes.has(row.event_type)).map(normalizeClanActivityEventOutput),
+    rank_events: eventRows.filter(row => row.event_type === "rank_up" || row.event_type === "rank_down").map(normalizeClanActivityEventOutput)
+  }, env);
+}
+
+async function handleClanActivityFeed(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const requestedBattle = url.searchParams.get("battle") || "";
+  const limit = clamp(Number(url.searchParams.get("limit") || 200), 1, 1000);
+  const battle = await resolveActivityBattleKey(env, requestedBattle);
+  const rows = await supabaseSelect(env, CLAN_ACTIVITY_EVENTS_TABLE, {
+    select: "*",
+    battle_key: `eq.${battle}`,
+    order: "event_at.desc,created_at.desc",
+    limit: String(limit)
+  });
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    battle,
+    display_name: cleanBattleDisplayName(battle, rows[0]?.battle_display_name),
+    clan_events: rows
+      .filter(row => row.event_type !== "rank_up" && row.event_type !== "rank_down")
+      .map(normalizeClanActivityEventOutput),
+    rank_events: rows
+      .filter(row => row.event_type === "rank_up" || row.event_type === "rank_down")
+      .map(normalizeClanActivityEventOutput)
+  }, env);
+}
+
+async function resolveActivityBattleKey(env, requestedBattle) {
+  const requested = String(requestedBattle || "").trim();
+  if (requested && !["current", "auto"].includes(requested.toLowerCase())) return requested;
+
+  const rows = await supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+    select: "battle_key,last_seen_at",
+    order: "last_seen_at.desc",
+    limit: "1"
+  });
+
+  return rows[0]?.battle_key || battleKey(env);
+}
+
+async function fetchClanActivityCurrentRows(env, battleKeyValue) {
+  return supabaseSelectPaged(env, CLAN_ACTIVITY_CURRENT_TABLE, {
+    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count",
+    battle_key: `eq.${battleKeyValue}`,
+    order: "clan_key.asc,user_id.asc"
+  }, 20000);
+}
+
+async function fetchClanActivitySummaryRows(env, battleKeyValue) {
+  return supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+    select: "*",
+    battle_key: `eq.${battleKeyValue}`,
+    order: "clan_rank.asc",
+    limit: "500"
+  });
+}
+
+function clanActivityRosterRow({
+  snapshotId,
+  fetchedAt,
+  source,
+  battleKey,
+  battleMeta,
+  clanRow,
+  clanData,
+  member,
+  memberRank,
+  usernameMap,
+  kickAvailable,
+  memberCount
+}) {
+  const rawMember = member.raw_member || {};
+  const rawContribution = member.raw_contribution || {};
+  const userId = toNumber(member.user_id);
+  const username = displayUsername({
+    user_id: userId,
+    username: firstDefined(
+      rawContribution.Username,
+      rawContribution.username,
+      rawContribution.Name,
+      rawContribution.name,
+      rawMember.Username,
+      rawMember.username,
+      rawMember.Name,
+      rawMember.name
+    )
+  }, usernameMap);
+  const permissionLevel = memberPermissionLevel(rawMember);
+  const role = memberRole(rawMember, permissionLevel);
+
+  return {
+    snapshot_id: snapshotId,
+    fetched_at: fetchedAt,
+    source,
+    battle_key: battleKey,
+    battle_display_name: battleMeta.displayName,
+    battle_started_at: battleMeta.startedAt,
+    battle_ended_at: battleMeta.endedAt,
+    clan_rank: clanRow.rank,
+    clan_name: clanRow.clan_name,
+    clan_key: normalizeText(clanRow.clan_name),
+    clan_id: stringOrNull(firstDefined(clanData.ID, clanData.Id, clanData.id, clanData._id)),
+    clan_points: clanRow.points,
+    icon_id: clanRow.icon_id || null,
+    icon_url: clanRow.icon_url || null,
+    kick_available: kickAvailable,
+    member_count: memberCount,
+    member_capacity: toNumber(firstDefined(clanData.MemberCapacity, clanData.memberCapacity, clanData.Capacity, clanData.capacity)),
+    member_rank: memberRank,
+    user_id: userId,
+    username: username || (userId ? `user_${userId}` : ""),
+    display_name: stringOrNull(firstDefined(
+      rawContribution.DisplayName,
+      rawContribution.displayName,
+      rawContribution.display_name,
+      rawMember.DisplayName,
+      rawMember.displayName,
+      rawMember.display_name
+    )),
+    avatar_url: null,
+    role,
+    permission_level: permissionLevel,
+    join_time: memberJoinIso(member),
+    points: toNumber(member.total_points) || 0,
+    raw_member: rawMember,
+    raw_contribution: rawContribution,
+    raw_clan: clanRow.raw_clan || {}
+  };
+}
+
+function clanActivityIncrements({
+  clanRow,
+  currentByUser,
+  previousClanByUser,
+  previousSummary,
+  fetchedAt,
+  battleKey,
+  battleMeta,
+  source,
+  kickAvailable
+}) {
+  const events = [];
+  const clanKey = normalizeText(clanRow.clan_name);
+  const hadPreviousRoster = previousClanByUser.size > 0;
+  let newMembers = 0;
+  let lostMembers = 0;
+  let promotions = 0;
+  let demotions = 0;
+  let rankChanges = 0;
+
+  if (hadPreviousRoster) {
+    for (const [userId, current] of currentByUser.entries()) {
+      const previous = previousClanByUser.get(userId);
+      if (!previous) {
+        newMembers += 1;
+        events.push(clanActivityEvent({
+          eventAt: current.join_time || fetchedAt,
+          fetchedAt,
+          source,
+          battleKey,
+          battleMeta,
+          clanRow,
+          eventType: "member_joined",
+          userRow: current,
+          previousValue: null,
+          currentValue: "joined"
+        }));
+        continue;
+      }
+
+      const change = memberRoleChange(previous, current);
+      if (change > 0) {
+        promotions += 1;
+        events.push(clanActivityEvent({
+          fetchedAt,
+          source,
+          battleKey,
+          battleMeta,
+          clanRow,
+          eventType: "member_promoted",
+          userRow: current,
+          previousValue: previous.role,
+          currentValue: current.role,
+          previousPermissionLevel: previous.permission_level,
+          currentPermissionLevel: current.permission_level
+        }));
+      } else if (change < 0) {
+        demotions += 1;
+        events.push(clanActivityEvent({
+          fetchedAt,
+          source,
+          battleKey,
+          battleMeta,
+          clanRow,
+          eventType: "member_demoted",
+          userRow: current,
+          previousValue: previous.role,
+          currentValue: current.role,
+          previousPermissionLevel: previous.permission_level,
+          currentPermissionLevel: current.permission_level
+        }));
+      }
+    }
+
+    for (const [userId, previous] of previousClanByUser.entries()) {
+      if (currentByUser.has(userId)) continue;
+
+      lostMembers += 1;
+      events.push(clanActivityEvent({
+        fetchedAt,
+        source,
+        battleKey,
+        battleMeta,
+        clanRow,
+        eventType: "member_left",
+        userRow: previous,
+        previousValue: "present",
+        currentValue: "left/kicked"
+      }));
+    }
+  }
+
+  const previousRank = toNumber(previousSummary?.clan_rank);
+  if (previousRank && previousRank !== clanRow.rank) {
+    rankChanges += 1;
+    events.push(clanActivityEvent({
+      fetchedAt,
+      source,
+      battleKey,
+      battleMeta,
+      clanRow,
+      eventType: clanRow.rank < previousRank ? "rank_up" : "rank_down",
+      previousRank,
+      currentRank: clanRow.rank,
+      previousValue: `#${previousRank}`,
+      currentValue: `#${clanRow.rank}`
+    }));
+  }
+
+  if (previousSummary && typeof kickAvailable === "boolean" && typeof previousSummary.kick_available === "boolean") {
+    const previousKick = Boolean(previousSummary.kick_available);
+    if (previousKick !== kickAvailable) {
+      events.push(clanActivityEvent({
+        fetchedAt,
+        source,
+        battleKey,
+        battleMeta,
+        clanRow,
+        eventType: previousKick && !kickAvailable ? "kick_used" : "kick_available",
+        previousValue: previousKick ? "yes" : "no",
+        currentValue: kickAvailable ? "yes" : "no"
+      }));
+    }
+  }
+
+  return {
+    newMembers,
+    lostMembers,
+    promotions,
+    demotions,
+    rankChanges,
+    events: events.map(event => ({
+      ...event,
+      event_id: clanActivityEventId(event)
+    }))
+  };
+}
+
+function clanActivityEvent({
+  eventAt = null,
+  fetchedAt,
+  source,
+  battleKey,
+  battleMeta,
+  clanRow,
+  eventType,
+  userRow = null,
+  previousValue = null,
+  currentValue = null,
+  previousRank = null,
+  currentRank = null,
+  previousPermissionLevel = null,
+  currentPermissionLevel = null
+}) {
+  return {
+    event_id: "",
+    event_at: eventAt || fetchedAt,
+    detected_at: fetchedAt,
+    source,
+    battle_key: battleKey,
+    battle_display_name: battleMeta.displayName,
+    clan_name: clanRow.clan_name,
+    clan_key: normalizeText(clanRow.clan_name),
+    clan_rank: clanRow.rank,
+    event_type: eventType,
+    user_id: userRow?.user_id || null,
+    username: userRow?.username || null,
+    display_name: userRow?.display_name || null,
+    previous_value: previousValue,
+    current_value: currentValue,
+    previous_rank: previousRank,
+    current_rank: currentRank,
+    previous_role: eventType === "member_promoted" || eventType === "member_demoted" ? previousValue : null,
+    current_role: eventType === "member_promoted" || eventType === "member_demoted" ? currentValue : null,
+    previous_permission_level: previousPermissionLevel,
+    current_permission_level: currentPermissionLevel,
+    details: {
+      clan_points: clanRow.points
+    }
+  };
+}
+
+function clanActivityEventId(event) {
+  return [
+    event.battle_key,
+    event.clan_key,
+    event.event_type,
+    event.user_id || "clan",
+    event.previous_value || event.previous_rank || "",
+    event.current_value || event.current_rank || "",
+    event.event_at
+  ].map(value => encodeURIComponent(String(value))).join(":");
+}
+
+function memberRoleChange(previous, current) {
+  const previousPermission = toNumber(previous.permission_level);
+  const currentPermission = toNumber(current.permission_level);
+
+  if (previousPermission !== null && currentPermission !== null && previousPermission !== currentPermission) {
+    return currentPermission - previousPermission;
+  }
+
+  const previousScore = memberRoleScore(previous.role);
+  const currentScore = memberRoleScore(current.role);
+  return currentScore - previousScore;
+}
+
+function memberPermissionLevel(rawMember) {
+  return toNumber(firstDefined(
+    rawMember.PermissionLevel,
+    rawMember.permissionLevel,
+    rawMember.permission_level,
+    rawMember.Permissions,
+    rawMember.permissions
+  ));
+}
+
+function memberRole(rawMember, permissionLevel) {
+  const explicit = stringOrNull(firstDefined(
+    rawMember.Role,
+    rawMember.role,
+    rawMember.RankName,
+    rawMember.rankName,
+    rawMember.Title,
+    rawMember.title
+  ));
+
+  if (explicit) return explicit;
+  if (permissionLevel >= 100) return "Owner";
+  if (permissionLevel >= 90) return "Leader";
+  if (permissionLevel >= 50) return "Officer";
+  if (permissionLevel >= 1) return "Member";
+  return null;
+}
+
+function memberRoleScore(role) {
+  const text = normalizeText(role);
+  if (!text) return 0;
+  if (text.includes("owner")) return 100;
+  if (text.includes("leader")) return 90;
+  if (text.includes("officer")) return 50;
+  if (text.includes("admin")) return 50;
+  if (text.includes("member")) return 1;
+  return 0;
+}
+
+function extractKickAvailable(value) {
+  const direct = findKickValue(value);
+  if (direct === null || direct === undefined) return null;
+  if (typeof direct === "boolean") return direct;
+  const n = toNumber(direct);
+  if (n !== null) return n > 0;
+  const text = String(direct || "").trim().toLowerCase();
+  if (["yes", "true", "available", "ready"].includes(text)) return true;
+  if (["no", "false", "unavailable", "used", "none"].includes(text)) return false;
+  return null;
+}
+
+function findKickValue(value, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 4) return null;
+
+  for (const [key, item] of Object.entries(value)) {
+    const lower = key.toLowerCase();
+    const isKickKey = lower.includes("kick");
+    const isStateKey =
+      lower.includes("available") ||
+      lower.includes("ready") ||
+      lower.includes("remaining") ||
+      lower.includes("left") ||
+      lower.includes("count") ||
+      lower.includes("can") ||
+      lower === "kicks";
+
+    if (isKickKey && isStateKey && (typeof item !== "object" || item === null)) {
+      return item;
+    }
+  }
+
+  for (const item of Object.values(value)) {
+    if (item && typeof item === "object") {
+      const found = findKickValue(item, depth + 1);
+      if (found !== null && found !== undefined) return found;
+    }
+  }
+
+  return null;
+}
+
+function groupRowsByNormalizedClan(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const key = normalizeText(row.clan_name);
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return map;
+}
+
+function clanActivityMemberKey(clan, userId) {
+  return `${normalizeText(clan)}:${String(userId || "").trim()}`;
+}
+
+function normalizeClanActivitySummaryOutput(row) {
+  return {
+    battle_key: row.battle_key,
+    battle_display_name: cleanBattleDisplayName(row.battle_key, row.battle_display_name),
+    battle_started_at: row.battle_started_at || null,
+    battle_ended_at: row.battle_ended_at || null,
+    clan_name: row.clan_name,
+    rank: toNumber(row.clan_rank),
+    previous_rank: toNumber(row.previous_clan_rank),
+    points: toNumber(row.clan_points) || 0,
+    icon_id: row.icon_id || null,
+    icon_url: row.icon_url || null,
+    kick_available: row.kick_available,
+    starting_members: toNumber(row.starting_members) || 0,
+    current_members: toNumber(row.current_members) || 0,
+    new_members: toNumber(row.new_members) || 0,
+    lost_members: toNumber(row.lost_members) || 0,
+    promotions: toNumber(row.promotions) || 0,
+    demotions: toNumber(row.demotions) || 0,
+    rank_changes: toNumber(row.rank_changes) || 0,
+    first_seen_at: row.first_seen_at || null,
+    last_seen_at: row.last_seen_at || null,
+    latest_snapshot_id: row.latest_snapshot_id || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function normalizeClanActivityRosterOutput(row) {
+  return {
+    user_id: toNumber(row.user_id),
+    username: row.username,
+    display_name: row.display_name || null,
+    avatar_url: row.avatar_url || null,
+    role: row.role || null,
+    permission_level: toNumber(row.permission_level),
+    join_time: row.join_time || null,
+    points: toNumber(row.points) || 0,
+    member_rank: toNumber(row.member_rank),
+    fetched_at: row.fetched_at || null
+  };
+}
+
+function normalizeClanActivityEventOutput(row) {
+  return {
+    event_id: row.event_id,
+    event_at: row.event_at,
+    detected_at: row.detected_at,
+    event_type: row.event_type,
+    clan_name: row.clan_name,
+    clan_rank: toNumber(row.clan_rank),
+    user_id: toNumber(row.user_id),
+    username: row.username || null,
+    display_name: row.display_name || null,
+    previous_value: row.previous_value || null,
+    current_value: row.current_value || null,
+    previous_rank: toNumber(row.previous_rank),
+    current_rank: toNumber(row.current_rank),
+    previous_role: row.previous_role || null,
+    current_role: row.current_role || null,
+    previous_permission_level: toNumber(row.previous_permission_level),
+    current_permission_level: toNumber(row.current_permission_level),
+    details: row.details || {}
+  };
+}
+
 async function addBattleRowCounts(env, rows, tableName, filtersForRow) {
   const output = [];
 
@@ -4261,6 +5072,14 @@ async function supabaseInsert(env, tableName, rows) {
   }
 }
 
+async function supabaseInsertChunked(env, tableName, rows, size = 500) {
+  const chunks = chunkValues(rows || [], clamp(Number(size || 500), 1, 1000));
+
+  for (const chunk of chunks) {
+    if (chunk.length) await supabaseInsert(env, tableName, chunk);
+  }
+}
+
 async function supabaseUpsert(env, tableName, rows, onConflict) {
   const url = supabaseUrl(env, tableName);
   url.searchParams.set("on_conflict", onConflict);
@@ -4276,6 +5095,14 @@ async function supabaseUpsert(env, tableName, rows, onConflict) {
   if (!res.ok) {
     const text = await res.text();
     throw httpError(502, `Supabase upsert failed for ${tableName} (${res.status}): ${text}`);
+  }
+}
+
+async function supabaseUpsertChunked(env, tableName, rows, onConflict, size = 500) {
+  const chunks = chunkValues(rows || [], clamp(Number(size || 500), 1, 1000));
+
+  for (const chunk of chunks) {
+    if (chunk.length) await supabaseUpsert(env, tableName, chunk, onConflict);
   }
 }
 
@@ -4974,6 +5801,62 @@ function globalRankScheduleOffsetMinutes(env) {
 function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
   const interval = globalRankScheduleMinutes(env);
   const offset = globalRankScheduleOffsetMinutes(env);
+  const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
+  const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minuteInInterval = minuteOfDay % interval;
+  const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
+
+  return minutesUntilOffset < 5;
+}
+
+function clanActivityRuntimeConfig(env) {
+  return {
+    ingest_clan_activity: String(env.INGEST_CLAN_ACTIVITY || "false").toLowerCase() === "true",
+    top_n: clanActivityTopN(env),
+    clan_delay_ms: clanActivityClanDelayMs(env),
+    schedule_minutes: clanActivityScheduleMinutes(env),
+    schedule_offset_minutes: clanActivityScheduleOffsetMinutes(env)
+  };
+}
+
+function clanActivityTopN(env) {
+  return clamp(
+    Number(env.CLAN_ACTIVITY_TOP_N || DEFAULT_CLAN_ACTIVITY_TOP_N),
+    1,
+    500
+  );
+}
+
+function clanActivityClanDelayMs(env) {
+  return clamp(
+    Number(env.CLAN_ACTIVITY_CLAN_DELAY_MS || DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS),
+    0,
+    120000
+  );
+}
+
+function clanActivityScheduleMinutes(env) {
+  return clamp(
+    Number(env.CLAN_ACTIVITY_SCHEDULE_MINUTES || DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function clanActivityScheduleOffsetMinutes(env) {
+  const interval = clanActivityScheduleMinutes(env);
+  const offsetValue = env.CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES === undefined || env.CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES === ""
+    ? DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES
+    : env.CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES;
+
+  return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function shouldRunClanActivitySchedule(env, scheduledAt = null) {
+  const interval = clanActivityScheduleMinutes(env);
+  const offset = clanActivityScheduleOffsetMinutes(env);
   const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
     ? scheduledAt
     : new Date();

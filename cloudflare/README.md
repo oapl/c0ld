@@ -89,6 +89,7 @@ Run this migration in Supabase SQL Editor:
 supabase/migrations/004_c0ld_clan_snapshots.sql
 supabase/migrations/006_c0ld_current_and_battles.sql
 supabase/migrations/007_c0ld_clans_leaderboard.sql
+supabase/migrations/019_clan_activity.sql
 ```
 
 It creates:
@@ -100,6 +101,10 @@ It creates:
 | `c0ld_battle_runs` | table | Battle metadata. New API battle keys are tracked here automatically. |
 | `c0ld_clans_snapshots` | table | Append-only all-clans leaderboard history. |
 | `c0ld_clans_current` | table | Latest all-clans leaderboard only. Replaced every clans pull. |
+| `c0ld_clan_activity_roster_snapshots` | table | Append-only roster snapshots for top-clan activity tracking. |
+| `c0ld_clan_activity_current` | table | Latest tracked top-clan rosters. |
+| `c0ld_clan_activity_events` | table | Detected joins, leaves/kicks, promotions, demotions, kick-state changes, and rank changes. |
+| `c0ld_clan_activity_summary` | table | Per-clan activity counters for `clans-activity.html`. |
 
 The older tables can stay while the site is migrated. New Worker pulls should write to `c0ld_clan_snapshots`.
 
@@ -153,6 +158,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional display override such as `LunarBattle2026`. |
+| `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
+| `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
+| `CLAN_ACTIVITY_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a fresh activity scan on this interval. |
+| `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
+| `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -208,6 +218,23 @@ Useful endpoints:
 | `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
+| `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
+| `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
+| `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
+| `/api/clans/activity/feed` | All-clans activity blotter split into clan activity and rank activity. |
+
+Clan activity tracking needs one baseline roster snapshot before it can detect
+joins, leaves, promotions, demotions, kick usage, or rank changes. After running
+migration `019` and deploying the Worker, seed that baseline with:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/activity/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+The first pull establishes `starting_members`; later pulls compare against the
+previous current roster and append activity events.
 
 To compare global-rank scan configs, deploy the Worker and run:
 

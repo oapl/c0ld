@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Activity Feed</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1117;
+      --panel: #151b22;
+      --border: #2b3540;
+      --text: #f6f8fb;
+      --muted: #9fb4c9;
+      --accent: #ff6d6d;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      padding: 16px 20px;
+      text-align: center;
+    }
+
+    .brand-img {
+      display: block;
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 10px;
+      object-fit: contain;
+    }
+
+    nav {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .menu-btn,
+    .btn {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #070b10;
+      border-radius: 5px;
+      padding: 8px 13px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .menu-btn.active {
+      border-color: var(--accent);
+      background: rgba(255, 109, 109, 0.22);
+      color: #ffb3b3;
+    }
+
+    .lookup-menu { position: relative; }
+    .lookup-menu summary { list-style: none; }
+    .lookup-menu summary::-webkit-details-marker { display: none; }
+    .lookup-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 190px;
+      z-index: 20;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0b1117;
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+    }
+    .lookup-menu[open] .lookup-panel {
+      display: grid;
+      gap: 6px;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 26px auto 60px;
+    }
+
+    .hero,
+    .panel {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+
+    .hero {
+      padding: 22px;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    h1, h2 { margin: 0; }
+    h1 { font-size: 32px; }
+    h2 { font-size: 20px; }
+    .muted { color: var(--muted); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .feed {
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .feed li {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 5px;
+    }
+
+    .feed strong { color: var(--text); }
+    .feed time { color: var(--muted); font-size: 13px; }
+    .error { padding: 18px; color: #ffb3b3; }
+
+    @media (max-width: 900px) {
+      main { width: calc(100% - 16px); }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="brand-img" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
+    <nav>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <a class="menu-btn" href="c0ld-leagues.html">c0ld Leagues</a>
+      <details class="lookup-menu">
+        <summary class="menu-btn active">Tools</summary>
+        <div class="lookup-panel">
+          <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+          <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+          <a class="menu-btn active" href="activity-feed.html">Activity Feed</a>
+          <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <h1>Activity Feed</h1>
+        <div id="subtitle" class="muted">Loading activity across tracked top clans...</div>
+      </div>
+      <button id="refresh" class="btn" type="button">Refresh</button>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Clan Activity</h2>
+          <span id="clan-count" class="muted">-</span>
+        </div>
+        <ul id="clan-feed" class="feed">
+          <li class="muted">Loading...</li>
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Rank Activity</h2>
+          <span id="rank-count" class="muted">-</span>
+        </div>
+        <ul id="rank-feed" class="feed">
+          <li class="muted">Loading...</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+
+    const els = {
+      subtitle: document.getElementById("subtitle"),
+      refresh: document.getElementById("refresh"),
+      clanCount: document.getElementById("clan-count"),
+      rankCount: document.getElementById("rank-count"),
+      clanFeed: document.getElementById("clan-feed"),
+      rankFeed: document.getElementById("rank-feed")
+    };
+
+    function fmtDate(value) {
+      if (!value) return "-";
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString();
+    }
+
+    function eventText(event) {
+      const name = event.username || (event.user_id ? `user_${event.user_id}` : event.clan_name);
+      switch (event.event_type) {
+        case "member_joined": return `${name} joined ${event.clan_name}.`;
+        case "member_left": return `${name} left or was kicked from ${event.clan_name}.`;
+        case "member_promoted": return `${name} promoted in ${event.clan_name}.`;
+        case "member_demoted": return `${name} demoted in ${event.clan_name}.`;
+        case "kick_used": return `${event.clan_name} used its kick.`;
+        case "kick_available": return `${event.clan_name} has a kick available.`;
+        case "rank_up": return `${event.clan_name} moved up from #${event.previous_rank} to #${event.current_rank}.`;
+        case "rank_down": return `${event.clan_name} moved down from #${event.previous_rank} to #${event.current_rank}.`;
+        default: return `${event.clan_name}: ${event.event_type}`;
+      }
+    }
+
+    function renderFeed(target, rows) {
+      if (!rows.length) {
+        target.innerHTML = '<li class="muted">No events found yet.</li>';
+        return;
+      }
+
+      target.innerHTML = rows.map(event => `
+        <li>
+          <strong>${eventText(event)}</strong>
+          <time>${fmtDate(event.event_at)}</time>
+        </li>
+      `).join("");
+    }
+
+    async function load() {
+      els.clanFeed.innerHTML = '<li class="muted">Loading...</li>';
+      els.rankFeed.innerHTML = '<li class="muted">Loading...</li>';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/clans/activity/feed?limit=300`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.message || "Could not load activity feed.");
+
+        const clanEvents = data.clan_events || [];
+        const rankEvents = data.rank_events || [];
+        els.subtitle.textContent = `${data.display_name || data.battle || "Current battle"} activity, newest first.`;
+        els.clanCount.textContent = `${clanEvents.length} events`;
+        els.rankCount.textContent = `${rankEvents.length} events`;
+        renderFeed(els.clanFeed, clanEvents);
+        renderFeed(els.rankFeed, rankEvents);
+      } catch (err) {
+        els.clanFeed.innerHTML = `<li class="error">${err.message || err}</li>`;
+        els.rankFeed.innerHTML = '<li class="muted">No rank events loaded.</li>';
+      }
+    }
+
+    els.refresh.addEventListener("click", load);
+    load();
+  </script>
+</body>
+</html>
