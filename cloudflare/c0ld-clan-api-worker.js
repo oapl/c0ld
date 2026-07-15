@@ -1969,6 +1969,11 @@ async function handleClansBattles(request, env) {
 async function handleTopClanThresholds(request, env) {
   const url = new URL(request.url);
   const top = clamp(Math.round(parseThresholdNumber(url.searchParams.get("top")) || 10), 1, 25);
+  const detailClan = String(url.searchParams.get("clan") || "").trim();
+  const detailClanKey = normalizeText(detailClan);
+  const includeMembers = ["1", "true", "yes", "y"].includes(
+    String(url.searchParams.get("include_members") || url.searchParams.get("members") || "").trim().toLowerCase()
+  );
   const filter1Threshold = parseRebirthThreshold(
     firstDefined(url.searchParams.get("filter1"), url.searchParams.get("high"), url.searchParams.get("highThreshold"), "100")
   );
@@ -1997,7 +2002,10 @@ async function handleTopClanThresholds(request, env) {
 
   const configuredBattleKey = battleKey(env);
   const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
-  const topClans = await fetchTopClans(env, top);
+  let topClans = await fetchTopClans(env, top);
+  if (detailClanKey) {
+    topClans = topClans.filter(clan => normalizeText(clan.clan_name) === detailClanKey);
+  }
   const generatedAt = new Date().toISOString();
   const rows = [];
   let selectedBattleKey = activeBattleMeta?.battleKey || configuredBattleKey;
@@ -2034,6 +2042,9 @@ async function handleTopClanThresholds(request, env) {
         resolvedBattleKey
       );
       const members = normalizeMembers(data, battle);
+      const usernameMap = includeMembers
+        ? await resolveRobloxUsernames(members.map(member => member.user_id), env).catch(() => new Map())
+        : new Map();
       const counts = countThresholdMembers(
         members,
         filter1Threshold,
@@ -2042,7 +2053,9 @@ async function handleTopClanThresholds(request, env) {
         {
           referenceIso: generatedAt,
           clanName: clan.clan_name,
-          previousPoints: previousActivity.pointsByMember
+          previousPoints: previousActivity.pointsByMember,
+          includeMembers,
+          usernameMap
         }
       );
 
@@ -2068,6 +2081,7 @@ async function handleTopClanThresholds(request, env) {
         low_count: counts.low_count,
         below_low_count: counts.below_low_count,
         member_count: counts.member_count,
+        members: includeMembers ? counts.members : undefined,
         error: null
       });
     } catch (err) {
@@ -2079,6 +2093,8 @@ async function handleTopClanThresholds(request, env) {
     ok: true,
     generated_at: generatedAt,
     top,
+    clan: detailClan || null,
+    include_members: includeMembers,
     filter1Threshold,
     filter2Threshold,
     filter3Threshold,
@@ -2130,6 +2146,8 @@ function countThresholdMembers(members, filter1Threshold, filter2Threshold, filt
   const activeAfterMs = referenceMs - 60 * 60 * 1000;
   const clanKey = normalizeText(options.clanName);
   const previousPoints = options.previousPoints || new Map();
+  const includeMembers = options.includeMembers === true;
+  const usernameMap = options.usernameMap || new Map();
   const counts = {
     active_count: 0,
     hatching_count: 0,
@@ -2141,7 +2159,15 @@ function countThresholdMembers(members, filter1Threshold, filter2Threshold, filt
     low_count: 0,
     below_low_count: 0,
     member_count: members.length,
-    total_points: 0
+    total_points: 0,
+    members: includeMembers ? {
+      active: [],
+      hatching: [],
+      filter1: [],
+      filter2: [],
+      filter3: [],
+      under_filter3: []
+    } : undefined
   };
 
   for (const member of members) {
@@ -2149,36 +2175,87 @@ function countThresholdMembers(members, filter1Threshold, filter2Threshold, filt
     const rebirths = points / TOP_CLAN_REBIRTH_POINTS;
     const previous = previousPoints.get(topClanMemberPointKey(clanKey, member.user_id));
     const contributionMs = contributionTimestampMs(member);
+    const detail = includeMembers ? topClanThresholdMemberDetail(member, points, rebirths, usernameMap) : null;
     counts.total_points += points;
 
     if (previous !== undefined) {
       if (points > previous) {
         counts.active_count += 1;
+        if (includeMembers) counts.members.active.push(detail);
       } else {
         counts.hatching_count += 1;
+        if (includeMembers) counts.members.hatching.push(detail);
       }
     } else if (points > 0 && contributionMs && contributionMs >= activeAfterMs) {
       counts.active_count += 1;
+      if (includeMembers) counts.members.active.push(detail);
     } else {
       counts.hatching_count += 1;
+      if (includeMembers) counts.members.hatching.push(detail);
     }
 
     if (rebirths >= filter1Threshold) {
       counts.filter1_count += 1;
+      if (includeMembers) counts.members.filter1.push(detail);
     } else if (rebirths >= filter2Threshold) {
       counts.filter2_count += 1;
+      if (includeMembers) counts.members.filter2.push(detail);
     } else if (rebirths >= filter3Threshold) {
       counts.filter3_count += 1;
+      if (includeMembers) counts.members.filter3.push(detail);
     } else {
       counts.under_filter3_count += 1;
+      if (includeMembers) counts.members.under_filter3.push(detail);
     }
   }
 
   counts.high_count = counts.filter2_count;
   counts.low_count = counts.filter3_count;
   counts.below_low_count = counts.under_filter3_count;
+  if (includeMembers) {
+    for (const bucket of Object.values(counts.members)) {
+      bucket.sort((a, b) =>
+        (toNumber(b.points) || 0) - (toNumber(a.points) || 0) ||
+        String(a.username || "").localeCompare(String(b.username || ""))
+      );
+    }
+  }
 
   return counts;
+}
+
+function topClanThresholdMemberDetail(member, points, rebirths, usernameMap) {
+  const rawMember = member?.raw_member || {};
+  const rawContribution = member?.raw_contribution || {};
+  const userId = toNumber(member?.user_id);
+  const username = displayUsername({
+    user_id: userId,
+    username: firstDefined(
+      rawContribution.Username,
+      rawContribution.username,
+      rawContribution.Name,
+      rawContribution.name,
+      rawMember.Username,
+      rawMember.username,
+      rawMember.Name,
+      rawMember.name
+    )
+  }, usernameMap);
+
+  return {
+    user_id: userId,
+    username: username || (userId ? `user_${userId}` : ""),
+    display_name: stringOrNull(firstDefined(
+      rawContribution.DisplayName,
+      rawContribution.displayName,
+      rawContribution.display_name,
+      rawMember.DisplayName,
+      rawMember.displayName,
+      rawMember.display_name
+    )),
+    points,
+    rebirths: Number.isFinite(rebirths) ? rebirths : 0
+  };
 }
 
 async function fetchPreviousTopClanMemberPoints(env, { battleKey, referenceIso, clanNames }) {
@@ -5130,6 +5207,11 @@ function prettifyBattleKey(value) {
 
 function firstDefined(...values) {
   return values.find(value => value !== undefined && value !== null && value !== "");
+}
+
+function stringOrNull(value) {
+  const text = String(value || "").trim();
+  return text || null;
 }
 
 function toNumber(value) {

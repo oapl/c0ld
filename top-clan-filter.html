@@ -262,6 +262,14 @@
       background: rgba(255,255,255,0.02);
     }
 
+    tbody tr.clickable-row {
+      cursor: pointer;
+    }
+
+    tbody tr.clickable-row:hover {
+      background: var(--hover);
+    }
+
     .numeric {
       text-align: right;
       font-variant-numeric: tabular-nums;
@@ -584,6 +592,19 @@
       if (filter3) document.getElementById("filter3-input").value = filter3;
     }
 
+    function loadQueryInputs() {
+      const params = new URLSearchParams(window.location.search);
+      const top = params.get("top");
+      const filter1 = params.get("filter1");
+      const filter2 = params.get("filter2");
+      const filter3 = params.get("filter3");
+
+      if (top) document.getElementById("top-input").value = top;
+      if (filter1) document.getElementById("filter1-input").value = filter1;
+      if (filter2) document.getElementById("filter2-input").value = filter2;
+      if (filter3) document.getElementById("filter3-input").value = filter3;
+    }
+
     function normalizeInputDisplays() {
       const topRaw = document.getElementById("top-input").value;
       const filter1Raw = document.getElementById("filter1-input").value;
@@ -688,6 +709,25 @@
       });
     }
 
+    function buildDetailUrl(row, payload) {
+      const url = new URL("top-clan-filter-detail.html", window.location.href);
+      url.searchParams.set("clan", row.clan_name || "");
+      url.searchParams.set("top", String(payload?.top || document.getElementById("top-input").value || "10"));
+      url.searchParams.set("filter1", String(payload?.filter1Threshold || DEFAULT_FILTERS.filter1));
+      url.searchParams.set("filter2", String(payload?.filter2Threshold || DEFAULT_FILTERS.filter2));
+      url.searchParams.set("filter3", String(payload?.filter3Threshold || DEFAULT_FILTERS.filter3));
+      return url.toString();
+    }
+
+    function wireDetailRows() {
+      document.querySelectorAll("[data-detail-url]").forEach(row => {
+        row.addEventListener("click", () => {
+          const url = row.dataset.detailUrl;
+          if (url) window.location.href = url;
+        });
+      });
+    }
+
     function wireSortHeaders() {
       document.querySelectorAll("[data-sort]").forEach(button => {
         button.addEventListener("click", () => {
@@ -740,9 +780,10 @@
 
       tbody.innerHTML = sortedRows(rows).map(row => {
         const metrics = rowMetrics(row);
+        const detailUrl = buildDetailUrl(row, payload);
 
         return `
-          <tr>
+          <tr class="clickable-row" data-detail-url="${htmlEscape(detailUrl)}">
             <td>#${htmlEscape(row.rank)}</td>
             <td>
               <div class="clan-cell">
@@ -765,6 +806,7 @@
           </tr>
         `;
       }).join("");
+      wireDetailRows();
     }
 
     function getParsedInputs() {
@@ -900,6 +942,7 @@
 
     function init() {
       loadSavedInputs();
+      loadQueryInputs();
       normalizeInputDisplays();
       wireEvents();
       loadThresholds();

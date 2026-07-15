@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Top Clan Filter Detail</title>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0f141b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --link: #ff9b96;
+      --hover: #1f2630;
+      --danger: #f85149;
+      --danger-bg: rgba(248,81,73,0.12);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: none; }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px 10px;
+    }
+
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .site-logo-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+    }
+
+    .site-logo {
+      display: block;
+      width: 76px;
+      height: auto;
+      border-radius: 10px;
+    }
+
+    .menu-bar {
+      max-width: 1280px;
+      margin: 9px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .menu-btn {
+      display: inline-block;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .menu-btn.active {
+      border-color: var(--link);
+      color: var(--link);
+      background: rgba(88,166,255,0.08);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 22px 24px 28px;
+    }
+
+    .status {
+      margin-bottom: 18px;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: none;
+    }
+
+    .status.info {
+      display: block;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .status.error {
+      display: block;
+      border: 1px solid var(--danger);
+      background: var(--danger-bg);
+      color: #ffb4ad;
+    }
+
+    .summary {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin-bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .clan-heading {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .clan-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: #21262d;
+      object-fit: cover;
+      flex: 0 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 26px;
+      line-height: 1.1;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      display: inline-block;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      border-color: var(--link);
+      background: var(--hover);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      min-height: 76px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1120px;
+    }
+
+    th, td {
+      width: 16.666%;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      border-left: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th:first-child,
+    td:first-child {
+      border-left: 0;
+    }
+
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .bucket-count {
+      color: var(--text);
+      font-weight: 700;
+      margin-left: 4px;
+    }
+
+    .member-name {
+      color: var(--text);
+      font-weight: 700;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .member-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 3px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty-cell {
+      color: var(--muted);
+    }
+
+    @media (max-width: 1050px) {
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 700px) {
+      header { padding: 14px 16px 10px; }
+      main { padding: 16px; }
+      .menu-bar { justify-content: flex-start; }
+      .summary { align-items: flex-start; }
+      .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="site-logo-link" href="index.html" aria-label="c0ld home">
+        <img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld">
+      </a>
+    </div>
+
+    <div class="menu-bar">
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Top Clans</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <a class="menu-btn" href="c0ld-leagues.html">c0ld Leagues</a>
+      <a class="menu-btn" href="top-leagues.html">Top Leagues</a>
+      <a class="menu-btn active" href="top-clan-filter.html">Top Clan Filter</a>
+      <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status info">Loading clan bucket details...</div>
+
+    <section class="summary">
+      <div class="clan-heading">
+        <img id="clan-icon" class="clan-icon" src="" alt="" loading="lazy">
+        <div>
+          <h1 id="clan-title">Clan Filter Detail</h1>
+          <div id="clan-subtitle" class="subtle">Loading...</div>
+        </div>
+      </div>
+      <a id="back-link" class="btn" href="top-clan-filter.html">Back</a>
+    </section>
+
+    <section class="stats">
+      <div class="stat">
+        <div class="stat-label">Rank</div>
+        <div id="stat-rank" class="stat-value">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Points</div>
+        <div id="stat-points" class="stat-value">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Active</div>
+        <div id="stat-active" class="stat-value">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Hatching</div>
+        <div id="stat-hatching" class="stat-value">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Members</div>
+        <div id="stat-members" class="stat-value">-</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2 id="bucket-title" class="section-title">Member Buckets</h2>
+        <div id="bucket-meta" class="subtle"></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr id="bucket-head-row"></tr>
+          </thead>
+          <tbody id="bucket-body">
+            <tr><td class="empty-cell">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const THRESHOLDS_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/top-clan-thresholds";
+    const DEFAULT_FILTERS = { filter1: 100, filter2: 90, filter3: 75 };
+    const DEFAULT_CLAN_ICON =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="12" fill="#21262d"/>
+          <path d="M20 44V24l12-6 12 6v20l-12 6-12-6z" fill="#6e7681"/>
+        </svg>
+      `);
+
+    function htmlEscape(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function stripZeros(value) {
+      return String(value).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+    }
+
+    function formatCompactNumber(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const n = Number(value);
+      if (Number.isNaN(n)) return "-";
+
+      const abs = Math.abs(n);
+      if (abs >= 1e12) return stripZeros((n / 1e12).toFixed(2)) + "T";
+      if (abs >= 1e9) return stripZeros((n / 1e9).toFixed(2)) + "B";
+      if (abs >= 1e6) return stripZeros((n / 1e6).toFixed(2)) + "M";
+      if (abs >= 1e3) return stripZeros((n / 1e3).toFixed(2)) + "K";
+      return String(Math.round(n));
+    }
+
+    function formatThreshold(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "";
+      return stripZeros(n.toFixed(2));
+    }
+
+    function getParams() {
+      const params = new URLSearchParams(window.location.search);
+      const top = Math.min(Math.max(Math.round(Number(params.get("top") || "10")), 1), 25);
+      const filter1 = Number(params.get("filter1") || DEFAULT_FILTERS.filter1);
+      const filter2 = Number(params.get("filter2") || DEFAULT_FILTERS.filter2);
+      const filter3 = Number(params.get("filter3") || DEFAULT_FILTERS.filter3);
+
+      return {
+        clan: String(params.get("clan") || "").trim(),
+        top: Number.isFinite(top) ? top : 10,
+        filter1: Number.isFinite(filter1) ? filter1 : DEFAULT_FILTERS.filter1,
+        filter2: Number.isFinite(filter2) ? filter2 : DEFAULT_FILTERS.filter2,
+        filter3: Number.isFinite(filter3) ? filter3 : DEFAULT_FILTERS.filter3
+      };
+    }
+
+    function buildThresholdUrl(params) {
+      const url = new URL(THRESHOLDS_URL);
+      url.searchParams.set("top", String(params.top));
+      url.searchParams.set("filter1", String(params.filter1));
+      url.searchParams.set("filter2", String(params.filter2));
+      url.searchParams.set("filter3", String(params.filter3));
+      url.searchParams.set("clan", params.clan);
+      url.searchParams.set("include_members", "true");
+      return url.toString();
+    }
+
+    function buildBackUrl(params) {
+      const url = new URL("top-clan-filter.html", window.location.href);
+      url.searchParams.set("top", String(params.top));
+      url.searchParams.set("filter1", String(params.filter1));
+      url.searchParams.set("filter2", String(params.filter2));
+      url.searchParams.set("filter3", String(params.filter3));
+      return url.toString();
+    }
+
+    async function fetchJsonOrThrow(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      const text = await res.text();
+      let payload = null;
+
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(payload?.message || payload?.error || text || `Worker request failed (${res.status}).`);
+      }
+
+      if (payload?.ok === false) {
+        throw new Error(payload?.message || payload?.error || "Lookup failed.");
+      }
+
+      return payload;
+    }
+
+    function setStatus(text = "", kind = "info") {
+      const el = document.getElementById("status");
+      if (!text) {
+        el.className = "status";
+        el.textContent = "";
+        return;
+      }
+
+      el.className = `status ${kind}`;
+      el.textContent = text;
+    }
+
+    function renderMember(member) {
+      if (!member) return `<span class="empty-cell">-</span>`;
+
+      const username = member.username || (member.user_id ? `user_${member.user_id}` : "-");
+      const displayName = member.display_name && member.display_name !== username
+        ? `<span class="member-meta">${htmlEscape(member.display_name)}</span>`
+        : "";
+
+      return `
+        <div class="member-name">${htmlEscape(username)}</div>
+        ${displayName}
+        <div class="member-meta">${formatCompactNumber(member.points)} pts - ${formatThreshold(member.rebirths)} rebirths</div>
+      `;
+    }
+
+    function renderBuckets(row, payload) {
+      const buckets = row.members || {};
+      const labels = [
+        ["active", "Active"],
+        ["hatching", "Hatching"],
+        ["filter1", `${formatThreshold(payload.filter1Threshold)}+`],
+        ["filter2", `${formatThreshold(payload.filter2Threshold)}+`],
+        ["filter3", `${formatThreshold(payload.filter3Threshold)}+`],
+        ["under_filter3", `Under ${formatThreshold(payload.filter3Threshold)}`]
+      ];
+      const maxRows = Math.max(1, ...labels.map(([key]) => (buckets[key] || []).length));
+
+      document.getElementById("bucket-head-row").innerHTML = labels.map(([key, label]) => `
+        <th>${htmlEscape(label)} <span class="bucket-count">${htmlEscape((buckets[key] || []).length)}</span></th>
+      `).join("");
+
+      document.getElementById("bucket-body").innerHTML = Array.from({ length: maxRows }, (_, index) => `
+        <tr>
+          ${labels.map(([key]) => `<td>${renderMember((buckets[key] || [])[index])}</td>`).join("")}
+        </tr>
+      `).join("");
+    }
+
+    function render(payload, params) {
+      const row = Array.isArray(payload?.rows) ? payload.rows[0] : null;
+      if (!row) {
+        throw new Error(`No clan detail was returned for ${params.clan}.`);
+      }
+
+      document.title = `${row.clan_name} Filter Detail`;
+      document.getElementById("clan-title").textContent = row.clan_name;
+      document.getElementById("clan-subtitle").textContent =
+        `${payload.display_name || payload.battle || "Current Battle"} - Top ${payload.top} clan filter`;
+      document.getElementById("clan-icon").src = row.icon_url || DEFAULT_CLAN_ICON;
+      document.getElementById("clan-icon").onerror = function () {
+        this.onerror = null;
+        this.src = DEFAULT_CLAN_ICON;
+      };
+
+      document.getElementById("stat-rank").textContent = row.rank ? `#${row.rank}` : "-";
+      document.getElementById("stat-points").textContent = formatCompactNumber(row.battle_points);
+      document.getElementById("stat-active").textContent = String(row.active_count ?? 0);
+      document.getElementById("stat-hatching").textContent = String(row.hatching_count ?? 0);
+      document.getElementById("stat-members").textContent = String(row.member_count ?? 0);
+      document.getElementById("bucket-title").textContent = `${row.clan_name} Member Buckets`;
+      document.getElementById("bucket-meta").textContent =
+        `${formatThreshold(payload.filter1Threshold)}+ / ${formatThreshold(payload.filter2Threshold)}+ / ${formatThreshold(payload.filter3Threshold)}+ rebirth filters`;
+
+      renderBuckets(row, payload);
+    }
+
+    async function init() {
+      const params = getParams();
+      document.getElementById("back-link").href = buildBackUrl(params);
+
+      if (!params.clan) {
+        setStatus("Missing clan name.", "error");
+        return;
+      }
+
+      try {
+        const payload = await fetchJsonOrThrow(buildThresholdUrl(params));
+        render(payload, params);
+        setStatus("");
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || String(err), "error");
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
