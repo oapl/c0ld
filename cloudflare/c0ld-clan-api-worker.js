@@ -2602,10 +2602,9 @@ async function handleClanActivityIngest(env, source, force = false) {
       const clanKey = normalizeText(clanRow.clan_name);
       const previousClanRows = previousByClan.get(clanKey) || [];
       const previousClanByUser = new Map(previousClanRows.map(row => [String(row.user_id), row]));
-      const currentClanRows = [];
       const currentByUser = new Map();
       const kickAvailable = extractKickAvailable(data);
-      const memberCount = members.length;
+      const rawMemberCount = members.length;
 
       fetchedClans += 1;
 
@@ -2622,12 +2621,31 @@ async function handleClanActivityIngest(env, source, force = false) {
           memberRank: memberIndex + 1,
           usernameMap,
           kickAvailable,
-          memberCount
+          memberCount: rawMemberCount
         });
 
+        const memberKey = String(row.user_id);
+        const existing = currentByUser.get(memberKey);
+        if (existing) {
+          const existingPoints = toNumber(existing.points) || 0;
+          const rowPoints = toNumber(row.points) || 0;
+          const existingRank = toNumber(existing.member_rank) || Number.MAX_SAFE_INTEGER;
+          const rowRank = toNumber(row.member_rank) || Number.MAX_SAFE_INTEGER;
+          if (existingPoints > rowPoints || (existingPoints === rowPoints && existingRank <= rowRank)) {
+            continue;
+          }
+        }
+
+        currentByUser.set(memberKey, row);
+      }
+
+      const currentClanRows = [...currentByUser.values()]
+        .sort((a, b) => (toNumber(a.member_rank) || Number.MAX_SAFE_INTEGER) - (toNumber(b.member_rank) || Number.MAX_SAFE_INTEGER));
+      const memberCount = currentClanRows.length;
+
+      for (const row of currentClanRows) {
+        row.member_count = memberCount;
         rosterRows.push(row);
-        currentClanRows.push(row);
-        currentByUser.set(String(row.user_id), row);
       }
 
       const previousSummary = previousSummaryByClan.get(clanKey);
