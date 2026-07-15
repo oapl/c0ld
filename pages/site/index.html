@@ -1483,12 +1483,20 @@
     }
 
     async function renderAll() {
-      await resolveLiveAvatarUrls(currentRows);
       renderCards();
       renderBattleOptions();
       renderLeaderboard();
       renderHistoryStats();
       renderHistoryTable();
+
+      const avatarRows = currentRows.slice();
+      resolveLiveAvatarUrls(avatarRows)
+        .then(() => {
+          if (avatarRows.length === currentRows.length) {
+            renderLeaderboard();
+          }
+        })
+        .catch(() => {});
     }
 
     function updateView() {
@@ -1572,7 +1580,7 @@
         };
       } else {
         const liveBattle = await fetchLiveJson(
-          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle }),
+          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle, avatars: "false", downtime: "false" }),
           `${TRACKED_CLAN_DISPLAY} ${battleDisplayName(selected)} leaderboard`
         );
 
@@ -1618,7 +1626,7 @@
         const globalRankPromise = fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`, forceFresh)
           .catch(() => ({ rows: [] }));
         const [currentJson, clansJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
-          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`, forceFresh),
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "false", downtime: "false" }), `live ${TRACKED_CLAN_DISPLAY} leaderboard`, forceFresh),
           fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard", forceFresh),
           fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`, forceFresh).catch(() => ({ rows: [] })),
           fetch(`Data/manual-battles.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }),
@@ -1663,6 +1671,20 @@
         }
 
         await applyBattleSelection();
+
+        if (activeBattle === "current") {
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "false" }), `live ${TRACKED_CLAN_DISPLAY} downtime`, forceFresh)
+            .then(fullCurrentJson => {
+              if (!fullCurrentJson || !Array.isArray(fullCurrentJson.rows) || activeBattle !== "current") return;
+              currentData = {
+                ...currentData,
+                ...fullCurrentJson
+              };
+              currentRows = normalizeCurrentRows(fullCurrentJson.rows || []);
+              renderAll();
+            })
+            .catch(error => console.warn("Deferred downtime refresh failed", error));
+        }
 
         globalRankPromise.then(globalJson => {
           globalRankData = globalJson && Array.isArray(globalJson.rows) ? globalJson : { rows: [] };

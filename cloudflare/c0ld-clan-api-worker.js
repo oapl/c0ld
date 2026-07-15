@@ -386,6 +386,8 @@ async function handleCurrent(request, env) {
   const url = new URL(request.url);
   const clan = url.searchParams.get("clan") || clanName(env);
   const requestedBattle = url.searchParams.get("battle") || "";
+  const includeAvatars = !["0", "false", "no"].includes(String(url.searchParams.get("avatars") || "true").toLowerCase());
+  const includeDowntime = !["0", "false", "no"].includes(String(url.searchParams.get("downtime") || "true").toLowerCase());
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
@@ -414,21 +416,28 @@ async function handleCurrent(request, env) {
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
-  const rowsWithDowntime = await addDowntimeFields(env, rowsWithGains, latest)
-    .catch(() => rowsWithGains.map(row => ({
+  const rowsWithDowntime = includeDowntime
+    ? await addDowntimeFields(env, rowsWithGains, latest).catch(() => rowsWithGains.map(row => ({
       ...row,
       last_gain_at: null,
       downtime_minutes: null
-    })));
+    })))
+    : rowsWithGains.map(row => ({
+      ...row,
+      last_gain_at: null,
+      downtime_minutes: null
+    }));
   const activeBattleMeta = !explicitBattle
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
   latest = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
   const usernameMap = await resolveMissingUsernames(rowsWithDowntime, env);
-  const avatarMap = await resolveRobloxAvatarHeadshots(
-    rowsWithDowntime.map(row => row.user_id),
-    env
-  ).catch(() => new Map());
+  const avatarMap = includeAvatars
+    ? await resolveRobloxAvatarHeadshots(
+      rowsWithDowntime.map(row => row.user_id),
+      env
+    ).catch(() => new Map())
+    : new Map();
   const trackedClan = await fetchTrackedClanCurrent(env, clan).catch(() => null);
 
   return cacheJson({
@@ -442,6 +451,8 @@ async function handleCurrent(request, env) {
     clan_rank: trackedClan?.rank ?? null,
     clan_points: trackedClan?.points ?? null,
     source: "c0ld-clan-api-worker",
+    downtime_included: includeDowntime,
+    avatars_included: includeAvatars,
     rows: rowsWithDowntime.map(row => ({
       fetched_at: row.fetched_at,
       rank: toNumber(row.rank),
@@ -457,7 +468,7 @@ async function handleCurrent(request, env) {
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h
     }))
-  }, env);
+  }, env, publicCacheSeconds(env, "CURRENT"));
 }
 
 async function handleGlobalCurrent(request, env) {
@@ -492,7 +503,7 @@ async function handleGlobalCurrent(request, env) {
     snapshot_at: run?.finished_at || run?.updated_at || displayRows[0]?.fetched_at || rows[0]?.fetched_at || null,
     run,
     rows: displayRows.map(row => normalizeGlobalCurrentOutput(row))
-  }, env);
+  }, env, publicCacheSeconds(env, "GLOBAL_CURRENT"));
 }
 
 async function handleGlobalLeaderboard(request, env) {
@@ -502,6 +513,7 @@ async function handleGlobalLeaderboard(request, env) {
   const clan = url.searchParams.get("clan") || clanName(env);
   const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 1000);
   const includeAvatars = ["1", "true", "yes"].includes(String(url.searchParams.get("avatars") || "").toLowerCase());
+  const includeGains = !["0", "false", "no"].includes(String(url.searchParams.get("gains") || "true").toLowerCase());
   const run = await findLatestGlobalRankSearchRun(env, clan);
 
   if (!run?.run_key) {
@@ -515,6 +527,7 @@ async function handleGlobalLeaderboard(request, env) {
 
   const rankedCandidates = await readGlobalRankLeaderboardCandidates(env, run.run_key, limit);
   const rows = rankedCandidates.slice(0, limit);
+  const userIds = rows.map(row => toNumber(row.user_id)).filter(Boolean);
   const userIdsNeedingLookup = rows
     .filter(row => !globalCandidateRawUsername(row))
     .map(row => toNumber(row.user_id))
@@ -531,12 +544,12 @@ async function handleGlobalLeaderboard(request, env) {
   const [usernameMap, avatarMap, gainMaps] = await Promise.all([
     resolveRobloxUsernames(userIdsNeedingLookup, env).catch(() => new Map()),
     includeAvatars ? resolveRobloxAvatarHeadshots(avatarUserIds, env).catch(() => new Map()) : new Map(),
-    buildGlobalLeaderboardGainMaps(env, {
+    includeGains ? buildGlobalLeaderboardGainMaps(env, {
       clan,
       battleKey: run.battle_key,
       snapshotAt,
       userIds
-    }).catch(() => ({}))
+    }).catch(() => ({})) : {}
   ]);
 
   return cacheJson({
@@ -546,6 +559,8 @@ async function handleGlobalLeaderboard(request, env) {
     snapshot_at: snapshotAt,
     run,
     total_global_players: totalGlobalPlayers,
+    gains_included: includeGains,
+    avatars_included: includeAvatars,
     rows: rows.map(row => normalizeGlobalLeaderboardOutput(row, {
       run,
       usernameMap,
@@ -553,7 +568,7 @@ async function handleGlobalLeaderboard(request, env) {
       gainMaps,
       totalGlobalPlayers
     }))
-  }, env);
+  }, env, publicCacheSeconds(env, includeGains ? "GLOBAL_LEADERBOARD" : "GLOBAL_LEADERBOARD_FAST"));
 }
 
 async function handleGlobalRankStatus(request, env) {
@@ -1948,7 +1963,7 @@ async function handleClansCurrent(request, env) {
       projected_rank: row.projected_rank,
       projection_basis: row.projection_basis
     }))
-  }, env);
+  }, env, publicCacheSeconds(env, "CLANS_CURRENT"));
 }
 
 async function handleClansHistory(request, env) {
@@ -6520,7 +6535,11 @@ function httpError(status, message) {
 }
 
 function siteOrigins(env) {
-  const origins = new Set(["https://oapl.github.io"]);
+  const origins = new Set([
+    "https://oapl.github.io",
+    "https://c0ld-clan.com",
+    "https://www.c0ld-clan.com"
+  ]);
   for (const value of String(env.SITE_ORIGINS || "").split(",")) {
     const trimmed = value.trim();
     if (!trimmed) continue;
@@ -6570,10 +6589,21 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
-function cacheJson(data, env) {
-  const seconds = Number(env.PUBLIC_CACHE_SECONDS || DEFAULT_PUBLIC_CACHE_SECONDS);
+function publicCacheSeconds(env, key = "") {
+  const normalizedKey = String(key || "").trim().toUpperCase();
+  const value =
+    (normalizedKey && env?.[`${normalizedKey}_CACHE_SECONDS`]) ||
+    env?.PUBLIC_CACHE_SECONDS ||
+    DEFAULT_PUBLIC_CACHE_SECONDS;
+  return clamp(Number(value), 0, 3600);
+}
+
+function cacheJson(data, env, secondsOverride = null) {
+  const seconds = secondsOverride === null || secondsOverride === undefined
+    ? publicCacheSeconds(env)
+    : clamp(Number(secondsOverride), 0, 3600);
   return json(data, 200, {
-    "Cache-Control": `public, max-age=${Math.max(0, seconds)}`
+    "Cache-Control": `public, max-age=${Math.max(0, seconds)}, stale-while-revalidate=300`
   });
 }
 

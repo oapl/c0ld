@@ -14,8 +14,13 @@ SKIP_ENDED_BATTLE_INGEST = "true"
 # Optional overrides. Leave blank to use API metadata when present.
 CURRENT_BATTLE_DISPLAY_NAME = ""
 CURRENT_BATTLE_END_ISO = ""
-SITE_ORIGINS = "https://oapl.github.io"
+SITE_ORIGINS = "https://oapl.github.io,https://c0ld-clan.com,https://www.c0ld-clan.com"
 PUBLIC_CACHE_SECONDS = "30"
+CURRENT_CACHE_SECONDS = "60"
+CLANS_CURRENT_CACHE_SECONDS = "60"
+GLOBAL_CURRENT_CACHE_SECONDS = "120"
+GLOBAL_LEADERBOARD_FAST_CACHE_SECONDS = "120"
+GLOBAL_LEADERBOARD_CACHE_SECONDS = "300"
 # Optional. Leave blank/omit to keep archived battle snapshots indefinitely.
 # Set to a positive hour count only if you intentionally want rolling pruning.
 SNAPSHOT_RETENTION_HOURS = ""

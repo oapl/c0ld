@@ -135,9 +135,14 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `SKIP_ENDED_BATTLE_INGEST` | Optional. Defaults to `true`; cron and normal manual ingests skip without writing snapshot rows when the active battle is ended or not started. |
 | `CURRENT_BATTLE_DISPLAY_NAME` | Optional override. If blank, the Worker uses the API battle name or prettifies the battle key. |
 | `CURRENT_BATTLE_END_ISO` | Optional override. If blank, the Worker reads the API end timestamp when present. |
-| `SITE_ORIGINS` | `https://oapl.github.io` |
+| `SITE_ORIGINS` | `https://oapl.github.io,https://c0ld-clan.com,https://www.c0ld-clan.com` |
 | `SUPABASE_URL` | `https://YOUR-PROJECT.supabase.co` |
 | `PUBLIC_CACHE_SECONDS` | `30` |
+| `CURRENT_CACHE_SECONDS` | Optional. Recommended `60`; cache `/api/current` separately because it is the slowest public endpoint. |
+| `CLANS_CURRENT_CACHE_SECONDS` | Optional. Recommended `60`; cache `/api/clans/current`. |
+| `GLOBAL_CURRENT_CACHE_SECONDS` | Optional. Recommended `120`; cache `/api/global/current`. |
+| `GLOBAL_LEADERBOARD_FAST_CACHE_SECONDS` | Optional. Recommended `120`; cache the first fast `/api/global/leaderboard?gains=false` response. |
+| `GLOBAL_LEADERBOARD_CACHE_SECONDS` | Optional. Recommended `300`; cache the heavier global leaderboard response with gain columns. |
 | `SNAPSHOT_RETENTION_HOURS` | Optional. Leave blank/omit to preserve archived battle snapshots. Set a positive hour count only if you intentionally want rolling pruning. |
 | `HISTORY_MAX_HOURS` | Optional. Defaults to `100000`; caps `/api/history` and `/api/clans/history` lookback requests. |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
