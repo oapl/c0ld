@@ -40,6 +40,7 @@ const DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES = 30;
 const DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const DEFAULT_CLAN_ACTIVITY_CONCURRENCY = 8;
+const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 25;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 
 export default {
@@ -122,12 +123,17 @@ export default {
         response = await handleGlobalRankIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
       } else if (request.method === "POST" && url.pathname === "/api/clans/activity/ingest") {
         requireAdmin(request, env);
-        response = await handleClanActivityIngest(env, "manual", isForceRequest(url));
+        response = await handleClanActivityIngest(env, "manual", {
+          force: isForceRequest(url),
+          bypassRecentGuard: isTruthyParam(url, "bypass_recent")
+        });
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
           ok: true,
-          results: await runScheduledIngests(env, isForceRequest(url))
+          results: await runScheduledIngests(env, isForceRequest(url), null, {
+            bypassActivityRecentGuard: isTruthyParam(url, "bypass_recent")
+          })
         });
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
@@ -149,7 +155,7 @@ export default {
   }
 };
 
-async function runScheduledIngests(env, force = false, scheduledAt = null) {
+async function runScheduledIngests(env, force = false, scheduledAt = null, options = {}) {
   const jobs = clanNames(env).map(clan => ({
     label: `members:${clan}`,
     run: () => handleIngest(env, "schedule", clan, force)
@@ -178,7 +184,10 @@ async function runScheduledIngests(env, force = false, scheduledAt = null) {
     if (force || shouldRunClanActivitySchedule(env, scheduledAt)) {
       jobs.push({
         label: "clan-activity",
-        run: () => handleClanActivityIngest(env, "schedule", force)
+        run: () => handleClanActivityIngest(env, "schedule", {
+          force,
+          bypassRecentGuard: options.bypassActivityRecentGuard === true
+        })
       });
     }
   }
@@ -2504,9 +2513,11 @@ function contributionTimestampMs(member) {
   return iso ? isoToMs(iso) : null;
 }
 
-async function handleClanActivityIngest(env, source, force = false) {
+async function handleClanActivityIngest(env, source, options = {}) {
   requireSupabase(env);
 
+  const force = typeof options === "boolean" ? options : options.force === true;
+  const bypassRecentGuard = typeof options === "object" && options.bypassRecentGuard === true;
   const fetchedAt = new Date().toISOString();
   const configuredBattleKey = battleKey(env);
   const trackedClan = clanName(env);
@@ -2532,8 +2543,6 @@ async function handleClanActivityIngest(env, source, force = false) {
     });
   }
 
-  const topN = clanActivityTopN(env);
-  const topClans = await fetchTopClans(env, topN);
   const trackedApi = await fetchClanApiWithRetry(env, trackedClan);
   const trackedBattles = trackedApi.data?.Battles || trackedApi.data?.battles || {};
   const resolvedBattleKey = resolveBattleKey(
@@ -2572,6 +2581,22 @@ async function handleClanActivityIngest(env, source, force = false) {
     });
   }
 
+  const recentSnapshotGate = await clanActivityRecentSnapshotGate(env, resolvedBattleKey, fetchedAt, bypassRecentGuard);
+  if (!recentSnapshotGate.allowed) {
+    return skippedIngestResponse({
+      scope: "clan-activity",
+      source,
+      clan: trackedClan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey,
+      battleMeta,
+      gate: recentSnapshotGate
+    });
+  }
+
+  const topN = clanActivityTopN(env);
+  const topClans = await fetchTopClans(env, topN);
   const previousRows = await fetchClanActivityCurrentRows(env, resolvedBattleKey).catch(() => []);
   const previousSummaries = await fetchClanActivitySummaryRows(env, resolvedBattleKey).catch(() => []);
   const previousByClanUser = new Map(previousRows.map(row => [clanActivityMemberKey(row.clan_name, row.user_id), row]));
@@ -2876,6 +2901,7 @@ async function handleClanActivityDetail(request, env) {
   const clanEventTypes = new Set([
     "member_joined",
     "member_left",
+    "member_kicked",
     "member_promoted",
     "member_demoted",
     "kick_available",
@@ -2935,6 +2961,44 @@ async function resolveActivityBattleKey(env, requestedBattle) {
   });
 
   return rows[0]?.battle_key || battleKey(env);
+}
+
+async function clanActivityRecentSnapshotGate(env, battleKeyValue, fetchedAt, bypassRecentGuard = false) {
+  const minMinutes = clanActivityMinSnapshotIntervalMinutes(env);
+  if (bypassRecentGuard) return { allowed: true, reason: "recent_guard_bypassed" };
+  if (minMinutes <= 0) return { allowed: true, reason: "recent_guard_disabled" };
+
+  const rows = await supabaseSelect(env, CLAN_ACTIVITY_ROSTER_TABLE, {
+    select: "snapshot_id,fetched_at",
+    battle_key: `eq.${battleKeyValue}`,
+    order: "fetched_at.desc",
+    limit: "1"
+  });
+  const latest = rows[0] || null;
+  const latestMs = isoToMs(latest?.fetched_at);
+  const nowMs = isoToMs(fetchedAt) || Date.now();
+  if (!latest || !latestMs || nowMs < latestMs) {
+    return { allowed: true, reason: "no_recent_snapshot" };
+  }
+
+  const minMs = minMinutes * 60 * 1000;
+  const ageMs = nowMs - latestMs;
+  if (ageMs >= minMs) {
+    return { allowed: true, reason: "recent_snapshot_old_enough" };
+  }
+
+  const ageMinutes = Math.max(0, ageMs / 60000);
+  const nextAllowedAt = new Date(latestMs + minMs).toISOString();
+  return {
+    allowed: false,
+    reason: "recent_snapshot",
+    message: `Clan activity ingest skipped because the latest snapshot is ${ageMinutes.toFixed(1)} minutes old. Minimum interval is ${minMinutes} minutes.`,
+    battle_key: battleKeyValue,
+    latest_snapshot_id: latest.snapshot_id || null,
+    latest_snapshot_at: latest.fetched_at || null,
+    min_snapshot_interval_minutes: minMinutes,
+    next_allowed_at: nextAllowedAt
+  };
 }
 
 async function fetchClanActivityCurrentRows(env, battleKeyValue) {
@@ -3046,6 +3110,11 @@ function clanActivityIncrements({
   let promotions = 0;
   let demotions = 0;
   let rankChanges = 0;
+  const previousKickAvailable = previousSummary && typeof previousSummary.kick_available === "boolean"
+    ? Boolean(previousSummary.kick_available)
+    : null;
+  const currentKickAvailable = typeof kickAvailable === "boolean" ? Boolean(kickAvailable) : null;
+  const kickUsedThisSnapshot = previousKickAvailable === true && currentKickAvailable === false;
 
   if (hadPreviousRoster) {
     for (const [userId, current] of currentByUser.entries()) {
@@ -3101,8 +3170,15 @@ function clanActivityIncrements({
       }
     }
 
+    const lostRows = [];
     for (const [userId, previous] of previousClanByUser.entries()) {
       if (currentByUser.has(userId)) continue;
+      lostRows.push(previous);
+    }
+
+    const inferSingleKick = kickUsedThisSnapshot && lostRows.length === 1;
+    for (const previous of lostRows) {
+      const eventType = inferSingleKick ? "member_kicked" : "member_left";
 
       lostMembers += 1;
       events.push(clanActivityEvent({
@@ -3111,10 +3187,19 @@ function clanActivityIncrements({
         battleKey,
         battleMeta,
         clanRow,
-        eventType: "member_left",
+        eventType,
         userRow: previous,
         previousValue: "present",
-        currentValue: "left/kicked"
+        currentValue: inferSingleKick ? "kicked" : "left",
+        details: inferSingleKick ? {
+          inference: "single_lost_member_and_kick_cooldown_started",
+          previous_kick_available: previousKickAvailable,
+          current_kick_available: currentKickAvailable
+        } : {
+          inference: "no_single_kick_cooldown_match",
+          previous_kick_available: previousKickAvailable,
+          current_kick_available: currentKickAvailable
+        }
       }));
     }
   }
@@ -3136,18 +3221,17 @@ function clanActivityIncrements({
     }));
   }
 
-  if (previousSummary && typeof kickAvailable === "boolean" && typeof previousSummary.kick_available === "boolean") {
-    const previousKick = Boolean(previousSummary.kick_available);
-    if (previousKick !== kickAvailable) {
+  if (previousKickAvailable !== null && currentKickAvailable !== null) {
+    if (previousKickAvailable !== currentKickAvailable) {
       events.push(clanActivityEvent({
         fetchedAt,
         source,
         battleKey,
         battleMeta,
         clanRow,
-        eventType: previousKick && !kickAvailable ? "kick_used" : "kick_available",
-        previousValue: previousKick ? "yes" : "no",
-        currentValue: kickAvailable ? "yes" : "no"
+        eventType: previousKickAvailable && !currentKickAvailable ? "kick_used" : "kick_available",
+        previousValue: previousKickAvailable ? "yes" : "no",
+        currentValue: currentKickAvailable ? "yes" : "no"
       }));
     }
   }
@@ -3179,7 +3263,8 @@ function clanActivityEvent({
   previousRank = null,
   currentRank = null,
   previousPermissionLevel = null,
-  currentPermissionLevel = null
+  currentPermissionLevel = null,
+  details = null
 }) {
   return {
     event_id: "",
@@ -3204,7 +3289,8 @@ function clanActivityEvent({
     previous_permission_level: previousPermissionLevel,
     current_permission_level: currentPermissionLevel,
     details: {
-      clan_points: clanRow.points
+      clan_points: clanRow.points,
+      ...(details && typeof details === "object" ? details : {})
     }
   };
 }
@@ -5588,6 +5674,12 @@ function isForceRequest(url) {
   );
 }
 
+function isTruthyParam(url, name) {
+  return ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get(name) || "").trim().toLowerCase()
+  );
+}
+
 function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force = false }) {
   if (force) {
     return { allowed: true, reason: "forced" };
@@ -5661,6 +5753,10 @@ function skippedIngestResponse({
     battle_display_name: gate.battle_display_name || battleMeta?.displayName || null,
     battle_started_at: gate.battle_started_at || battleMeta?.startedAt || null,
     battle_ended_at: gate.battle_ended_at || battleMeta?.endedAt || null,
+    latest_snapshot_id: gate.latest_snapshot_id || null,
+    latest_snapshot_at: gate.latest_snapshot_at || null,
+    min_snapshot_interval_minutes: gate.min_snapshot_interval_minutes || null,
+    next_allowed_at: gate.next_allowed_at || null,
     fetched_at: fetchedAt,
     rows_inserted: 0
   });
@@ -6136,7 +6232,8 @@ function clanActivityRuntimeConfig(env) {
     concurrency: clanActivityConcurrency(env),
     clan_delay_ms: clanActivityClanDelayMs(env),
     schedule_minutes: clanActivityScheduleMinutes(env),
-    schedule_offset_minutes: clanActivityScheduleOffsetMinutes(env)
+    schedule_offset_minutes: clanActivityScheduleOffsetMinutes(env),
+    min_snapshot_interval_minutes: clanActivityMinSnapshotIntervalMinutes(env)
   };
 }
 
@@ -6179,6 +6276,14 @@ function clanActivityScheduleOffsetMinutes(env) {
     : env.CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES;
 
   return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function clanActivityMinSnapshotIntervalMinutes(env) {
+  return clamp(
+    Number(env.CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES || DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES),
+    0,
+    1440
+  );
 }
 
 function shouldRunClanActivitySchedule(env, scheduledAt = null) {

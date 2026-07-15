@@ -317,7 +317,8 @@
       const name = event.username || (event.user_id ? `user_${event.user_id}` : event.clan_name);
       switch (event.event_type) {
         case "member_joined": return `${name} joined ${event.clan_name}.`;
-        case "member_left": return `${name} left or was kicked from ${event.clan_name}.`;
+        case "member_left": return `${name} left ${event.clan_name}.`;
+        case "member_kicked": return `${name} was kicked from ${event.clan_name}.`;
         case "member_promoted": return `${name} promoted from ${event.previous_member_role || event.previous_value || "-"} to ${event.current_member_role || event.current_value || "-"}.`;
         case "member_demoted": return `${name} demoted from ${event.previous_member_role || event.previous_value || "-"} to ${event.current_member_role || event.current_value || "-"}.`;
         case "kick_used": return `${event.clan_name} used its kick.`;

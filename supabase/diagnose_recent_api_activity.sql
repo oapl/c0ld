@@ -32,7 +32,7 @@ recent_global_history_rows as (
     date_trunc('hour', fetched_at) as hour_bucket,
     count(*) as history_rows,
     count(distinct run_key) as run_keys
-  from public.c0ld_global_ranks_history
+  from public.c0ld_global_rank_history
   where fetched_at >= now() - interval '24 hours'
   group by 1
 ),
@@ -101,4 +101,3 @@ full outer join recent_clans_rows cl using (hour_bucket)
 full outer join recent_activity_roster_rows ar using (hour_bucket)
 full outer join recent_activity_events ae using (hour_bucket)
 order by hour_bucket desc;
-
