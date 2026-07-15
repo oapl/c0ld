@@ -39,6 +39,7 @@ const DEFAULT_CLAN_ACTIVITY_TOP_N = 100;
 const DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES = 30;
 const DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
+const DEFAULT_CLAN_ACTIVITY_CONCURRENCY = 8;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 
 export default {
@@ -208,8 +209,11 @@ async function runScheduledIngests(env, force = false, scheduledAt = null) {
         candidate_player_count: payload?.candidate_player_count ?? null,
         total_global_players: payload?.total_global_players ?? null,
         clans_fetched: payload?.clans_fetched ?? null,
+        clan_activity_concurrency: payload?.clan_activity_concurrency ?? null,
         roster_rows_inserted: payload?.roster_rows_inserted ?? null,
         events_inserted: payload?.events_inserted ?? null,
+        summary_rows_inserted: payload?.summary_rows_inserted ?? null,
+        scan_error_count: Array.isArray(payload?.scan_errors) ? payload.scan_errors.length : null,
         message: payload?.message || null
       };
       results.push(result);
@@ -2575,98 +2579,113 @@ async function handleClanActivityIngest(env, source, force = false) {
   const previousSummaryByClan = new Map(previousSummaries.map(row => [normalizeText(row.clan_name), row]));
   const snapshotId = `clan-activity:${resolvedBattleKey}:${fetchedAt}`;
   const delayMs = clanActivityClanDelayMs(env);
+  const concurrency = clanActivityConcurrency(env);
   const rosterRows = [];
   const summaryRows = [];
   const eventRows = [];
+  const scanErrors = [];
   let fetchedClans = 0;
 
-  for (let index = 0; index < topClans.length; index += 1) {
-    const clanRow = topClans[index];
-    if (index > 0 && delayMs > 0) await sleep(delayMs);
-
-    const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
-    const data = api.data || {};
-    const battles = data.Battles || data.battles || {};
-    const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
-    const members = battle ? normalizeMembers(data, battle) : [];
-    const usernameMap = await resolveRobloxUsernames(members.map(member => member.user_id), env)
-      .catch(() => new Map());
-    const clanKey = normalizeText(clanRow.clan_name);
-    const previousClanRows = previousByClan.get(clanKey) || [];
-    const previousClanByUser = new Map(previousClanRows.map(row => [String(row.user_id), row]));
-    const currentClanRows = [];
-    const currentByUser = new Map();
-    const kickAvailable = extractKickAvailable(data);
-    const memberCount = members.length;
-
-    fetchedClans += 1;
-
-    for (const [memberIndex, member] of members.entries()) {
-      const row = clanActivityRosterRow({
-        snapshotId,
-        fetchedAt,
-        source,
-        battleKey: resolvedBattleKey,
-        battleMeta,
-        clanRow,
-        clanData: data,
-        member,
-        memberRank: memberIndex + 1,
-        usernameMap,
-        kickAvailable,
-        memberCount
-      });
-
-      rosterRows.push(row);
-      currentClanRows.push(row);
-      currentByUser.set(String(row.user_id), row);
+  await runLimited(topClans.map((clanRow, index) => ({ clanRow, index })), concurrency, async ({ clanRow, index }) => {
+    if (delayMs > 0) {
+      await sleep((index % concurrency) * delayMs);
     }
 
-    const previousSummary = previousSummaryByClan.get(clanKey);
-    const firstSeen = previousSummary?.first_seen_at || fetchedAt;
-    const startingMembers = toNumber(previousSummary?.starting_members) ?? (
-      previousClanRows.length ? previousClanRows.length : memberCount
-    );
-    const increments = clanActivityIncrements({
-      clanRow,
-      currentByUser,
-      previousClanByUser,
-      previousSummary,
-      fetchedAt,
-      battleKey: resolvedBattleKey,
-      battleMeta,
-      source,
-      kickAvailable
-    });
+    try {
+      const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
+      const data = api.data || {};
+      const battles = data.Battles || data.battles || {};
+      const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+      const members = battle ? normalizeMembers(data, battle) : [];
+      const usernameMap = await resolveRobloxUsernames(members.map(member => member.user_id), env)
+        .catch(() => new Map());
+      const clanKey = normalizeText(clanRow.clan_name);
+      const previousClanRows = previousByClan.get(clanKey) || [];
+      const previousClanByUser = new Map(previousClanRows.map(row => [String(row.user_id), row]));
+      const currentClanRows = [];
+      const currentByUser = new Map();
+      const kickAvailable = extractKickAvailable(data);
+      const memberCount = members.length;
 
-    eventRows.push(...increments.events);
+      fetchedClans += 1;
 
-    summaryRows.push({
-      battle_key: resolvedBattleKey,
-      battle_display_name: battleMeta.displayName,
-      battle_started_at: battleMeta.startedAt,
-      battle_ended_at: battleMeta.endedAt,
-      clan_name: clanRow.clan_name,
-      clan_key: clanKey,
-      clan_rank: clanRow.rank,
-      previous_clan_rank: toNumber(previousSummary?.clan_rank),
-      clan_points: clanRow.points,
-      icon_id: clanRow.icon_id || null,
-      icon_url: clanRow.icon_url || null,
-      kick_available: kickAvailable,
-      starting_members: startingMembers,
-      current_members: memberCount,
-      new_members: (toNumber(previousSummary?.new_members) || 0) + increments.newMembers,
-      lost_members: (toNumber(previousSummary?.lost_members) || 0) + increments.lostMembers,
-      promotions: (toNumber(previousSummary?.promotions) || 0) + increments.promotions,
-      demotions: (toNumber(previousSummary?.demotions) || 0) + increments.demotions,
-      rank_changes: (toNumber(previousSummary?.rank_changes) || 0) + increments.rankChanges,
-      first_seen_at: firstSeen,
-      last_seen_at: fetchedAt,
-      latest_snapshot_id: snapshotId,
-      updated_at: fetchedAt,
-      raw_clan: clanRow.raw_clan || {}
-    });
+      for (const [memberIndex, member] of members.entries()) {
+        const row = clanActivityRosterRow({
+          snapshotId,
+          fetchedAt,
+          source,
+          battleKey: resolvedBattleKey,
+          battleMeta,
+          clanRow,
+          clanData: data,
+          member,
+          memberRank: memberIndex + 1,
+          usernameMap,
+          kickAvailable,
+          memberCount
+        });
+
+        rosterRows.push(row);
+        currentClanRows.push(row);
+        currentByUser.set(String(row.user_id), row);
+      }
+
+      const previousSummary = previousSummaryByClan.get(clanKey);
+      const firstSeen = previousSummary?.first_seen_at || fetchedAt;
+      const startingMembers = toNumber(previousSummary?.starting_members) ?? (
+        previousClanRows.length ? previousClanRows.length : memberCount
+      );
+      const increments = clanActivityIncrements({
+        clanRow,
+        currentByUser,
+        previousClanByUser,
+        previousSummary,
+        fetchedAt,
+        battleKey: resolvedBattleKey,
+        battleMeta,
+        source,
+        kickAvailable
+      });
+
+      eventRows.push(...increments.events);
+
+      summaryRows.push({
+        battle_key: resolvedBattleKey,
+        battle_display_name: battleMeta.displayName,
+        battle_started_at: battleMeta.startedAt,
+        battle_ended_at: battleMeta.endedAt,
+        clan_name: clanRow.clan_name,
+        clan_key: clanKey,
+        clan_rank: clanRow.rank,
+        previous_clan_rank: toNumber(previousSummary?.clan_rank),
+        clan_points: clanRow.points,
+        icon_id: clanRow.icon_id || null,
+        icon_url: clanRow.icon_url || null,
+        kick_available: kickAvailable,
+        starting_members: startingMembers,
+        current_members: memberCount,
+        new_members: (toNumber(previousSummary?.new_members) || 0) + increments.newMembers,
+        lost_members: (toNumber(previousSummary?.lost_members) || 0) + increments.lostMembers,
+        promotions: (toNumber(previousSummary?.promotions) || 0) + increments.promotions,
+        demotions: (toNumber(previousSummary?.demotions) || 0) + increments.demotions,
+        rank_changes: (toNumber(previousSummary?.rank_changes) || 0) + increments.rankChanges,
+        first_seen_at: firstSeen,
+        last_seen_at: fetchedAt,
+        latest_snapshot_id: snapshotId,
+        updated_at: fetchedAt,
+        raw_clan: clanRow.raw_clan || {}
+      });
+    } catch (err) {
+      scanErrors.push({
+        clan_name: clanRow.clan_name,
+        rank: clanRow.rank,
+        message: err?.message || String(err)
+      });
+    }
+  });
+
+  if (!rosterRows.length && scanErrors.length) {
+    throw httpError(502, `Clan activity scan failed before collecting any roster rows: ${scanErrors[0].message}`);
   }
 
   await supabaseInsertChunked(env, CLAN_ACTIVITY_ROSTER_TABLE, rosterRows, 500);
@@ -2698,9 +2717,11 @@ async function handleClanActivityIngest(env, source, force = false) {
     fetched_at: fetchedAt,
     clans_requested: topClans.length,
     clans_fetched: fetchedClans,
+    clan_activity_concurrency: concurrency,
     roster_rows_inserted: rosterRows.length,
     events_inserted: eventRows.length,
-    summary_rows_inserted: summaryRows.length
+    summary_rows_inserted: summaryRows.length,
+    scan_errors: scanErrors.slice(0, 25)
   }, 202);
 }
 
@@ -6094,6 +6115,7 @@ function clanActivityRuntimeConfig(env) {
   return {
     ingest_clan_activity: String(env.INGEST_CLAN_ACTIVITY || "false").toLowerCase() === "true",
     top_n: clanActivityTopN(env),
+    concurrency: clanActivityConcurrency(env),
     clan_delay_ms: clanActivityClanDelayMs(env),
     schedule_minutes: clanActivityScheduleMinutes(env),
     schedule_offset_minutes: clanActivityScheduleOffsetMinutes(env)
@@ -6113,6 +6135,14 @@ function clanActivityClanDelayMs(env) {
     Number(env.CLAN_ACTIVITY_CLAN_DELAY_MS || DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS),
     0,
     120000
+  );
+}
+
+function clanActivityConcurrency(env) {
+  return clamp(
+    Number(env.CLAN_ACTIVITY_CONCURRENCY || DEFAULT_CLAN_ACTIVITY_CONCURRENCY),
+    1,
+    25
   );
 }
 

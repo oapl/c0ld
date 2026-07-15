@@ -54,6 +54,7 @@ GLOBAL_RANK_EVENT_NAME = ""
 # Optional top-clan roster activity tracking for clans-activity.html and activity-feed.html.
 INGEST_CLAN_ACTIVITY = "false"
 CLAN_ACTIVITY_TOP_N = "100"
+CLAN_ACTIVITY_CONCURRENCY = "8"
 CLAN_ACTIVITY_SCHEDULE_MINUTES = "30"
 CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = "0"
 CLAN_ACTIVITY_CLAN_DELAY_MS = "250"
