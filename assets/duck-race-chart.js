@@ -248,7 +248,7 @@
     panel.innerHTML = `
       <div id="duck-race-meta" class="duck-race-meta">Waiting for the race.</div>
       <div id="duck-race-track" class="duck-race-track">
-        <div class="duck-race-empty">Click Duck Chart to load the race.</div>
+        <div class="duck-race-empty">Click Merc Mode to load the race.</div>
       </div>
     `;
 
@@ -373,7 +373,7 @@
     if (rewardBody) rewardBody.hidden = visible;
     if (button) {
       button.setAttribute("aria-pressed", String(visible));
-      button.textContent = visible ? "Line Chart" : "Duck Chart";
+      button.textContent = visible ? "Line Chart" : "Merc Mode";
     }
 
     if (visible) {
@@ -392,7 +392,7 @@
 
     const button = document.getElementById("reward-threshold-refresh");
     if (button) {
-      button.textContent = "Duck Chart";
+      button.textContent = "Merc Mode";
       button.classList.add("duck-chart-button");
       button.type = "button";
       button.setAttribute("aria-pressed", "false");
