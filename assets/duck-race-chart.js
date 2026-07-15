@@ -6,6 +6,7 @@
   }
 
   const API = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+  const DUCK_IMAGE_URL = "assets/duck-race-duck.png";
   const UPDATE_MS = 5 * 60 * 1000;
   const state = {
     visible: false,
@@ -97,14 +98,14 @@
 
       .duck-racer {
         --lane-left: 10%;
-        --duck-width: 142px;
+        --duck-width: 148px;
         --label-lift: 0px;
         position: absolute;
         left: 2%;
         top: auto;
-        bottom: 52px;
+        bottom: 46px;
         width: var(--duck-width);
-        height: 74px;
+        height: 134px;
         pointer-events: auto;
         transition: left 900ms cubic-bezier(.2, .75, .2, 1);
         z-index: 1;
@@ -114,17 +115,18 @@
         left: var(--lane-left);
       }
 
-      .duck-svg {
+      .duck-image {
         display: block;
-        width: 142px;
-        height: 74px;
+        width: 148px;
+        height: 134px;
+        object-fit: contain;
         filter: drop-shadow(0 2px 0 rgba(0, 0, 0, .65));
       }
 
       .duck-logo {
         position: absolute;
-        left: 40px;
-        top: 37px;
+        left: 44px;
+        top: 74px;
         width: 34px;
         height: 34px;
         border-radius: 7px;
@@ -177,17 +179,17 @@
         .duck-race-section { padding: 14px 12px 14px; }
         .duck-race-track { height: 310px; }
         .duck-racer {
-          --duck-width: 122px;
-          bottom: 48px;
-          height: 64px;
+          --duck-width: 126px;
+          bottom: 44px;
+          height: 114px;
         }
-        .duck-svg {
-          width: 122px;
-          height: 64px;
+        .duck-image {
+          width: 126px;
+          height: 114px;
         }
         .duck-logo {
-          left: 34px;
-          top: 32px;
+          left: 37px;
+          top: 63px;
           width: 29px;
           height: 29px;
         }
@@ -233,17 +235,8 @@
     return "";
   }
 
-  function duckSvg() {
-    return `
-      <svg class="duck-svg" viewBox="0 0 130 68" aria-hidden="true">
-        <path d="M9 46c3-17 21-27 40-22 8-17 35-15 41 2 8 0 17 3 22 10l14 1-13 10c-5 13-23 19-45 18H28C15 65 6 58 9 46z" fill="#f2cd24" stroke="#1b1b1b" stroke-width="4" stroke-linejoin="round"/>
-        <path d="M33 44c11 7 27 8 43 2l-4 16H34c-8 0-15-3-19-8 6-7 12-10 18-10z" fill="#fff" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M45 20c-4-11 2-18 13-19 9-1 15 4 18 11-9-4-18-2-31 8z" fill="#4fa94c" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/>
-        <circle cx="78" cy="18" r="10" fill="#fff" stroke="#1b1b1b" stroke-width="3"/>
-        <circle cx="82" cy="18" r="4" fill="#1b1b1b"/>
-        <path d="M91 26l29 3-25 11c-4-4-5-8-4-14z" fill="#ff7a20" stroke="#1b1b1b" stroke-width="3" stroke-linejoin="round"/>
-      </svg>
-    `;
+  function duckImage() {
+    return `<img class="duck-image" src="${DUCK_IMAGE_URL}" alt="">`;
   }
 
   function ensurePanel() {
@@ -311,7 +304,7 @@
       <div class="duck-lane">
         <div class="duck-waterline"></div>
         <div class="duck-racer" style="--lane-left:${laneLeft.toFixed(2)}%;--label-lift:${labelLift}px;z-index:${zIndex}">
-          ${duckSvg()}
+          ${duckImage()}
           ${logo ? `<img class="duck-logo" src="${escapeHtml(logo)}" alt="">` : ""}
           <div class="duck-racer-label">
             <div class="duck-racer-name">#${escapeHtml(row.rank || index + 1)} ${escapeHtml(row.clan_name || "Unknown")}</div>
