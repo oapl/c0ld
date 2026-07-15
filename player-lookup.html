@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Player Lookup</title>
+<title>Profile Lookup</title>
 <style>
 *,*::before,*::after{box-sizing:border-box}
 :root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--danger:#f85149;--danger-bg:rgba(248,81,73,.12)}
@@ -30,6 +30,14 @@ button:hover,input:focus{border-color:var(--link);background:var(--hover)}
 .profile-shell iframe{width:100%;border:0;display:block;min-height:540px;background:transparent}
 .error{padding:20px;color:#ffb4ad;background:var(--danger-bg)}
 @media(max-width:650px){main{padding:16px}.lookup-form>*{width:100%}}
+.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.menu .lookup-summary,.menu-bar .lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border,#30363d);border-radius:5px;background:var(--panel-2,#0f141b);color:var(--text,#e6edf3);font-size:13px;line-height:1}
+.menu .lookup-summary.active,.menu-bar .lookup-summary.active{border-color:var(--link,#ff9b96);color:var(--link,#ff9b96);background:rgba(248,81,73,.12)}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:165px;padding:6px;border:1px solid var(--border,#30363d);border-radius:8px;background:var(--panel,#161b22);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
 </style>
 </head>
 <body>
@@ -37,19 +45,22 @@ button:hover,input:focus{border-color:var(--link);background:var(--hover)}
   <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
   <div class="menu">
     <a href="index.html">c0ld Leaderboard</a>
-    <a href="clans.html">Top Clans</a>
+    <a href="clans.html">Clans Leaderboard</a>
     <a href="global-leaderboard.html">Global Leaderboard</a>
-    <a href="c0ld-leagues.html">c0ld Leagues</a>
-    <a href="top-leagues.html">Top Leagues</a>
-    <a href="top-clan-filter.html">Top Clan Filter</a>
-    <a href="live-clan.html">Clan Lookup</a>
-    <a class="active" href="player-lookup.html">Player Lookup</a>
+<details class="lookup-menu">
+      <summary class="menu-btn lookup-summary active">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn active" href="player-lookup.html">Profile Lookup</a>
+      </div>
+    </details>
   </div>
 </header>
 <main>
   <section class="hero">
     <div>
-      <h1>Player Lookup</h1>
+      <h1>Profile Lookup</h1>
       <div id="status" class="subtle">Search by Roblox username or user ID.</div>
     </div>
     <form id="lookup-form" class="lookup-form">

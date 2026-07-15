@@ -49,6 +49,14 @@ th{color:var(--muted);font-size:13px;text-align:left;cursor:pointer;font-weight:
 tbody tr:hover{background:rgba(255,255,255,.02)}
 @media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.hero{align-items:stretch}.controls>*{width:100%}}
 @media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}}
+.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.menu .lookup-summary,.menu-bar .lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border,#30363d);border-radius:5px;background:var(--panel-2,#0f141b);color:var(--text,#e6edf3);font-size:13px;line-height:1}
+.menu .lookup-summary.active,.menu-bar .lookup-summary.active{border-color:var(--link,#ff9b96);color:var(--link,#ff9b96);background:rgba(248,81,73,.12)}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:165px;padding:6px;border:1px solid var(--border,#30363d);border-radius:8px;background:var(--panel,#161b22);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
 </style>
 </head>
 <body>
@@ -56,13 +64,16 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
   <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
   <div class="menu">
     <a href="index.html">c0ld Leaderboard</a>
-    <a href="clans.html">Top Clans</a>
+    <a href="clans.html">Clans Leaderboard</a>
     <a class="active" href="global-leaderboard.html">Global Leaderboard</a>
-    <a href="c0ld-leagues.html">c0ld Leagues</a>
-    <a href="top-leagues.html">Top Leagues</a>
-    <a href="top-clan-filter.html">Top Clan Filter</a>
-    <a href="live-clan.html">Clan Lookup</a>
-    <a href="player-lookup.html">Player Lookup</a>
+<details class="lookup-menu">
+      <summary class="menu-btn lookup-summary">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+      </div>
+    </details>
   </div>
 </header>
 <main>

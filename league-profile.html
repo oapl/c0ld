@@ -27,18 +27,29 @@ button{border:1px solid #30363d;border-radius:6px;background:#0f141b;color:#e6ed
 .avatar{width:36px;height:36px;border-radius:8px;background:#21262d;color:#c9d1d9;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;object-fit:cover}.meta{color:#8b949e;font-size:12px;margin-top:2px}
 .positive{color:#3fb950;font-weight:700}.negative{color:#f85149;font-weight:700}.zero,.unknown{color:#8b949e}.empty,.error{padding:20px}.error{color:#ffb4ad;background:rgba(248,81,73,.12)}tbody tr:hover{background:rgba(255,255,255,.02)}
 .profile-hero{padding:18px;margin-bottom:18px;display:flex;gap:18px;align-items:center}.profile-avatar{width:76px;height:76px;border-radius:12px;background:#21262d;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;overflow:hidden}.profile-avatar img{width:100%;height:100%;object-fit:cover}.profile-hero h1{margin:0 0 6px;font-size:30px}.subtitle{color:#8b949e;margin-bottom:6px}.stat-line{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;border-bottom:1px solid #30363d}.stat-line span{color:#8b949e}.chart-controls{display:flex;gap:14px;flex-wrap:wrap;padding:0 0 10px}.chart-wrap{padding:16px}.chart-wrap canvas{width:100%;height:340px;display:block;border:1px solid #30363d;border-radius:8px;background:#0f141b}
-@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}</style>
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.profile-hero{align-items:flex-start}}.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.menu .lookup-summary,.menu-bar .lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border,#30363d);border-radius:5px;background:var(--panel-2,#0f141b);color:var(--text,#e6edf3);font-size:13px;line-height:1}
+.menu .lookup-summary.active,.menu-bar .lookup-summary.active{border-color:var(--link,#ff9b96);color:var(--link,#ff9b96);background:rgba(248,81,73,.12)}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:165px;padding:6px;border:1px solid var(--border,#30363d);border-radius:8px;background:var(--panel,#161b22);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
+</style>
 </head>
 <body>
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu">
     <a href="index.html">c0ld Leaderboard</a>
-    <a href="clans.html">Top Clans</a>
+    <a href="clans.html">Clans Leaderboard</a>
     <a href="global-leaderboard.html">Global Leaderboard</a>
-    <a href="c0ld-leagues.html">c0ld Leagues</a>
-    <a href="top-leagues.html">Top Leagues</a>
-    <a href="top-clan-filter.html">Top Clan Filter</a>
-    <a href="live-clan.html">Clan Lookup</a>
-    <a href="player-lookup.html">Player Lookup</a>
+<details class="lookup-menu">
+      <summary class="menu-btn lookup-summary">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+      </div>
+    </details>
   </div></header>
 <main>
 <div id="error" class="error" style="display:block;min-height:0;padding:0;background:transparent"></div>
