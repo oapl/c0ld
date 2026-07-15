@@ -15,6 +15,8 @@ const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
 const CLAN_ACTIVITY_SUMMARY_TABLE = "c0ld_clan_activity_summary";
+const PS99_PLACES_TABLE = "c0ld_ps99_places";
+const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -42,6 +44,11 @@ const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const DEFAULT_CLAN_ACTIVITY_CONCURRENCY = 8;
 const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 25;
 const TOP_CLAN_REBIRTH_POINTS = 120;
+const DEFAULT_PS99_UNIVERSE_ID = 3317771874;
+const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
+const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 10;
+const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
 
 export default {
   async fetch(request, env, ctx) {
@@ -80,7 +87,8 @@ export default {
           ingest_open: gate.allowed,
           ingest_skip_reason: gate.allowed ? null : gate.reason,
           global_rank_config: globalRankRuntimeConfig(env),
-          clan_activity_config: clanActivityRuntimeConfig(env)
+          clan_activity_config: clanActivityRuntimeConfig(env),
+          ps99_version_config: ps99VersionRuntimeConfig(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -112,6 +120,8 @@ export default {
         response = await handleClanActivityDetail(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/feed") {
         response = await handleClanActivityFeed(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/versions") {
+        response = await handlePs99Versions(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
@@ -126,6 +136,11 @@ export default {
         response = await handleClanActivityIngest(env, "manual", {
           force: isForceRequest(url),
           bypassRecentGuard: isTruthyParam(url, "bypass_recent")
+        });
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/versions/ingest") {
+        requireAdmin(request, env);
+        response = await handlePs99VersionIngest(env, "manual", {
+          force: isForceRequest(url)
         });
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
@@ -192,6 +207,15 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
     }
   }
 
+  if (String(env.INGEST_PS99_VERSION_HISTORY || "false").toLowerCase() === "true") {
+    if (force || shouldRunPs99VersionSchedule(env, scheduledAt)) {
+      jobs.push({
+        label: "ps99-versions",
+        run: () => handlePs99VersionIngest(env, "schedule", { force })
+      });
+    }
+  }
+
   const results = [];
 
   for (const job of jobs) {
@@ -222,6 +246,9 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
         roster_rows_inserted: payload?.roster_rows_inserted ?? null,
         events_inserted: payload?.events_inserted ?? null,
         summary_rows_inserted: payload?.summary_rows_inserted ?? null,
+        ps99_places_checked: payload?.places_checked ?? null,
+        ps99_events_inserted: payload?.version_events_inserted ?? null,
+        ps99_newest_version: payload?.newest_version ?? null,
         scan_error_count: Array.isArray(payload?.scan_errors) ? payload.scan_errors.length : null,
         message: payload?.message || null
       };
@@ -2948,6 +2975,375 @@ async function handleClanActivityFeed(request, env) {
       .filter(row => row.event_type === "rank_up" || row.event_type === "rank_down")
       .map(normalizeClanActivityEventOutput)
   }, env);
+}
+
+async function handlePs99Versions(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || DEFAULT_PS99_VERSION_HISTORY_LIMIT), 1, 500);
+  const places = await supabaseSelect(env, PS99_PLACES_TABLE, {
+    select: "universe_id,place_id,place_name,root_place,is_active,latest_version,latest_published_at,latest_checked_at,updated_at",
+    is_active: "eq.true",
+    order: "root_place.desc,place_name.asc",
+    limit: "500"
+  });
+  const events = await supabaseSelect(env, PS99_VERSION_EVENTS_TABLE, {
+    select: "event_id,universe_id,place_id,place_name,previous_version,current_version,previous_published_at,current_published_at,detected_at,source,created_at",
+    order: "detected_at.desc,id.desc",
+    limit: String(limit)
+  });
+  const newestPlace = [...places].sort((a, b) => {
+    const versionDelta = (toNumber(b.latest_version) || 0) - (toNumber(a.latest_version) || 0);
+    if (versionDelta) return versionDelta;
+    return isoToMs(b.latest_checked_at) - isoToMs(a.latest_checked_at);
+  })[0] || null;
+  const newestEvent = events[0] || null;
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    universe_id: ps99UniverseId(env),
+    root_place_id: ps99RootPlaceId(env),
+    newest_version: toNumber(newestEvent?.current_version) ?? toNumber(newestPlace?.latest_version),
+    newest_place_name: newestEvent?.place_name || newestPlace?.place_name || null,
+    newest_detected_at: newestEvent?.detected_at || newestPlace?.latest_checked_at || null,
+    places: places.map(normalizePs99PlaceOutput),
+    events: events.map(normalizePs99VersionEventOutput)
+  }, env, publicCacheSeconds(env, "PS99_VERSION_HISTORY"));
+}
+
+async function handlePs99VersionIngest(env, source, options = {}) {
+  requireSupabase(env);
+
+  const fetchedAt = new Date().toISOString();
+  const universeId = ps99UniverseId(env);
+  const refreshPlaces = String(env.PS99_REFRESH_PLACE_LIST || "true").toLowerCase() !== "false";
+  const scanErrors = [];
+  let fetchedPlaces = [];
+
+  if (refreshPlaces) {
+    try {
+      fetchedPlaces = await fetchPs99UniversePlaces(env);
+      if (fetchedPlaces.length) {
+        await supabaseUpsert(env, PS99_PLACES_TABLE, fetchedPlaces.map(place => ({
+          universe_id: universeId,
+          place_id: place.placeId,
+          place_name: place.placeName,
+          root_place: place.rootPlace,
+          is_active: true,
+          raw_place: place.rawPlace,
+          updated_at: fetchedAt
+        })), "place_id");
+      }
+    } catch (err) {
+      scanErrors.push({
+        scope: "place_list",
+        message: err?.message || String(err)
+      });
+    }
+  }
+
+  const existingPlaces = await fetchPs99WatchedPlaces(env, fetchedAt);
+  const places = existingPlaces.length ? existingPlaces : fetchedPlaces.map(place => ({
+    universe_id: universeId,
+    place_id: place.placeId,
+    place_name: place.placeName,
+    root_place: place.rootPlace,
+    latest_version: null,
+    latest_published_at: null
+  }));
+  const placeRows = [];
+  const eventRows = [];
+
+  for (const place of places) {
+    const placeId = toNumber(place.place_id || place.placeId);
+    if (!placeId) continue;
+
+    try {
+      const version = await fetchPs99LatestPlaceVersion(env, placeId);
+      const latestVersion = toNumber(version.version);
+      const latestPublishedAt = safeIso(version.publishedAt);
+      const previousVersion = toNumber(place.latest_version);
+      const previousPublishedAt = safeIso(place.latest_published_at);
+      const placeName = stringOrNull(place.place_name || place.placeName) || `Place ${placeId}`;
+
+      placeRows.push({
+        universe_id: universeId,
+        place_id: placeId,
+        place_name: placeName,
+        root_place: Boolean(place.root_place || place.rootPlace || placeId === ps99RootPlaceId(env)),
+        is_active: true,
+        latest_version: latestVersion,
+        latest_published_at: latestPublishedAt,
+        latest_checked_at: fetchedAt,
+        raw_place: parseJsonObject(place.raw_place) || place.rawPlace || {},
+        raw_version: version.rawVersion || {},
+        updated_at: fetchedAt
+      });
+
+      if (latestVersion !== null && latestVersion !== previousVersion) {
+        eventRows.push({
+          event_id: `ps99:${placeId}:${latestVersion}`,
+          universe_id: universeId,
+          place_id: placeId,
+          place_name: placeName,
+          previous_version: previousVersion,
+          current_version: latestVersion,
+          previous_published_at: previousPublishedAt,
+          current_published_at: latestPublishedAt,
+          detected_at: fetchedAt,
+          source,
+          raw_version: version.rawVersion || {}
+        });
+      }
+    } catch (err) {
+      scanErrors.push({
+        scope: "place_version",
+        place_id: placeId,
+        place_name: place.place_name || place.placeName || null,
+        message: err?.message || String(err)
+      });
+    }
+
+    const delayMs = ps99VersionPlaceDelayMs(env);
+    if (delayMs > 0) await sleep(delayMs);
+  }
+
+  if (placeRows.length) {
+    await supabaseUpsert(env, PS99_PLACES_TABLE, placeRows, "place_id");
+  }
+
+  if (eventRows.length) {
+    await supabaseUpsert(env, PS99_VERSION_EVENTS_TABLE, eventRows, "event_id");
+  }
+
+  const newest = [...placeRows].sort((a, b) => (toNumber(b.latest_version) || 0) - (toNumber(a.latest_version) || 0))[0] || null;
+
+  return json({
+    ok: true,
+    source,
+    universe_id: universeId,
+    root_place_id: ps99RootPlaceId(env),
+    fetched_at: fetchedAt,
+    places_discovered: fetchedPlaces.length,
+    places_checked: placeRows.length,
+    version_events_inserted: eventRows.length,
+    newest_place_name: newest?.place_name || null,
+    newest_version: newest?.latest_version ?? null,
+    scan_errors: scanErrors.slice(0, 25)
+  }, 202);
+}
+
+async function fetchPs99WatchedPlaces(env, fetchedAt) {
+  let rows = await supabaseSelect(env, PS99_PLACES_TABLE, {
+    select: "universe_id,place_id,place_name,root_place,is_active,latest_version,latest_published_at,raw_place",
+    is_active: "eq.true",
+    order: "root_place.desc,place_name.asc",
+    limit: "500"
+  });
+
+  if (rows.length) return rows;
+
+  const rootPlace = {
+    universe_id: ps99UniverseId(env),
+    place_id: ps99RootPlaceId(env),
+    place_name: "Pet Simulator 99",
+    root_place: true,
+    is_active: true,
+    latest_checked_at: fetchedAt,
+    updated_at: fetchedAt,
+    raw_place: {}
+  };
+  await supabaseUpsert(env, PS99_PLACES_TABLE, [rootPlace], "place_id");
+  rows = await supabaseSelect(env, PS99_PLACES_TABLE, {
+    select: "universe_id,place_id,place_name,root_place,is_active,latest_version,latest_published_at,raw_place",
+    is_active: "eq.true",
+    order: "root_place.desc,place_name.asc",
+    limit: "500"
+  });
+
+  return rows;
+}
+
+async function fetchPs99UniversePlaces(env) {
+  const url = new URL(`https://develop.roblox.com/v1/universes/${ps99UniverseId(env)}/places`);
+  url.searchParams.set("sortOrder", "Asc");
+  url.searchParams.set("limit", "100");
+  const payload = await fetchJsonWithRetry(url, "Roblox universe places", {
+    attempts: 3,
+    baseDelayMs: 1000
+  });
+  const rows = extractRobloxArray(payload);
+  const places = rows
+    .map(row => normalizePs99UniversePlace(row, env))
+    .filter(row => row.placeId);
+  const rootPlaceId = ps99RootPlaceId(env);
+
+  if (!places.some(place => place.placeId === rootPlaceId)) {
+    places.unshift({
+      placeId: rootPlaceId,
+      placeName: "Pet Simulator 99",
+      rootPlace: true,
+      rawPlace: {}
+    });
+  }
+
+  return places;
+}
+
+async function fetchPs99LatestPlaceVersion(env, placeId) {
+  const url = new URL(`https://apis.roblox.com/place-version-history-api/v1/${placeId}/history`);
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("sortOrder", "Desc");
+  const payload = await fetchJsonWithRetryHeaders(url, "Roblox place version history", {
+    attempts: 3,
+    baseDelayMs: 2000,
+    headers: robloxVersionHistoryHeaders(env)
+  });
+  const rows = extractRobloxArray(payload);
+  const row = rows[0] || payload;
+  const version = toNumber(firstDefined(
+    row.versionNumber,
+    row.VersionNumber,
+    row.version,
+    row.Version,
+    row.versionId,
+    row.VersionId,
+    row.id,
+    row.Id
+  ));
+  const publishedAt = firstDefined(
+    row.created,
+    row.Created,
+    row.createdAt,
+    row.created_at,
+    row.publishedAt,
+    row.published_at,
+    row.timestamp,
+    row.date
+  );
+
+  return {
+    version,
+    publishedAt,
+    rawVersion: row && typeof row === "object" ? row : {}
+  };
+}
+
+async function fetchJsonWithRetryHeaders(url, label, { attempts, baseDelayMs, headers = {} }) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "c0ld-Clan-API-Worker",
+          ...headers
+        },
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+      const text = await res.text();
+      let payload = {};
+
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        payload = { message: text || "Invalid JSON response" };
+      }
+
+      if (!res.ok || payload.ok === false || payload.status === "error") {
+        const retryAfter = parseRetryAfterSeconds(res.headers.get("Retry-After"));
+        const err = httpError(
+          res.status || 502,
+          payload.message || payload.error || `${label} failed with HTTP ${res.status}`
+        );
+        err.retryAfterMs = retryAfter ? retryAfter * 1000 : null;
+        throw err;
+      }
+
+      return payload;
+    } catch (err) {
+      lastError = err;
+      if (attempt >= attempts) break;
+
+      const retryAfterMs = Number(err?.retryAfterMs);
+      const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+        ? retryAfterMs
+        : Math.min(120000, attempt * attempt * baseDelayMs);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError || httpError(502, `${label} failed`);
+}
+
+function normalizePs99UniversePlace(row, env) {
+  const placeId = Math.round(toNumber(firstDefined(
+    row.id,
+    row.placeId,
+    row.place_id,
+    row.PlaceId
+  )) || 0);
+  const placeName = stringOrNull(firstDefined(row.name, row.placeName, row.Name)) || `Place ${placeId}`;
+  const rawRoot = firstDefined(row.isRootPlace, row.rootPlace, row.root_place);
+
+  return {
+    placeId,
+    placeName,
+    rootPlace: rawRoot === true || String(rawRoot || "").toLowerCase() === "true" || placeId === ps99RootPlaceId(env),
+    rawPlace: row && typeof row === "object" ? row : {}
+  };
+}
+
+function extractRobloxArray(payload) {
+  if (Array.isArray(payload)) return payload;
+
+  for (const key of ["data", "versions", "history", "placeVersions", "items"]) {
+    if (Array.isArray(payload?.[key])) return payload[key];
+  }
+
+  return [];
+}
+
+function robloxVersionHistoryHeaders(env) {
+  const cookie = robloxVersionHistoryCookie(env);
+  return cookie ? { Cookie: cookie } : {};
+}
+
+function robloxVersionHistoryCookie(env) {
+  const raw = String(env.ROBLOX_SECURITY_COOKIE || env.ROBLOX_COOKIE || "").trim();
+  if (!raw) return "";
+  return raw.includes(".ROBLOSECURITY=") ? raw : `.ROBLOSECURITY=${raw}`;
+}
+
+function normalizePs99PlaceOutput(row) {
+  return {
+    universe_id: toNumber(row.universe_id),
+    place_id: toNumber(row.place_id),
+    place_name: row.place_name || null,
+    root_place: Boolean(row.root_place),
+    latest_version: toNumber(row.latest_version),
+    latest_published_at: row.latest_published_at || null,
+    latest_checked_at: row.latest_checked_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function normalizePs99VersionEventOutput(row) {
+  return {
+    event_id: row.event_id || null,
+    universe_id: toNumber(row.universe_id),
+    place_id: toNumber(row.place_id),
+    place_name: row.place_name || null,
+    previous_version: toNumber(row.previous_version),
+    current_version: toNumber(row.current_version),
+    previous_published_at: row.previous_published_at || null,
+    current_published_at: row.current_published_at || null,
+    detected_at: row.detected_at || null,
+    source: row.source || null
+  };
 }
 
 async function resolveActivityBattleKey(env, requestedBattle) {
@@ -6299,6 +6695,65 @@ function shouldRunClanActivitySchedule(env, scheduledAt = null) {
   return minutesUntilOffset < 5;
 }
 
+function ps99VersionRuntimeConfig(env) {
+  return {
+    ingest_ps99_version_history: String(env.INGEST_PS99_VERSION_HISTORY || "false").toLowerCase() === "true",
+    universe_id: ps99UniverseId(env),
+    root_place_id: ps99RootPlaceId(env),
+    refresh_place_list: String(env.PS99_REFRESH_PLACE_LIST || "true").toLowerCase() !== "false",
+    schedule_minutes: ps99VersionScheduleMinutes(env),
+    schedule_offset_minutes: ps99VersionScheduleOffsetMinutes(env),
+    place_delay_ms: ps99VersionPlaceDelayMs(env),
+    version_history_auth_configured: Boolean(robloxVersionHistoryCookie(env))
+  };
+}
+
+function ps99UniverseId(env) {
+  return Math.round(toNumber(env.PS99_UNIVERSE_ID) || DEFAULT_PS99_UNIVERSE_ID);
+}
+
+function ps99RootPlaceId(env) {
+  return Math.round(toNumber(env.PS99_ROOT_PLACE_ID) || DEFAULT_PS99_ROOT_PLACE_ID);
+}
+
+function ps99VersionScheduleMinutes(env) {
+  return clamp(
+    Number(env.PS99_VERSION_SCHEDULE_MINUTES || DEFAULT_PS99_VERSION_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function ps99VersionScheduleOffsetMinutes(env) {
+  const interval = ps99VersionScheduleMinutes(env);
+  const offsetValue = env.PS99_VERSION_SCHEDULE_OFFSET_MINUTES === undefined || env.PS99_VERSION_SCHEDULE_OFFSET_MINUTES === ""
+    ? DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES
+    : env.PS99_VERSION_SCHEDULE_OFFSET_MINUTES;
+
+  return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function ps99VersionPlaceDelayMs(env) {
+  return clamp(
+    Number(env.PS99_VERSION_PLACE_DELAY_MS || 0),
+    0,
+    120000
+  );
+}
+
+function shouldRunPs99VersionSchedule(env, scheduledAt = null) {
+  const interval = ps99VersionScheduleMinutes(env);
+  const offset = ps99VersionScheduleOffsetMinutes(env);
+  const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
+  const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minuteInInterval = minuteOfDay % interval;
+  const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
+
+  return minutesUntilOffset < 5;
+}
+
 function normalizedScheduleOffset(value, interval) {
   const raw = Number(value || 0);
   if (!Number.isFinite(raw)) return 0;
@@ -6578,6 +7033,18 @@ function prettifyBattleKey(value) {
 
 function firstDefined(...values) {
   return values.find(value => value !== undefined && value !== null && value !== "");
+}
+
+function parseJsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function stringOrNull(value) {

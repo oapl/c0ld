@@ -90,6 +90,7 @@ supabase/migrations/004_c0ld_clan_snapshots.sql
 supabase/migrations/006_c0ld_current_and_battles.sql
 supabase/migrations/007_c0ld_clans_leaderboard.sql
 supabase/migrations/019_clan_activity.sql
+supabase/migrations/021_ps99_version_history.sql
 ```
 
 It creates:
@@ -105,6 +106,8 @@ It creates:
 | `c0ld_clan_activity_current` | table | Latest tracked top-clan rosters. |
 | `c0ld_clan_activity_events` | table | Detected joins, leaves/kicks, promotions, demotions, kick-state changes, and rank changes. |
 | `c0ld_clan_activity_summary` | table | Per-clan activity counters for `clans-activity.html`. |
+| `c0ld_ps99_places` | table | Watched PS99 places and their latest known place version. |
+| `c0ld_ps99_version_events` | table | Append-only PS99 place version change catalog for `ps99-version-history.html`. |
 
 The older tables can stay while the site is migrated. New Worker pulls should write to `c0ld_clan_snapshots`.
 
@@ -170,6 +173,14 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
 | `CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES` | Optional. Defaults to `25`; skips activity ingests when the latest roster snapshot for the same battle is newer than this. Use `bypass_recent=1` on a protected manual URL only when you intentionally want to override it. |
 | `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
+| `INGEST_PS99_VERSION_HISTORY` | Optional. Defaults to `false`. Set to `true` after running migration `021` to catalog PS99 place version changes. |
+| `PS99_UNIVERSE_ID` | Optional. Defaults to `3317771874`. |
+| `PS99_ROOT_PLACE_ID` | Optional. Defaults to `8737899170`. |
+| `PS99_REFRESH_PLACE_LIST` | Optional. Defaults to `true`; lets the Worker refresh the watched PS99 place list from Roblox before checking versions. |
+| `PS99_VERSION_SCHEDULE_MINUTES` | Optional. Defaults to `10`; controls how often scheduled version checks run. |
+| `PS99_VERSION_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the PS99 version schedule interval. |
+| `PS99_VERSION_PLACE_DELAY_MS` | Optional. Defaults to `0`; delay between watched place version checks. |
+| `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -181,6 +192,7 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 |---|---|
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
+| `ROBLOX_SECURITY_COOKIE` | Optional. Add only if Roblox rejects the place-version-history endpoint without cookie auth. Store the raw `.ROBLOSECURITY` value or the full `.ROBLOSECURITY=...` cookie. |
 
 ## Scheduled pulls
 
@@ -229,6 +241,8 @@ Useful endpoints:
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
 | `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
 | `/api/clans/activity/feed` | All-clans activity blotter split into clan activity and rank activity. |
+| `/api/ps99/versions/ingest` | Manual protected PS99 place-version ingest. `POST` only. |
+| `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
@@ -242,6 +256,14 @@ Invoke-RestMethod -Method Post `
 
 The first pull establishes `starting_members`; later pulls compare against the
 previous current roster and append activity events.
+
+To seed PS99 version history after running migration `021`, run:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/versions/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
 
 To compare global-rank scan configs, deploy the Worker and run:
 

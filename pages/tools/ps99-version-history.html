@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PS99 Version History</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1117;
+      --panel: #151b22;
+      --border: #2b3540;
+      --text: #f6f8fb;
+      --muted: #9fb4c9;
+      --accent: #ff6d6d;
+      --good: #25d366;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      padding: 16px 20px;
+      text-align: center;
+    }
+
+    .brand-img {
+      display: block;
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 10px;
+      object-fit: contain;
+    }
+
+    nav {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .menu-btn,
+    .btn {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #070b10;
+      border-radius: 5px;
+      padding: 8px 13px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .menu-btn.active,
+    .btn:hover {
+      border-color: var(--accent);
+      background: rgba(255, 109, 109, 0.22);
+      color: #ffb3b3;
+    }
+
+    .lookup-menu { position: relative; }
+    .lookup-menu summary { list-style: none; }
+    .lookup-menu summary::-webkit-details-marker { display: none; }
+    .lookup-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 190px;
+      z-index: 20;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0b1117;
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+    }
+    .lookup-menu[open] .lookup-panel {
+      display: grid;
+      gap: 6px;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 26px auto 60px;
+    }
+
+    .hero,
+    .panel,
+    .stat {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+
+    .hero {
+      padding: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    h1, h2 { margin: 0; }
+    h1 { font-size: 32px; }
+    h2 { font-size: 20px; }
+    .muted { color: var(--muted); }
+    .good { color: var(--good); font-weight: 800; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .stat {
+      padding: 16px;
+      min-height: 78px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .panel {
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 13px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    td:first-child,
+    .version {
+      font-weight: 800;
+    }
+
+    .empty,
+    .error {
+      padding: 18px;
+      color: var(--muted);
+    }
+
+    .error { color: #ffb3b3; }
+
+    @media (max-width: 900px) {
+      main { width: calc(100% - 16px); }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      table { min-width: 760px; }
+      .panel { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="brand-img" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
+    <nav>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <a class="menu-btn" href="c0ld-leagues.html">c0ld Leagues</a>
+      <details class="lookup-menu">
+        <summary class="menu-btn active">Tools</summary>
+        <div class="lookup-panel">
+          <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+          <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+          <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+          <a class="menu-btn active" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
+          <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <h1>PS99 Version History</h1>
+        <div id="subtitle" class="muted">Cataloging watched Pet Simulator 99 place updates.</div>
+      </div>
+      <button id="refresh" class="btn" type="button">Refresh</button>
+    </section>
+
+    <section class="stats">
+      <article class="stat">
+        <div class="stat-label">Newest Version</div>
+        <div id="newest-version" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Newest Place</div>
+        <div id="newest-place" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Places Watched</div>
+        <div id="places-watched" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Last Detected</div>
+        <div id="last-detected" class="stat-value">-</div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Current Watched Places</h2>
+        <span id="places-meta" class="muted">Loading...</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Place</th>
+            <th>Place ID</th>
+            <th>Latest Version</th>
+            <th>Published</th>
+            <th>Checked</th>
+          </tr>
+        </thead>
+        <tbody id="places-body">
+          <tr><td colspan="5" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Version History</h2>
+        <span id="history-meta" class="muted">Loading...</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Detected</th>
+            <th>Place</th>
+            <th>Version</th>
+            <th>Previous</th>
+            <th>Published</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="5" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+    const CACHE_KEY = "c0ld:ps99-version-history:v1";
+
+    const els = {
+      subtitle: document.getElementById("subtitle"),
+      refresh: document.getElementById("refresh"),
+      newestVersion: document.getElementById("newest-version"),
+      newestPlace: document.getElementById("newest-place"),
+      placesWatched: document.getElementById("places-watched"),
+      lastDetected: document.getElementById("last-detected"),
+      placesMeta: document.getElementById("places-meta"),
+      historyMeta: document.getElementById("history-meta"),
+      placesBody: document.getElementById("places-body"),
+      historyBody: document.getElementById("history-body")
+    };
+
+    function fmtDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "-";
+      return date.toLocaleString(undefined, {
+        month: "numeric",
+        day: "numeric",
+        year: "2-digit",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    }
+
+    function fmtVersion(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? `v${n.toLocaleString()}` : "-";
+    }
+
+    function text(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function render(data, stale = false) {
+      const places = Array.isArray(data?.places) ? data.places : [];
+      const events = Array.isArray(data?.events) ? data.events : [];
+      const newestVersion = data?.newest_version ?? events[0]?.current_version ?? places[0]?.latest_version;
+
+      els.subtitle.textContent = stale
+        ? "Showing cached PS99 version data while refreshing..."
+        : `Loaded ${events.length.toLocaleString()} version history event${events.length === 1 ? "" : "s"}.`;
+      els.newestVersion.textContent = fmtVersion(newestVersion);
+      els.newestPlace.textContent = data?.newest_place_name || events[0]?.place_name || "-";
+      els.placesWatched.textContent = places.length.toLocaleString();
+      els.lastDetected.textContent = fmtDate(data?.newest_detected_at || events[0]?.detected_at || places[0]?.latest_checked_at);
+      els.placesMeta.textContent = `${places.length.toLocaleString()} active watched place${places.length === 1 ? "" : "s"}`;
+      els.historyMeta.textContent = events.length ? `Newest first` : "No version events yet";
+
+      els.placesBody.innerHTML = places.length
+        ? places.map(place => `
+          <tr>
+            <td>${text(place.place_name)}${place.root_place ? ' <span class="good">root</span>' : ""}</td>
+            <td>${text(place.place_id)}</td>
+            <td class="version">${fmtVersion(place.latest_version)}</td>
+            <td>${fmtDate(place.latest_published_at)}</td>
+            <td>${fmtDate(place.latest_checked_at)}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="5" class="empty">No watched places found. Run the PS99 version migration and ingest once.</td></tr>`;
+
+      els.historyBody.innerHTML = events.length
+        ? events.map(event => `
+          <tr>
+            <td>${fmtDate(event.detected_at)}</td>
+            <td>${text(event.place_name)}</td>
+            <td class="version">${fmtVersion(event.current_version)}</td>
+            <td>${fmtVersion(event.previous_version)}</td>
+            <td>${fmtDate(event.current_published_at)}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="5" class="empty">No version history found yet. Run the protected ingest once to seed the catalog.</td></tr>`;
+    }
+
+    async function load({ force = false } = {}) {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached && !force) {
+        try { render(JSON.parse(cached), true); } catch {}
+      }
+
+      els.refresh.disabled = true;
+      els.refresh.textContent = "Refreshing...";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/ps99/versions?limit=200`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        render(data);
+      } catch (err) {
+        if (!cached) {
+          els.placesBody.innerHTML = `<tr><td colspan="5" class="error">${text(err.message || err)}</td></tr>`;
+          els.historyBody.innerHTML = `<tr><td colspan="5" class="error">${text(err.message || err)}</td></tr>`;
+        }
+      } finally {
+        els.refresh.disabled = false;
+        els.refresh.textContent = "Refresh";
+      }
+    }
+
+    els.refresh.addEventListener("click", () => load({ force: true }));
+    load();
+  </script>
+</body>
+</html>
