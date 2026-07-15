@@ -352,6 +352,25 @@ function recalcBattle(battle){
   };
 }
 
+function downsampleSeriesByMinutes(series,minutes){
+  const bucketMs=Math.max(1,minutes)*60*1000;
+  const buckets=new Map();
+
+  for(const point of normalizeSeries(series)){
+    const time=new Date(point.t).getTime();
+    if(Number.isNaN(time))continue;
+
+    const key=Math.floor(time/bucketMs)*bucketMs;
+    const previous=buckets.get(key);
+
+    if(!previous||new Date(point.t)>new Date(previous.t)){
+      buckets.set(key,point);
+    }
+  }
+
+  return[...buckets.values()].sort((a,b)=>new Date(a.t)-new Date(b.t));
+}
+
 async function loadLiveProfile(id){
   const current=await fetchJson(`${MEMBER_CURRENT}?clan=${encodeURIComponent(clan().label)}`,"live leaderboard");
   const currentRow=findCurrentRow(current,id);
@@ -478,9 +497,35 @@ async function loadGlobalProfile(id){
   if(!payload?.ok||!row)return null;
 
   const seen=row.fetched_at||row.updated_at||payload.run?.finished_at||payload.run?.updated_at||null;
-  const points=finite(row.global_points??row.clan_points)??0;
-  const rank=finite(row.global_rank??row.clan_rank);
+  const globalPoints=finite(row.global_points);
+  const clanPoints=finite(row.clan_points);
+  const points=globalPoints??clanPoints??0;
+  const globalRank=finite(row.global_rank);
+  const clanRank=finite(row.clan_rank);
   const displayName=row.event_name||row.battle_display_name||row.battle_key||"Global Scan";
+  const historySeries=downsampleSeriesByMinutes(
+    (payload.history||[]).map(item=>({
+      t:item.fetched_at,
+      rank:finite(item.global_rank),
+      points:finite(item.global_points??item.clan_points)
+    })),
+    30
+  );
+  const battles=historySeries.length>1
+    ? [recalcBattle({
+        battle:row.battle_key||"global-scan",
+        source:"global",
+        display_name:`${displayName} Global Rank`,
+        battle_first_snapshot:historySeries[0]?.t||seen,
+        battle_last_snapshot:historySeries[historySeries.length-1]?.t||seen,
+        first_seen:historySeries[0]?.t||seen,
+        last_seen:historySeries[historySeries.length-1]?.t||seen,
+        starting_rank:historySeries[0]?.rank??globalRank,
+        ending_rank:historySeries[historySeries.length-1]?.rank??globalRank,
+        ending_points:historySeries[historySeries.length-1]?.points??points,
+        series:historySeries
+      })]
+    : [];
 
   return{
     aliases:[String(id)],
@@ -488,26 +533,21 @@ async function loadGlobalProfile(id){
     user_id:row.user_id||null,
     avatar_url:row.avatar_url||null,
     profile_url:row.user_id?`https://www.roblox.com/users/${row.user_id}/profile`:null,
-    total_battles:1,
-    latest_rank:rank,
+    total_battles:battles.length,
+    is_global_profile:true,
+    latest_rank:clanRank??globalRank,
     latest_points:points,
     latest_seen:seen,
     source_clan:row.source_clan||row.clan_name||null,
+    source_clan_rank:row.source_clan_rank??clanRank??null,
+    source_clan_points:row.source_clan_points??clanPoints??null,
+    global_points:globalPoints??points,
     global_rank:row.global_rank??null,
     total_global_players:row.total_global_players??null,
-    battles:[recalcBattle({
-      battle:row.battle_key||"global-scan",
-      source:"global",
-      display_name:displayName,
-      battle_first_snapshot:seen,
-      battle_last_snapshot:seen,
-      first_seen:seen,
-      last_seen:seen,
-      starting_rank:rank,
-      ending_rank:rank,
-      ending_points:points,
-      series:seen?[{t:seen,rank,points}]:[]
-    })]
+    battle_key:row.battle_key||null,
+    battle_display_name:row.battle_display_name||null,
+    event_name:row.event_name||null,
+    battles
   };
 }
 
@@ -561,6 +601,16 @@ function mergeProfiles(staticProfile,liveProfile){
     latest_rank:liveProfile.latest_rank??staticProfile.latest_rank??null,
     latest_points:liveProfile.latest_points??staticProfile.latest_points??null,
     latest_seen:liveProfile.latest_seen??staticProfile.latest_seen??null,
+    source_clan:liveProfile.source_clan??staticProfile.source_clan??null,
+    source_clan_rank:liveProfile.source_clan_rank??staticProfile.source_clan_rank??null,
+    source_clan_points:liveProfile.source_clan_points??staticProfile.source_clan_points??null,
+    global_rank:liveProfile.global_rank??staticProfile.global_rank??null,
+    global_points:liveProfile.global_points??staticProfile.global_points??null,
+    total_global_players:liveProfile.total_global_players??staticProfile.total_global_players??null,
+    is_global_profile:Boolean(liveProfile.is_global_profile||staticProfile.is_global_profile),
+    battle_key:liveProfile.battle_key??staticProfile.battle_key??null,
+    battle_display_name:liveProfile.battle_display_name??staticProfile.battle_display_name??null,
+    event_name:liveProfile.event_name??staticProfile.event_name??null,
     battles
   };
 }
@@ -677,9 +727,42 @@ function activitySummary(battle){
   };
 }
 
+function rankDisplay(value,total){
+  const rank=finite(value);
+  if(rank===null)return"—";
+
+  const totalValue=finite(total);
+  return`#${fmt(rank)}${totalValue!==null?` / ${fmt(totalValue)}`:""}`;
+}
+
+function sourceClanDisplay(){
+  const name=profile.source_clan||profile.clan_name||clan().label||"—";
+  const rank=finite(profile.source_clan_rank);
+  return`${escapeHtml(name)}${rank!==null?` <span class="muted">#${fmt(rank)}</span>`:""}`;
+}
+
+function currentPoints(){
+  return profile.global_points??profile.latest_points;
+}
+
+function renderProfileCards(){
+  const hasGlobalRank=finite(profile.global_rank)!==null;
+  const rankValue=hasGlobalRank?profile.global_rank:profile.latest_rank;
+  const rankLabel=hasGlobalRank?"Global Rank":"Latest Rank";
+
+  return`
+    <div class="card"><div class="label">Clan</div><div class="value">${sourceClanDisplay()}</div></div>
+    <div class="card"><div class="label">${rankLabel}</div><div class="value">${hasGlobalRank?rankDisplay(rankValue,profile.total_global_players):fmt(rankValue)}</div></div>
+    <div class="card"><div class="label">Current Points</div><div class="value">${fmt(currentPoints())}</div></div>
+    <div class="card"><div class="label">Latest Seen</div><div class="value">${fmtDateTime(profile.latest_seen)}</div></div>
+  `;
+}
+
 function render(){
   const app=document.getElementById("app");
   const battles=sortedBattles();
+  const hasHistory=battles.length>0;
+  const historyTitle=battles.some(battle=>battle.source==="global")?"History":"Battle History";
 
   app.innerHTML=`
     <section class="profile-header">
@@ -694,22 +777,21 @@ function render(){
     </section>
 
     <section class="cards">
-      <div class="card"><div class="label">Battles</div><div class="value">${fmt(battles.length)}</div></div>
-      <div class="card"><div class="label">Latest Rank</div><div class="value">${fmt(profile.latest_rank)}</div></div>
-      <div class="card"><div class="label">Latest Points</div><div class="value">${fmt(profile.latest_points)}</div></div>
-      <div class="card"><div class="label">Latest Seen</div><div class="value">${fmtDateTime(profile.latest_seen)}</div></div>
+      ${renderProfileCards()}
     </section>
 
-    <div class="section-title-row">
-      <h2 class="section-title">Battle History</h2>
-      <select id="battle-select">
-        ${battles.map((battle,index)=>`
-          <option value="${index}">${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
-        `).join("")}
-      </select>
-    </div>
+    ${hasHistory?`
+      <div class="section-title-row">
+        <h2 class="section-title">${historyTitle}</h2>
+        <select id="battle-select">
+          ${battles.map((battle,index)=>`
+            <option value="${index}">${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
+          `).join("")}
+        </select>
+      </div>
 
-    <section id="battle-detail"></section>
+      <section id="battle-detail"></section>
+    `:`<section class="empty">No history found.</section>`}
   `;
 
   app.querySelector(".avatar").onerror=function(){
@@ -717,10 +799,7 @@ function render(){
     this.src=DEFAULT_AVATAR;
   };
 
-  if(!battles.length){
-    document.getElementById("battle-detail").innerHTML=`<div class="empty">No battle history found.</div>`;
-    return;
-  }
+  if(!hasHistory)return;
 
   document.getElementById("battle-select").onchange=event=>{
     battleIndex=Number(event.target.value||0);
@@ -735,6 +814,7 @@ function renderBattle(){
   const range=eventRange(battle);
   const endRank=battle.ending_rank??battle.end_rank??battle.last_rank??null;
   const activity=activitySummary(battle);
+  const isGlobalBattle=battle.source==="global";
 
   document.getElementById("battle-detail").innerHTML=`
     <article class="battle-card">
@@ -745,17 +825,18 @@ function renderBattle(){
 
       <div class="stats">
         <div class="stat-row">
-          <div class="label">Starting Rank</div>
+          <div class="label">Starting ${isGlobalBattle?"Global ":""}Rank</div>
           <div class="stat-value">${fmt(battle.starting_rank)}</div>
         </div>
         <div class="stat-row">
-          <div class="label">End Rank</div>
+          <div class="label">End ${isGlobalBattle?"Global ":""}Rank</div>
           <div class="stat-value">${fmt(endRank)}</div>
         </div>
         <div class="stat-row">
           <div class="label">Ending Points</div>
           <div class="stat-value">${fmt(battle.ending_points)}</div>
         </div>
+        ${isGlobalBattle?"":`
         <div class="stat-row">
           <div class="label">Total Downtime</div>
           <div class="stat-value">${activity?`${formatDuration(activity.downtime)} (${formatPercent(activity.downtimePct)} of tracked data)`:"—"}</div>
@@ -764,6 +845,7 @@ function renderBattle(){
           <div class="label">Total Uptime</div>
           <div class="stat-value">${activity?`${formatDuration(activity.uptime)} (${formatPercent(activity.uptimePct)} of tracked data)`:"—"}</div>
         </div>
+        `}
       </div>
 
       ${battle.series?.length>1?`
@@ -1054,8 +1136,29 @@ async function main(){
       ?await loadStaticProfile(id).catch(()=>null)
       :null;
 
+    const globalProfile=await loadGlobalProfile(id).catch(()=>null);
     profile=mergeProfiles(staticProfile,live);
-    if(!profile)profile=await loadGlobalProfile(id).catch(()=>null);
+
+    if(!profile){
+      profile=globalProfile;
+    }else if(globalProfile){
+      const existingBattles=profile.battles||[];
+      const globalBattles=globalProfile.battles||[];
+
+      profile={
+        ...profile,
+        source_clan:globalProfile.source_clan??profile.source_clan??null,
+        source_clan_rank:globalProfile.source_clan_rank??profile.source_clan_rank??null,
+        source_clan_points:globalProfile.source_clan_points??profile.source_clan_points??null,
+        global_rank:globalProfile.global_rank??profile.global_rank??null,
+        global_points:globalProfile.global_points??profile.global_points??null,
+        total_global_players:globalProfile.total_global_players??profile.total_global_players??null,
+        latest_seen:globalProfile.latest_seen??profile.latest_seen??null,
+        latest_points:globalProfile.latest_points??profile.latest_points??null,
+        battles:globalBattles.length?[...globalBattles,...existingBattles]:existingBattles,
+        is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
+      };
+    }
 
     if(!profile)throw new Error(`Could not load profile ${id}.`);
 
