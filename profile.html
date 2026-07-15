@@ -523,30 +523,7 @@ async function loadGlobalProfile(id){
   const points=globalPoints??clanPoints??0;
   const globalRank=finite(row.global_rank);
   const clanRank=finite(row.clan_rank);
-  const displayName=row.event_name||row.battle_display_name||row.battle_key||"Global Scan";
-  const historySeries=downsampleSeriesByMinutes(
-    (payload.history||[]).map(item=>({
-      t:item.fetched_at,
-      rank:finite(item.global_rank),
-      points:finite(item.global_points??item.clan_points)
-    })),
-    30
-  );
-  const battles=historySeries.length>1
-    ? [recalcBattle({
-        battle:row.battle_key||"global-scan",
-        source:"global",
-        display_name:`${displayName} Global Rank`,
-        battle_first_snapshot:historySeries[0]?.t||seen,
-        battle_last_snapshot:historySeries[historySeries.length-1]?.t||seen,
-        first_seen:historySeries[0]?.t||seen,
-        last_seen:historySeries[historySeries.length-1]?.t||seen,
-        starting_rank:historySeries[0]?.rank??globalRank,
-        ending_rank:historySeries[historySeries.length-1]?.rank??globalRank,
-        ending_points:historySeries[historySeries.length-1]?.points??points,
-        series:historySeries
-      })]
-    : [];
+  const battles=[];
 
   return{
     aliases:[String(id)],
@@ -757,10 +734,12 @@ function rankDisplay(value,total){
   return`#${fmt(rank)}${totalValue!==null?` / ${fmt(totalValue)}`:""}`;
 }
 
-function sourceClanDisplay(){
-  const name=profile.source_clan||profile.clan_name||clan().label||"—";
+function clanRankDisplay(){
   const rank=finite(profile.source_clan_rank);
-  return`${escapeHtml(name)}${rank!==null?` <span class="muted">#${fmt(rank)}</span>`:""}`;
+  if(rank!==null)return`#${fmt(rank)}`;
+
+  const latest=finite(profile.latest_rank);
+  return latest!==null?`#${fmt(latest)}`:"—";
 }
 
 function currentPoints(){
@@ -773,7 +752,7 @@ function renderProfileCards(){
   const rankLabel=hasGlobalRank?"Global Rank":"Latest Rank";
 
   return`
-    <div class="card"><div class="label">Clan</div><div class="value">${sourceClanDisplay()}</div></div>
+    <div class="card"><div class="label">Clan Rank</div><div class="value">${clanRankDisplay()}</div></div>
     <div class="card"><div class="label">${rankLabel}</div><div class="value">${hasGlobalRank?rankDisplay(rankValue,profile.total_global_players):fmt(rankValue)}</div></div>
     <div class="card"><div class="label">Current Points</div><div class="value">${fmt(currentPoints())}</div></div>
     <div class="card"><div class="label">Joined</div><div class="value">${fmtJoinedDate(profile.joined_at)}</div></div>
@@ -1165,7 +1144,6 @@ async function main(){
       profile=globalProfile;
     }else if(globalProfile){
       const existingBattles=profile.battles||[];
-      const globalBattles=globalProfile.battles||[];
 
       profile={
         ...profile,
@@ -1178,7 +1156,7 @@ async function main(){
         latest_seen:globalProfile.latest_seen??profile.latest_seen??null,
         latest_points:globalProfile.latest_points??profile.latest_points??null,
         joined_at:profile.joined_at??globalProfile.joined_at??null,
-        battles:globalBattles.length?[...globalBattles,...existingBattles]:existingBattles,
+        battles:existingBattles,
         is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
       };
     }

@@ -650,6 +650,33 @@ function chunkValues(values, size) {
   return chunks;
 }
 
+function robloxLookupConcurrency(env) {
+  return clamp(Number(env.ROBLOX_LOOKUP_CONCURRENCY || 2), 1, 5);
+}
+
+function robloxLookupRetryAttempts(env) {
+  return clamp(Number(env.ROBLOX_LOOKUP_RETRIES || 3), 1, 6);
+}
+
+function robloxLookupRetryBaseMs(env) {
+  return clamp(Number(env.ROBLOX_LOOKUP_RETRY_BASE_MS || 750), 100, 10000);
+}
+
+function shouldRetryRobloxResponse(response) {
+  return response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+}
+
+function retryAfterMs(response, fallbackMs) {
+  const raw = response.headers.get("Retry-After");
+  if (!raw) return fallbackMs;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+
+  const dateMs = new Date(raw).getTime();
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : fallbackMs;
+}
+
 function normalizeGlobalLeaderboardOutput(row, {
   run,
   usernameMap,
@@ -3713,7 +3740,9 @@ async function resolveRobloxUsernames(userIds, env) {
   }
 
   const lookupBatch = async batch => {
-    try {
+    const attempts = robloxLookupRetryAttempts(env);
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const res = await fetch("https://users.roblox.com/v1/users", {
         method: "POST",
         headers: {
@@ -3727,7 +3756,14 @@ async function resolveRobloxUsernames(userIds, env) {
         })
       });
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (attempt < attempts && shouldRetryRobloxResponse(res)) {
+          await sleep(retryAfterMs(res, robloxLookupRetryBaseMs(env) * attempt));
+          continue;
+        }
+
+        return;
+      }
 
       const json = await res.json();
       for (const user of json.data || []) {
@@ -3736,17 +3772,20 @@ async function resolveRobloxUsernames(userIds, env) {
           result.set(id, String(user.name));
         }
       }
-    } catch {
-      // Keep fallback user_ID labels if Roblox lookup is unavailable.
+
+      return;
     }
   };
 
-  const batches = [];
-  for (let i = 0; i < ids.length; i += ROBLOX_BATCH_SIZE) {
-    batches.push(lookupBatch(ids.slice(i, i + ROBLOX_BATCH_SIZE)));
-  }
+  const batches = chunkValues(ids, ROBLOX_BATCH_SIZE);
+  await runLimited(batches, robloxLookupConcurrency(env), async batch => {
+    try {
+      await lookupBatch(batch);
+    } catch {
+      // Keep fallback user_ID labels if Roblox lookup is unavailable.
+    }
+  });
 
-  await Promise.all(batches);
   return result;
 }
 
