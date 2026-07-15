@@ -69,15 +69,13 @@
         top: 58px;
         right: 38px;
         bottom: 0;
-        width: 18px;
+        width: 20px;
         background:
-          linear-gradient(45deg, #f5f5f5 25%, transparent 25% 75%, #f5f5f5 75%),
-          linear-gradient(45deg, #111 25%, transparent 25% 75%, #111 75%);
-        background-size: 18px 18px;
-        background-position: 0 0, 9px 9px;
+          conic-gradient(#f5f5f5 25%, #111 0 50%, #f5f5f5 0 75%, #111 0);
+        background-size: 20px 20px;
         border-left: 1px solid rgba(255, 255, 255, .35);
         border-right: 1px solid rgba(255, 255, 255, .35);
-        opacity: .9;
+        opacity: .95;
       }
 
       .duck-lane {
