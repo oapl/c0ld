@@ -10,6 +10,7 @@ const GLOBAL_RANK_SHARDS_TABLE = "c0ld_global_rank_shards";
 const GLOBAL_RANK_CANDIDATES_TABLE = "c0ld_global_rank_candidates";
 const GLOBAL_RANK_CURRENT_TABLE = "c0ld_global_ranks_current";
 const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
+const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
@@ -103,6 +104,8 @@ export default {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
         response = await handleClanActivitySummary(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/clans/activity/status") {
+        response = await handleClanActivityStatus(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/detail") {
         response = await handleClanActivityDetail(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/feed") {
@@ -498,6 +501,7 @@ async function handleGlobalLeaderboard(request, env) {
   const url = new URL(request.url);
   const clan = url.searchParams.get("clan") || clanName(env);
   const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 1000);
+  const includeAvatars = ["1", "true", "yes"].includes(String(url.searchParams.get("avatars") || "").toLowerCase());
   const run = await findLatestGlobalRankSearchRun(env, clan);
 
   if (!run?.run_key) {
@@ -511,7 +515,13 @@ async function handleGlobalLeaderboard(request, env) {
 
   const rankedCandidates = await readGlobalRankLeaderboardCandidates(env, run.run_key, limit);
   const rows = rankedCandidates.slice(0, limit);
-  const userIds = rows.map(row => toNumber(row.user_id)).filter(Boolean);
+  const userIdsNeedingLookup = rows
+    .filter(row => !globalCandidateRawUsername(row))
+    .map(row => toNumber(row.user_id))
+    .filter(Boolean);
+  const avatarUserIds = includeAvatars
+    ? rows.map(row => toNumber(row.user_id)).filter(Boolean)
+    : [];
   const snapshotAt = run.finished_at || run.updated_at || run.started_at || rows[0]?.fetched_at || null;
   const totalGlobalPlayers =
     toNumber(run.total_global_players) ||
@@ -519,8 +529,8 @@ async function handleGlobalLeaderboard(request, env) {
     await countGlobalRankCandidates(env, run.run_key);
 
   const [usernameMap, avatarMap, gainMaps] = await Promise.all([
-    resolveRobloxUsernames(userIds, env).catch(() => new Map()),
-    resolveRobloxAvatarHeadshots(userIds, env).catch(() => new Map()),
+    resolveRobloxUsernames(userIdsNeedingLookup, env).catch(() => new Map()),
+    includeAvatars ? resolveRobloxAvatarHeadshots(avatarUserIds, env).catch(() => new Map()) : new Map(),
     buildGlobalLeaderboardGainMaps(env, {
       clan,
       battleKey: run.battle_key,
@@ -765,6 +775,13 @@ function globalCandidateUsername(row, usernameMap) {
   const resolved = String(usernameMap.get(userId) || "").trim();
   if (resolved && !isFallbackUsername(resolved, userId)) return resolved;
 
+  const rawName = globalCandidateRawUsername(row);
+  if (rawName) return rawName;
+  return userId ? `user_${userId}` : "";
+}
+
+function globalCandidateRawUsername(row) {
+  const userId = toNumber(row?.user_id);
   const raw = parseGlobalCandidateRaw(row.raw_candidate);
   const rawName = String(firstDefined(
     raw.member?.Username,
@@ -779,8 +796,7 @@ function globalCandidateUsername(row, usernameMap) {
     raw.contribution?.name
   ) || "").trim();
 
-  if (rawName && !isFallbackUsername(rawName, userId)) return rawName;
-  return userId ? `user_${userId}` : "";
+  return rawName && !isFallbackUsername(rawName, userId) ? rawName : "";
 }
 
 function globalCandidateDisplayName(row) {
@@ -2697,6 +2713,81 @@ async function handleClanActivitySummary(request, env) {
   }, env);
 }
 
+async function handleClanActivityStatus(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const requestedBattle = url.searchParams.get("battle") || "";
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const battle = await resolveActivityBattleKey(env, requestedBattle).catch(() => activeBattleMeta?.battleKey || battleKey(env));
+  const config = clanActivityRuntimeConfig(env);
+  const requestedScheduledAt = url.searchParams.get("scheduled_at")
+    ? new Date(url.searchParams.get("scheduled_at"))
+    : null;
+  const scheduledAt = requestedScheduledAt instanceof Date && !Number.isNaN(requestedScheduledAt.getTime())
+    ? requestedScheduledAt
+    : new Date();
+
+  const [summaryRows, latestRosterRows, latestEvents, rosterCount, currentCount, eventCount] = await Promise.all([
+    supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+      select: "battle_key,battle_display_name,clan_name,clan_rank,starting_members,current_members,new_members,lost_members,promotions,demotions,rank_changes,last_seen_at,latest_snapshot_id,updated_at",
+      battle_key: `eq.${battle}`,
+      order: "clan_rank.asc",
+      limit: "500"
+    }).catch(err => ({ __error: err?.message || String(err) })),
+    supabaseSelect(env, CLAN_ACTIVITY_ROSTER_TABLE, {
+      select: "snapshot_id,fetched_at,source,battle_key,clan_name,clan_rank",
+      battle_key: `eq.${battle}`,
+      order: "fetched_at.desc",
+      limit: "5"
+    }).catch(err => ({ __error: err?.message || String(err) })),
+    supabaseSelect(env, CLAN_ACTIVITY_EVENTS_TABLE, {
+      select: "event_id,event_at,event_type,clan_name,username,user_id,previous_rank,current_rank",
+      battle_key: `eq.${battle}`,
+      order: "event_at.desc",
+      limit: "10"
+    }).catch(err => ({ __error: err?.message || String(err) })),
+    supabaseCount(env, CLAN_ACTIVITY_ROSTER_TABLE, { battle_key: `eq.${battle}` }).catch(() => null),
+    supabaseCount(env, CLAN_ACTIVITY_CURRENT_TABLE, { battle_key: `eq.${battle}` }).catch(() => null),
+    supabaseCount(env, CLAN_ACTIVITY_EVENTS_TABLE, { battle_key: `eq.${battle}` }, "event_id").catch(() => null)
+  ]);
+
+  const summaryError = summaryRows?.__error || null;
+  const rosterError = latestRosterRows?.__error || null;
+  const eventError = latestEvents?.__error || null;
+  const summaries = Array.isArray(summaryRows) ? summaryRows : [];
+  const rosters = Array.isArray(latestRosterRows) ? latestRosterRows : [];
+  const events = Array.isArray(latestEvents) ? latestEvents : [];
+  const latestSnapshotId = summaries[0]?.latest_snapshot_id || rosters[0]?.snapshot_id || null;
+
+  return json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    battle,
+    active_battle_key: activeBattleMeta?.battleKey || null,
+    active_battle_display_name: activeBattleMeta?.displayName || null,
+    config,
+    would_run_now: config.ingest_clan_activity && shouldRunClanActivitySchedule(env, scheduledAt),
+    scheduled_probe_at: scheduledAt.toISOString(),
+    row_counts: {
+      summary_clans: summaries.length,
+      roster_rows: rosterCount,
+      current_rows: currentCount,
+      events: eventCount
+    },
+    latest_snapshot_id: latestSnapshotId,
+    latest_snapshot_at: summaries[0]?.last_seen_at || rosters[0]?.fetched_at || null,
+    latest_events: events,
+    errors: {
+      summary: summaryError,
+      roster: rosterError,
+      events: eventError
+    }
+  }, 200, {
+    "Cache-Control": "no-store"
+  });
+}
+
 async function handleClanActivityDetail(request, env) {
   requireSupabase(env);
 
@@ -4569,6 +4660,13 @@ async function resolveRobloxUsernames(userIds, env) {
     return result;
   }
 
+  const cached = await readUserLookupCache(env, ids).catch(() => new Map());
+  for (const [id, cachedRow] of cached.entries()) {
+    if (cachedRow.username && !isFallbackUsername(cachedRow.username, id)) {
+      result.set(id, cachedRow.username);
+    }
+  }
+
   const lookupBatch = async batch => {
     const attempts = robloxLookupRetryAttempts(env);
 
@@ -4596,18 +4694,31 @@ async function resolveRobloxUsernames(userIds, env) {
       }
 
       const json = await res.json();
+      const cacheRows = [];
       for (const user of json.data || []) {
         const id = toNumber(user.id);
         if (id && user.name) {
-          result.set(id, String(user.name));
+          const username = String(user.name);
+          result.set(id, username);
+          cacheRows.push({
+            user_id: id,
+            username,
+            display_name: user.displayName || null,
+            updated_at: new Date().toISOString()
+          });
         }
+      }
+
+      if (cacheRows.length) {
+        await upsertUserLookupCache(env, cacheRows).catch(() => {});
       }
 
       return;
     }
   };
 
-  const batches = chunkValues(ids, ROBLOX_BATCH_SIZE);
+  const unresolvedBeforeLookup = ids.filter(id => isFallbackUsername(result.get(id), id));
+  const batches = chunkValues(unresolvedBeforeLookup, ROBLOX_BATCH_SIZE);
   await runLimited(batches, robloxLookupConcurrency(env), async batch => {
     try {
       await lookupBatch(batch);
@@ -4633,6 +4744,42 @@ async function resolveRobloxUsernames(userIds, env) {
   }
 
   return result;
+}
+
+async function readUserLookupCache(env, userIds) {
+  const result = new Map();
+  const ids = [...new Set((userIds || []).map(Number).filter(Boolean))];
+
+  for (const batch of chunkValues(ids, 250)) {
+    const rows = await supabaseSelect(env, USER_LOOKUP_CACHE_TABLE, {
+      select: "user_id,username,display_name,avatar_url,updated_at",
+      user_id: `in.(${batch.join(",")})`,
+      limit: String(batch.length)
+    });
+
+    for (const row of rows) {
+      const id = toNumber(row.user_id);
+      if (id) result.set(id, row);
+    }
+  }
+
+  return result;
+}
+
+async function upsertUserLookupCache(env, rows) {
+  const cleanRows = (rows || [])
+    .map(row => ({
+      user_id: toNumber(row.user_id),
+      username: stringOrNull(row.username),
+      display_name: stringOrNull(row.display_name),
+      avatar_url: stringOrNull(row.avatar_url),
+      updated_at: row.updated_at || new Date().toISOString()
+    }))
+    .filter(row => row.user_id && row.username && !isFallbackUsername(row.username, row.user_id));
+
+  if (cleanRows.length) {
+    await supabaseUpsertChunked(env, USER_LOOKUP_CACHE_TABLE, cleanRows, "user_id", 500);
+  }
 }
 
 async function resolveMissingUsernames(rows, env) {
@@ -5285,9 +5432,9 @@ async function supabaseSelect(env, tableName, params) {
   return res.json();
 }
 
-async function supabaseCount(env, tableName, params) {
+async function supabaseCount(env, tableName, params, countColumn = "id") {
   const url = supabaseUrl(env, tableName);
-  url.searchParams.set("select", "id");
+  url.searchParams.set("select", countColumn);
   url.searchParams.set("limit", "1");
 
   for (const [key, value] of Object.entries(params)) {

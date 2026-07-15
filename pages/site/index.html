@@ -1615,10 +1615,11 @@
 
       try {
         const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
-        const [currentJson, clansJson, globalJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
+        const globalRankPromise = fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`, forceFresh)
+          .catch(() => ({ rows: [] }));
+        const [currentJson, clansJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
           fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`, forceFresh),
           fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard", forceFresh),
-          fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`, forceFresh).catch(() => ({ rows: [] })),
           fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`, forceFresh).catch(() => ({ rows: [] })),
           fetch(`Data/manual-battles.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }),
           fetch(`Data/player-index.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }),
@@ -1627,7 +1628,7 @@
 
         currentData = currentJson;
         clansCurrentData = withClanProjections(clansJson);
-        globalRankData = globalJson && Array.isArray(globalJson.rows) ? globalJson : { rows: [] };
+        globalRankData = { rows: [] };
         rebuildGlobalRankMap();
 
         if (!currentData || !Array.isArray(currentData.rows)) {
@@ -1662,6 +1663,12 @@
         }
 
         await applyBattleSelection();
+
+        globalRankPromise.then(globalJson => {
+          globalRankData = globalJson && Array.isArray(globalJson.rows) ? globalJson : { rows: [] };
+          rebuildGlobalRankMap();
+          renderLeaderboard();
+        });
 
         status.style.display = "none";
         status.className = "";
