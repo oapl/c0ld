@@ -1139,47 +1139,69 @@
       liveBattleRows.set(key, Array.isArray(data?.rows) ? data.rows : []);
     }
 
+    async function loadBattleMetadata(forceFresh = false) {
+      const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
+      const [liveBattlesJson, historyRes] = await Promise.all([
+        fetchLiveJson(CLANS_API_BATTLES_URL, "live clans battle list", forceFresh).catch(() => ({ rows: [] })),
+        fetch(`Data/clans-history.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }).catch(() => null)
+      ]);
+
+      let staticHistory = [];
+      if (historyRes?.ok) {
+        try {
+          const parsed = await historyRes.json();
+          staticHistory = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          staticHistory = [];
+        }
+      }
+
+      historyData = mergeBattleLists(liveBattlesJson?.rows || [], staticHistory);
+      renderBattleOptions();
+    }
+
     async function loadData(forceFresh = false) {
       const tbody = document.getElementById("clans-tbody");
+      let showedCachedData = false;
 
       try {
         if (!forceFresh) {
-          await renderCachedClansPage();
+          showedCachedData = await renderCachedClansPage();
         }
 
         const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
 
-        const [currentJson, liveBattlesJson, historyRes] = await Promise.all([
-          fetchJsonWithFallback(
-            CLANS_API_CURRENT_URL,
-            `Data/clans-current.json${staticSuffix}`,
-            "live clans leaderboard",
-            forceFresh
-          ),
-          fetchLiveJson(CLANS_API_BATTLES_URL, "live clans battle list", forceFresh).catch(() => ({ rows: [] })),
-          fetch(`Data/clans-history.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" })
-        ]);
-
+        const currentJson = await fetchJsonWithFallback(
+          CLANS_API_CURRENT_URL,
+          `Data/clans-current.json${staticSuffix}`,
+          "live clans leaderboard",
+          forceFresh
+        );
         currentData = withProjectedRanks(currentJson);
 
         if (!currentData || !Array.isArray(currentData.rows)) {
           throw new Error("Live clans leaderboard does not contain a rows array.");
         }
 
-        if (historyRes.ok) {
-          const staticHistory = await historyRes.json();
-          historyData = mergeBattleLists(liveBattlesJson?.rows || [], Array.isArray(staticHistory) ? staticHistory : []);
-        } else {
-          historyData = mergeBattleLists(liveBattlesJson?.rows || []);
-        }
-
         selectedBattle = getUrlBattle();
-        await ensureLiveBattleRows(selectedBattle);
         await renderAll();
         writeCachedClansPage();
+
+        if (selectedBattle && selectedBattle !== "current") {
+          await loadBattleMetadata(forceFresh);
+          await ensureLiveBattleRows(selectedBattle);
+          await renderAll();
+          writeCachedClansPage();
+        } else {
+          loadBattleMetadata(forceFresh)
+            .then(writeCachedClansPage)
+            .catch(error => console.warn("Could not refresh clans battle metadata.", error));
+        }
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;
+        if (!showedCachedData) {
+          tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;
+        }
       }
     }
 
