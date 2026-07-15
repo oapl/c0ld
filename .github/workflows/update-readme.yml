@@ -180,10 +180,7 @@ jobs:
             README.md
             Data/
             assets/avatars/
-            index.html
-            clans.html
-            players.html
-            profile.html
+            pages/
             scripts/
             ingest.js
             .github/workflows/update-readme.yml
@@ -207,8 +204,8 @@ jobs:
               echo "Merge succeeded."
             else
               echo "Merge had conflicts. Resolving generated files in favor of current run..."
-              git checkout --ours -- README.md Data assets/avatars index.html clans.html players.html profile.html scripts ingest.js .github/workflows/update-readme.yml || true
-              git add README.md Data assets/avatars index.html clans.html players.html profile.html scripts ingest.js .github/workflows/update-readme.yml
+              git checkout --ours -- README.md Data assets/avatars pages scripts ingest.js .github/workflows/update-readme.yml || true
+              git add README.md Data assets/avatars pages scripts ingest.js .github/workflows/update-readme.yml
               git commit --no-edit || true
             fi
 

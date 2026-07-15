@@ -30,7 +30,32 @@ jobs:
         run: |
           rm -rf _site
           mkdir _site
-          cp -v *.html _site/
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import sys
+
+          source_root = Path("pages")
+          site_root = Path("_site")
+          seen = {}
+
+          if not source_root.exists():
+              raise SystemExit("Missing pages/ directory")
+
+          for path in sorted(source_root.rglob("*.html")):
+              target = site_root / path.name
+              if path.name in seen:
+                  print(f"Duplicate HTML route filename: {path.name}", file=sys.stderr)
+                  print(f"  {seen[path.name]}", file=sys.stderr)
+                  print(f"  {path}", file=sys.stderr)
+                  raise SystemExit(1)
+              seen[path.name] = path
+              shutil.copy2(path, target)
+              print(f"{path} -> {target}")
+
+          if not seen:
+              raise SystemExit("No HTML files found in pages/")
+          PY
           cp -R Data assets _site/
           touch _site/.nojekyll
 

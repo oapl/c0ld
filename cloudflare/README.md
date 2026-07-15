@@ -31,7 +31,8 @@ Deploy:
 wrangler deploy
 ```
 
-Then update these constants in `servers.html`, `server.html`, and `macros.html`:
+Then update these constants in `pages/servers/servers.html`,
+`pages/servers/server.html`, and `pages/tools/macros.html`:
 
 ```js
 const PROTECTED_API_BASE = "https://c0ld-auth.YOUR-SUBDOMAIN.workers.dev";
