@@ -21,7 +21,7 @@ and `top-clan-filter.html` working.
 | `pages/tools/clan-activity-detail.html` | `clan-activity-detail.html` | Drill-down for one clan from Clans Activity |
 | `pages/tools/activity-feed.html` | `activity-feed.html` | All-clans activity blotter |
 | `pages/tools/live-clan.html` | `live-clan.html` | Clan Lookup tool |
-| `pages/tools/player-lookup.html` | `player-lookup.html` | Profile Lookup tool |
+| `pages/tools/player-lookup.html` | `player-lookup.html` | Player Lookup tool |
 | `pages/profiles/profile.html` | `profile.html` | Player profile route |
 | `pages/profiles/clan-profile.html` | `clan-profile.html` | Clan profile route |
 

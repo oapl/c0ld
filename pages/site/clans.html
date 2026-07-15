@@ -377,7 +377,7 @@
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
         <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
     </details>
     </div>
@@ -448,6 +448,7 @@
     const AUTO_REFRESH_MS = 60 * 1000;
     const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
     const CLANS_API_BATTLES_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/battles?scan_limit=20000";
+    const CLANS_PAGE_CACHE_KEY = "c0ld:clans-page:v1";
 
     const DEFAULT_CLAN_ICON =
       "data:image/svg+xml;utf8," +
@@ -1094,6 +1095,37 @@
       return res.json();
     }
 
+    function readCachedClansPage() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(CLANS_PAGE_CACHE_KEY) || "null");
+        if (!cached || !cached.currentData) return null;
+        return cached;
+      } catch {
+        return null;
+      }
+    }
+
+    function writeCachedClansPage() {
+      try {
+        localStorage.setItem(CLANS_PAGE_CACHE_KEY, JSON.stringify({
+          savedAt: new Date().toISOString(),
+          currentData,
+          historyData
+        }));
+      } catch {
+      }
+    }
+
+    async function renderCachedClansPage() {
+      const cached = readCachedClansPage();
+      if (!cached) return false;
+
+      currentData = withProjectedRanks(cached.currentData);
+      historyData = Array.isArray(cached.historyData) ? cached.historyData : [];
+      await renderAll();
+      return true;
+    }
+
     async function ensureLiveBattleRows(battle) {
       if (!battle || battle === "current") return;
       const key = normalizeKey(battle);
@@ -1111,6 +1143,10 @@
       const tbody = document.getElementById("clans-tbody");
 
       try {
+        if (!forceFresh) {
+          await renderCachedClansPage();
+        }
+
         const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
 
         const [currentJson, liveBattlesJson, historyRes] = await Promise.all([
@@ -1140,6 +1176,7 @@
         selectedBattle = getUrlBattle();
         await ensureLiveBattleRows(selectedBattle);
         await renderAll();
+        writeCachedClansPage();
       } catch (error) {
         console.error(error);
         tbody.innerHTML = `<tr><td colspan="8" class="error-state">${htmlEscape(error.message)}</td></tr>`;

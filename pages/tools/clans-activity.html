@@ -242,7 +242,7 @@
           <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
           <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
           <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-          <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
         </div>
       </details>
     </nav>
@@ -296,6 +296,7 @@
 
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+    const CACHE_KEY = "c0ld:clans-activity-summary:v1";
 
     const els = {
       subtitle: document.getElementById("subtitle"),
@@ -336,52 +337,80 @@
       window.location.href = url.toString();
     }
 
+    function readCache() {
+      try {
+        const data = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+        return data && Array.isArray(data.rows) ? data : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function writeCache(data) {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+      } catch {
+      }
+    }
+
+    function renderData(data) {
+      const rows = data.rows || [];
+      const totals = rows.reduce((acc, row) => {
+        acc.newMembers += Number(row.new_members) || 0;
+        acc.lostMembers += Number(row.lost_members) || 0;
+        acc.rankChanges += Number(row.rank_changes) || 0;
+        return acc;
+      }, { newMembers: 0, lostMembers: 0, rankChanges: 0 });
+
+      els.subtitle.textContent = `${data.display_name || data.battle || "Current battle"} activity for top clans.`;
+      els.tracked.textContent = fmt(rows.length);
+      els.newMembers.textContent = fmt(totals.newMembers);
+      els.lostMembers.textContent = fmt(totals.lostMembers);
+      els.rankChanges.textContent = fmt(totals.rankChanges);
+      els.snapshot.textContent = `Updated ${fmtDate(data.snapshot_at)}`;
+
+      if (!rows.length) {
+        els.rows.innerHTML = '<tr><td colspan="9" class="muted">No clan activity rows found yet.</td></tr>';
+        return;
+      }
+
+      els.rows.innerHTML = rows.map(row => `
+        <tr data-clan="${row.clan_name}">
+          <td><div class="clan-cell">${clanIcon(row)}<span>#${fmt(row.rank)} ${row.clan_name}</span></div></td>
+          <td>${kick(row.kick_available)}</td>
+          <td class="number">${fmt(row.starting_members)}</td>
+          <td class="number">${fmt(row.current_members)}</td>
+          <td class="number">${fmt(row.new_members)}</td>
+          <td class="number">${fmt(row.lost_members)}</td>
+          <td class="number">${fmt(row.promotions)}</td>
+          <td class="number">${fmt(row.demotions)}</td>
+          <td class="number">${fmt(row.rank_changes)}</td>
+        </tr>
+      `).join("");
+
+      for (const tr of els.rows.querySelectorAll("tr[data-clan]")) {
+        tr.addEventListener("click", () => openDetail(tr.dataset.clan));
+      }
+    }
+
     async function load() {
-      els.rows.innerHTML = '<tr><td colspan="9" class="muted">Loading...</td></tr>';
+      const cached = readCache();
+      if (cached) {
+        renderData(cached);
+      } else {
+        els.rows.innerHTML = '<tr><td colspan="9" class="muted">Loading...</td></tr>';
+      }
+
       try {
         const res = await fetch(`${API_BASE}/api/clans/activity/summary?limit=100`, { cache: "no-store" });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.message || "Could not load clan activity.");
-
-        const rows = data.rows || [];
-        const totals = rows.reduce((acc, row) => {
-          acc.newMembers += Number(row.new_members) || 0;
-          acc.lostMembers += Number(row.lost_members) || 0;
-          acc.rankChanges += Number(row.rank_changes) || 0;
-          return acc;
-        }, { newMembers: 0, lostMembers: 0, rankChanges: 0 });
-
-        els.subtitle.textContent = `${data.display_name || data.battle || "Current battle"} activity for top clans.`;
-        els.tracked.textContent = fmt(rows.length);
-        els.newMembers.textContent = fmt(totals.newMembers);
-        els.lostMembers.textContent = fmt(totals.lostMembers);
-        els.rankChanges.textContent = fmt(totals.rankChanges);
-        els.snapshot.textContent = `Updated ${fmtDate(data.snapshot_at)}`;
-
-        if (!rows.length) {
-          els.rows.innerHTML = '<tr><td colspan="9" class="muted">No clan activity rows found yet.</td></tr>';
-          return;
-        }
-
-        els.rows.innerHTML = rows.map(row => `
-          <tr data-clan="${row.clan_name}">
-            <td><div class="clan-cell">${clanIcon(row)}<span>#${fmt(row.rank)} ${row.clan_name}</span></div></td>
-            <td>${kick(row.kick_available)}</td>
-            <td class="number">${fmt(row.starting_members)}</td>
-            <td class="number">${fmt(row.current_members)}</td>
-            <td class="number">${fmt(row.new_members)}</td>
-            <td class="number">${fmt(row.lost_members)}</td>
-            <td class="number">${fmt(row.promotions)}</td>
-            <td class="number">${fmt(row.demotions)}</td>
-            <td class="number">${fmt(row.rank_changes)}</td>
-          </tr>
-        `).join("");
-
-        for (const tr of els.rows.querySelectorAll("tr[data-clan]")) {
-          tr.addEventListener("click", () => openDetail(tr.dataset.clan));
-        }
+        renderData(data);
+        writeCache(data);
       } catch (err) {
-        els.rows.innerHTML = `<tr><td colspan="9" class="error">${err.message || err}</td></tr>`;
+        if (!cached) {
+          els.rows.innerHTML = `<tr><td colspan="9" class="error">${err.message || err}</td></tr>`;
+        }
       }
     }
 

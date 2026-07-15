@@ -28,7 +28,7 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:Arial,Helvetica,sans-
         <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
     </details>
   </div></header>
@@ -42,6 +42,7 @@ const API="https://yamo-league-api-worker.opal-dde.workers.dev";
 const RUN_KEY="active";
 const TOP_LEAGUES_LIMIT=1000;
 const REFRESH_INTERVAL_MS=5*60*1000;
+const CACHE_KEY="c0ld:top-leagues:v1";
 let rows=[],sortKey="rank",sortAsc=true,loading=false;
 function esc(v){return String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"—";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
@@ -61,10 +62,13 @@ function snapshotMap(history,targetMs,toleranceMin,fallbackMin){const tol=tolera
 async function hydrateShortGainsFromHistory(data){if(!rows.length||rows.every(r=>r.gain_5m!=null&&r.gain_1h!=null))return;try{const latestMs=new Date(data.snapshot_at||rows[0]?.fetched_at||0).getTime();if(!Number.isFinite(latestMs))return;const u=new URL(API+"/api/leagues/history");u.searchParams.set("league",data.league_name||"GLOBAL_TOP_1000_LEAGUES");u.searchParams.set("run",RUN_KEY);u.searchParams.set("hours","8");u.searchParams.set("limit","5000");u.searchParams.set("v",Date.now());const res=await fetch(u,{cache:"no-store"});const hist=await res.json();if(!res.ok||hist.ok===false)throw new Error(hist.message||"history HTTP "+res.status);const history=hist.rows||[];const maps={gain_5m:snapshotMap(history,latestMs-5*60*1000,4,20),gain_1h:snapshotMap(history,latestMs-60*60*1000,10,90)};for(const r of rows){const key=gainKey(r),current=Number(r.total_points??r.points)||0;for(const k of Object.keys(maps)){if(r[k]!=null||!maps[k])continue;const prev=maps[k].get(key);if(prev!==undefined)r[k]=current-prev}}}catch(e){console.warn("Could not hydrate short top-league gains from history",e)}}
 function render(){const tbody=document.getElementById("top-tbody"),list=visible();if(!list.length){tbody.innerHTML='<tr><td colspan="10" class="empty">No top league rows yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="namebox">'+leagueIcon(r)+'<span><a href="'+esc(leagueHref(r))+'">'+esc(r.league_name||"—")+'</a><div class="meta">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td class="numeric" title="'+esc(fullNum(r.projected_points_1h))+'">'+esc(shortNum(r.projected_points_1h))+'</td><td class="numeric">'+projectedRank(r)+'</td></tr>').join("")}
 function showError(msg){document.getElementById("top-tbody").innerHTML='<tr><td colspan="10" class="error">'+esc(msg)+'</td></tr>'}
+function readCache(){try{const data=JSON.parse(localStorage.getItem(CACHE_KEY)||"null");return data&&Array.isArray(data.rows)?data:null}catch{return null}}
+function writeCache(data){try{localStorage.setItem(CACHE_KEY,JSON.stringify({...data,savedAt:new Date().toISOString()}))}catch{}}
+function renderCached(){const data=readCache();if(!data)return false;rows=data.rows||[];renderCards(data);render();return true}
 async function fetchTopLeagueSnapshot(limit,list){const u=new URL(API+"/api/leagues/top-leagues");u.searchParams.set("limit",String(limit));if(list)u.searchParams.set("list",list);u.searchParams.set("run",RUN_KEY);u.searchParams.set("v",Date.now());const r=await fetch(u,{cache:"no-store"});const data=await r.json();if(!r.ok||data.ok===false)throw new Error(data.message||"HTTP "+r.status);return data}
 function snapshotTime(data){const ms=new Date(data?.snapshot_at||0).getTime();return Number.isFinite(ms)?ms:0}
 async function fetchFreshTopLeagues(){const [topData,allData]=await Promise.all([fetchTopLeagueSnapshot(TOP_LEAGUES_LIMIT,"top"),fetchTopLeagueSnapshot(TOP_LEAGUES_LIMIT,"all").catch(()=>null)]);const data=allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData;return {...data,rows:(data.rows||[]).slice(0,TOP_LEAGUES_LIMIT)}}
-async function loadData(){if(loading)return;loading=true;try{const data=await fetchFreshTopLeagues();rows=data.rows||[];await hydrateShortGainsFromHistory(data);renderCards(data);render()}catch(e){console.error(e);showError(e.message||String(e))}finally{loading=false}}
+async function loadData(){if(loading)return;loading=true;try{if(!rows.length)renderCached();const data=await fetchFreshTopLeagues();rows=data.rows||[];renderCards(data);render();writeCache({...data,rows});await hydrateShortGainsFromHistory(data);render();writeCache({...data,rows})}catch(e){console.error(e);if(!rows.length)showError(e.message||String(e))}finally{loading=false}}
 document.getElementById("refresh-btn").addEventListener("click",loadData);document.getElementById("search-input").addEventListener("input",render);document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="projected_rank_1h"}render()}));loadData();setInterval(loadData,REFRESH_INTERVAL_MS);
 </script>
 </body>

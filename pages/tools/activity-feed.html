@@ -168,7 +168,7 @@
           <a class="menu-btn active" href="activity-feed.html">Activity Feed</a>
           <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
           <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-          <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
         </div>
       </details>
     </nav>
@@ -208,6 +208,7 @@
 
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+    const CACHE_KEY = "c0ld:activity-feed:v1";
 
     const els = {
       subtitle: document.getElementById("subtitle"),
@@ -253,25 +254,53 @@
       `).join("");
     }
 
+    function readCache() {
+      try {
+        const data = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+        return data && (Array.isArray(data.clan_events) || Array.isArray(data.rank_events)) ? data : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function writeCache(data) {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+      } catch {
+      }
+    }
+
+    function renderData(data) {
+      const clanEvents = data.clan_events || [];
+      const rankEvents = data.rank_events || [];
+      els.subtitle.textContent = `${data.display_name || data.battle || "Current battle"} activity, newest first.`;
+      els.clanCount.textContent = `${clanEvents.length} events`;
+      els.rankCount.textContent = `${rankEvents.length} events`;
+      renderFeed(els.clanFeed, clanEvents);
+      renderFeed(els.rankFeed, rankEvents);
+    }
+
     async function load() {
-      els.clanFeed.innerHTML = '<li class="muted">Loading...</li>';
-      els.rankFeed.innerHTML = '<li class="muted">Loading...</li>';
+      const cached = readCache();
+      if (cached) {
+        renderData(cached);
+      } else {
+        els.clanFeed.innerHTML = '<li class="muted">Loading...</li>';
+        els.rankFeed.innerHTML = '<li class="muted">Loading...</li>';
+      }
 
       try {
         const res = await fetch(`${API_BASE}/api/clans/activity/feed?limit=300`, { cache: "no-store" });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.message || "Could not load activity feed.");
 
-        const clanEvents = data.clan_events || [];
-        const rankEvents = data.rank_events || [];
-        els.subtitle.textContent = `${data.display_name || data.battle || "Current battle"} activity, newest first.`;
-        els.clanCount.textContent = `${clanEvents.length} events`;
-        els.rankCount.textContent = `${rankEvents.length} events`;
-        renderFeed(els.clanFeed, clanEvents);
-        renderFeed(els.rankFeed, rankEvents);
+        renderData(data);
+        writeCache(data);
       } catch (err) {
-        els.clanFeed.innerHTML = `<li class="error">${err.message || err}</li>`;
-        els.rankFeed.innerHTML = '<li class="muted">No rank events loaded.</li>';
+        if (!cached) {
+          els.clanFeed.innerHTML = `<li class="error">${err.message || err}</li>`;
+          els.rankFeed.innerHTML = '<li class="muted">No rank events loaded.</li>';
+        }
       }
     }
 

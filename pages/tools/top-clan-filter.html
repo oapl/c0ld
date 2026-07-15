@@ -397,7 +397,7 @@
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
         <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
     </details>
     </div>
@@ -485,7 +485,8 @@
       top: "ps99_top_clan_member_thresholds_top",
       filter1: "ps99_top_clan_rebirth_filter_1",
       filter2: "ps99_top_clan_rebirth_filter_2",
-      filter3: "ps99_top_clan_rebirth_filter_3"
+      filter3: "ps99_top_clan_rebirth_filter_3",
+      payloadPrefix: "ps99_top_clan_rebirth_payload:"
     };
 
     function htmlEscape(value) {
@@ -862,6 +863,30 @@
       return url.toString();
     }
 
+    function cacheKeyForInputs(top, filter1, filter2, filter3) {
+      return `${STORAGE_KEYS.payloadPrefix}${top}:${filter1}:${filter2}:${filter3}`;
+    }
+
+    function readCachedPayload(top, filter1, filter2, filter3) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKeyForInputs(top, filter1, filter2, filter3)) || "null");
+        if (!cached || !Array.isArray(cached.rows)) return null;
+        return cached;
+      } catch {
+        return null;
+      }
+    }
+
+    function writeCachedPayload(top, filter1, filter2, filter3, payload) {
+      try {
+        localStorage.setItem(cacheKeyForInputs(top, filter1, filter2, filter3), JSON.stringify({
+          ...payload,
+          savedAt: new Date().toISOString()
+        }));
+      } catch {
+      }
+    }
+
     async function fetchJsonOrThrow(url) {
       const res = await fetch(url, { cache: "no-store" });
       const text = await res.text();
@@ -902,13 +927,21 @@
 
       saveInputs(String(top), formatRebirthThreshold(filter1), formatRebirthThreshold(filter2), formatRebirthThreshold(filter3));
       normalizeInputDisplays();
-      setStatus("Loading top clan rebirth counts...", "info");
+      const cachedPayload = readCachedPayload(top, filter1, filter2, filter3);
+      if (cachedPayload) {
+        renderCards(cachedPayload);
+        renderTable(cachedPayload);
+        setStatus("Showing cached top clan rebirth counts while the latest pull refreshes.", "info");
+      } else {
+        setStatus("Loading top clan rebirth counts...", "info");
+      }
 
       try {
         const payload = await fetchThresholds(top, filter1, filter2, filter3);
 
         renderCards(payload);
         renderTable(payload);
+        writeCachedPayload(top, filter1, filter2, filter3, payload);
         saveInputs(
           String(payload.top || top),
           formatRebirthThreshold(payload.filter1Threshold || filter1),

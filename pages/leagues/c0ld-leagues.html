@@ -77,7 +77,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
         <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
-        <a class="menu-btn" href="player-lookup.html">Profile Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
     </details>
   </div></header>
@@ -125,6 +125,7 @@ const RUN_KEY="active";
 const REFRESH_INTERVAL_MS=5*60*1000;
 const LEAGUE_FETCH_CONCURRENCY=4;
 const LEAGUE_FETCH_STAGGER_MS=150;
+const CACHE_KEY="c0ld:tracked-leagues:v1";
 const TRACKED_LEAGUES=[
   {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",rank:1},
   {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",rank:2},
@@ -224,12 +225,16 @@ function renderCards(){document.getElementById("top60-count").textContent=countR
 function renderMeta(){document.getElementById("table-meta").textContent=leagueRows.length+" leagues · "+memberRows.length+" c0ld members · Updated "+(lastUpdated?dt(lastUpdated):"-")}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No tracked c0ld leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">'+rankCell(r)+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
 function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="'+esc(leaguePage(r))+'"><strong>'+esc(bestName(r.user_id,r.username,r.display_name))+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
+function readCache(){try{const data=JSON.parse(localStorage.getItem(CACHE_KEY)||"null");return data&&Array.isArray(data.leagueRows)?data:null}catch{return null}}
+function writeCache(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({savedAt:new Date().toISOString(),leagueRows,memberRows,lastUpdated}))}catch{}}
+function renderCached(){const data=readCache();if(!data)return false;leagueRows=data.leagueRows||[];memberRows=data.memberRows||[];lastUpdated=data.lastUpdated||null;setStatus("Showing cached c0ld league data while the latest pull refreshes.");render();return true}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderCards();renderMeta()}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function mapLimit(items,limit,fn){const out=new Array(items.length);let next=0;const workers=Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const index=next++;out[index]=await fn(items[index],index)}});await Promise.all(workers);return out}
 async function loadData(){
   if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;
   try{
+    if(!leagueRows.length)renderCached();
     setStatus("Refreshing stored c0ld leagues. Points refresh every 5 minutes; outside Top 1,000 ranks use seeded rank windows when that refresh runs.");
     const topRowsPromise=fetchTopLeagueContext();
     const discoveredPromise=fetchDiscoveredLeagues();
@@ -250,6 +255,7 @@ async function loadData(){
     lastUpdated=leagueRows.map(row=>row.snapshot_at).filter(Boolean).sort().pop()||null;
     memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))));
     render();
+    writeCache();
   }catch(err){
     console.error(err);
     setStatus("Could not load c0ld leagues: "+(err.message||String(err)));
