@@ -2002,6 +2002,15 @@ async function handleTopClanThresholds(request, env) {
   const rows = [];
   let selectedBattleKey = activeBattleMeta?.battleKey || configuredBattleKey;
   let selectedBattleDisplayName = activeBattleMeta?.displayName || prettifyBattleKey(selectedBattleKey) || selectedBattleKey;
+  const previousActivity = await fetchPreviousTopClanMemberPoints(env, {
+    battleKey: selectedBattleKey,
+    referenceIso: generatedAt,
+    clanNames: topClans.map(clan => clan.clan_name)
+  }).catch(err => ({
+    run: null,
+    pointsByMember: new Map(),
+    error: err?.message || String(err)
+  }));
 
   for (const clan of topClans) {
     try {
@@ -2030,7 +2039,11 @@ async function handleTopClanThresholds(request, env) {
         filter1Threshold,
         filter2Threshold,
         filter3Threshold,
-        generatedAt
+        {
+          referenceIso: generatedAt,
+          clanName: clan.clan_name,
+          previousPoints: previousActivity.pointsByMember
+        }
       );
 
       selectedBattleKey = resolvedBattleKey || selectedBattleKey;
@@ -2076,6 +2089,14 @@ async function handleTopClanThresholds(request, env) {
       configName: cleanBattleDisplayName(selectedBattleKey, selectedBattleDisplayName),
       battleKey: selectedBattleKey
     },
+    activity: {
+      source: previousActivity.run ? "global_rank_candidates" : "fallback",
+      baseline_run_key: previousActivity.run?.run_key || null,
+      baseline_finished_at: previousActivity.run?.finished_at || previousActivity.run?.updated_at || null,
+      baseline_member_count: previousActivity.pointsByMember?.size || 0,
+      matched_clans: previousActivity.matchedClans || 0,
+      error: previousActivity.error || null
+    },
     rows
   }, env);
 }
@@ -2104,9 +2125,11 @@ function topClanThresholdErrorRow(clan, error) {
   };
 }
 
-function countThresholdMembers(members, filter1Threshold, filter2Threshold, filter3Threshold, referenceIso) {
-  const referenceMs = isoToMs(referenceIso) || Date.now();
+function countThresholdMembers(members, filter1Threshold, filter2Threshold, filter3Threshold, options = {}) {
+  const referenceMs = isoToMs(options.referenceIso) || Date.now();
   const activeAfterMs = referenceMs - 60 * 60 * 1000;
+  const clanKey = normalizeText(options.clanName);
+  const previousPoints = options.previousPoints || new Map();
   const counts = {
     active_count: 0,
     hatching_count: 0,
@@ -2124,10 +2147,17 @@ function countThresholdMembers(members, filter1Threshold, filter2Threshold, filt
   for (const member of members) {
     const points = toNumber(member.total_points) || 0;
     const rebirths = points / TOP_CLAN_REBIRTH_POINTS;
+    const previous = previousPoints.get(topClanMemberPointKey(clanKey, member.user_id));
     const contributionMs = contributionTimestampMs(member);
     counts.total_points += points;
 
-    if (points > 0 && contributionMs && contributionMs >= activeAfterMs) {
+    if (previous !== undefined) {
+      if (points > previous) {
+        counts.active_count += 1;
+      } else {
+        counts.hatching_count += 1;
+      }
+    } else if (points > 0 && contributionMs && contributionMs >= activeAfterMs) {
       counts.active_count += 1;
     } else {
       counts.hatching_count += 1;
@@ -2149,6 +2179,91 @@ function countThresholdMembers(members, filter1Threshold, filter2Threshold, filt
   counts.below_low_count = counts.under_filter3_count;
 
   return counts;
+}
+
+async function fetchPreviousTopClanMemberPoints(env, { battleKey, referenceIso, clanNames }) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    return { run: null, pointsByMember: new Map(), error: "Supabase is not configured." };
+  }
+
+  const referenceMs = isoToMs(referenceIso) || Date.now();
+  const targetMs = referenceMs - 60 * 60 * 1000;
+  const run = await findClosestGlobalRankRun(env, {
+    battleKey,
+    targetMs,
+    referenceMs,
+    toleranceMinutes: 45
+  });
+
+  if (!run?.run_key) {
+    return { run: null, pointsByMember: new Map(), error: "No one-hour global scan baseline found." };
+  }
+
+  const pointsByMember = new Map();
+  const wantedClans = new Set((clanNames || [])
+    .map(name => normalizeText(name))
+    .filter(Boolean));
+  const matchedClans = new Set();
+
+  const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    select: "user_id,points,source_clan",
+    run_key: `eq.${run.run_key}`,
+    order: "source_clan.asc,user_id.asc"
+  }, globalRankCandidateReadLimit(env));
+
+  for (const row of rows) {
+    const clanKey = normalizeText(row.source_clan);
+    if (!clanKey || (wantedClans.size && !wantedClans.has(clanKey))) continue;
+
+    const userId = toNumber(row.user_id);
+    const points = toNumber(row.points);
+    if (!userId || points === null) continue;
+
+    matchedClans.add(clanKey);
+
+    const key = topClanMemberPointKey(clanKey, userId);
+    const existing = pointsByMember.get(key);
+    if (existing === undefined || points > existing) pointsByMember.set(key, points);
+  }
+
+  return { run, pointsByMember, matchedClans: matchedClans.size, error: null };
+}
+
+async function findClosestGlobalRankRun(env, { battleKey, targetMs, referenceMs, toleranceMinutes }) {
+  const params = {
+    select: "run_key,finished_at,updated_at,started_at,battle_key,status",
+    status: "in.(ok,completed)",
+    finished_at: `lt.${new Date(referenceMs).toISOString()}`,
+    order: "finished_at.desc",
+    limit: "200"
+  };
+
+  const normalizedBattle = normalizeText(battleKey);
+  if (normalizedBattle && normalizedBattle !== "auto") {
+    params.battle_key = `eq.${battleKey}`;
+  }
+
+  const runs = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
+  const toleranceMs = toleranceMinutes * 60 * 1000;
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (const row of runs) {
+    const rowMs = isoToMs(row.finished_at || row.updated_at || row.started_at);
+    if (!rowMs) continue;
+
+    const distance = Math.abs(rowMs - targetMs);
+    if (distance <= toleranceMs && distance < bestDistance) {
+      best = row;
+      bestDistance = distance;
+    }
+  }
+
+  return best;
+}
+
+function topClanMemberPointKey(clanKey, userId) {
+  return `${clanKey}:${String(userId || "").trim()}`;
 }
 
 function contributionTimestampMs(member) {
