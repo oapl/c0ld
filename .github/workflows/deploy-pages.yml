@@ -58,6 +58,7 @@ jobs:
           PY
           cp -R Data assets _site/
           touch _site/.nojekyll
+          printf '%s\n' 'c0ld-clan.com' > _site/CNAME
 
       - name: Generate individual clan pages
         run: node scripts/generate-clan-pages.js _site
