@@ -945,7 +945,7 @@
           "&size=150x150&format=Png&isCircular=false";
 
         try {
-          const res = await fetch(url, { cache: "no-store" });
+          const res = await fetch(url, { cache: "default" });
           if (!res.ok) continue;
 
           const json = await res.json();
@@ -1590,9 +1590,13 @@
       await renderAll();
     }
 
-    async function fetchLiveJson(url, label) {
-      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-        cache: "no-store"
+    function withFreshParam(url) {
+      return `${url}${url.includes("?") ? "&" : "?"}fresh=${Date.now()}`;
+    }
+
+    async function fetchLiveJson(url, label, forceFresh = false) {
+      const res = await fetch(forceFresh ? withFreshParam(url) : url, {
+        cache: forceFresh ? "reload" : "default"
       });
 
       if (!res.ok) {
@@ -1602,22 +1606,22 @@
       return res.json();
     }
 
-    async function loadData() {
+    async function loadData(forceFresh = false) {
       if (isLoading) return;
       isLoading = true;
 
       const status = document.getElementById("status");
 
       try {
-        const cacheBust = Date.now();
+        const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
         const [currentJson, clansJson, globalJson, liveBattlesJson, staticBattlesRes, playerIndexRes, historyRes] = await Promise.all([
-          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`),
-          fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard"),
-          fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`).catch(() => ({ rows: [] })),
-          fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`).catch(() => ({ rows: [] })),
-          fetch(`Data/manual-battles.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/player-index.json?v=${cacheBust}`, { cache: "no-store" }),
-          fetch(`Data/c0ld-history.json?v=${cacheBust}`, { cache: "no-store" })
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL), `live ${TRACKED_CLAN_DISPLAY} leaderboard`, forceFresh),
+          fetchLiveJson(CLANS_API_CURRENT_URL, "live clans leaderboard", forceFresh),
+          fetchLiveJson(withClanQuery(GLOBAL_API_CURRENT_URL), `${TRACKED_CLAN_DISPLAY} global ranks`, forceFresh).catch(() => ({ rows: [] })),
+          fetchLiveJson(withClanQuery(MEMBER_API_BATTLES_URL), `live ${TRACKED_CLAN_DISPLAY} battles`, forceFresh).catch(() => ({ rows: [] })),
+          fetch(`Data/manual-battles.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }),
+          fetch(`Data/player-index.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" }),
+          fetch(`Data/c0ld-history.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" })
         ]);
 
         currentData = currentJson;
@@ -1673,7 +1677,7 @@
 
     function wireEvents() {
       document.getElementById("refresh").addEventListener("click", () => {
-        loadData();
+        loadData(true);
       });
 
       document.getElementById("search").addEventListener("input", () => {

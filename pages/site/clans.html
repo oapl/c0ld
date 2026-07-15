@@ -1053,10 +1053,14 @@
       renderTable();
     }
 
-    async function fetchJsonWithFallback(primaryUrl, fallbackUrl, label) {
+    function withFreshParam(url) {
+      return `${url}${url.includes("?") ? "&" : "?"}fresh=${Date.now()}`;
+    }
+
+    async function fetchJsonWithFallback(primaryUrl, fallbackUrl, label, forceFresh = false) {
       try {
-        const primary = await fetch(`${primaryUrl}${primaryUrl.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-          cache: "no-store"
+        const primary = await fetch(forceFresh ? withFreshParam(primaryUrl) : primaryUrl, {
+          cache: forceFresh ? "reload" : "default"
         });
 
         if (primary.ok) {
@@ -1065,7 +1069,7 @@
       } catch {
       }
 
-      const fallback = await fetch(fallbackUrl, { cache: "no-store" });
+      const fallback = await fetch(fallbackUrl, { cache: forceFresh ? "reload" : "default" });
       if (!fallback.ok) {
         throw new Error(`Could not load ${label}. HTTP ${fallback.status}`);
       }
@@ -1078,9 +1082,9 @@
       return data;
     }
 
-    async function fetchLiveJson(url, label) {
-      const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`, {
-        cache: "no-store"
+    async function fetchLiveJson(url, label, forceFresh = false) {
+      const res = await fetch(forceFresh ? withFreshParam(url) : url, {
+        cache: forceFresh ? "reload" : "default"
       });
 
       if (!res.ok) {
@@ -1103,20 +1107,21 @@
       liveBattleRows.set(key, Array.isArray(data?.rows) ? data.rows : []);
     }
 
-    async function loadData() {
+    async function loadData(forceFresh = false) {
       const tbody = document.getElementById("clans-tbody");
 
       try {
-        const cacheBust = Date.now();
+        const staticSuffix = forceFresh ? `?v=${Date.now()}` : "";
 
         const [currentJson, liveBattlesJson, historyRes] = await Promise.all([
           fetchJsonWithFallback(
             CLANS_API_CURRENT_URL,
-            `Data/clans-current.json?v=${cacheBust}`,
-            "live clans leaderboard"
+            `Data/clans-current.json${staticSuffix}`,
+            "live clans leaderboard",
+            forceFresh
           ),
-          fetchLiveJson(CLANS_API_BATTLES_URL, "live clans battle list").catch(() => ({ rows: [] })),
-          fetch(`Data/clans-history.json?v=${cacheBust}`, { cache: "no-store" })
+          fetchLiveJson(CLANS_API_BATTLES_URL, "live clans battle list", forceFresh).catch(() => ({ rows: [] })),
+          fetch(`Data/clans-history.json${staticSuffix}`, { cache: forceFresh ? "reload" : "default" })
         ]);
 
         currentData = withProjectedRanks(currentJson);
@@ -1154,7 +1159,7 @@
       });
 
       document.getElementById("refresh-btn").addEventListener("click", () => {
-        loadData();
+        loadData(true);
       });
     }
 

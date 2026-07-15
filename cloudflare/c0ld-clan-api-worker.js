@@ -18,7 +18,7 @@ const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_HISTORY_MAX_HOURS = 100000;
-const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
+const DEFAULT_PUBLIC_CACHE_SECONDS = 30;
 const ARCHIVE_PRUNE_BATCH_SIZE = 500;
 const ARCHIVE_PRUNE_MAX_BATCHES = 10;
 const ROBLOX_BATCH_SIZE = 100;
@@ -41,7 +41,7 @@ const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       if (request.method === "OPTIONS") {
         return withCors(new Response(null, { status: 204 }), request, env);
@@ -49,6 +49,10 @@ export default {
 
       const url = new URL(request.url);
       let response;
+      const cachedResponse = await readPublicGetCache(request, env);
+      if (cachedResponse) {
+        return withCors(cachedResponse, request, env);
+      }
 
       if (request.method === "GET" && url.pathname === "/api/health") {
         const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
@@ -125,6 +129,7 @@ export default {
         response = json({ ok: false, message: "Not found" }, 404);
       }
 
+      await writePublicGetCache(request, response, env, ctx);
       return withCors(response, request, env);
     } catch (err) {
       return withCors(json({
@@ -6417,4 +6422,51 @@ function cacheJson(data, env) {
   return json(data, 200, {
     "Cache-Control": `public, max-age=${Math.max(0, seconds)}`
   });
+}
+
+function shouldBypassPublicGetCache(url, request) {
+  const cacheControl = request.headers.get("Cache-Control") || "";
+  if (/\bno-cache\b|\bno-store\b/i.test(cacheControl)) return true;
+
+  for (const key of ["force", "fresh", "nocache", "no_cache", "_", "v"]) {
+    if (url.searchParams.has(key)) return true;
+  }
+
+  return false;
+}
+
+function publicGetCacheKey(request) {
+  const url = new URL(request.url);
+  return new Request(url.toString(), { method: "GET" });
+}
+
+function isPublicGetCacheEligible(request) {
+  if (request.method !== "GET") return false;
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith("/api/")) return false;
+  return !shouldBypassPublicGetCache(url, request);
+}
+
+async function readPublicGetCache(request, env) {
+  if (!isPublicGetCacheEligible(request)) return null;
+  if (typeof caches === "undefined" || !caches?.default) return null;
+  return caches.default.match(publicGetCacheKey(request));
+}
+
+async function writePublicGetCache(request, response, env, ctx) {
+  if (!isPublicGetCacheEligible(request)) return;
+  if (!response?.ok) return;
+  if (typeof caches === "undefined" || !caches?.default) return;
+
+  const cacheControl = response.headers.get("Cache-Control") || "";
+  const maxAgeMatch = cacheControl.match(/\bmax-age=(\d+)\b/i);
+  const maxAge = maxAgeMatch ? Number(maxAgeMatch[1]) : 0;
+  if (!/\bpublic\b/i.test(cacheControl) || /\bno-store\b/i.test(cacheControl) || maxAge <= 0) return;
+
+  const put = caches.default.put(publicGetCacheKey(request), response.clone());
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(put);
+  } else {
+    await put;
+  }
 }
