@@ -3904,15 +3904,15 @@ async function postPs99RestartAlert(env, event, options = {}) {
     ? event.details
     : (parseJsonObject(event?.details) || {});
   const detectedAt = safeIso(event.detected_at) || new Date().toISOString();
-  const relativeTime = discordTimestamp(detectedAt, "R") || "Unknown";
-  const clockTime = discordTimestamp(detectedAt, "t") || "Unknown";
+  const detectedMs = isoToMs(detectedAt) || Date.now();
+  const detectedMinute = new Date(Math.floor(detectedMs / 60000) * 60000).toISOString();
+  const relativeTime = discordTimestamp(detectedMinute, "R") || "Unknown";
   const previousRestartAt = safeIso(details.previous_restart_detected_at);
   const restartVersion = details.restart_place_version ?? event.current_place_version;
   const currentVersion = event.current_place_version;
   const description = [
-    `**${relativeTime}**`,
     "~~━━━━━━━━━━━~~",
-    `Restart @ ${clockTime}`,
+    `**${relativeTime}**`,
     `Time Since Last Restart: ${ps99AlertElapsed(previousRestartAt, detectedAt)}`,
     `Place Version @ restart: ${ps99AlertVersion(restartVersion)}`,
     `Place Version Now: ${ps99AlertVersion(currentVersion)}`,
