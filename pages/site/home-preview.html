@@ -595,24 +595,24 @@
             <div id="mvp-name" class="award-name">Calculating…</div>
             <div id="mvp-value" class="award-value">—</div>
             <div class="award-rule"></div>
-            <div id="mvp-description" class="award-description">Most observed time holding the #1 player position.</div>
+            <div id="mvp-description" class="award-description">Most time holding rank #1.</div>
           </article>
 
           <article class="award red">
             <div class="award-avatar-shell">
-              <img id="volatile-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Most inconsistent Roblox avatar" />
+              <img id="volatile-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Needs New Glasses Roblox avatar" />
               <span class="award-medal">↕</span>
             </div>
             <div class="award-title">Needs New Glasses</div>
             <div id="volatile-name" class="award-name">Calculating…</div>
             <div id="volatile-value" class="award-value">—</div>
             <div class="award-rule"></div>
-            <div id="volatile-description" class="award-description">The highest number of observed player-rank changes.</div>
+            <div id="volatile-description" class="award-description">Most changes in rank throughout the battle.</div>
           </article>
 
           <article class="award blue">
             <div class="award-avatar-shell">
-              <img id="sleeper-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Underdog Roblox avatar" />
+              <img id="sleeper-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Sleeper Agent Roblox avatar" />
               <span class="award-medal">↑</span>
             </div>
             <div class="award-title">Sleeper Agent</div>
@@ -968,12 +968,12 @@
       if (mvp) {
         els.mvpName.textContent = playerNames.get(mvp[0]) || "Unknown player";
         els.mvpValue.textContent = `${formatDuration(mvp[1])} at #1`;
-        els.mvpDescription.textContent = "Longest observed hold of the #1 player position across the entire current battle.";
+        els.mvpDescription.textContent = "Most time holding rank #1.";
         setAwardAvatar(els.mvpAvatar, playerProfiles.get(mvp[0]));
       } else if (currentLeader) {
         els.mvpName.textContent = currentLeader.username || "Current leader";
         els.mvpValue.textContent = `#1 · ${formatNumber(currentLeader.total_points)} points`;
-        els.mvpDescription.textContent = "Current points leader; time-at-rank history is still accumulating.";
+        els.mvpDescription.textContent = "Most time holding rank #1.";
         setAwardAvatar(els.mvpAvatar, currentLeader);
       } else {
         awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No current leader is available.");
@@ -983,7 +983,7 @@
       if (volatile && volatile[1] > 0) {
         els.volatileName.textContent = playerNames.get(volatile[0]) || "Unknown player";
         els.volatileValue.textContent = `${volatile[1]} rank change${volatile[1] === 1 ? "" : "s"}`;
-        els.volatileDescription.textContent = "Most movement between observed leaderboard snapshots across the entire current battle.";
+        els.volatileDescription.textContent = "Most changes in rank throughout the battle.";
         setAwardAvatar(els.volatileAvatar, playerProfiles.get(volatile[0]));
       } else {
         awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "No player-rank changes have been observed in the current battle.");
