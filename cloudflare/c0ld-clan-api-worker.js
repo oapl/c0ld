@@ -117,6 +117,8 @@ export default {
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/home/awards") {
+        response = await handleHomeAwards(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/history") {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/battles") {
@@ -557,6 +559,45 @@ async function handleCurrent(request, env) {
       gain_24h: row.gain_24h
     }))
   }, env, publicCacheSeconds(env, "CURRENT"));
+}
+
+async function handleHomeAwards(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const requestedBattle = String(url.searchParams.get("battle") || "").trim();
+  const resultRaw = await supabaseRpc(env, "get_c0ld_home_awards", {
+    p_clan_name: clan,
+    p_battle_key: requestedBattle || null
+  });
+  const result = Array.isArray(resultRaw) ? resultRaw[0] : resultRaw;
+
+  if (!result || typeof result !== "object") {
+    throw httpError(502, "The home awards summary returned an invalid response.");
+  }
+
+  const awards = result.awards && typeof result.awards === "object" ? result.awards : {};
+  const userIds = Object.values(awards)
+    .map(award => toNumber(award?.user_id))
+    .filter(Boolean);
+  const avatarMap = await resolveRobloxAvatarHeadshots(userIds, env).catch(() => new Map());
+  const enrichedAwards = Object.fromEntries(Object.entries(awards).map(([key, award]) => [
+    key,
+    award && typeof award === "object"
+      ? {
+          ...award,
+          avatar_url: avatarMap.get(String(award.user_id)) || null
+        }
+      : null
+  ]));
+
+  return cacheJson({
+    ...result,
+    generated_at: new Date().toISOString(),
+    source: "postgres_award_summary",
+    awards: enrichedAwards
+  }, env, 60);
 }
 
 async function handleGlobalCurrent(request, env) {
@@ -7036,6 +7077,25 @@ async function supabaseSelect(env, tableName, params) {
   if (!res.ok) {
     const text = await res.text();
     throw httpError(502, `Supabase select failed for ${tableName} (${res.status}): ${text}`);
+  }
+
+  return res.json();
+}
+
+async function supabaseRpc(env, functionName, payload = {}) {
+  const base = String(env.SUPABASE_URL || "").replace(/\/$/, "");
+  const url = `${base}/rest/v1/rpc/${encodeURIComponent(functionName)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: supabaseHeaders(env, {
+      Prefer: "return=representation"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw httpError(502, `Supabase RPC failed for ${functionName} (${res.status}): ${text}`);
   }
 
   return res.json();

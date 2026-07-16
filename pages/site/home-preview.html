@@ -820,6 +820,8 @@
     const HISTORY_FALLBACK_HOURS = 100000;
     const REFRESH_MS = 60 * 1000;
     const DEFAULT_AVATAR = "assets/c0ld-kitsune-logo.gif";
+    const AWARD_CACHE_KEY = "c0ld.home-awards.v1";
+    const AWARD_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
     const els = {
       errorBanner: document.getElementById("error-banner"),
@@ -1092,6 +1094,134 @@
       descriptionTarget.textContent = description;
     }
 
+    function renderCurrentAwardPreview(currentRows) {
+      const ranked = [...(currentRows || [])].filter(row => finite(row.rank) !== null);
+      const currentLeader = ranked.sort((a, b) => finite(a.rank) - finite(b.rank))[0];
+      if (currentLeader) {
+        els.mvpName.textContent = currentLeader.username || "Current leader";
+        els.mvpValue.textContent = `#1 · ${formatNumber(currentLeader.total_points)} points`;
+        els.mvpDescription.textContent = "Most time holding rank #1.";
+        setAwardAvatar(els.mvpAvatar, currentLeader);
+      }
+
+      const pointLeader = [...(currentRows || [])]
+        .filter(row => finite(row.total_points) !== null)
+        .sort((a, b) => Number(b.total_points) - Number(a.total_points))[0];
+      if (pointLeader) {
+        els.pointsName.textContent = pointLeader.username || "Current point leader";
+        els.pointsValue.textContent = `${formatNumber(pointLeader.total_points)} points`;
+        els.pointsDescription.textContent = "Most points in the current battle.";
+        setAwardAvatar(els.pointsAvatar, pointLeader);
+      }
+    }
+
+    function renderAwardSummary(summary) {
+      const awards = summary?.awards;
+      if (!awards || typeof awards !== "object" || !Object.values(awards).some(Boolean)) return false;
+
+      if (awards.mvp) {
+        els.mvpName.textContent = awards.mvp.username || "Unknown player";
+        els.mvpValue.textContent = `${formatDuration(Number(awards.mvp.value_ms) || 0)} at #1`;
+        els.mvpDescription.textContent = "Most time holding rank #1.";
+        setAwardAvatar(els.mvpAvatar, awards.mvp);
+      }
+
+      if (awards.points) {
+        els.pointsName.textContent = awards.points.username || "Unknown player";
+        els.pointsValue.textContent = `${formatNumber(awards.points.total_points)} points`;
+        els.pointsDescription.textContent = "Most points in the current battle.";
+        setAwardAvatar(els.pointsAvatar, awards.points);
+      }
+
+      if (awards.sleeper) {
+        const percentage = finite(awards.sleeper.percentage);
+        els.sleeperName.textContent = awards.sleeper.username || "Unknown player";
+        els.sleeperValue.textContent = `#${awards.sleeper.first_rank} → #${awards.sleeper.latest_rank}`;
+        els.sleeperDescription.textContent = `Climbed ${awards.sleeper.gain} places (${percentage === null ? 0 : percentage.toFixed(0)}%) from their first recorded rank in this battle to now.`;
+        setAwardAvatar(els.sleeperAvatar, awards.sleeper);
+      } else {
+        awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "No upward player-rank climb has been observed in the current battle.");
+      }
+
+      if (awards.downtime) {
+        els.downtimeName.textContent = awards.downtime.username || "Unknown player";
+        els.downtimeValue.textContent = `${formatDuration(Number(awards.downtime.value_ms) || 0)} idle`;
+        els.downtimeDescription.textContent = "Most accumulated time without a recorded point gain.";
+        setAwardAvatar(els.downtimeAvatar, awards.downtime);
+      } else {
+        awardFallback(els.downtimeName, els.downtimeValue, els.downtimeDescription, "No measurable downtime was found in this battle.");
+      }
+
+      if (awards.glasses) {
+        const changes = Math.max(0, Math.trunc(Number(awards.glasses.rank_changes) || 0));
+        els.glassesName.textContent = awards.glasses.username || "Unknown player";
+        els.glassesValue.textContent = `${changes} rank change${changes === 1 ? "" : "s"}`;
+        els.glassesDescription.textContent = "Most changes in rank throughout the battle.";
+        setAwardAvatar(els.glassesAvatar, awards.glasses);
+      } else {
+        awardFallback(els.glassesName, els.glassesValue, els.glassesDescription, "No rank changes were observed in this battle.");
+      }
+
+      if (awards.lvp) {
+        els.lvpName.textContent = awards.lvp.username || "Unknown player";
+        els.lvpValue.textContent = `${formatDuration(Number(awards.lvp.value_ms) || 0)} in last`;
+        els.lvpDescription.textContent = "Most observed time holding last place.";
+        setAwardAvatar(els.lvpAvatar, awards.lvp);
+      } else {
+        awardFallback(els.lvpName, els.lvpValue, els.lvpDescription, "No last-place history was available for this battle.");
+      }
+
+      return true;
+    }
+
+    function awardDisplayBindings() {
+      return [
+        [els.mvpAvatar, els.mvpName, els.mvpValue, els.mvpDescription],
+        [els.pointsAvatar, els.pointsName, els.pointsValue, els.pointsDescription],
+        [els.sleeperAvatar, els.sleeperName, els.sleeperValue, els.sleeperDescription],
+        [els.downtimeAvatar, els.downtimeName, els.downtimeValue, els.downtimeDescription],
+        [els.glassesAvatar, els.glassesName, els.glassesValue, els.glassesDescription],
+        [els.lvpAvatar, els.lvpName, els.lvpValue, els.lvpDescription]
+      ];
+    }
+
+    function saveAwardDisplayCache(battle) {
+      try {
+        const displays = awardDisplayBindings().map(([avatar, name, value, description]) => ({
+          avatar: avatar.currentSrc || avatar.src || DEFAULT_AVATAR,
+          name: name.textContent,
+          value: value.textContent,
+          description: description.textContent
+        }));
+        localStorage.setItem(AWARD_CACHE_KEY, JSON.stringify({
+          saved_at: Date.now(),
+          battle,
+          displays
+        }));
+      } catch {
+        // The live data path remains available when browser storage is unavailable.
+      }
+    }
+
+    function restoreAwardDisplayCache() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(AWARD_CACHE_KEY) || "null");
+        if (!cached || Date.now() - Number(cached.saved_at || 0) > AWARD_CACHE_MAX_AGE_MS) return null;
+        const bindings = awardDisplayBindings();
+        if (!Array.isArray(cached.displays) || cached.displays.length !== bindings.length) return null;
+        cached.displays.forEach((display, index) => {
+          const [avatar, name, value, description] = bindings[index];
+          name.textContent = display.name || "Awaiting history";
+          value.textContent = display.value || "—";
+          description.textContent = display.description || "Battle history award.";
+          setAwardAvatar(avatar, { username: display.name, avatar_url: display.avatar });
+        });
+        return cached.battle || null;
+      } catch {
+        return null;
+      }
+    }
+
     function renderAwards(snapshots, currentRows) {
       setAwardAvatar(els.mvpAvatar, null);
       setAwardAvatar(els.pointsAvatar, null);
@@ -1321,9 +1451,10 @@
       els.battleCountdownDetail.textContent = remaining ? formatDate(countdownEndsAt) : "Battle window ended";
     }
 
-    async function fetchJson(url, fallback = null) {
+    async function fetchJson(url, fallback = null, { fresh = false } = {}) {
       try {
-        const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, { cache: "no-store" });
+        const requestUrl = fresh ? `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}` : url;
+        const response = await fetch(requestUrl, { cache: fresh ? "no-store" : "default" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data?.ok === false) throw new Error(data.message || "API error");
@@ -1376,6 +1507,11 @@
       return { rows: historyCache.rows, hours };
     }
 
+    async function fetchRecentBattleHistory(battle) {
+      const url = `${API_BASE}/api/history?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}&hours=2&limit=5000&order=asc&offset=0`;
+      return fetchJson(url, { rows: [] });
+    }
+
     async function load() {
       if (loading) return;
       loading = true;
@@ -1391,16 +1527,13 @@
         ]);
 
         const battle = current.battle || detail.battle || "current";
-        const history = await fetchBattleHistory(battle);
         const currentRows = Array.isArray(current.rows) ? current.rows : [];
-        const snapshots = groupSnapshots(history.rows);
         const rootPlace = (versions.places || []).find(place => place.root_place) || versions.places?.[0] || null;
         const latestRestart = restarts.latest_restart || restarts.events?.[0] || null;
 
         renderActivity(detail, announcement);
-        renderRankActivity(snapshots, currentRows);
-        renderAwards(snapshots, currentRows);
-        renderBootlegAwards(snapshots, currentRows);
+        renderRankActivity([], currentRows);
+        renderCurrentAwardPreview(currentRows);
 
         els.lastRestart.textContent = latestRestart ? relativeTime(latestRestart.detected_at) : "None logged";
         els.lastRestartDetail.textContent = latestRestart ? formatDate(latestRestart.detected_at) : "No confirmed restart yet";
@@ -1420,6 +1553,22 @@
         els.rosterCount.textContent = String(detail.summary?.current_members ?? currentRows.length ?? "—");
         updateCountdown();
 
+        const [awardSummary, recentHistory] = await Promise.all([
+          fetchJson(`${API_BASE}/api/home/awards?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}`, {}),
+          fetchRecentBattleHistory(battle)
+        ]);
+        renderRankActivity(groupSnapshots(recentHistory.rows), currentRows);
+
+        if (renderAwardSummary(awardSummary)) {
+          saveAwardDisplayCache(battle);
+        } else {
+          const history = await fetchBattleHistory(battle);
+          const snapshots = groupSnapshots(history.rows);
+          renderAwards(snapshots, currentRows);
+          renderBootlegAwards(snapshots, currentRows);
+          saveAwardDisplayCache(battle);
+        }
+
       } catch (error) {
         els.errorBanner.textContent = `Some live dashboard data could not be loaded: ${error.message || error}`;
         els.errorBanner.style.display = "block";
@@ -1428,6 +1577,7 @@
       }
     }
 
+    restoreAwardDisplayCache();
     load();
     window.setInterval(updateCountdown, 1000);
     window.setInterval(load, REFRESH_MS);

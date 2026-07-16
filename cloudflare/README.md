@@ -91,6 +91,7 @@ supabase/migrations/006_c0ld_current_and_battles.sql
 supabase/migrations/007_c0ld_clans_leaderboard.sql
 supabase/migrations/019_clan_activity.sql
 supabase/migrations/021_ps99_version_history.sql
+supabase/migrations/024_home_awards_rpc.sql
 ```
 
 It creates:
@@ -104,6 +105,7 @@ It creates:
 | `c0ld_clans_current` | table | Latest all-clans leaderboard only. Replaced every clans pull. |
 | `c0ld_clan_activity_roster_snapshots` | table | Append-only roster snapshots for top-clan activity tracking. |
 | `c0ld_clan_activity_current` | table | Latest tracked top-clan rosters. |
+| `get_c0ld_home_awards` | function | Calculates the six full-battle home awards in Postgres and returns one compact summary. |
 | `c0ld_clan_activity_events` | table | Detected joins, leaves/kicks, promotions, demotions, kick-state changes, and rank changes. |
 | `c0ld_clan_activity_summary` | table | Per-clan activity counters for `clans-activity.html`. |
 | `c0ld_ps99_places` | table | Watched PS99 places and their latest known place version. |
