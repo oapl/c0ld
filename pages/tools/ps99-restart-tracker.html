@@ -8,13 +8,14 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b1117;
-      --panel: #151b22;
-      --panel-soft: #10161d;
-      --border: #2b3540;
-      --text: #f6f8fb;
-      --muted: #9fb4c9;
-      --accent: #ff6d6d;
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-soft: #0d1117;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #ff9b96;
+      --hover: #1f2630;
       --good: #25d366;
       --warn: #ffc857;
       --info: #62b5ff;
@@ -31,15 +32,15 @@
     header {
       border-bottom: 1px solid var(--border);
       background: var(--panel);
-      padding: 16px 20px;
+      padding: 12px 22px 10px;
       text-align: center;
     }
 
     .brand-img {
       display: block;
-      width: 70px;
-      height: 70px;
-      margin: 0 auto 10px;
+      width: 76px;
+      height: auto;
+      margin: 0 auto 9px;
       object-fit: contain;
     }
 
@@ -51,24 +52,33 @@
       align-items: center;
     }
 
-    .menu-btn,
+    .menu-btn {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: var(--panel-soft);
+      border-radius: 5px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
     .btn {
       border: 1px solid var(--border);
       color: var(--text);
-      background: #070b10;
-      border-radius: 5px;
-      padding: 8px 13px;
-      text-decoration: none;
+      background: var(--panel-soft);
+      border-radius: 6px;
+      padding: 9px 11px;
       font-size: 14px;
-      font-weight: 700;
       cursor: pointer;
     }
 
     .menu-btn.active,
     .btn:hover {
       border-color: var(--accent);
-      background: rgba(255, 109, 109, 0.22);
-      color: #ffb3b3;
+      background: rgba(248, 81, 73, 0.12);
+      color: var(--accent);
     }
 
     .btn:disabled { cursor: wait; opacity: 0.7; }
@@ -85,14 +95,15 @@
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #0b1117;
+      background: var(--panel);
       box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
     }
     .lookup-menu[open] .lookup-panel { display: grid; gap: 6px; }
 
     main {
-      width: min(1180px, calc(100% - 32px));
-      margin: 26px auto 60px;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 22px 24px 60px;
     }
 
     .hero,
@@ -101,22 +112,23 @@
     .notice {
       border: 1px solid var(--border);
       background: var(--panel);
-      border-radius: 8px;
+      border-radius: 10px;
     }
 
     .hero {
-      padding: 22px;
+      padding: 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 18px;
       flex-wrap: wrap;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
 
     h1, h2 { margin: 0; }
-    h1 { font-size: 32px; }
-    h2 { font-size: 20px; }
+    h1 { font-size: 27px; line-height: 1.1; }
+    h2 { font-size: 18px; }
+    .hero .muted { font-size: 13px; }
     .muted { color: var(--muted); }
 
     .notice {
@@ -124,7 +136,7 @@
       margin-bottom: 18px;
       border-left-width: 5px;
     }
-    .notice strong { display: block; margin-bottom: 4px; font-size: 17px; }
+    .notice strong { display: block; margin-bottom: 4px; font-size: 16px; }
     .notice.monitoring { border-left-color: var(--good); }
     .notice.candidate { border-left-color: var(--warn); background: rgba(255, 200, 87, 0.08); }
     .notice.cooldown { border-left-color: var(--accent); background: rgba(255, 109, 109, 0.09); }
@@ -134,33 +146,42 @@
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 18px;
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
-    .stat { padding: 16px; min-height: 82px; }
-    .stat-label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
-    .stat-value { font-size: 21px; font-weight: 800; }
+    .stat {
+      padding: 16px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .stat-label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+    .stat-value { font-size: 20px; font-weight: bold; line-height: 1.25; }
 
-    .panel { overflow: hidden; margin-bottom: 18px; }
+    .panel { overflow: hidden; margin-bottom: 24px; }
     .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
-      padding: 16px 18px;
+      padding: 16px;
       border-bottom: 1px solid var(--border);
     }
 
     table { width: 100%; border-collapse: collapse; }
     th, td {
-      padding: 13px 16px;
+      padding: 11px 14px;
       text-align: left;
       border-bottom: 1px solid var(--border);
       vertical-align: middle;
+      white-space: nowrap;
     }
-    th { color: var(--muted); font-size: 13px; font-weight: 500; }
+    th { color: var(--muted); font-size: 13px; font-weight: normal; }
     td:first-child { font-weight: 700; }
     code { color: #d9eaff; font-size: 12px; }
 
@@ -179,19 +200,13 @@
     .pill.bad { color: #ff9e9e; border-color: rgba(255, 109, 109, 0.5); }
     .pill.info { color: var(--info); border-color: rgba(98, 181, 255, 0.5); }
 
-    .method {
-      padding: 17px 18px;
-      background: var(--panel-soft);
-      color: var(--muted);
-      line-height: 1.55;
-    }
-    .method strong { color: var(--text); }
+    tbody tr:hover { background: var(--hover); }
     .empty, .error { padding: 18px; color: var(--muted); }
     .error { color: #ffb3b3; }
     [hidden] { display: none !important; }
 
     @media (max-width: 900px) {
-      main { width: calc(100% - 16px); }
+      main { padding: 16px 8px 60px; }
       .stats { grid-template-columns: repeat(2, 1fr); }
       table { min-width: 820px; }
       .panel { overflow-x: auto; }
@@ -257,7 +272,7 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Current Reference Sample</h2>
+        <h2>Monitored Servers</h2>
         <span id="sample-meta" class="muted">Loading…</span>
       </div>
       <table>
@@ -299,7 +314,7 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Confirmed Restart History</h2>
+        <h2>Restart History</h2>
         <span id="history-meta" class="muted">Loading…</span>
       </div>
       <table>
@@ -316,9 +331,6 @@
           <tr><td colspan="5" class="empty">Loading…</td></tr>
         </tbody>
       </table>
-      <div class="method">
-        <strong>How detection works:</strong> Roblox does not publish server creation time or a server's place version in the public server list. The tracker samples five random servers from a batch of 100 high-occupancy public servers. If all five disappear in the same one-minute interval, five replacements must remain visible in the following scan before a restart is confirmed. A recent PS99 place-version change raises confidence, and a ten-minute stabilization period prevents duplicate alerts. “Observed duration” is only how long this tracker has seen an ID, not the server's true age.
-      </div>
     </section>
   </main>
 
@@ -363,7 +375,7 @@
 
     function fmtVersion(value) {
       const number = Number(value);
-      return Number.isFinite(number) ? `v${number.toLocaleString()}` : "-";
+      return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
     }
 
     function fmtDuration(value) {

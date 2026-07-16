@@ -56,7 +56,10 @@ const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
 const DEFAULT_PS99_RESTART_CONFIRMATIONS = 2;
 const DEFAULT_PS99_RESTART_COOLDOWN_MINUTES = 10;
 const DEFAULT_PS99_RESTART_HISTORY_LIMIT = 100;
-const PS99_RESTART_CRON = "* * * * *";
+const PS99_RESTART_CRONS = new Set([
+  "* * * * *",
+  "*/1 * * * *"
+]);
 const PS99_VERSION_SEED_HINTS = Object.freeze({
   8737899170: 27147,
   13764885284: 30,
@@ -191,7 +194,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     const scheduledAt = event?.scheduledTime ? new Date(event.scheduledTime) : null;
-    if (String(event?.cron || "") === PS99_RESTART_CRON) {
+    if (isPs99RestartCron(event?.cron)) {
       if (ps99RestartEnabled(env)) {
         ctx.waitUntil(handlePs99RestartIngest(env, "schedule"));
       }
@@ -201,6 +204,11 @@ export default {
     ctx.waitUntil(runScheduledIngests(env, false, scheduledAt));
   }
 };
+
+function isPs99RestartCron(value) {
+  const cron = String(value || "").trim().replace(/\s+/g, " ");
+  return PS99_RESTART_CRONS.has(cron);
+}
 
 async function runScheduledIngests(env, force = false, scheduledAt = null, options = {}) {
   const jobs = clanNames(env).map(clan => ({

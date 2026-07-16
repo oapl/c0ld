@@ -7,12 +7,14 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b1117;
-      --panel: #151b22;
-      --border: #2b3540;
-      --text: #f6f8fb;
-      --muted: #9fb4c9;
-      --accent: #ff6d6d;
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0d1117;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #ff9b96;
+      --hover: #1f2630;
       --good: #25d366;
     }
 
@@ -27,15 +29,15 @@
     header {
       border-bottom: 1px solid var(--border);
       background: var(--panel);
-      padding: 16px 20px;
+      padding: 12px 22px 10px;
       text-align: center;
     }
 
     .brand-img {
       display: block;
-      width: 70px;
-      height: 70px;
-      margin: 0 auto 10px;
+      width: 76px;
+      height: auto;
+      margin: 0 auto 9px;
       object-fit: contain;
     }
 
@@ -47,24 +49,33 @@
       align-items: center;
     }
 
-    .menu-btn,
+    .menu-btn {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: var(--panel-2);
+      border-radius: 5px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
     .btn {
       border: 1px solid var(--border);
       color: var(--text);
-      background: #070b10;
-      border-radius: 5px;
-      padding: 8px 13px;
-      text-decoration: none;
+      background: var(--panel-2);
+      border-radius: 6px;
+      padding: 9px 11px;
       font-size: 14px;
-      font-weight: 700;
       cursor: pointer;
     }
 
     .menu-btn.active,
     .btn:hover {
       border-color: var(--accent);
-      background: rgba(255, 109, 109, 0.22);
-      color: #ffb3b3;
+      background: rgba(248, 81, 73, 0.12);
+      color: var(--accent);
     }
 
     .lookup-menu { position: relative; }
@@ -80,7 +91,7 @@
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #0b1117;
+      background: var(--panel);
       box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
     }
     .lookup-menu[open] .lookup-panel {
@@ -89,8 +100,9 @@
     }
 
     main {
-      width: min(1180px, calc(100% - 32px));
-      margin: 26px auto 60px;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 22px 24px 60px;
     }
 
     .hero,
@@ -98,51 +110,58 @@
     .stat {
       border: 1px solid var(--border);
       background: var(--panel);
-      border-radius: 8px;
+      border-radius: 10px;
     }
 
     .hero {
-      padding: 22px;
+      padding: 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 18px;
       flex-wrap: wrap;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
     }
 
     h1, h2 { margin: 0; }
-    h1 { font-size: 32px; }
-    h2 { font-size: 20px; }
+    h1 { font-size: 27px; line-height: 1.1; }
+    h2 { font-size: 18px; }
+    .hero .muted { font-size: 13px; }
     .muted { color: var(--muted); }
     .good { color: var(--good); font-weight: 800; }
 
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 18px;
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
     .stat {
       padding: 16px;
-      min-height: 78px;
+      min-height: 92px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
     }
 
     .stat-label {
       color: var(--muted);
       font-size: 13px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .stat-value {
-      font-size: 22px;
-      font-weight: 800;
+      font-size: 20px;
+      font-weight: bold;
+      line-height: 1.25;
     }
 
     .panel {
       overflow: hidden;
-      margin-bottom: 18px;
+      margin-bottom: 24px;
     }
 
     .panel-header {
@@ -151,7 +170,7 @@
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
-      padding: 16px 18px;
+      padding: 16px;
       border-bottom: 1px solid var(--border);
     }
 
@@ -161,22 +180,30 @@
     }
 
     th, td {
-      padding: 13px 16px;
+      padding: 11px 14px;
       text-align: left;
       border-bottom: 1px solid var(--border);
       vertical-align: middle;
+      white-space: nowrap;
     }
 
     th {
       color: var(--muted);
       font-size: 13px;
-      font-weight: 500;
+      font-weight: normal;
     }
 
     td:first-child,
     .version {
       font-weight: 800;
     }
+
+    .place-link {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    tbody tr:hover { background: var(--hover); }
 
     .empty,
     .error {
@@ -187,7 +214,7 @@
     .error { color: #ffb3b3; }
 
     @media (max-width: 900px) {
-      main { width: calc(100% - 16px); }
+      main { padding: 16px 8px 60px; }
       .stats { grid-template-columns: repeat(2, 1fr); }
       table { min-width: 760px; }
       .panel { overflow-x: auto; }
@@ -257,12 +284,11 @@
             <th>Place</th>
             <th>Place ID</th>
             <th>Latest Version</th>
-            <th>Published</th>
-            <th>Checked</th>
+            <th>Updated</th>
           </tr>
         </thead>
         <tbody id="places-body">
-          <tr><td colspan="5" class="empty">Loading...</td></tr>
+          <tr><td colspan="4" class="empty">Loading...</td></tr>
         </tbody>
       </table>
     </section>
@@ -321,7 +347,12 @@
 
     function fmtVersion(value) {
       const n = Number(value);
-      return Number.isFinite(n) ? `v${n.toLocaleString()}` : "-";
+      return Number.isFinite(n) ? String(Math.trunc(n)) : "-";
+    }
+
+    function robloxPlaceUrl(value) {
+      const placeId = String(value ?? "").replace(/\D/g, "");
+      return placeId ? `https://www.roblox.com/games/${placeId}` : "https://www.roblox.com/games/";
     }
 
     function text(value) {
@@ -352,14 +383,13 @@
       els.placesBody.innerHTML = places.length
         ? places.map(place => `
           <tr>
-            <td>${text(place.place_name)}${place.root_place ? ' <span class="good">root</span>' : ""}</td>
+            <td><a class="place-link" href="${robloxPlaceUrl(place.place_id)}" target="_blank" rel="noopener noreferrer">${text(place.place_name)}</a>${place.root_place ? ' <span class="good">root</span>' : ""}</td>
             <td>${text(place.place_id)}</td>
             <td class="version">${fmtVersion(place.latest_version)}</td>
             <td>${fmtDate(place.latest_published_at)}</td>
-            <td>${fmtDate(place.latest_checked_at)}</td>
           </tr>
         `).join("")
-        : `<tr><td colspan="5" class="empty">No watched places found. Run the PS99 version migration and ingest once.</td></tr>`;
+        : `<tr><td colspan="4" class="empty">No watched places found. Run the PS99 version migration and ingest once.</td></tr>`;
 
       els.historyBody.innerHTML = events.length
         ? events.map(event => `
@@ -391,7 +421,7 @@
         render(data);
       } catch (err) {
         if (!cached) {
-          els.placesBody.innerHTML = `<tr><td colspan="5" class="error">${text(err.message || err)}</td></tr>`;
+          els.placesBody.innerHTML = `<tr><td colspan="4" class="error">${text(err.message || err)}</td></tr>`;
           els.historyBody.innerHTML = `<tr><td colspan="5" class="error">${text(err.message || err)}</td></tr>`;
         }
       } finally {
