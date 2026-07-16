@@ -162,6 +162,74 @@
     .stat-label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
     .stat-value { font-size: 20px; font-weight: bold; line-height: 1.25; }
 
+    .audio-stat {
+      align-items: stretch;
+      text-align: left;
+    }
+
+    .audio-stat .stat-label { text-align: center; }
+
+    .audio-controls {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .audio-controls select,
+    .audio-controls input {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    .audio-controls input[aria-invalid="true"] { border-color: var(--accent); }
+
+    .ccu-stat { gap: 8px; }
+
+    .ccu-divider {
+      width: 100%;
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 0;
+    }
+
+    .ccu-values {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .ccu-value + .ccu-value { border-left: 1px solid var(--border); }
+
+    .ccu-value span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .ccu-value strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .audio-player-host {
+      position: fixed;
+      left: -10000px;
+      bottom: 0;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .panel { overflow: hidden; margin-bottom: 24px; }
     .panel-header {
       display: flex;
@@ -251,9 +319,35 @@
     </section>
 
     <section class="stats">
-      <article class="stat">
-        <div class="stat-label">Detector Status</div>
-        <div id="detector-status" class="stat-value">-</div>
+      <article class="stat audio-stat">
+        <div class="stat-label">Audio Alert</div>
+        <div class="audio-controls">
+          <select id="audio-alert-state" aria-label="Audio alert state">
+            <option value="disabled">Disabled</option>
+            <option value="enabled">Enabled</option>
+          </select>
+          <input
+            id="audio-alert-url"
+            type="url"
+            aria-label="YouTube audio alert URL"
+            value="https://www.youtube.com/watch?v=enYdAxVcNZA"
+            spellcheck="false"
+          />
+        </div>
+      </article>
+      <article class="stat ccu-stat">
+        <div class="stat-label">CCU</div>
+        <hr class="ccu-divider" />
+        <div class="ccu-values">
+          <div class="ccu-value">
+            <span>10 Min Ago</span>
+            <strong id="ccu-ten-minutes-ago">-</strong>
+          </div>
+          <div class="ccu-value">
+            <span>Now</span>
+            <strong id="ccu-now">-</strong>
+          </div>
+        </div>
       </article>
       <article class="stat">
         <div class="stat-label">Tracked Servers Present</div>
@@ -263,11 +357,8 @@
         <div class="stat-label">Current Place Version</div>
         <div id="place-version" class="stat-value">-</div>
       </article>
-      <article class="stat">
-        <div class="stat-label">Last Confirmed Restart</div>
-        <div id="last-restart" class="stat-value">-</div>
-      </article>
     </section>
+    <div id="audio-player-host" class="audio-player-host" aria-hidden="true"></div>
 
     <section class="panel">
       <div class="panel-header">
@@ -336,7 +427,21 @@
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
     const CACHE_KEY = "c0ld:ps99-restart-tracker:v1";
-    const REFRESH_MS = 60000;
+    const AUDIO_SETTINGS_KEY = "c0ld:ps99-restart-audio:v1";
+    const DEFAULT_AUDIO_ALERT_URL = "https://www.youtube.com/watch?v=enYdAxVcNZA";
+    const REFRESH_MS = 30000;
+    const CCU_REFRESH_MS = 60000;
+
+    let audioSettings = readAudioSettings();
+    let youtubeApiPromise = null;
+    let audioPlayer = null;
+    let audioPlayerPromise = null;
+    let audioPlayerVideoId = null;
+    let audioSaveTimer = null;
+    let restartMonitorInitialized = false;
+    let lastRestartEventId = null;
+    let lastRestartTestSignalId = null;
+    let ccuPollInFlight = false;
 
     const els = {
       subtitle: document.getElementById("subtitle"),
@@ -344,10 +449,13 @@
       statusNotice: document.getElementById("status-notice"),
       statusTitle: document.getElementById("status-title"),
       statusDetail: document.getElementById("status-detail"),
-      detectorStatus: document.getElementById("detector-status"),
+      audioState: document.getElementById("audio-alert-state"),
+      audioUrl: document.getElementById("audio-alert-url"),
+      audioPlayerHost: document.getElementById("audio-player-host"),
+      ccuTenMinutesAgo: document.getElementById("ccu-ten-minutes-ago"),
+      ccuNow: document.getElementById("ccu-now"),
       trackedPresent: document.getElementById("tracked-present"),
       placeVersion: document.getElementById("place-version"),
-      lastRestart: document.getElementById("last-restart"),
       sampleMeta: document.getElementById("sample-meta"),
       sampleBody: document.getElementById("sample-body"),
       candidatePanel: document.getElementById("candidate-panel"),
@@ -375,6 +483,251 @@
     function fmtVersion(value) {
       const number = Number(value);
       return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
+    }
+
+    function fmtCcu(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      if (number >= 1000000) return `${(number / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+      if (number >= 1000) return `${(number / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+      return Math.round(number).toLocaleString();
+    }
+
+    function readAudioSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(AUDIO_SETTINGS_KEY) || "null");
+        return {
+          enabled: saved?.enabled === true,
+          url: typeof saved?.url === "string" && saved.url.trim()
+            ? saved.url.trim()
+            : DEFAULT_AUDIO_ALERT_URL
+        };
+      } catch {
+        return { enabled: false, url: DEFAULT_AUDIO_ALERT_URL };
+      }
+    }
+
+    function saveAudioSettings() {
+      try {
+        localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings));
+      } catch {
+      }
+    }
+
+    function youtubeVideoId(value) {
+      const raw = String(value || "").trim();
+      if (/^[A-Za-z0-9_-]{11}$/.test(raw)) return raw;
+
+      try {
+        const url = new URL(raw);
+        const host = url.hostname.toLowerCase().replace(/^(www\.|m\.)/, "");
+        let candidate = "";
+
+        if (host === "youtu.be") {
+          candidate = url.pathname.split("/").filter(Boolean)[0] || "";
+        } else if (
+          host === "youtube.com"
+          || host.endsWith(".youtube.com")
+          || host === "youtube-nocookie.com"
+          || host.endsWith(".youtube-nocookie.com")
+        ) {
+          candidate = url.searchParams.get("v") || "";
+          if (!candidate) {
+            const parts = url.pathname.split("/").filter(Boolean);
+            if (["embed", "shorts", "live"].includes(parts[0])) candidate = parts[1] || "";
+          }
+        }
+
+        return /^[A-Za-z0-9_-]{11}$/.test(candidate) ? candidate : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function resetAudioPlayer() {
+      try { audioPlayer?.destroy?.(); } catch {}
+      audioPlayer = null;
+      audioPlayerPromise = null;
+      audioPlayerVideoId = null;
+      els.audioPlayerHost.replaceChildren();
+    }
+
+    function loadYouTubeApi() {
+      if (window.YT && typeof window.YT.Player === "function") return Promise.resolve(window.YT);
+      if (youtubeApiPromise) return youtubeApiPromise;
+
+      youtubeApiPromise = new Promise((resolve, reject) => {
+        const previousReady = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => {
+          try { previousReady?.(); } finally { resolve(window.YT); }
+        };
+
+        let script = document.querySelector("script[data-ps99-youtube-api]");
+        if (!script) {
+          script = document.createElement("script");
+          script.src = "https://www.youtube.com/iframe_api";
+          script.async = true;
+          script.dataset.ps99YoutubeApi = "true";
+          document.head.appendChild(script);
+        }
+        script.addEventListener("error", () => {
+          youtubeApiPromise = null;
+          reject(new Error("YouTube audio player could not be loaded."));
+        }, { once: true });
+      });
+
+      return youtubeApiPromise;
+    }
+
+    async function ensureAudioPlayer(videoId) {
+      if (audioPlayer && audioPlayerVideoId === videoId && audioPlayerPromise) {
+        return audioPlayerPromise;
+      }
+
+      resetAudioPlayer();
+      const YT = await loadYouTubeApi();
+      const mount = document.createElement("div");
+      mount.id = "ps99-audio-player";
+      els.audioPlayerHost.appendChild(mount);
+      audioPlayerVideoId = videoId;
+      audioPlayerPromise = new Promise((resolve, reject) => {
+        audioPlayer = new YT.Player(mount.id, {
+          width: "1",
+          height: "1",
+          videoId,
+          playerVars: {
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            playsinline: 1,
+            rel: 0
+          },
+          events: {
+            onReady: event => resolve(event.target),
+            onError: () => {
+              els.audioUrl.setAttribute("aria-invalid", "true");
+              reject(new Error("This YouTube video could not be used for the audio alert."));
+            }
+          }
+        });
+      });
+
+      return audioPlayerPromise;
+    }
+
+    async function prepareAudioPlayer({ prime = false } = {}) {
+      const videoId = youtubeVideoId(audioSettings.url);
+      els.audioUrl.setAttribute("aria-invalid", videoId ? "false" : "true");
+      if (!audioSettings.enabled || !videoId) return null;
+
+      const player = await ensureAudioPlayer(videoId);
+      if (prime) {
+        player.mute();
+        player.playVideo();
+        window.setTimeout(() => {
+          if (audioPlayerVideoId !== videoId) return;
+          player.pauseVideo();
+          player.seekTo(0, true);
+          player.unMute();
+        }, 400);
+      }
+      return player;
+    }
+
+    async function playRestartAudio() {
+      if (!audioSettings.enabled) return;
+      const videoId = youtubeVideoId(audioSettings.url);
+      if (!videoId) return;
+
+      try {
+        const player = await ensureAudioPlayer(videoId);
+        player.seekTo(0, true);
+        player.setVolume(100);
+        player.unMute();
+        player.playVideo();
+      } catch {
+      }
+    }
+
+    function syncAudioSettings({ prime = false } = {}) {
+      const enteredUrl = els.audioUrl.value.trim() || DEFAULT_AUDIO_ALERT_URL;
+      if (!els.audioUrl.value.trim()) els.audioUrl.value = enteredUrl;
+      const previousVideoId = youtubeVideoId(audioSettings.url);
+      const nextVideoId = youtubeVideoId(enteredUrl);
+      audioSettings = {
+        enabled: els.audioState.value === "enabled",
+        url: enteredUrl
+      };
+      saveAudioSettings();
+      els.audioUrl.setAttribute("aria-invalid", nextVideoId ? "false" : "true");
+
+      if (previousVideoId !== nextVideoId) resetAudioPlayer();
+      if (audioSettings.enabled && nextVideoId) {
+        prepareAudioPlayer({ prime }).catch(() => {});
+      } else {
+        try { audioPlayer?.pauseVideo?.(); } catch {}
+      }
+    }
+
+    function initializeAudioAlert() {
+      els.audioState.value = audioSettings.enabled ? "enabled" : "disabled";
+      els.audioUrl.value = audioSettings.url;
+      els.audioUrl.setAttribute("aria-invalid", youtubeVideoId(audioSettings.url) ? "false" : "true");
+
+      if (audioSettings.enabled) prepareAudioPlayer().catch(() => {});
+    }
+
+    function restartEventId(event) {
+      return event?.event_id
+        || [event?.place_id, event?.candidate_started_at, event?.detected_at].filter(Boolean).join(":")
+        || null;
+    }
+
+    function observeRestartActivity(event, testSignal) {
+      const eventId = restartEventId(event);
+      const testSignalId = String(testSignal?.signal_id || "") || null;
+      if (!restartMonitorInitialized) {
+        restartMonitorInitialized = true;
+        lastRestartEventId = eventId;
+        lastRestartTestSignalId = testSignalId;
+        return;
+      }
+
+      const hasNewRestart = Boolean(eventId && eventId !== lastRestartEventId);
+      const hasNewTest = Boolean(testSignalId && testSignalId !== lastRestartTestSignalId);
+      if (eventId) lastRestartEventId = eventId;
+      if (testSignalId) lastRestartTestSignalId = testSignalId;
+      if (hasNewRestart || hasNewTest) playRestartAudio();
+    }
+
+    async function pollCcu() {
+      if (ccuPollInFlight) return;
+      ccuPollInFlight = true;
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/ps99/ccu?limit=20&_=${Date.now()}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
+
+        const samples = Array.isArray(data.samples) ? data.samples : [];
+        const latest = data.latest || samples[0] || null;
+        const latestTime = new Date(latest?.sampled_at || 0).getTime();
+        const tenMinuteTarget = latestTime - 10 * 60000;
+        const tenMinutesAgo = Number.isFinite(latestTime)
+          ? samples.find(sample => new Date(sample?.sampled_at || 0).getTime() <= tenMinuteTarget)
+          : null;
+
+        els.ccuNow.textContent = fmtCcu(latest?.ccu);
+        els.ccuTenMinutesAgo.textContent = fmtCcu(tenMinutesAgo?.ccu);
+      } catch {
+        els.ccuNow.textContent = "-";
+        els.ccuTenMinutesAgo.textContent = "-";
+      } finally {
+        ccuPollInFlight = false;
+      }
     }
 
     function fmtDuration(value) {
@@ -450,10 +803,8 @@
       els.statusNotice.className = `notice ${status}`;
       els.statusTitle.textContent = title;
       els.statusDetail.textContent = detail;
-      els.detectorStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
       els.trackedPresent.textContent = `${Number(state.tracked_present || 0)} / ${Number(data?.detector?.sample_size || 5)}`;
       els.placeVersion.textContent = fmtVersion(state.candidate_place_version ?? state.baseline_place_version);
-      els.lastRestart.textContent = fmtDate(state.last_restart_detected_at || data?.latest_restart?.detected_at);
       els.sampleMeta.textContent = state.last_checked_at
         ? `${Number(state.last_batch_size || 0).toLocaleString()} servers checked at ${fmtDate(state.last_checked_at)}`
         : "Awaiting the first scan";
@@ -497,11 +848,18 @@
       els.refresh.textContent = "Refreshing…";
 
       try {
-        const response = await fetch(`${API_BASE}/api/ps99/restarts?limit=200`, { cache: "no-store" });
+        const response = await fetch(
+          `${API_BASE}/api/ps99/restarts?limit=200&_=${Date.now()}`,
+          { cache: "no-store" }
+        );
         const data = await response.json();
         if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
         sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
         render(data);
+        observeRestartActivity(
+          data.latest_restart || (Array.isArray(data.events) ? data.events[0] : null),
+          data.latest_test_alert
+        );
       } catch (error) {
         if (!cached) {
           els.statusNotice.className = "notice insufficient";
@@ -516,9 +874,36 @@
       }
     }
 
-    els.refresh.addEventListener("click", () => load({ force: true }));
+    els.audioState.addEventListener("change", () => {
+      syncAudioSettings({ prime: els.audioState.value === "enabled" });
+    });
+
+    els.audioUrl.addEventListener("input", () => {
+      window.clearTimeout(audioSaveTimer);
+      audioSaveTimer = window.setTimeout(() => syncAudioSettings(), 350);
+    });
+
+    els.audioUrl.addEventListener("change", () => {
+      syncAudioSettings({ prime: els.audioState.value === "enabled" });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        load({ force: true });
+        pollCcu();
+      }
+    });
+
+    els.refresh.addEventListener("click", () => {
+      load({ force: true });
+      pollCcu();
+    });
+
+    initializeAudioAlert();
+    pollCcu();
     load();
     setInterval(() => load({ force: true }), REFRESH_MS);
+    setInterval(pollCcu, CCU_REFRESH_MS);
   </script>
 </body>
 </html>
