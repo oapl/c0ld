@@ -687,6 +687,14 @@ async function handleGlobalLeaderboard(request, env) {
     }).catch(() => ({})) : {}
   ]);
 
+  const outputRows = rows.map(row => normalizeGlobalLeaderboardOutput(row, {
+    run,
+    usernameMap,
+    avatarMap,
+    gainMaps,
+    totalGlobalPlayers
+  }));
+
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
@@ -696,13 +704,7 @@ async function handleGlobalLeaderboard(request, env) {
     total_global_players: totalGlobalPlayers,
     gains_included: includeGains,
     avatars_included: includeAvatars,
-    rows: rows.map(row => normalizeGlobalLeaderboardOutput(row, {
-      run,
-      usernameMap,
-      avatarMap,
-      gainMaps,
-      totalGlobalPlayers
-    }))
+    rows: includeGains ? addGlobalLeaderboardProjectionFields(outputRows) : outputRows
   }, env, publicCacheSeconds(env, includeGains ? "GLOBAL_LEADERBOARD" : "GLOBAL_LEADERBOARD_FAST"));
 }
 
@@ -1144,6 +1146,93 @@ function normalizeGlobalLeaderboardOutput(row, {
     gain_12h: previous("gain_12h"),
     gain_24h: previous("gain_24h")
   };
+}
+
+function addGlobalLeaderboardProjectionFields(rows) {
+  const topRows = (rows || [])
+    .map((row, index) => ({ row, index }))
+    .filter(item => {
+      const rank = toNumber(item.row.global_rank);
+      return rank !== null && rank >= 1 && rank <= 100;
+    });
+
+  if (!topRows.length) return rows;
+
+  const projectedRows = topRows.map(item => {
+    const rate = chooseGlobalLeaderboardProjectionRate(item.row);
+
+    const points = toNumber(item.row.points) || 0;
+    return {
+      ...item,
+      projected: {
+        projected_gain_1h: Math.round(rate.rate_per_hour),
+        projected_points_1h: Math.round(points + rate.rate_per_hour),
+        projection_basis: rate.basis,
+        projected_rank: null,
+        projected_rank_1h: null
+      }
+    };
+  });
+
+  const rankable = projectedRows
+    .filter(item => item.projected)
+    .sort((a, b) => {
+      const ap = toNumber(a.projected.projected_points_1h) ?? toNumber(a.row.points) ?? 0;
+      const bp = toNumber(b.projected.projected_points_1h) ?? toNumber(b.row.points) ?? 0;
+      if (bp !== ap) return bp - ap;
+
+      const ar = toNumber(a.row.global_rank);
+      const br = toNumber(b.row.global_rank);
+      if (ar !== null && br !== null && ar !== br) return ar - br;
+
+      return (toNumber(a.row.user_id) || 0) - (toNumber(b.row.user_id) || 0);
+    });
+
+  const projectedByIndex = new Map();
+  rankable.forEach((item, index) => {
+    projectedByIndex.set(item.index, {
+      ...item.projected,
+      projected_rank: index + 1,
+      projected_rank_1h: index + 1
+    });
+  });
+
+  return rows.map((row, index) => {
+    const projected = projectedByIndex.get(index);
+    if (!projected) {
+      return {
+        ...row,
+        projected_rank: null,
+        projected_rank_1h: null,
+        projected_points_1h: null,
+        projected_gain_1h: null,
+        projection_basis: null
+      };
+    }
+
+    return { ...row, ...projected };
+  });
+}
+
+function chooseGlobalLeaderboardProjectionRate(row) {
+  const windows = [
+    { key: "gain_1h", basis: "1h", hours: 1 },
+    { key: "gain_5m", basis: "5m", hours: 5 / 60 },
+    { key: "gain_12h", basis: "12h", hours: 12 },
+    { key: "gain_24h", basis: "24h", hours: 24 }
+  ];
+
+  for (const window of windows) {
+    const gain = toNumber(row[window.key]);
+    if (gain === null) continue;
+
+    return {
+      basis: window.basis,
+      rate_per_hour: gain / window.hours
+    };
+  }
+
+  return { basis: "current", rate_per_hour: 0 };
 }
 
 function globalCandidateUsername(row, usernameMap) {

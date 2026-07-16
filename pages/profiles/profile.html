@@ -43,7 +43,7 @@
     .summary-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
     .summary-title{margin:0 0 5px;font-size:20px}
     .summary-meta{text-align:right;color:var(--muted);font-size:13px;line-height:1.45}
-    .summary-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 18px}
+    .summary-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 18px}
     .summary-stat{min-width:0}
     .summary-stat .value{font-size:18px;font-weight:700;overflow-wrap:anywhere}
     select{min-width:230px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text)}
@@ -156,7 +156,7 @@ function profileId(){return new URLSearchParams(location.search).get("id")||""}
 function isEmbedded(){return new URLSearchParams(location.search).get("embed")==="1"}
 function prettifyBattleName(value){return String(value||"").trim().replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/(\D)(20\d{2})$/i,"$1 $2").replace(/\s+/g," ").trim()}
 function isLegacyNongBattle(battle){const keys=[battle?.battle,battle?.battle_key,battle?.api_battle_key,battle?.display_name,battle?.battle_display_name,battle?.source_table,battle?.c0ld_results_table,battle?.clan_results_table].map(normalize),isApiSource=String(battle?.source||"").toLowerCase()==="api",isAlwaysLegacy=keys.some(key=>key==="safetybattle"||key==="poisonbattle"||key==="poisonturtlebattle"||key==="abstractbattle"||key==="abstractc0ld"||key==="spring2026"),isStaticOnlyLegacy=!isApiSource&&keys.some(key=>key==="angelbattle2026"||key==="angelbattle2026c0ld"||key==="angelbattle2026clans"||key==="starrybattle"||key==="starryc0ld"||key==="starryclans");return isAlwaysLegacy||isStaticOnlyLegacy}
-function battleName(battle){const key=String(battle?.battle||battle?.battle_key||battle?.api_battle_key||"").trim(),raw=String(battle?.display_name||battle?.battle_display_name||"").trim(),pretty=prettifyBattleName(key);if(key&&raw&&normalize(raw).includes("backrooms")&&!normalize(key).includes("backrooms"))return pretty||key;return raw||pretty||key}
+function battleName(battle){const key=String(battle?.battle||battle?.battle_key||battle?.api_battle_key||"").trim(),raw=String(battle?.display_name||battle?.battle_display_name||"").trim(),pretty=prettifyBattleName(key);if(key&&raw&&normalize(raw).includes("backrooms")&&!normalize(key).includes("backrooms"))return stripClanPrefix(pretty||key,battle);return stripClanPrefix(raw||pretty||key,battle)}
 
 function escapeHtml(value){
   return String(value??"")
@@ -357,7 +357,7 @@ function activeRange(){
 }
 
 function battleIdentity(battle){
-  return normalize(battle?.battle||battle?.display_name||battle?.api_battle_key||"");
+  return normalize(stripClanPrefix(battle?.battle||battle?.display_name||battle?.api_battle_key||"",battle));
 }
 
 function isActiveBattle(battle){
@@ -435,13 +435,75 @@ function recalcBattle(battle){
 }
 
 function summaryKey(row,type){
+  const summaryType=type||row?.type||"";
+  if(summaryType==="leaderboard"){
+    return[
+      summaryType,
+      normalize(leaderboardHistoryLabel(row))
+    ].join("|");
+  }
+  if(summaryType==="league"){
+    return[
+      summaryType,
+      row?.league_period_key||row?.label_key||row?.league_run_key||"",
+      row?.league_id||"",
+      normalize(row?.league_name||"")
+    ].join("|");
+  }
+
   return[
-    type||row?.type||"",
+    summaryType,
     row?.league_run_key||row?.run_key||"",
     row?.league_id||"",
     normalize(row?.league_name||row?.event_name||row?.battle_display_name||row?.label||""),
     row?.final_snapshot_at||""
   ].join("|");
+}
+
+function stripClanPrefix(label,row={}){
+  let out=String(label||"").trim();
+  const prefixes=[
+    row.source_clan,
+    row.clan_name,
+    profile?.source_clan,
+    profile?.clan_name,
+    clan().label,
+    "c0ld",
+    "cold",
+    "wmsy"
+  ].map(value=>String(value||"").trim()).filter(Boolean);
+
+  for(const prefix of prefixes){
+    const escaped=prefix.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    out=out.replace(new RegExp(`^${escaped}\\s*[-:|]\\s*`,"i"),"").trim();
+  }
+
+  return out;
+}
+
+function stripLeaderboardClanPrefix(label,row={}){
+  return stripClanPrefix(label,row);
+}
+
+function leaderboardHistoryLabel(row={},run={}){
+  const candidates=[
+    row.leaderboard_name,
+    row.event_name,
+    row.battle_display_name,
+    row.label,
+    run.leaderboard_name,
+    run.event_name,
+    run.battle_display_name,
+    row.battle_key,
+    "Global Leaderboard"
+  ];
+
+  for(const value of candidates){
+    const cleaned=stripLeaderboardClanPrefix(value,row);
+    if(cleaned)return cleaned;
+  }
+
+  return"Global Leaderboard";
 }
 
 function mergeSummaries(type,...lists){
@@ -484,7 +546,7 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
     const points=finite(row.global_points??row.points);
     if(rank===null&&points===null)continue;
 
-    const key=normalize(row.leaderboard_name||row.event_name||row.battle_display_name||row.battle_key||"Global Leaderboard");
+    const key=normalize(leaderboardHistoryLabel(row,run));
     if(!groups.has(key))groups.set(key,[]);
     groups.get(key).push(row);
   }
@@ -497,17 +559,7 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
     const latest=ordered[ordered.length-1]||first;
     const ranks=ordered.map(row=>finite(row.global_rank)).filter(Number.isFinite);
     const points=ordered.map(row=>finite(row.global_points??row.points)).filter(Number.isFinite);
-    const label=
-      latest.leaderboard_name||
-      latest.event_name||
-      latest.battle_display_name||
-      first.leaderboard_name||
-      first.event_name||
-      first.battle_display_name||
-      run.leaderboard_name||
-      run.event_name||
-      run.battle_display_name||
-      "Global Leaderboard";
+    const label=leaderboardHistoryLabel({...first,...latest},run);
 
     return{
       type:"leaderboard",
@@ -536,8 +588,10 @@ function normalizeLeagueSummaryRows(rows){
     .map(row=>({
       type:"league",
       league_run_key:row.league_run_key||null,
-      run_label:row.run_label||row.event_name||null,
-      event_name:row.event_name||row.run_label||null,
+      league_period_key:row.league_period_key||row.label_key||null,
+      label_key:row.label_key||row.league_period_key||null,
+      run_label:row.run_label||row.event_name||row.league_period_key||row.label_key||null,
+      event_name:row.event_name||row.run_label||row.league_period_key||row.label_key||null,
       league_name:row.league_name||"League",
       league_id:row.league_id||null,
       league_level:finite(row.league_level),
@@ -546,6 +600,9 @@ function normalizeLeagueSummaryRows(rows){
       member_capacity:finite(row.member_capacity),
       display_name:row.display_name||null,
       final_rank:finite(row.final_rank),
+      league_rank:finite(row.league_rank??row.final_league_rank??row.rank),
+      player_league_rank:finite(row.player_league_rank??row.member_rank??row.final_rank),
+      total_leagues:finite(row.total_leagues??row.total_ranked),
       best_rank:finite(row.best_rank),
       final_points:finite(row.final_points),
       highest_points:finite(row.highest_points),
@@ -555,7 +612,7 @@ function normalizeLeagueSummaryRows(rows){
       role:row.role||null,
       join_time:row.join_time||null
     }))
-    .filter(row=>row.final_rank!==null||row.final_points!==null)
+    .filter(row=>row.final_rank!==null||row.league_rank!==null||row.final_points!==null)
     .sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
 }
 
@@ -946,7 +1003,20 @@ function sortedBattles(){
 }
 
 function clanHistoryBattles(){
-  return sortedBattles().filter(battle=>battle.source!=="global");
+  const map=new Map();
+
+  for(const battle of sortedBattles().filter(battle=>battle.source!=="global")){
+    const key=battleIdentity(battle)||`clan-${map.size}`;
+    const existing=map.get(key);
+    map.set(
+      key,
+      existing
+        ? recalcBattle({...existing,...battle,display_name:battleName(battle)||battleName(existing),series:mergeSeries(existing.series,battle.series)})
+        : recalcBattle({...battle,display_name:battleName(battle)})
+    );
+  }
+
+  return[...map.values()].sort((a,b)=>new Date(b.battle_last_snapshot||b.last_seen||0)-new Date(a.battle_last_snapshot||a.last_seen||0));
 }
 
 function clanPlacementSummaries(){
@@ -1179,11 +1249,12 @@ function summaryStat(label,value){
 
 function summaryTitle(row,type){
   if(type==="league")return row.run_label||row.event_name||row.league_name||"League";
-  if(type==="leaderboard")return row.leaderboard_name||row.event_name||row.battle_display_name||row.label||"Global Leaderboard";
+  if(type==="leaderboard")return leaderboardHistoryLabel(row);
   return row.label||row.battle_display_name||row.battle||"Clan Battle";
 }
 
 function summarySubtitle(row,type){
+  if(type==="leaderboard"||type==="clan")return"";
   const name=placementName(row,type);
   if(!name)return"";
   if(type==="league")return`League: ${name}`;
@@ -1212,8 +1283,9 @@ function renderSummaryCards(rows,type){
             <div class="summary-meta">${fmtDateTime(row.final_snapshot_at)}</div>
           </div>
           <div class="summary-stats">
-            ${summaryStat(placementLabel,escapeHtml(placementName(row,type)||"—"))}
-            ${summaryStat("Rank",rankDisplay(row.final_rank,row.total_ranked))}
+            ${type==="leaderboard"?"":summaryStat(placementLabel,escapeHtml(placementName(row,type)||"—"))}
+            ${summaryStat("Rank",type==="league"?rankDisplay(row.league_rank,row.total_leagues):rankDisplay(row.final_rank,row.total_ranked))}
+            ${type==="league"?summaryStat("League Rank",rankDisplay(row.player_league_rank)): ""}
             ${summaryStat("Points",fmt(row.final_points))}
           </div>
         </article>

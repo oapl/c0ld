@@ -32,7 +32,7 @@ button:hover,input:focus{border-color:var(--link);background:var(--hover)}
 .section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
 .section-title{margin:0;font-size:18px}
 .table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:1060px}
+table{width:100%;border-collapse:collapse;min-width:1160px}
 th,td{padding:12px 14px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
 th{color:var(--muted);font-size:13px;text-align:left;cursor:pointer;font-weight:500}
 .numeric{text-align:right;font-variant-numeric:tabular-nums}
@@ -110,6 +110,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
         <thead>
           <tr>
             <th data-sort="global_rank">Global Rank</th>
+            <th data-sort="projected_rank" class="numeric">Projected Rank</th>
             <th data-sort="clan">Clan</th>
             <th data-sort="username">Player</th>
             <th data-sort="points" class="numeric">Points</th>
@@ -119,7 +120,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
             <th data-sort="gain_24h" class="numeric">24 Hours</th>
           </tr>
         </thead>
-        <tbody id="tbody"><tr><td colspan="8" class="empty">Loading global leaderboard...</td></tr></tbody>
+        <tbody id="tbody"><tr><td colspan="9" class="empty">Loading global leaderboard...</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -128,7 +129,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const LIMIT=500;
 const REFRESH_INTERVAL_MS=5*60*1000;
-const CACHE_KEY="c0ld:global-leaderboard:v2:"+LIMIT;
+const CACHE_KEY="c0ld:global-leaderboard:v3:"+LIMIT;
 let rows=[],sortKey="global_rank",sortAsc=true,loading=false,lastPayload=null;
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
@@ -139,10 +140,11 @@ function delta(v){if(v===null||v===undefined)return'<span class="unknown">-</spa
 function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
 function avatar(row){if(row.avatar_url)return'<img class="avatar" src="'+esc(row.avatar_url)+'" alt="">';return'<span class="avatar-fallback">'+esc(initials(row.username))+'</span>'}
 function playerCell(row){const name=row.username||row.display_name||("user_"+row.user_id);const href=row.user_id?"https://www.roblox.com/users/"+encodeURIComponent(row.user_id)+"/profile":"#";return'<div class="player-cell">'+avatar(row)+'<span><a href="'+esc(href)+'" target="_blank" rel="noopener">'+esc(name)+'</a><div class="meta">'+esc(row.user_id||"")+'</div></span></div>'}
+function projectedRankCell(row){const current=Number(row.global_rank),rank=Number(row.projected_rank??row.projected_rank_1h);if(!Number.isFinite(current)||current>100||!Number.isFinite(rank))return'<span class="unknown">-</span>';const title='Projected points: '+fullNum(row.projected_points_1h)+'; basis: '+(row.projection_basis||'1h');return'<span class="rank" title="'+esc(title)+'">#'+esc(rank)+'</span>'}
 function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=rows.slice();if(q)list=list.filter(row=>String(row.clan||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||String(row.display_name||"").toLowerCase().includes(q)||String(row.user_id||"").includes(q));list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
 function renderCards(){document.getElementById("showing-count").textContent=rows.length.toLocaleString("en-US");document.getElementById("pool-count").textContent=Number(lastPayload?.total_global_players||0).toLocaleString("en-US")||"-";document.getElementById("battle-name").textContent=lastPayload?.run?.event_name||lastPayload?.run?.battle_display_name||lastPayload?.run?.battle_key||"-";document.getElementById("last-db-update").textContent=dt(lastPayload?.snapshot_at)}
-function render(){const tbody=document.getElementById("tbody"),list=visible();renderCards();document.getElementById("table-meta").textContent=(lastPayload?.run?.run_key?"Run "+lastPayload.run.run_key:"Latest completed scan");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No global players found.</td></tr>';return}tbody.innerHTML=list.map(row=>'<tr><td class="rank">#'+esc(row.global_rank||"-")+'</td><td><strong>'+esc(row.clan||"-")+'</strong></td><td>'+playerCell(row)+'</td><td class="numeric" title="'+esc(fullNum(row.points))+'">'+esc(shortNum(row.points))+'</td><td class="numeric">'+delta(row.gain_5m)+'</td><td class="numeric">'+delta(row.gain_1h)+'</td><td class="numeric">'+delta(row.gain_12h)+'</td><td class="numeric">'+delta(row.gain_24h)+'</td></tr>').join("")}
-function showError(msg){document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>';document.getElementById("table-meta").textContent="Error"}
+function render(){const tbody=document.getElementById("tbody"),list=visible();renderCards();document.getElementById("table-meta").textContent=(lastPayload?.run?.run_key?"Run "+lastPayload.run.run_key:"Latest completed scan");if(!list.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No global players found.</td></tr>';return}tbody.innerHTML=list.map(row=>'<tr><td class="rank">#'+esc(row.global_rank||"-")+'</td><td class="numeric">'+projectedRankCell(row)+'</td><td><strong>'+esc(row.clan||"-")+'</strong></td><td>'+playerCell(row)+'</td><td class="numeric" title="'+esc(fullNum(row.points))+'">'+esc(shortNum(row.points))+'</td><td class="numeric">'+delta(row.gain_5m)+'</td><td class="numeric">'+delta(row.gain_1h)+'</td><td class="numeric">'+delta(row.gain_12h)+'</td><td class="numeric">'+delta(row.gain_24h)+'</td></tr>').join("")}
+function showError(msg){document.getElementById("tbody").innerHTML='<tr><td colspan="9" class="error">'+esc(msg)+'</td></tr>';document.getElementById("table-meta").textContent="Error"}
 function applyPayload(data,label){lastPayload=data;rows=data.rows||[];document.getElementById("status").textContent=label||"Showing the top "+rows.length.toLocaleString("en-US")+" players from the latest scanned clan pool.";render()}
 function readCachedPayload(){try{const raw=localStorage.getItem(CACHE_KEY);if(!raw)return null;const cached=JSON.parse(raw);return cached&&Array.isArray(cached.rows)?cached:null}catch{return null}}
 function writeCachedPayload(data){try{if(data&&Array.isArray(data.rows))localStorage.setItem(CACHE_KEY,JSON.stringify(data))}catch{}}
