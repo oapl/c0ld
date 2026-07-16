@@ -18,6 +18,10 @@ DISCORD_ALLOWED_ROLE_IDS = "1489032328855556096,1501632370082840576"
 # Optional. Comma-separated reward cutoff ranks used by /rewards.
 PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000"
 CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500"
+# Optional player rewards header. Either set the full label or just the update.
+PLAYER_REWARD_LEADERBOARD_LABEL = ""
+PS99_UPDATE_LABEL = ""
+PS99_UPDATE_NUMBER = ""
 
 [[services]]
 binding = "CLAN_API_WORKER"

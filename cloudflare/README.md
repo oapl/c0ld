@@ -392,6 +392,9 @@ Required Worker variables:
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `3,10,50,100,500`. |
+| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
+| `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
+| `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
 
 Required Worker secrets:
 
@@ -501,7 +504,9 @@ The reward cutoff commands are:
 They post the current point minimums for the configured reward ranks. Defaults
 are `3,100,1000,1050,1150,6150,30000` for players and `3,10,50,100,500` for
 clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
-`CLAN_REWARD_CUTOFF_RANKS` on either Worker.
+`CLAN_REWARD_CUTOFF_RANKS` on either Worker. For the player command header, set
+`PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or
+`PS99_UPDATE_LABEL="Update 88"` on the Discord Worker.
 
 ## League API Worker
 

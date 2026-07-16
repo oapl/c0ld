@@ -283,16 +283,8 @@ async function buildRewardsResponse(interaction, env) {
   const embed = {
     title: type === "clans" ? "Clan Reward Cutoffs" : "Player Reward Cutoffs",
     color: type === "clans" ? 0xf2cc60 : 0x58a6ff,
-    description: rewardCutoffDescription(payload, type),
-    footer: {
-      text: "Cutoff points are the current points held at each reward rank."
-    }
+    description: rewardCutoffDescription(payload, type, env)
   };
-
-  const timestamp = payload.snapshot_at || payload.generated_at;
-  if (timestamp && Number.isFinite(new Date(timestamp).getTime())) {
-    embed.timestamp = new Date(timestamp).toISOString();
-  }
 
   return {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
@@ -333,9 +325,9 @@ async function fetchRewardCutoffsPayload(type, env) {
   return payload;
 }
 
-function rewardCutoffDescription(payload, type) {
+function rewardCutoffDescription(payload, type, env) {
   const titleParts = [
-    payload.event_name || payload.display_name || payload.battle || "Current Event"
+    rewardLeaderboardTitle(payload, type, env)
   ];
 
   if (payload.snapshot_at) {
@@ -367,6 +359,25 @@ function rewardCutoffLine(cutoff) {
   }
 
   return `**${label}:** ${fullNumber(cutoff.points)} pts`;
+}
+
+function rewardLeaderboardTitle(payload, type, env) {
+  if (type === "players") {
+    const customLabel = String(env.PLAYER_REWARD_LEADERBOARD_LABEL || "").trim();
+    if (customLabel) return customLabel;
+
+    const updateLabel = String(env.PS99_UPDATE_LABEL || "").trim();
+    if (updateLabel) {
+      return /leaderboard/i.test(updateLabel) ? updateLabel : `${updateLabel} Leaderboard`;
+    }
+
+    const updateNumber = String(env.PS99_UPDATE_NUMBER || "").trim();
+    if (updateNumber) return `Update ${updateNumber} Leaderboard`;
+
+    return "Player Leaderboard";
+  }
+
+  return payload.event_name || payload.display_name || payload.battle || "Clan Leaderboard";
 }
 
 function rewardCommandType(interaction) {
