@@ -17,6 +17,8 @@ const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
 const CLAN_ACTIVITY_SUMMARY_TABLE = "c0ld_clan_activity_summary";
 const PS99_PLACES_TABLE = "c0ld_ps99_places";
 const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
+const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
+const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -49,6 +51,12 @@ const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
 const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 5;
 const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
+const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 5;
+const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
+const DEFAULT_PS99_RESTART_CONFIRMATIONS = 2;
+const DEFAULT_PS99_RESTART_COOLDOWN_MINUTES = 10;
+const DEFAULT_PS99_RESTART_HISTORY_LIMIT = 100;
+const PS99_RESTART_CRON = "* * * * *";
 const PS99_VERSION_SEED_HINTS = Object.freeze({
   8737899170: 27147,
   13764885284: 30,
@@ -99,7 +107,8 @@ export default {
           ingest_skip_reason: gate.allowed ? null : gate.reason,
           global_rank_config: globalRankRuntimeConfig(env),
           clan_activity_config: clanActivityRuntimeConfig(env),
-          ps99_version_config: ps99VersionRuntimeConfig(env)
+          ps99_version_config: ps99VersionRuntimeConfig(env),
+          ps99_restart_config: ps99RestartRuntimeConfig(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -133,6 +142,8 @@ export default {
         response = await handleClanActivityFeed(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/versions") {
         response = await handlePs99Versions(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
+        response = await handlePs99Restarts(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
@@ -153,6 +164,9 @@ export default {
         response = await handlePs99VersionIngest(env, "manual", {
           force: isForceRequest(url)
         });
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restarts/ingest") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIngest(env, "manual");
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -177,6 +191,13 @@ export default {
 
   async scheduled(event, env, ctx) {
     const scheduledAt = event?.scheduledTime ? new Date(event.scheduledTime) : null;
+    if (String(event?.cron || "") === PS99_RESTART_CRON) {
+      if (ps99RestartEnabled(env)) {
+        ctx.waitUntil(handlePs99RestartIngest(env, "schedule"));
+      }
+      return;
+    }
+
     ctx.waitUntil(runScheduledIngests(env, false, scheduledAt));
   }
 };
@@ -3398,6 +3419,392 @@ function normalizePs99VersionEventOutput(row) {
     current_published_at: row.current_published_at || null,
     detected_at: row.detected_at || null,
     source: row.source || null
+  };
+}
+
+async function handlePs99Restarts(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(
+    Number(url.searchParams.get("limit") || DEFAULT_PS99_RESTART_HISTORY_LIMIT),
+    1,
+    500
+  );
+  const placeId = ps99RootPlaceId(env);
+  const [states, events] = await Promise.all([
+    supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
+      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,updated_at",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }),
+    supabaseSelect(env, PS99_RESTART_EVENTS_TABLE, {
+      select: "event_id,universe_id,place_id,place_name,candidate_started_at,detected_at,cooldown_until,previous_place_version,current_place_version,version_correlated,confidence,previous_servers,replacement_servers,reason,source,details,created_at",
+      place_id: `eq.${placeId}`,
+      order: "detected_at.desc,id.desc",
+      limit: String(limit)
+    })
+  ]);
+  const state = states[0] ? normalizePs99RestartStateOutput(states[0]) : null;
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    universe_id: ps99UniverseId(env),
+    place_id: placeId,
+    place_name: state?.place_name || "Pet Simulator 99",
+    detector: ps99RestartRuntimeConfig(env),
+    state,
+    latest_restart: events[0] ? normalizePs99RestartEventOutput(events[0]) : null,
+    events: events.map(normalizePs99RestartEventOutput)
+  }, env, publicCacheSeconds(env, "PS99_RESTART"));
+}
+
+async function handlePs99RestartIngest(env, source) {
+  requireSupabase(env);
+
+  const checkedAt = new Date().toISOString();
+  const checkedMs = isoToMs(checkedAt);
+  const placeId = ps99RootPlaceId(env);
+  const universeId = ps99UniverseId(env);
+  const sampleSize = ps99RestartSampleSize(env);
+  const batchSize = ps99RestartBatchSize(env);
+  const confirmationsRequired = ps99RestartConfirmations(env);
+  const cooldownMinutes = ps99RestartCooldownMinutes(env);
+  const [batch, stateRows, versionContext] = await Promise.all([
+    fetchPs99PublicServerBatch(placeId, batchSize),
+    supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
+      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }),
+    fetchPs99RestartVersionContext(env, placeId)
+  ]);
+  const currentVersion = toNumber(versionContext.currentVersion);
+  const currentById = new Map(batch.map(server => [server.server_id, server]));
+  const previous = stateRows[0] || {};
+  const previousStatus = String(previous.status || "initializing");
+  const previousTrackedPresent = Math.round(toNumber(previous.tracked_present) || 0);
+  let status = previousStatus === "insufficient" ? "monitoring" : previousStatus;
+  let trackedServers = refreshPs99ObservedServers(parseJsonArray(previous.tracked_servers), currentById, checkedAt);
+  let candidateServers = refreshPs99ObservedServers(parseJsonArray(previous.candidate_servers), currentById, checkedAt);
+  let baselineSampledAt = safeIso(previous.baseline_sampled_at);
+  let baselinePlaceVersion = toNumber(previous.baseline_place_version);
+  let candidateStartedAt = safeIso(previous.candidate_started_at);
+  let candidateConfirmations = Math.round(toNumber(previous.candidate_confirmations) || 0);
+  let candidatePlaceVersion = toNumber(previous.candidate_place_version);
+  let lastRestartDetectedAt = safeIso(previous.last_restart_detected_at);
+  let cooldownUntil = safeIso(previous.cooldown_until);
+  let eventRow = null;
+
+  if (batch.length < sampleSize) {
+    status = "insufficient";
+  } else if (status === "cooldown" && isoToMs(cooldownUntil) > checkedMs) {
+    // Keep observing the replacement sample, but suppress new alerts during stabilization.
+  } else if (status === "cooldown" || trackedServers.length < sampleSize) {
+    trackedServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
+    candidateServers = [];
+    status = "monitoring";
+    baselineSampledAt = checkedAt;
+    baselinePlaceVersion = currentVersion;
+    candidateStartedAt = null;
+    candidateConfirmations = 0;
+    candidatePlaceVersion = null;
+    cooldownUntil = null;
+  } else if (status === "candidate") {
+    const trackedPresent = trackedServers.filter(server => server.present).length;
+    const candidatePresent = candidateServers.filter(server => server.present).length;
+
+    if (trackedPresent > 0) {
+      trackedServers = refillPs99RestartSample(
+        trackedServers,
+        batch,
+        sampleSize,
+        checkedAt,
+        currentVersion
+      );
+      candidateServers = [];
+      status = "monitoring";
+      baselineSampledAt = checkedAt;
+      baselinePlaceVersion = currentVersion;
+      candidateStartedAt = null;
+      candidateConfirmations = 0;
+      candidatePlaceVersion = null;
+    } else if (
+      candidateServers.length === sampleSize
+      && candidatePresent === sampleSize
+      && checkedMs - isoToMs(candidateStartedAt) >= 45000
+    ) {
+      candidateConfirmations += 1;
+
+      if (candidateConfirmations >= confirmationsRequired) {
+        const restartDetectedAt = checkedAt;
+        const candidateStart = candidateStartedAt || checkedAt;
+        cooldownUntil = new Date(checkedMs + cooldownMinutes * 60000).toISOString();
+        const recentVersionEventMs = isoToMs(versionContext.detectedAt);
+        const versionCorrelated = Boolean(
+          (baselinePlaceVersion !== null && currentVersion !== null && baselinePlaceVersion !== currentVersion)
+          || (recentVersionEventMs && checkedMs - recentVersionEventMs >= 0 && checkedMs - recentVersionEventMs <= 30 * 60000)
+        );
+
+        eventRow = {
+          event_id: `ps99-restart:${placeId}:${candidateStart}`,
+          universe_id: universeId,
+          place_id: placeId,
+          place_name: versionContext.placeName || "Pet Simulator 99",
+          candidate_started_at: candidateStart,
+          detected_at: restartDetectedAt,
+          cooldown_until: cooldownUntil,
+          previous_place_version: versionCorrelated
+            ? (toNumber(versionContext.previousVersion) ?? baselinePlaceVersion)
+            : baselinePlaceVersion,
+          current_place_version: currentVersion,
+          version_correlated: versionCorrelated,
+          confidence: versionCorrelated ? "high" : "confirmed",
+          previous_servers: trackedServers,
+          replacement_servers: candidateServers,
+          reason: `All ${sampleSize} tracked server IDs disappeared together and ${sampleSize} replacements persisted across ${confirmationsRequired} one-minute scans.`,
+          source,
+          details: {
+            batch_size: batch.length,
+            sample_size: sampleSize,
+            confirmation_scans: candidateConfirmations,
+            version_event_detected_at: versionContext.detectedAt || null,
+            server_age_available: false
+          }
+        };
+        trackedServers = candidateServers;
+        candidateServers = [];
+        status = "cooldown";
+        baselineSampledAt = candidateStart;
+        baselinePlaceVersion = currentVersion;
+        candidateStartedAt = null;
+        candidateConfirmations = 0;
+        candidatePlaceVersion = null;
+        lastRestartDetectedAt = restartDetectedAt;
+      }
+    } else {
+      candidateServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
+      candidateStartedAt = checkedAt;
+      candidateConfirmations = 1;
+      candidatePlaceVersion = currentVersion;
+    }
+  } else {
+    const trackedPresent = trackedServers.filter(server => server.present).length;
+
+    if (trackedPresent === 0 && previousTrackedPresent === sampleSize) {
+      candidateServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
+      status = "candidate";
+      candidateStartedAt = checkedAt;
+      candidateConfirmations = 1;
+      candidatePlaceVersion = currentVersion;
+    } else {
+      trackedServers = refillPs99RestartSample(
+        trackedServers,
+        batch,
+        sampleSize,
+        checkedAt,
+        currentVersion
+      );
+      candidateServers = [];
+      status = "monitoring";
+      candidateStartedAt = null;
+      candidateConfirmations = 0;
+      candidatePlaceVersion = null;
+    }
+  }
+
+  const trackedPresent = trackedServers.filter(server => server.present).length;
+  const stateRow = {
+    place_id: placeId,
+    universe_id: universeId,
+    place_name: versionContext.placeName || "Pet Simulator 99",
+    status,
+    tracked_servers: trackedServers,
+    candidate_servers: candidateServers,
+    baseline_sampled_at: baselineSampledAt,
+    baseline_place_version: baselinePlaceVersion,
+    candidate_started_at: candidateStartedAt,
+    candidate_confirmations: candidateConfirmations,
+    candidate_place_version: candidatePlaceVersion,
+    last_batch_size: batch.length,
+    tracked_present: trackedPresent,
+    last_checked_at: checkedAt,
+    last_restart_detected_at: lastRestartDetectedAt,
+    cooldown_until: cooldownUntil,
+    last_error: null,
+    raw_snapshot: {
+      fetched_at: checkedAt,
+      sort_order: "Desc",
+      server_ids: batch.map(server => server.server_id)
+    },
+    updated_at: checkedAt
+  };
+
+  await supabaseUpsert(env, PS99_RESTART_STATE_TABLE, [stateRow], "place_id");
+  if (eventRow) {
+    await supabaseUpsert(env, PS99_RESTART_EVENTS_TABLE, [eventRow], "event_id");
+  }
+
+  return json({
+    ok: true,
+    source,
+    checked_at: checkedAt,
+    status,
+    place_id: placeId,
+    place_version: currentVersion,
+    batch_size: batch.length,
+    tracked_present: trackedPresent,
+    candidate_confirmations: candidateConfirmations,
+    restart_detected: Boolean(eventRow),
+    cooldown_until: cooldownUntil
+  }, 202);
+}
+
+async function fetchPs99PublicServerBatch(placeId, batchSize) {
+  const url = new URL(`https://games.roblox.com/v1/games/${placeId}/servers/Public`);
+  url.searchParams.set("sortOrder", "Desc");
+  url.searchParams.set("excludeFullGames", "false");
+  url.searchParams.set("limit", String(batchSize));
+  const payload = await fetchJsonWithRetry(url, "Roblox public servers", {
+    attempts: 3,
+    baseDelayMs: 1000
+  });
+
+  return extractRobloxArray(payload)
+    .map(normalizePs99PublicServer)
+    .filter(server => server.server_id);
+}
+
+async function fetchPs99RestartVersionContext(env, placeId) {
+  const [places, events] = await Promise.all([
+    supabaseSelect(env, PS99_PLACES_TABLE, {
+      select: "place_name,latest_version,latest_checked_at",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }),
+    supabaseSelect(env, PS99_VERSION_EVENTS_TABLE, {
+      select: "previous_version,current_version,detected_at",
+      place_id: `eq.${placeId}`,
+      order: "detected_at.desc,id.desc",
+      limit: "1"
+    })
+  ]);
+  const place = places[0] || {};
+  const event = events[0] || {};
+
+  return {
+    placeName: stringOrNull(place.place_name),
+    currentVersion: toNumber(place.latest_version) ?? toNumber(event.current_version),
+    previousVersion: toNumber(event.previous_version),
+    detectedAt: safeIso(event.detected_at)
+  };
+}
+
+function normalizePs99PublicServer(row) {
+  return {
+    server_id: stringOrNull(row?.id),
+    playing: Math.max(0, Math.round(toNumber(row?.playing) || 0)),
+    max_players: Math.max(0, Math.round(toNumber(row?.maxPlayers) || 0)),
+    ping: toNumber(row?.ping),
+    fps: toNumber(row?.fps)
+  };
+}
+
+function samplePs99RestartServers(batch, count, observedAt, placeVersion, excludedIds = new Set()) {
+  const pool = batch.filter(server => !excludedIds.has(server.server_id));
+
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+  }
+
+  return pool.slice(0, count).map(server => ({
+    ...server,
+    first_seen_at: observedAt,
+    last_seen_at: observedAt,
+    observed_place_version: toNumber(placeVersion),
+    present: true
+  }));
+}
+
+function refreshPs99ObservedServers(servers, currentById, checkedAt) {
+  return servers
+    .map(server => {
+      const serverId = stringOrNull(server?.server_id || server?.id);
+      if (!serverId) return null;
+      const current = currentById.get(serverId);
+
+      return {
+        server_id: serverId,
+        playing: current ? current.playing : Math.max(0, Math.round(toNumber(server.playing) || 0)),
+        max_players: current ? current.max_players : Math.max(0, Math.round(toNumber(server.max_players) || 0)),
+        ping: current ? current.ping : toNumber(server.ping),
+        fps: current ? current.fps : toNumber(server.fps),
+        first_seen_at: safeIso(server.first_seen_at) || checkedAt,
+        last_seen_at: current ? checkedAt : safeIso(server.last_seen_at),
+        observed_place_version: toNumber(server.observed_place_version),
+        present: Boolean(current)
+      };
+    })
+    .filter(Boolean);
+}
+
+function refillPs99RestartSample(trackedServers, batch, sampleSize, checkedAt, placeVersion) {
+  const survivors = trackedServers.filter(server => server.present).slice(0, sampleSize);
+  const excluded = new Set(survivors.map(server => server.server_id));
+  const replacements = samplePs99RestartServers(
+    batch,
+    Math.max(0, sampleSize - survivors.length),
+    checkedAt,
+    placeVersion,
+    excluded
+  );
+
+  return [...survivors, ...replacements];
+}
+
+function normalizePs99RestartStateOutput(row) {
+  return {
+    place_id: toNumber(row.place_id),
+    universe_id: toNumber(row.universe_id),
+    place_name: row.place_name || null,
+    status: row.status || "initializing",
+    tracked_servers: parseJsonArray(row.tracked_servers),
+    candidate_servers: parseJsonArray(row.candidate_servers),
+    baseline_sampled_at: row.baseline_sampled_at || null,
+    baseline_place_version: toNumber(row.baseline_place_version),
+    candidate_started_at: row.candidate_started_at || null,
+    candidate_confirmations: toNumber(row.candidate_confirmations) || 0,
+    candidate_place_version: toNumber(row.candidate_place_version),
+    last_batch_size: toNumber(row.last_batch_size) || 0,
+    tracked_present: toNumber(row.tracked_present) || 0,
+    last_checked_at: row.last_checked_at || null,
+    last_restart_detected_at: row.last_restart_detected_at || null,
+    cooldown_until: row.cooldown_until || null,
+    last_error: row.last_error || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function normalizePs99RestartEventOutput(row) {
+  return {
+    event_id: row.event_id || null,
+    universe_id: toNumber(row.universe_id),
+    place_id: toNumber(row.place_id),
+    place_name: row.place_name || null,
+    candidate_started_at: row.candidate_started_at || null,
+    detected_at: row.detected_at || null,
+    cooldown_until: row.cooldown_until || null,
+    previous_place_version: toNumber(row.previous_place_version),
+    current_place_version: toNumber(row.current_place_version),
+    version_correlated: Boolean(row.version_correlated),
+    confidence: row.confidence || "confirmed",
+    previous_servers: parseJsonArray(row.previous_servers),
+    replacement_servers: parseJsonArray(row.replacement_servers),
+    reason: row.reason || null,
+    source: row.source || null,
+    details: parseJsonObject(row.details) || {}
   };
 }
 
@@ -6763,6 +7170,62 @@ function ps99VersionRuntimeConfig(env) {
   };
 }
 
+function ps99RestartRuntimeConfig(env) {
+  return {
+    ingest_ps99_restarts: ps99RestartEnabled(env),
+    universe_id: ps99UniverseId(env),
+    place_id: ps99RootPlaceId(env),
+    schedule_minutes: 1,
+    batch_size: ps99RestartBatchSize(env),
+    sample_size: ps99RestartSampleSize(env),
+    confirmation_scans: ps99RestartConfirmations(env),
+    cooldown_minutes: ps99RestartCooldownMinutes(env),
+    server_age_available: false,
+    version_correlation: true
+  };
+}
+
+function ps99RestartEnabled(env) {
+  return String(env.INGEST_PS99_RESTARTS || "false").toLowerCase() === "true";
+}
+
+function ps99RestartSampleSize(env) {
+  return clamp(
+    Number(env.PS99_RESTART_SAMPLE_SIZE || DEFAULT_PS99_RESTART_SAMPLE_SIZE),
+    3,
+    10
+  );
+}
+
+function ps99RestartBatchSize(env) {
+  const requested = clamp(
+    Number(env.PS99_RESTART_BATCH_SIZE || DEFAULT_PS99_RESTART_BATCH_SIZE),
+    10,
+    100
+  );
+
+  if (requested <= 10) return 10;
+  if (requested <= 25) return 25;
+  if (requested <= 50) return 50;
+  return 100;
+}
+
+function ps99RestartConfirmations(env) {
+  return clamp(
+    Number(env.PS99_RESTART_CONFIRMATIONS || DEFAULT_PS99_RESTART_CONFIRMATIONS),
+    2,
+    5
+  );
+}
+
+function ps99RestartCooldownMinutes(env) {
+  return clamp(
+    Number(env.PS99_RESTART_COOLDOWN_MINUTES || DEFAULT_PS99_RESTART_COOLDOWN_MINUTES),
+    1,
+    60
+  );
+}
+
 function ps99UniverseId(env) {
   return Math.round(toNumber(env.PS99_UNIVERSE_ID) || DEFAULT_PS99_UNIVERSE_ID);
 }
@@ -7099,6 +7562,18 @@ function parseJsonObject(value) {
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }
 

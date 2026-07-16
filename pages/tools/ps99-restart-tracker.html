@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Live Pet Simulator 99 public-server restart detector and confirmed restart history." />
+  <title>PS99 Restart Tracker</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1117;
+      --panel: #151b22;
+      --panel-soft: #10161d;
+      --border: #2b3540;
+      --text: #f6f8fb;
+      --muted: #9fb4c9;
+      --accent: #ff6d6d;
+      --good: #25d366;
+      --warn: #ffc857;
+      --info: #62b5ff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      padding: 16px 20px;
+      text-align: center;
+    }
+
+    .brand-img {
+      display: block;
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 10px;
+      object-fit: contain;
+    }
+
+    nav {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .menu-btn,
+    .btn {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #070b10;
+      border-radius: 5px;
+      padding: 8px 13px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .menu-btn.active,
+    .btn:hover {
+      border-color: var(--accent);
+      background: rgba(255, 109, 109, 0.22);
+      color: #ffb3b3;
+    }
+
+    .btn:disabled { cursor: wait; opacity: 0.7; }
+    .lookup-menu { position: relative; }
+    .lookup-menu summary { list-style: none; }
+    .lookup-menu summary::-webkit-details-marker { display: none; }
+    .lookup-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 205px;
+      z-index: 20;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0b1117;
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+    }
+    .lookup-menu[open] .lookup-panel { display: grid; gap: 6px; }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 26px auto 60px;
+    }
+
+    .hero,
+    .panel,
+    .stat,
+    .notice {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+
+    .hero {
+      padding: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    h1, h2 { margin: 0; }
+    h1 { font-size: 32px; }
+    h2 { font-size: 20px; }
+    .muted { color: var(--muted); }
+
+    .notice {
+      padding: 16px 18px;
+      margin-bottom: 18px;
+      border-left-width: 5px;
+    }
+    .notice strong { display: block; margin-bottom: 4px; font-size: 17px; }
+    .notice.monitoring { border-left-color: var(--good); }
+    .notice.candidate { border-left-color: var(--warn); background: rgba(255, 200, 87, 0.08); }
+    .notice.cooldown { border-left-color: var(--accent); background: rgba(255, 109, 109, 0.09); }
+    .notice.initializing,
+    .notice.insufficient { border-left-color: var(--info); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .stat { padding: 16px; min-height: 82px; }
+    .stat-label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .stat-value { font-size: 21px; font-weight: 800; }
+
+    .panel { overflow: hidden; margin-bottom: 18px; }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 13px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    th { color: var(--muted); font-size: 13px; font-weight: 500; }
+    td:first-child { font-weight: 700; }
+    code { color: #d9eaff; font-size: 12px; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .pill.good { color: var(--good); border-color: rgba(37, 211, 102, 0.5); }
+    .pill.warn { color: var(--warn); border-color: rgba(255, 200, 87, 0.5); }
+    .pill.bad { color: #ff9e9e; border-color: rgba(255, 109, 109, 0.5); }
+    .pill.info { color: var(--info); border-color: rgba(98, 181, 255, 0.5); }
+
+    .method {
+      padding: 17px 18px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .method strong { color: var(--text); }
+    .empty, .error { padding: 18px; color: var(--muted); }
+    .error { color: #ffb3b3; }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 900px) {
+      main { width: calc(100% - 16px); }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      table { min-width: 820px; }
+      .panel { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="brand-img" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
+    <nav>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <a class="menu-btn" href="c0ld-leagues.html">c0ld Leagues</a>
+      <details class="lookup-menu">
+        <summary class="menu-btn active">Tools</summary>
+        <div class="lookup-panel">
+          <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+          <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+          <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+          <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn active" href="ps99-restart-tracker.html">PS99 Restarts</a>
+          <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
+          <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <h1>PS99 Restart Tracker</h1>
+        <div id="subtitle" class="muted">Watching five public Pet Simulator 99 servers for coordinated turnover.</div>
+      </div>
+      <button id="refresh" class="btn" type="button">Refresh</button>
+    </section>
+
+    <section id="status-notice" class="notice initializing" aria-live="polite">
+      <strong id="status-title">Loading restart detector…</strong>
+      <span id="status-detail" class="muted">Retrieving the latest server sample.</span>
+    </section>
+
+    <section class="stats">
+      <article class="stat">
+        <div class="stat-label">Detector Status</div>
+        <div id="detector-status" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Tracked Servers Present</div>
+        <div id="tracked-present" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Current Place Version</div>
+        <div id="place-version" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Last Confirmed Restart</div>
+        <div id="last-restart" class="stat-value">-</div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Current Reference Sample</h2>
+        <span id="sample-meta" class="muted">Loading…</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Server ID</th>
+            <th>Status</th>
+            <th>Players</th>
+            <th>Ping</th>
+            <th>FPS</th>
+            <th>Observed Duration</th>
+            <th>Sampled Version</th>
+          </tr>
+        </thead>
+        <tbody id="sample-body">
+          <tr><td colspan="7" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="candidate-panel" class="panel" hidden>
+      <div class="panel-header">
+        <h2>Candidate Replacement Servers</h2>
+        <span id="candidate-meta" class="muted">Awaiting confirmation…</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Server ID</th>
+            <th>Status</th>
+            <th>Players</th>
+            <th>Ping</th>
+            <th>Observed Since</th>
+          </tr>
+        </thead>
+        <tbody id="candidate-body"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Confirmed Restart History</h2>
+        <span id="history-meta" class="muted">Loading…</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Detected</th>
+            <th>Confidence</th>
+            <th>Place Version</th>
+            <th>Confirmation</th>
+            <th>Stabilization Ended</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="5" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div class="method">
+        <strong>How detection works:</strong> Roblox does not publish server creation time or a server's place version in the public server list. The tracker samples five random servers from a batch of 100 high-occupancy public servers. If all five disappear in the same one-minute interval, five replacements must remain visible in the following scan before a restart is confirmed. A recent PS99 place-version change raises confidence, and a ten-minute stabilization period prevents duplicate alerts. “Observed duration” is only how long this tracker has seen an ID, not the server's true age.
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+    const CACHE_KEY = "c0ld:ps99-restart-tracker:v1";
+    const REFRESH_MS = 60000;
+
+    const els = {
+      subtitle: document.getElementById("subtitle"),
+      refresh: document.getElementById("refresh"),
+      statusNotice: document.getElementById("status-notice"),
+      statusTitle: document.getElementById("status-title"),
+      statusDetail: document.getElementById("status-detail"),
+      detectorStatus: document.getElementById("detector-status"),
+      trackedPresent: document.getElementById("tracked-present"),
+      placeVersion: document.getElementById("place-version"),
+      lastRestart: document.getElementById("last-restart"),
+      sampleMeta: document.getElementById("sample-meta"),
+      sampleBody: document.getElementById("sample-body"),
+      candidatePanel: document.getElementById("candidate-panel"),
+      candidateMeta: document.getElementById("candidate-meta"),
+      candidateBody: document.getElementById("candidate-body"),
+      historyMeta: document.getElementById("history-meta"),
+      historyBody: document.getElementById("history-body")
+    };
+
+    function text(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+      }[char]));
+    }
+
+    function fmtDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "-";
+      return date.toLocaleString(undefined, {
+        month: "numeric", day: "numeric", year: "2-digit", hour: "numeric", minute: "2-digit"
+      });
+    }
+
+    function fmtVersion(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `v${number.toLocaleString()}` : "-";
+    }
+
+    function fmtDuration(value) {
+      const started = new Date(value).getTime();
+      if (!Number.isFinite(started)) return "-";
+      const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+      if (seconds < 60) return `<1 min`;
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ${minutes % 60}m`;
+      return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+    }
+
+    function shortId(value) {
+      const id = String(value || "");
+      return id.length > 20 ? `${id.slice(0, 8)}…${id.slice(-8)}` : id || "-";
+    }
+
+    function statusCopy(state) {
+      const status = state?.status || "initializing";
+      const confirmations = Number(state?.candidate_confirmations || 0);
+      const required = Number(state?.detector?.confirmation_scans || 2);
+      const copies = {
+        monitoring: ["No restart detected", "All missing IDs are replaced individually during ordinary server churn; only coordinated turnover starts an alert."],
+        candidate: ["Possible restart — confirming", `All five reference IDs disappeared together. Replacement confirmation ${confirmations}/${required}.`],
+        cooldown: ["Restart confirmed", `The detector is stabilizing until ${fmtDate(state?.cooldown_until)} before registering a fresh reference sample.`],
+        insufficient: ["Waiting for enough public servers", "Roblox returned fewer servers than the configured five-server sample."],
+        initializing: ["Registering reference servers", "The first five-server baseline will appear after the next successful scan."]
+      };
+      return copies[status] || copies.initializing;
+    }
+
+    function serverRows(servers, columns = 7) {
+      if (!servers.length) return `<tr><td colspan="${columns}" class="empty">No servers registered yet.</td></tr>`;
+      return servers.map(server => `
+        <tr>
+          <td><code title="${text(server.server_id)}">${text(shortId(server.server_id))}</code></td>
+          <td><span class="pill ${server.present ? "good" : "bad"}">${server.present ? "Present" : "Missing"}</span></td>
+          <td>${Number(server.playing || 0).toLocaleString()} / ${Number(server.max_players || 0).toLocaleString()}</td>
+          <td>${Number.isFinite(Number(server.ping)) ? `${Math.round(Number(server.ping))} ms` : "-"}</td>
+          <td>${Number.isFinite(Number(server.fps)) ? Number(server.fps).toFixed(1) : "-"}</td>
+          <td title="First observed ${text(fmtDate(server.first_seen_at))}">≥ ${text(fmtDuration(server.first_seen_at))}</td>
+          <td>${fmtVersion(server.observed_place_version)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function candidateRows(servers) {
+      return servers.map(server => `
+        <tr>
+          <td><code title="${text(server.server_id)}">${text(shortId(server.server_id))}</code></td>
+          <td><span class="pill ${server.present ? "good" : "warn"}">${server.present ? "Present" : "Rechecking"}</span></td>
+          <td>${Number(server.playing || 0).toLocaleString()} / ${Number(server.max_players || 0).toLocaleString()}</td>
+          <td>${Number.isFinite(Number(server.ping)) ? `${Math.round(Number(server.ping))} ms` : "-"}</td>
+          <td>${fmtDate(server.first_seen_at)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function render(data, stale = false) {
+      const state = data?.state || {};
+      state.detector = data?.detector || {};
+      const servers = Array.isArray(state.tracked_servers) ? state.tracked_servers : [];
+      const candidates = Array.isArray(state.candidate_servers) ? state.candidate_servers : [];
+      const events = Array.isArray(data?.events) ? data.events : [];
+      const [title, detail] = statusCopy(state);
+      const status = state.status || "initializing";
+
+      els.subtitle.textContent = stale
+        ? "Showing the last saved detector state while refreshing…"
+        : `One-minute monitoring of ${data?.place_name || "Pet Simulator 99"} public servers.`;
+      els.statusNotice.className = `notice ${status}`;
+      els.statusTitle.textContent = title;
+      els.statusDetail.textContent = detail;
+      els.detectorStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      els.trackedPresent.textContent = `${Number(state.tracked_present || 0)} / ${Number(data?.detector?.sample_size || 5)}`;
+      els.placeVersion.textContent = fmtVersion(state.candidate_place_version ?? state.baseline_place_version);
+      els.lastRestart.textContent = fmtDate(state.last_restart_detected_at || data?.latest_restart?.detected_at);
+      els.sampleMeta.textContent = state.last_checked_at
+        ? `${Number(state.last_batch_size || 0).toLocaleString()} servers checked at ${fmtDate(state.last_checked_at)}`
+        : "Awaiting the first scan";
+      els.sampleBody.innerHTML = serverRows(servers);
+
+      els.candidatePanel.hidden = candidates.length === 0;
+      if (candidates.length) {
+        els.candidateMeta.textContent = `Confirmation ${Number(state.candidate_confirmations || 0)} / ${Number(data?.detector?.confirmation_scans || 2)}`;
+        els.candidateBody.innerHTML = candidateRows(candidates);
+      }
+
+      els.historyMeta.textContent = events.length
+        ? `${events.length.toLocaleString()} confirmed restart${events.length === 1 ? "" : "s"}, newest first`
+        : "No confirmed restarts yet";
+      els.historyBody.innerHTML = events.length
+        ? events.map(event => {
+          const version = event.previous_place_version === event.current_place_version
+            ? fmtVersion(event.current_place_version)
+            : `${fmtVersion(event.previous_place_version)} → ${fmtVersion(event.current_place_version)}`;
+          return `
+            <tr>
+              <td>${fmtDate(event.detected_at)}</td>
+              <td><span class="pill ${event.version_correlated ? "good" : "info"}">${event.version_correlated ? "High · version matched" : "Confirmed · identity"}</span></td>
+              <td>${version}</td>
+              <td>${text(event.reason || "Five-server replacement confirmed.")}</td>
+              <td>${fmtDate(event.cooldown_until)}</td>
+            </tr>
+          `;
+        }).join("")
+        : `<tr><td colspan="5" class="empty">No restart has been confirmed since monitoring began.</td></tr>`;
+    }
+
+    async function load({ force = false } = {}) {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached && !force) {
+        try { render(JSON.parse(cached), true); } catch {}
+      }
+
+      if (els.refresh.disabled) return;
+      els.refresh.disabled = true;
+      els.refresh.textContent = "Refreshing…";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/ps99/restarts?limit=200`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        render(data);
+      } catch (error) {
+        if (!cached) {
+          els.statusNotice.className = "notice insufficient";
+          els.statusTitle.textContent = "Restart detector unavailable";
+          els.statusDetail.textContent = error.message || String(error);
+          els.sampleBody.innerHTML = `<tr><td colspan="7" class="error">${text(error.message || error)}</td></tr>`;
+          els.historyBody.innerHTML = `<tr><td colspan="5" class="error">${text(error.message || error)}</td></tr>`;
+        }
+      } finally {
+        els.refresh.disabled = false;
+        els.refresh.textContent = "Refresh";
+      }
+    }
+
+    els.refresh.addEventListener("click", () => load({ force: true }));
+    load();
+    setInterval(() => load({ force: true }), REFRESH_MS);
+  </script>
+</body>
+</html>

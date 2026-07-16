@@ -3,7 +3,7 @@ main = "c0ld-clan-api-worker.js"
 compatibility_date = "2026-06-16"
 
 [triggers]
-crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *"]
+crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *", "* * * * *"]
 
 [vars]
 CLAN_NAME = "c0ld"
@@ -68,6 +68,12 @@ PS99_VERSION_SCHEDULE_MINUTES = "5"
 PS99_VERSION_SCHEDULE_OFFSET_MINUTES = "0"
 PS99_VERSION_PLACE_DELAY_MS = "0"
 PS99_VERSION_HISTORY_CACHE_SECONDS = "60"
+INGEST_PS99_RESTARTS = "false"
+PS99_RESTART_BATCH_SIZE = "100"
+PS99_RESTART_SAMPLE_SIZE = "5"
+PS99_RESTART_CONFIRMATIONS = "2"
+PS99_RESTART_COOLDOWN_MINUTES = "10"
+PS99_RESTART_CACHE_SECONDS = "30"
 
 # Set these with `wrangler secret put ...`
 # SUPABASE_SERVICE_KEY

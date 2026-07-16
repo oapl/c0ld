@@ -181,6 +181,12 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_VERSION_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the PS99 version schedule interval. |
 | `PS99_VERSION_PLACE_DELAY_MS` | Optional. Defaults to `0`; delay between watched place version checks. |
 | `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
+| `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. Set to `true` after running migration `022` to monitor coordinated PS99 public-server turnover. |
+| `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per one-minute observation. Roblox accepts `10`, `25`, `50`, or `100`. |
+| `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `5`; persistent high-occupancy public-server IDs used as the reference sample. |
+| `PS99_RESTART_CONFIRMATIONS` | Optional. Defaults to `2`; consecutive one-minute observations required before a restart event is confirmed. |
+| `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
+| `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -192,7 +198,10 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 |---|---|
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
+
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
+
+The public Roblox server list does not include creation time or place version. The restart detector therefore labels server age as unavailable, persists five server IDs, refreshes individually missing IDs during normal churn, and only starts confirmation when all five disappear in the same one-minute observation.
 
 ## Scheduled pulls
 
@@ -200,10 +209,10 @@ The Wrangler example includes:
 
 ```toml
 [triggers]
-crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *"]
+crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *", "* * * * *"]
 ```
 
-That runs the Worker every 5 minutes on a grid ending at `:29` and `:59`. In the Cloudflare dashboard, add the same cron trigger under the Worker trigger settings if you are not using Wrangler.
+The five-minute grid continues the existing clan, activity, global-rank, and PS99 version jobs. The every-minute trigger is routed only to the lightweight PS99 restart detector. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
 
 Do not reduce the Cloudflare cron itself to only two runs per hour. The Worker uses `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=29` to start fresh scans at `:29` and `:59`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans.
 
@@ -243,6 +252,8 @@ Useful endpoints:
 | `/api/clans/activity/feed` | All-clans activity blotter split into clan activity and rank activity. |
 | `/api/ps99/versions/ingest` | Manual protected PS99 place-version ingest. `POST` only. |
 | `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
+| `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
+| `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
@@ -262,6 +273,14 @@ To seed PS99 version history after running migration `021`, run:
 ```powershell
 Invoke-RestMethod -Method Post `
   -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/versions/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+To register the first five-server restart sample after running migration `022`, run:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/restarts/ingest" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
