@@ -111,7 +111,8 @@ export default {
           global_rank_config: globalRankRuntimeConfig(env),
           clan_activity_config: clanActivityRuntimeConfig(env),
           ps99_version_config: ps99VersionRuntimeConfig(env),
-          ps99_restart_config: ps99RestartRuntimeConfig(env)
+          ps99_restart_config: ps99RestartRuntimeConfig(env),
+          ps99_alert_config: ps99AlertRuntimeConfig(env)
         });
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
@@ -289,6 +290,7 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
         ps99_places_checked: payload?.places_checked ?? null,
         ps99_events_inserted: payload?.version_events_inserted ?? null,
         ps99_newest_version: payload?.newest_version ?? null,
+        webhook_alert: payload?.webhook_alert || null,
         scan_error_count: Array.isArray(payload?.scan_errors) ? payload.scan_errors.length : null,
         message: payload?.message || null
       };
@@ -3094,6 +3096,7 @@ async function handlePs99VersionIngest(env, source, options = {}) {
   }));
   const placeRows = [];
   const eventRows = [];
+  let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_version_change" };
 
   for (const place of places) {
     const placeId = toNumber(place.place_id || place.placeId);
@@ -3160,6 +3163,10 @@ async function handlePs99VersionIngest(env, source, options = {}) {
 
   if (eventRows.length) {
     await supabaseUpsert(env, PS99_VERSION_EVENTS_TABLE, eventRows, "event_id");
+    const alertRows = eventRows.filter(row => (toNumber(row.previous_version) || 0) > 0);
+    webhookAlert = alertRows.length
+      ? await postPs99VersionAlert(env, alertRows, fetchedAt)
+      : { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "initial_version_baseline" };
   }
 
   const newest = [...placeRows].sort((a, b) => (toNumber(b.latest_version) || 0) - (toNumber(a.latest_version) || 0))[0] || null;
@@ -3175,6 +3182,7 @@ async function handlePs99VersionIngest(env, source, options = {}) {
     version_events_inserted: eventRows.length,
     newest_place_name: newest?.place_name || null,
     newest_version: newest?.latest_version ?? null,
+    webhook_alert: webhookAlert,
     scan_errors: scanErrors.slice(0, 25)
   }, 202);
 }
@@ -3503,6 +3511,7 @@ async function handlePs99RestartIngest(env, source) {
   let lastRestartDetectedAt = safeIso(previous.last_restart_detected_at);
   let cooldownUntil = safeIso(previous.cooldown_until);
   let eventRow = null;
+  let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_restart_detected" };
 
   if (batch.length < sampleSize) {
     status = "insufficient";
@@ -3651,6 +3660,7 @@ async function handlePs99RestartIngest(env, source) {
   await supabaseUpsert(env, PS99_RESTART_STATE_TABLE, [stateRow], "place_id");
   if (eventRow) {
     await supabaseUpsert(env, PS99_RESTART_EVENTS_TABLE, [eventRow], "event_id");
+    webhookAlert = await postPs99RestartAlert(env, eventRow);
   }
 
   return json({
@@ -3664,8 +3674,196 @@ async function handlePs99RestartIngest(env, source) {
     tracked_present: trackedPresent,
     candidate_confirmations: candidateConfirmations,
     restart_detected: Boolean(eventRow),
-    cooldown_until: cooldownUntil
+    cooldown_until: cooldownUntil,
+    webhook_alert: webhookAlert
   }, 202);
+}
+
+async function postPs99VersionAlert(env, events, detectedAt) {
+  const lines = events.slice(0, 20).map(event => {
+    const placeName = escapeDiscordMarkdown(event.place_name || `Place ${event.place_id}`);
+    const placeUrl = `https://www.roblox.com/games/${Math.round(toNumber(event.place_id) || 0)}`;
+    const previousVersion = ps99AlertVersion(event.previous_version);
+    const currentVersion = ps99AlertVersion(event.current_version);
+    const published = discordTimestamp(event.current_published_at, "F");
+    return `**[${placeName}](${placeUrl})**\n${previousVersion} \u2192 **${currentVersion}**${published ? ` \u2022 Published ${published}` : ""}`;
+  });
+  const extraCount = Math.max(0, events.length - 20);
+  if (extraCount) lines.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
+
+  return postPs99DiscordAlert(env, {
+    username: "PS99 Update Tracker",
+    embeds: [{
+      title: "PS99 Place Version Updated",
+      url: "https://c0ld-clan.com/ps99-version-history.html",
+      description: lines.join("\n\n").slice(0, 4096),
+      color: 0x62b5ff,
+      footer: {
+        text: `${events.length} watched place${events.length === 1 ? "" : "s"} updated`
+      },
+      timestamp: safeIso(detectedAt) || new Date().toISOString()
+    }]
+  });
+}
+
+async function postPs99RestartAlert(env, event) {
+  const placeId = Math.round(toNumber(event.place_id) || ps99RootPlaceId(env));
+  const placeName = escapeDiscordMarkdown(event.place_name || "Pet Simulator 99");
+  const confidence = event.version_correlated
+    ? "High \u2014 place version matched"
+    : "Confirmed \u2014 server identity turnover";
+
+  return postPs99DiscordAlert(env, {
+    username: "PS99 Update Tracker",
+    embeds: [{
+      title: "PS99 Server Restart Detected",
+      url: "https://c0ld-clan.com/ps99-restart-tracker.html",
+      description: String(event.reason || "The monitored PS99 public servers were replaced together.").slice(0, 4096),
+      color: 0xff9b96,
+      fields: [
+        {
+          name: "Place",
+          value: `[${placeName}](https://www.roblox.com/games/${placeId})`,
+          inline: true
+        },
+        {
+          name: "Place Version",
+          value: ps99AlertVersion(event.current_place_version),
+          inline: true
+        },
+        {
+          name: "Confidence",
+          value: confidence,
+          inline: true
+        },
+        {
+          name: "Detected",
+          value: discordTimestamp(event.detected_at, "F") || "Unknown",
+          inline: false
+        }
+      ],
+      timestamp: safeIso(event.detected_at) || new Date().toISOString()
+    }]
+  });
+}
+
+async function postPs99DiscordAlert(env, payload) {
+  const configured = Boolean(ps99AlertWebhookRaw(env));
+  const webhookUrl = ps99AlertWebhookUrl(env);
+  if (!configured) return { configured: false, posted: false, reason: "webhook_not_configured" };
+  if (!webhookUrl) return { configured: true, posted: false, reason: "invalid_webhook_url" };
+
+  const roleId = ps99AlertRoleId(env);
+  const body = {
+    ...payload,
+    content: roleId ? `<@&${roleId}>` : "",
+    allowed_mentions: {
+      parse: [],
+      roles: roleId ? [roleId] : []
+    }
+  };
+  let lastError = "Discord webhook request failed.";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const responseText = await response.text();
+      const responseBody = parseJsonObject(responseText) || {};
+
+      if (response.ok) {
+        return {
+          configured: true,
+          posted: true,
+          role_mentioned: Boolean(roleId),
+          message_id: stringOrNull(responseBody.id)
+        };
+      }
+
+      lastError = `Discord webhook returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 300)}` : ""}`;
+      if (attempt < 3 && (response.status === 429 || response.status >= 500)) {
+        const retrySeconds = toNumber(responseBody.retry_after);
+        const retryMs = response.status === 429 && retrySeconds !== null
+          ? clamp(retrySeconds * 1000, 500, 15000)
+          : attempt * 1000;
+        await sleep(retryMs);
+        continue;
+      }
+
+      break;
+    } catch (err) {
+      lastError = err?.message || String(err);
+      if (attempt < 3) {
+        await sleep(attempt * 1000);
+        continue;
+      }
+    }
+  }
+
+  return {
+    configured: true,
+    posted: false,
+    role_mentioned: false,
+    reason: "webhook_request_failed",
+    error: lastError.slice(0, 500)
+  };
+}
+
+function ps99AlertRuntimeConfig(env) {
+  const rawWebhook = ps99AlertWebhookRaw(env);
+  return {
+    webhook_configured: Boolean(rawWebhook),
+    webhook_valid: Boolean(ps99AlertWebhookUrl(env)),
+    role_id_configured: Boolean(ps99AlertRoleId(env))
+  };
+}
+
+function ps99AlertWebhookRaw(env) {
+  return String(env.PS99_ALERT_WEBHOOK_URL || "").trim();
+}
+
+function ps99AlertWebhookUrl(env) {
+  const raw = ps99AlertWebhookRaw(env);
+  if (!raw) return "";
+
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const isDiscordHost = host === "discord.com"
+      || host.endsWith(".discord.com")
+      || host === "discordapp.com"
+      || host.endsWith(".discordapp.com");
+    const isWebhookPath = /^\/api(?:\/v\d+)?\/webhooks\/\d+\/[^/]+\/?$/.test(url.pathname);
+    if (url.protocol !== "https:" || !isDiscordHost || !isWebhookPath) return "";
+
+    url.searchParams.set("wait", "true");
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function ps99AlertRoleId(env) {
+  const value = String(env.PS99_ALERT_ROLE_ID || "").trim();
+  return /^\d{5,30}$/.test(value) ? value : "";
+}
+
+function ps99AlertVersion(value) {
+  const version = toNumber(value);
+  return version === null ? "Unknown" : String(Math.trunc(version));
+}
+
+function discordTimestamp(value, style = "R") {
+  const ms = isoToMs(value);
+  return ms === null ? "" : `<t:${Math.floor(ms / 1000)}:${style}>`;
+}
+
+function escapeDiscordMarkdown(value) {
+  return String(value || "").replace(/([\\`*_{}\[\]()<>#+\-.!|~])/g, "\\$1");
 }
 
 async function fetchPs99PublicServerBatch(placeId, batchSize) {
