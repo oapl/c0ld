@@ -672,8 +672,8 @@ async function loadGlobalProfile(id){
     source_clan:row.source_clan||row.clan_name||null,
     clan_rank:row.clan_rank??memberRank??null,
     clan_points:row.clan_points??memberPoints??null,
-    source_clan_rank:row.source_clan_rank??clanRank??null,
-    source_clan_points:row.source_clan_points??clanPoints??null,
+    source_clan_rank:row.source_clan_rank??null,
+    source_clan_points:row.source_clan_points??null,
     source_clan_leaderboard_rank:row.source_clan_leaderboard_rank??row.source_clan_rank??null,
     source_clan_leaderboard_points:row.source_clan_leaderboard_points??row.source_clan_points??null,
     member_rank:memberRank,
@@ -904,16 +904,16 @@ function rewardLabel(rank,tiers){
 
 function renderRewardLine(){
   const globalRank=finite(profile.global_rank);
-  const clanRank=finite(profile.member_rank??profile.clan_rank);
+  const clanLeaderboardRank=finite(profile.source_clan_leaderboard_rank??profile.source_clan_rank);
 
-  if(globalRank===null&&clanRank===null)return"";
+  if(globalRank===null&&clanLeaderboardRank===null)return"";
 
   return`
     <section class="reward-strip">
       <span class="muted">Rewards:</span>
       Global ${escapeHtml(rewardLabel(globalRank,PLAYER_REWARD_RANKS))}
       <span class="reward-divider">•</span>
-      Clan ${escapeHtml(rewardLabel(clanRank,PLAYER_REWARD_RANKS))}
+      Clan ${escapeHtml(rewardLabel(clanLeaderboardRank,CLAN_REWARD_RANKS))}
     </section>
   `;
 }

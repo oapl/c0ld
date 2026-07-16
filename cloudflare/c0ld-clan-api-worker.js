@@ -613,7 +613,7 @@ async function handleGlobalCurrent(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000);
 
   const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
-    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,updated_at",
+    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,raw_global,updated_at",
     clan_name: `eq.${clan}`,
     order: "clan_rank.asc",
     limit: String(limit)
@@ -7953,6 +7953,10 @@ function parseLeaderboardNumber(value) {
 }
 
 function normalizeGlobalCurrentOutput(row) {
+  const rawGlobal = parseJsonObject(row.raw_global) || {};
+  const sourceClanRank = toNumber(rawGlobal.source_clan_rank);
+  const sourceClanPoints = toNumber(rawGlobal.source_clan_points);
+
   return {
     clan_name: row.clan_name,
     user_id: toNumber(row.user_id),
@@ -7964,6 +7968,10 @@ function normalizeGlobalCurrentOutput(row) {
     member_rank: toNumber(row.clan_rank),
     member_points: toNumber(row.clan_points) || 0,
     source_clan: row.clan_name,
+    source_clan_rank: sourceClanRank,
+    source_clan_points: sourceClanPoints,
+    source_clan_leaderboard_rank: sourceClanRank,
+    source_clan_leaderboard_points: sourceClanPoints,
     battle_key: row.battle_key,
     battle_display_name: row.battle_display_name,
     event_name: row.event_name,
