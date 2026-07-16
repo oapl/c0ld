@@ -132,7 +132,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -219,6 +219,10 @@
       table { min-width: 760px; }
       .panel { overflow-x: auto; }
     }
+
+    @media (max-width: 550px) {
+      .stats { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -255,20 +259,12 @@
 
     <section class="stats">
       <article class="stat">
-        <div class="stat-label">Newest Version</div>
-        <div id="newest-version" class="stat-value">-</div>
-      </article>
-      <article class="stat">
-        <div class="stat-label">Newest Place</div>
-        <div id="newest-place" class="stat-value">-</div>
-      </article>
-      <article class="stat">
-        <div class="stat-label">Places Watched</div>
-        <div id="places-watched" class="stat-value">-</div>
-      </article>
-      <article class="stat">
         <div class="stat-label">Last Detected</div>
         <div id="last-detected" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Last Scanned</div>
+        <div id="last-scanned" class="stat-value">-</div>
       </article>
     </section>
 
@@ -321,10 +317,8 @@
     const els = {
       subtitle: document.getElementById("subtitle"),
       refresh: document.getElementById("refresh"),
-      newestVersion: document.getElementById("newest-version"),
-      newestPlace: document.getElementById("newest-place"),
-      placesWatched: document.getElementById("places-watched"),
       lastDetected: document.getElementById("last-detected"),
+      lastScanned: document.getElementById("last-scanned"),
       placesMeta: document.getElementById("places-meta"),
       historyMeta: document.getElementById("history-meta"),
       placesBody: document.getElementById("places-body"),
@@ -367,15 +361,18 @@
     function render(data, stale = false) {
       const places = Array.isArray(data?.places) ? data.places : [];
       const events = Array.isArray(data?.events) ? data.events : [];
-      const newestVersion = data?.newest_version ?? events[0]?.current_version ?? places[0]?.latest_version;
+      const lastScannedAt = places.reduce((latest, place) => {
+        const checkedAt = new Date(place?.latest_checked_at || 0).getTime();
+        return Number.isFinite(checkedAt) && checkedAt > latest.time
+          ? { time: checkedAt, value: place.latest_checked_at }
+          : latest;
+      }, { time: 0, value: null }).value;
 
       els.subtitle.textContent = stale
         ? "Showing cached PS99 version data while refreshing..."
         : `Loaded ${events.length.toLocaleString()} version history event${events.length === 1 ? "" : "s"}.`;
-      els.newestVersion.textContent = fmtVersion(newestVersion);
-      els.newestPlace.textContent = data?.newest_place_name || events[0]?.place_name || "-";
-      els.placesWatched.textContent = places.length.toLocaleString();
-      els.lastDetected.textContent = fmtDate(data?.newest_detected_at || events[0]?.detected_at || places[0]?.latest_checked_at);
+      els.lastDetected.textContent = fmtDate(events[0]?.detected_at);
+      els.lastScanned.textContent = fmtDate(lastScannedAt);
       els.placesMeta.textContent = `${places.length.toLocaleString()} active watched place${places.length === 1 ? "" : "s"}`;
       els.historyMeta.textContent = events.length ? `Newest first` : "No version events yet";
 

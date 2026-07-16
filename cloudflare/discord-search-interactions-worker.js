@@ -25,6 +25,11 @@ export default {
         return await registerSearchCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-version-command") {
+        requireAdmin(request, env);
+        return await registerVersionCommand(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/commands") {
         requireAdmin(request, env);
         return await listCommands(url, env);
@@ -78,6 +83,17 @@ async function handleInteraction(request, env) {
   }
 
   const commandName = String(interaction.data?.name || "").toLowerCase();
+  if (commandName === "version") {
+    try {
+      return interactionJson(await buildVersionResponse(env));
+    } catch (err) {
+      return interactionJson(messageResponse(
+        `Version lookup failed: ${err?.message || String(err)}`,
+        true
+      ));
+    }
+  }
+
   if (commandName !== "search") {
     return interactionJson(messageResponse(`Unknown command: ${commandName || "none"}`));
   }
@@ -154,6 +170,14 @@ async function buildSearchResponse(query, env) {
 }
 
 async function registerSearchCommand(url, env) {
+  return registerCommand(url, env, searchCommandPayload());
+}
+
+async function registerVersionCommand(url, env) {
+  return registerCommand(url, env, versionCommandPayload());
+}
+
+async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
   const guildId = String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
@@ -168,7 +192,7 @@ async function registerSearchCommand(url, env) {
       "Content-Type": "application/json",
       Accept: "application/json"
     },
-    body: JSON.stringify(searchCommandPayload())
+    body: JSON.stringify(commandPayload)
   });
   const payload = await res.json().catch(() => ({}));
 
@@ -176,7 +200,7 @@ async function registerSearchCommand(url, env) {
     return json({
       ok: false,
       status: res.status,
-      message: discordApiErrorMessage(res.status, payload.message || "Discord command registration failed."),
+      message: discordApiErrorMessage(res.status, payload.message || `Discord /${commandPayload.name} registration failed.`),
       details: payload
     }, 502);
   }
@@ -187,6 +211,44 @@ async function registerSearchCommand(url, env) {
     guild_id: guildId || null,
     command: payload
   });
+}
+
+async function buildVersionResponse(env) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/ps99/versions", apiBase);
+  apiUrl.searchParams.set("limit", "1");
+  apiUrl.searchParams.set("fresh", "1");
+
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Version-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `PS99 version API failed (${response.status}).`);
+  }
+
+  const places = Array.isArray(payload.places) ? payload.places : [];
+  const rootPlaceId = String(payload.root_place_id || "");
+  const rootPlace = places.find(place => Boolean(place.root_place))
+    || places.find(place => String(place.place_id || "") === rootPlaceId)
+    || places[0]
+    || null;
+  const lastScannedAt = places.reduce((latest, place) => {
+    const value = String(place?.latest_checked_at || "");
+    const time = Date.parse(value);
+    return Number.isFinite(time) && time > latest.time ? { time, value } : latest;
+  }, { time: 0, value: "" }).value;
+  const version = plainInteger(rootPlace?.latest_version ?? payload.newest_version);
+  const release = formatPs99CommandDate(rootPlace?.latest_published_at);
+  const lastScanned = formatPs99CommandDate(lastScannedAt || rootPlace?.latest_checked_at);
+
+  return messageResponse(
+    `Newest PS99 Version: ${version} | Release: ${release} | Last Scanned: ${lastScanned}`
+  );
 }
 
 async function listCommands(url, env) {
@@ -547,6 +609,38 @@ function searchCommandPayload() {
       }
     ]
   };
+}
+
+function versionCommandPayload() {
+  return {
+    name: "version",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Show the newest PS99 version and last scan time.",
+    dm_permission: false
+  };
+}
+
+function plainInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
+}
+
+function formatPs99CommandDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Guatemala",
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.month}/${values.day}/${values.year} ${values.hour}:${values.minute}${String(values.dayPeriod || "").toUpperCase()}`;
 }
 
 function memberHasAllowedRole(interaction, env) {

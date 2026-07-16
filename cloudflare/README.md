@@ -334,7 +334,7 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search` Worker
+## Discord `/search` and `/version` Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
@@ -373,7 +373,7 @@ Required Worker secrets:
 |---|---|
 | `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
 | `DISCORD_BOT_TOKEN` | Bot token used only by the admin registration endpoint to create/update the slash command. |
-| `REGISTER_ADMIN_TOKEN` | Your private bearer token for `/admin/register-search-command`. |
+| `REGISTER_ADMIN_TOKEN` | Your private bearer token for the command-registration endpoints. |
 
 In the Discord Developer Portal, open the application's **General Information**
 page and set the **Interactions Endpoint URL** to:
@@ -393,12 +393,16 @@ permission integer you generated, the URL shape is:
 https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=84992&scope=bot%20applications.commands
 ```
 
-Register or update the slash command:
+Register or update the slash commands:
 
 ```powershell
 $token = "YOUR_REGISTER_ADMIN_TOKEN"
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-search-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-version-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
@@ -445,6 +449,17 @@ The command users run is:
 ```text
 /search username:Cinnamowopal
 ```
+
+The plain-text PS99 version command is:
+
+```text
+/version
+```
+
+It reports the root PS99 place version, its release time, and the most recent
+completed version scan. Register it through the same admin script, or call
+`POST /admin/register-version-command?guild_id=YOUR_GUILD_ID` with the same
+admin bearer token.
 
 ## League API Worker
 

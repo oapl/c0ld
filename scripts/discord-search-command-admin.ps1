@@ -109,15 +109,21 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search..." -ForegroundColor Cyan
-  $registerPath = if ($RegisterGlobal) {
-    "/admin/register-search-command"
-  } else {
-    $query = New-QueryString @{ guild_id = $GuildId }
-    "/admin/register-search-command$query"
+  Write-Host "Registering /search and /version..." -ForegroundColor Cyan
+  $registerPaths = @(
+    "/admin/register-search-command",
+    "/admin/register-version-command"
+  )
+  foreach ($path in $registerPaths) {
+    $registerPath = if ($RegisterGlobal) {
+      $path
+    } else {
+      $query = New-QueryString @{ guild_id = $GuildId }
+      "$path$query"
+    }
+    Invoke-C0ldDiscordWorker -Method POST -Path $registerPath |
+      ConvertTo-Json -Depth 8
   }
-  Invoke-C0ldDiscordWorker -Method POST -Path $registerPath |
-    ConvertTo-Json -Depth 8
 }
 
 if (-not $SkipList) {
