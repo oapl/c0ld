@@ -25,9 +25,12 @@
     .avatar{width:96px;height:96px;border-radius:10px;background:#21262d;object-fit:cover}
     .profile-name{margin:0 0 6px;font-size:34px}
     .meta,.label,.dates,.chart-title,.muted{color:var(--muted);font-size:13px;line-height:1.45}
-    .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}
+    .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:14px}
     .card{padding:16px;min-height:82px}
     .value{font-size:21px;font-weight:700}
+    .reward-strip{margin:0 0 24px;color:var(--text);font-size:14px}
+    .reward-strip .muted{color:var(--muted)}
+    .reward-divider{color:var(--muted);padding:0 8px}
     .section-title-row{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:24px 0 14px}
     .section-title{margin:0;font-size:24px}
     select{min-width:230px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text)}
@@ -105,6 +108,8 @@ const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/hist
 const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
 const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/search";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
+const PLAYER_REWARD_RANKS=[3,100,1000,1050,1150,6150,30000];
+const CLAN_REWARD_RANKS=[3,10,50,100,500];
 
 const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
@@ -538,7 +543,36 @@ async function loadGlobalProfile(id){
   const points=globalPoints??clanPoints??0;
   const globalRank=finite(row.global_rank);
   const clanRank=finite(row.clan_rank);
-  const battles=[];
+  const rawHistory=Array.isArray(payload.history)?payload.history:[];
+  const historySeries=mergeSeries([],rawHistory.map(item=>({
+    t:item.fetched_at,
+    rank:finite(item.global_rank),
+    points:finite(item.global_points??item.points??item.clan_points)
+  })));
+  const currentTime=seen;
+
+  if(currentTime&&!historySeries.some(item=>new Date(item.t).getTime()===new Date(currentTime).getTime())){
+    historySeries.push({
+      t:currentTime,
+      rank:globalRank,
+      points
+    });
+    historySeries.sort((a,b)=>new Date(a.t)-new Date(b.t));
+  }
+
+  const battles=historySeries.length>1?[recalcBattle({
+    battle:"global-leaderboard",
+    source:"global",
+    display_name:"Global Leaderboard",
+    battle_first_snapshot:historySeries[0]?.t||null,
+    battle_last_snapshot:historySeries[historySeries.length-1]?.t||null,
+    first_seen:historySeries[0]?.t||null,
+    last_seen:historySeries[historySeries.length-1]?.t||null,
+    starting_rank:historySeries[0]?.rank??null,
+    ending_rank:globalRank??historySeries[historySeries.length-1]?.rank??null,
+    ending_points:points,
+    series:historySeries
+  })]:[];
 
   return{
     aliases:[String(id)],
@@ -761,6 +795,30 @@ function currentPoints(){
   return profile.global_points??profile.latest_points;
 }
 
+function rewardLabel(rank,tiers){
+  const value=finite(rank);
+  if(value===null)return"—";
+
+  const tier=tiers.find(item=>value<=item);
+  return tier?`Top ${fmt(tier)}`:"None";
+}
+
+function renderRewardLine(){
+  const globalRank=finite(profile.global_rank);
+  const clanRank=finite(profile.source_clan_rank);
+
+  if(globalRank===null&&clanRank===null)return"";
+
+  return`
+    <section class="reward-strip">
+      <span class="muted">Rewards:</span>
+      Global ${escapeHtml(rewardLabel(globalRank,PLAYER_REWARD_RANKS))}
+      <span class="reward-divider">•</span>
+      Clan ${escapeHtml(rewardLabel(clanRank,CLAN_REWARD_RANKS))}
+    </section>
+  `;
+}
+
 function renderProfileCards(){
   const hasGlobalRank=finite(profile.global_rank)!==null;
   const rankValue=hasGlobalRank?profile.global_rank:profile.latest_rank;
@@ -795,6 +853,8 @@ function render(){
     <section class="cards">
       ${renderProfileCards()}
     </section>
+
+    ${renderRewardLine()}
 
     ${hasHistory?`
       <div class="section-title-row">
@@ -1159,6 +1219,7 @@ async function main(){
       profile=globalProfile;
     }else if(globalProfile){
       const existingBattles=profile.battles||[];
+      const globalBattles=globalProfile.battles||[];
 
       profile={
         ...profile,
@@ -1171,7 +1232,8 @@ async function main(){
         latest_seen:globalProfile.latest_seen??profile.latest_seen??null,
         latest_points:globalProfile.latest_points??profile.latest_points??null,
         joined_at:profile.joined_at??globalProfile.joined_at??null,
-        battles:existingBattles,
+        battles:[...existingBattles,...globalBattles],
+        total_battles:existingBattles.length+globalBattles.length,
         is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
       };
     }

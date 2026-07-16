@@ -1066,6 +1066,15 @@ function chunkValues(values, size) {
   return chunks;
 }
 
+function postgrestInFilter(values) {
+  const quoted = (values || [])
+    .map(value => String(value || "").trim())
+    .filter(Boolean)
+    .map(value => `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`);
+
+  return `in.(${quoted.join(",")})`;
+}
+
 function robloxLookupConcurrency(env) {
   return clamp(Number(env.ROBLOX_LOOKUP_CONCURRENCY || 2), 1, 5);
 }
@@ -1396,21 +1405,103 @@ async function searchGlobalRankCandidates(env, clan, query) {
     .then(map => map.get(userId))
     .catch(() => `user_${userId}`));
 
+  const row = normalizeGlobalCandidateSearchOutput(candidate, {
+    run,
+    globalRank: higherCount + tiedBeforeCount + 1,
+    totalGlobalPlayers: total,
+    username,
+    displayName: lookup.display_name,
+    avatarUrl: avatarMap.get(userId) || null
+  });
+  const history = await searchGlobalRankCandidateHistory(env, clan, userId, row);
+
   return {
     ok: true,
     query,
     clan_name: clan,
     run,
-    row: normalizeGlobalCandidateSearchOutput(candidate, {
-      run,
-      globalRank: higherCount + tiedBeforeCount + 1,
-      totalGlobalPlayers: total,
-      username,
-      displayName: lookup.display_name,
-      avatarUrl: avatarMap.get(userId) || null
-    }),
-    history: []
+    row,
+    history
   };
+}
+
+async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = null) {
+  const limit = globalRankCandidateHistoryLimit(env);
+  const runs = (await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "run_key,battle_key,battle_display_name,event_name,finished_at,updated_at,started_at,total_global_players,candidate_player_count,scan_limit,scanned_count,scanned_clan_count,clan_member_count,found_member_count,stop_reason,status",
+    clan_name: `eq.${clan}`,
+    status: "in.(ok,completed)",
+    order: "finished_at.desc",
+    limit: String(limit + 12)
+  }))
+    .filter(isUsableCompletedGlobalRankRun)
+    .slice(0, limit);
+
+  if (!runs.length) return [];
+
+  const rows = [];
+  for (const runChunk of chunkValues(runs.map(run => run.run_key).filter(Boolean), 25)) {
+    if (!runChunk.length) continue;
+
+    rows.push(...await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      select: "run_key,user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
+      run_key: runChunk.length === 1 ? `eq.${runChunk[0]}` : postgrestInFilter(runChunk),
+      user_id: `eq.${userId}`,
+      order: "fetched_at.desc,points.desc,user_id.asc",
+      limit: String(runChunk.length * 10)
+    }));
+  }
+
+  const byRun = new Map();
+  for (const row of rows) {
+    const runKey = String(row.run_key || "").trim();
+    if (!runKey) continue;
+
+    const normalized = {
+      ...row,
+      user_id: toNumber(row.user_id),
+      points: toNumber(row.points) || 0
+    };
+    const existing = byRun.get(runKey);
+    if (!existing || sortGlobalCandidateRows(normalized, existing) < 0) {
+      byRun.set(runKey, normalized);
+    }
+  }
+
+  const currentRunKey = String(currentRow?.run_key || "").trim();
+
+  return runs
+    .map(run => {
+      const candidate = byRun.get(run.run_key);
+      if (!candidate) return null;
+
+      const isCurrent = currentRunKey && currentRunKey === run.run_key;
+      const totalGlobalPlayers = toNumber(run.total_global_players) ||
+        toNumber(run.candidate_player_count) ||
+        toNumber(currentRow?.total_global_players);
+
+      return {
+        run_key: run.run_key,
+        fetched_at: candidate.fetched_at || run.finished_at || run.updated_at || run.started_at || null,
+        event_name: run.event_name || candidate.battle_display_name || run.battle_display_name || null,
+        battle_key: candidate.battle_key || run.battle_key || null,
+        battle_display_name: cleanBattleDisplayName(
+          candidate.battle_key || run.battle_key,
+          candidate.battle_display_name || run.battle_display_name
+        ),
+        source_clan: candidate.source_clan || null,
+        source_clan_rank: toNumber(candidate.source_clan_rank),
+        source_clan_points: toNumber(candidate.source_clan_points) || 0,
+        clan_rank: toNumber(candidate.source_clan_rank),
+        clan_points: toNumber(candidate.source_clan_points) || 0,
+        global_rank: isCurrent ? toNumber(currentRow.global_rank) : null,
+        global_points: toNumber(candidate.points),
+        total_global_players: totalGlobalPlayers,
+        found: true
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.fetched_at || 0) - new Date(a.fetched_at || 0));
 }
 
 async function handleGlobalRankIngest(env, source, requestedClan, force = false) {
@@ -7998,6 +8089,10 @@ function globalRankCandidateClanBatchSize(env) {
 
 function globalRankCandidateReadLimit(env) {
   return clamp(globalRankClanScanLimit(env) * 100, 1000, 2000000);
+}
+
+function globalRankCandidateHistoryLimit(env) {
+  return clamp(Number(env.GLOBAL_RANK_CANDIDATE_HISTORY_LIMIT || 48), 1, 96);
 }
 
 function globalRankRuntimeConfig(env) {
