@@ -110,6 +110,9 @@ const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/globa
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 const PLAYER_REWARD_RANKS=[3,100,1000,1050,1150,6150,30000];
 const CLAN_REWARD_RANKS=[3,10,50,100,500];
+const EMBEDDED_HISTORY_BATTLE_LIMIT=24;
+const FULL_HISTORY_BATTLE_LIMIT=60;
+const HISTORY_FETCH_CONCURRENCY=5;
 
 const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
@@ -219,14 +222,35 @@ function formatDuration(ms){
 
 function rowPoints(row){return row?.total_points??row?.points??0}
 
-async function fetchJson(url,label){
-  const res=await fetch(`${url}${url.includes("?")?"&":"?"}v=${Date.now()}`,{cache:"no-store"});
+async function fetchJson(url,label,{cacheBust=false,cache="default"}={}){
+  const target=cacheBust?`${url}${url.includes("?")?"&":"?"}v=${Date.now()}`:url;
+  const res=await fetch(target,{cache});
   if(!res.ok)throw new Error(`Could not load ${label}. HTTP ${res.status}`);
   return res.json();
 }
 
-async function optionalJson(url){
-  try{return await fetchJson(url,url)}catch{return null}
+async function optionalJson(url,options){
+  try{return await fetchJson(url,url,options)}catch{return null}
+}
+
+async function mapLimit(items,limit,mapper){
+  const list=Array.from(items||[]);
+  const results=new Array(list.length);
+  let next=0;
+
+  const workers=Array.from({length:Math.min(Math.max(1,limit),list.length)},async()=>{
+    while(next<list.length){
+      const index=next++;
+      results[index]=await mapper(list[index],index);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+function historyBattleLimit(){
+  return isEmbedded()?EMBEDDED_HISTORY_BATTLE_LIMIT:FULL_HISTORY_BATTLE_LIMIT;
 }
 
 function setupChrome(){
@@ -415,8 +439,9 @@ async function loadLiveProfile(id){
   const userId=currentRow?.user_id||(/^\d+$/.test(String(id))?String(id):"");
 
   if(!userId&&!currentRow)return null;
+  if(!currentRow&&isEmbedded())return null;
 
-  const battleListData=await optionalJson(`${MEMBER_BATTLES}?clan=${encodeURIComponent(clan().label)}&limit=100`)||{rows:[]};
+  const battleListData=await optionalJson(`${MEMBER_BATTLES}?clan=${encodeURIComponent(clan().label)}&limit=${historyBattleLimit()}`)||{rows:[]};
   const battleMap=new Map();
 
   for(const item of[
@@ -440,23 +465,31 @@ async function loadLiveProfile(id){
   let latestRank=currentRow?.rank??null;
   let latestSeen=currentRow?.fetched_at||current.snapshot_at||current.generated_at||null;
   let joinedAt=currentRow?.join_time||currentRow?.joined_at||null;
-
-  for(const battleMeta of battleMap.values()){
-    let history={rows:[]};
+  const battleHistories=await mapLimit([...battleMap.values()].slice(0,historyBattleLimit()),HISTORY_FETCH_CONCURRENCY,async battleMeta=>{
     const battleKey=battleMeta.battle||battleMeta.battle_key||current.battle||"";
+    let history={rows:[]};
 
-    if(userId){
-      const historyUrl=
-        `${MEMBER_HISTORY}?clan=${encodeURIComponent(clan().label)}`+
-        `&user_id=${encodeURIComponent(userId)}`+
-        `${battleKey?`&battle=${encodeURIComponent(battleKey)}`:""}`+
-        `&hours=10000&limit=50000`;
+    const historyUrl=
+      `${MEMBER_HISTORY}?clan=${encodeURIComponent(clan().label)}`+
+      `&user_id=${encodeURIComponent(userId)}`+
+      `${battleKey?`&battle=${encodeURIComponent(battleKey)}`:""}`+
+      `&hours=10000&limit=50000`;
 
-      history=await optionalJson(historyUrl)||{rows:[]};
-    }
+    history=await optionalJson(historyUrl)||{rows:[]};
 
-    const rows=Array.isArray(history.rows)?history.rows.slice():[];
-    const isCurrentBattle=normalize(battleKey)===normalize(current.battle||"current");
+    return{
+      battleMeta,
+      battleKey,
+      rows:Array.isArray(history.rows)?history.rows.slice():[],
+      isCurrentBattle:normalize(battleKey)===normalize(current.battle||"current")
+    };
+  });
+
+  for(const item of battleHistories){
+    if(!item)continue;
+
+    const{battleMeta,battleKey,isCurrentBattle}=item;
+    const rows=item.rows;
 
     if(currentRow&&isCurrentBattle){
       const currentTime=currentRow.fetched_at||current.snapshot_at||current.generated_at;
@@ -544,35 +577,78 @@ async function loadGlobalProfile(id){
   const globalRank=finite(row.global_rank);
   const clanRank=finite(row.clan_rank);
   const rawHistory=Array.isArray(payload.history)?payload.history:[];
-  const historySeries=mergeSeries([],rawHistory.map(item=>({
+  const clanSeries=mergeSeries([],rawHistory.map(item=>({
+    t:item.fetched_at,
+    rank:finite(item.source_clan_rank??item.clan_rank),
+    points:finite(item.source_clan_points??item.clan_points)
+  })));
+  const globalSeries=mergeSeries([],rawHistory.map(item=>({
     t:item.fetched_at,
     rank:finite(item.global_rank),
     points:finite(item.global_points??item.points??item.clan_points)
   })));
   const currentTime=seen;
 
-  if(currentTime&&!historySeries.some(item=>new Date(item.t).getTime()===new Date(currentTime).getTime())){
-    historySeries.push({
+  if(currentTime&&!clanSeries.some(item=>new Date(item.t).getTime()===new Date(currentTime).getTime())){
+    clanSeries.push({
+      t:currentTime,
+      rank:clanRank,
+      points:clanPoints
+    });
+    clanSeries.sort((a,b)=>new Date(a.t)-new Date(b.t));
+  }
+
+  if(currentTime&&!globalSeries.some(item=>new Date(item.t).getTime()===new Date(currentTime).getTime())){
+    globalSeries.push({
       t:currentTime,
       rank:globalRank,
       points
     });
-    historySeries.sort((a,b)=>new Date(a.t)-new Date(b.t));
+    globalSeries.sort((a,b)=>new Date(a.t)-new Date(b.t));
   }
 
-  const battles=historySeries.length>1?[recalcBattle({
+  const battleDisplayName=
+    row.battle_display_name||
+    row.event_name||
+    payload.run?.battle_display_name||
+    payload.run?.event_name||
+    row.battle_key||
+    payload.run?.battle_key||
+    "Clan Battle";
+  const sourceClan=row.source_clan||row.clan_name||"Clan";
+  const battles=[];
+
+  if(clanSeries.length>1){
+    battles.push(recalcBattle({
+      battle:row.battle_key||payload.run?.battle_key||"clan-battle",
+      source:"global-clan",
+      display_name:`${sourceClan} - ${battleDisplayName}`,
+      battle_first_snapshot:clanSeries[0]?.t||null,
+      battle_last_snapshot:clanSeries[clanSeries.length-1]?.t||null,
+      first_seen:clanSeries[0]?.t||null,
+      last_seen:clanSeries[clanSeries.length-1]?.t||null,
+      starting_rank:clanSeries[0]?.rank??null,
+      ending_rank:clanRank??clanSeries[clanSeries.length-1]?.rank??null,
+      ending_points:clanPoints??clanSeries[clanSeries.length-1]?.points??null,
+      series:clanSeries
+    }));
+  }
+
+  if(globalSeries.length>1){
+    battles.push(recalcBattle({
     battle:"global-leaderboard",
     source:"global",
     display_name:"Global Leaderboard",
-    battle_first_snapshot:historySeries[0]?.t||null,
-    battle_last_snapshot:historySeries[historySeries.length-1]?.t||null,
-    first_seen:historySeries[0]?.t||null,
-    last_seen:historySeries[historySeries.length-1]?.t||null,
-    starting_rank:historySeries[0]?.rank??null,
-    ending_rank:globalRank??historySeries[historySeries.length-1]?.rank??null,
+    battle_first_snapshot:globalSeries[0]?.t||null,
+    battle_last_snapshot:globalSeries[globalSeries.length-1]?.t||null,
+    first_seen:globalSeries[0]?.t||null,
+    last_seen:globalSeries[globalSeries.length-1]?.t||null,
+    starting_rank:globalSeries[0]?.rank??null,
+    ending_rank:globalRank??globalSeries[globalSeries.length-1]?.rank??null,
     ending_points:points,
-    series:historySeries
-  })]:[];
+    series:globalSeries
+    }));
+  }
 
   return{
     aliases:[String(id)],
@@ -836,7 +912,7 @@ function render(){
   const app=document.getElementById("app");
   const battles=sortedBattles();
   const hasHistory=battles.length>0;
-  const historyTitle=battles.some(battle=>battle.source==="global")?"History":"Battle History";
+  const historyTitle=battles.every(battle=>battle.source==="global")?"History":"Battle History";
 
   app.innerHTML=`
     <section class="profile-header">
@@ -1205,14 +1281,20 @@ async function main(){
   }
 
   try{
-    activeInfo=await optionalJson(ACTIVE_BATTLE);
+    optionalJson(ACTIVE_BATTLE).then(info=>{
+      activeInfo=info;
+      if(profile&&document.getElementById("battle-detail")){
+        renderBattle();
+        notifyEmbedHeight();
+      }
+    });
 
-    const live=await loadLiveProfile(id).catch(()=>null);
-    const staticProfile=clan().key==="c0ld"
-      ?await loadStaticProfile(id).catch(()=>null)
-      :null;
+    const[live,staticProfile,globalProfile]=await Promise.all([
+      loadLiveProfile(id).catch(()=>null),
+      clan().key==="c0ld"?loadStaticProfile(id).catch(()=>null):Promise.resolve(null),
+      loadGlobalProfile(id).catch(()=>null)
+    ]);
 
-    const globalProfile=await loadGlobalProfile(id).catch(()=>null);
     profile=mergeProfiles(staticProfile,live);
 
     if(!profile){
@@ -1240,14 +1322,6 @@ async function main(){
 
     if(!profile)throw new Error(`Could not load profile ${id}.`);
 
-    if(!profile.avatar_url&&profile.user_id){
-      const thumbs=await optionalJson(
-        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${profile.user_id}&size=150x150&format=Png&isCircular=false`
-      );
-
-      profile.avatar_url=thumbs?.data?.[0]?.imageUrl||null;
-    }
-
     profile.profile_url=profile.user_id
       ?`https://www.roblox.com/users/${profile.user_id}/profile`
       :profile.profile_url;
@@ -1255,6 +1329,20 @@ async function main(){
     document.title=`${profile.username||"Player"} - ${clan().label} Profile`;
     render();
     notifyEmbedHeight();
+
+    if(!profile.avatar_url&&profile.user_id){
+      optionalJson(
+        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${profile.user_id}&size=150x150&format=Png&isCircular=false`
+      ).then(thumbs=>{
+        const imageUrl=thumbs?.data?.[0]?.imageUrl||null;
+        if(!imageUrl)return;
+
+        profile.avatar_url=imageUrl;
+        const avatar=document.querySelector(".avatar");
+        if(avatar)avatar.src=imageUrl;
+        notifyEmbedHeight();
+      });
+    }
   }catch(error){
     console.error(error);
     app.innerHTML=`<div class="error">${escapeHtml(error.message)}</div>`;
