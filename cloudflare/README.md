@@ -167,7 +167,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_CLAN_DELAY_MS` | Optional. Defaults to `1000`; delay between clan detail pulls to avoid hammering the API. |
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
-| `GLOBAL_RANK_EVENT_NAME` | Optional display override such as `LunarBattle2026`. |
+| `GLOBAL_RANK_RETENTION_HOURS` | Optional. Defaults to `24`; completed global-rank run data older than this is pruned while the battle/update is active. |
+| `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `true`; set `false` to disable global-rank run cleanup. |
+| `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
+| `GLOBAL_RANK_LEADERBOARD_LABEL` | Optional leaderboard placement label, such as `Update 84 Leaderboard`; preferred for profile Leaderboard History. |
+| `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
@@ -329,6 +333,13 @@ clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
 "Better than 99.50% of players." It does not stop early when all c0ld members
 are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
 clan leaderboard is exhausted.
+
+After a global rank scan finalizes, the Worker prunes old completed scan data.
+While the same battle/update is active, it keeps a rolling
+`GLOBAL_RANK_RETENTION_HOURS` window. Once a battle/update is no longer current
+or its stored end time has passed, cleanup keeps the newest successful run as
+the final historical snapshot and deletes the older run/candidate/history/shard
+rows for that group.
 
 For the fastest controlled Top 500 pull, use one-pass sharding. With:
 
@@ -525,6 +536,12 @@ Useful endpoints:
 The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
+
+League profile summaries can display an update/theme name when `LEAGUE_RUN_LABEL`
+is set, such as `Tap Heroes`, or when `LEAGUE_RUN_LABELS_JSON` maps a
+`LEAGUE_RUN_KEY` to a label. The public BIG Games league payload exposes league
+names, IDs, points, rosters, and contribution timestamps, but not a separate
+update theme, so this label is owned by the Worker config.
 
 `c0ld-league-matches.html` is the hidden reassessment/scanner page. The normal
 `c0ld-leagues.html` page uses the known c0ld overlap league list and expects the

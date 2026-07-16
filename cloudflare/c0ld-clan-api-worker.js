@@ -1345,23 +1345,44 @@ async function handleGlobalSearch(request, env) {
     })
     : [];
 
+  const run = runRows[0] || null;
+  const historyRunKeys = [...new Set(history.map(row => String(row.run_key || "").trim()).filter(Boolean))];
+  const historyRuns = historyRunKeys.length
+    ? await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "run_key,battle_key,battle_display_name,event_name,total_global_players,candidate_player_count,finished_at,updated_at,started_at",
+      run_key: historyRunKeys.length === 1 ? `eq.${historyRunKeys[0]}` : postgrestInFilter(historyRunKeys),
+      limit: String(historyRunKeys.length)
+    })
+    : [];
+  const historyRunMap = new Map(historyRuns.map(row => [String(row.run_key), row]));
+  const leaderboardName = globalRankLeaderboardLabel(env, run || found);
+
   return cacheJson({
     ok: true,
     query,
     clan_name: clan,
     row: {
       ...normalizeGlobalCurrentOutput(found),
-      clan_member_count: toNumber(runRows[0]?.clan_member_count) || null
+      leaderboard_name: leaderboardName,
+      event_name: leaderboardName,
+      clan_member_count: toNumber(run?.clan_member_count) || null
     },
-    run: runRows[0] || null,
-    history: history.map(row => ({
-      ...row,
-      global_rank: toNumber(row.global_rank),
-      global_points: toNumber(row.global_points),
-      total_global_players: toNumber(row.total_global_players),
-      clan_rank: toNumber(row.clan_rank),
-      clan_points: toNumber(row.clan_points)
-    }))
+    run: run ? { ...run, leaderboard_name: leaderboardName, event_name: leaderboardName } : null,
+    history: history.map(row => {
+      const rowRun = historyRunMap.get(String(row.run_key || "")) || (String(row.run_key || "") === String(run?.run_key || "") ? run : null);
+      const rowLeaderboardName = globalRankLeaderboardLabel(env, rowRun || row);
+
+      return {
+        ...row,
+        leaderboard_name: rowLeaderboardName,
+        event_name: rowLeaderboardName,
+        global_rank: toNumber(row.global_rank),
+        global_points: toNumber(row.global_points),
+        total_global_players: toNumber(row.total_global_players),
+        clan_rank: toNumber(row.clan_rank),
+        clan_points: toNumber(row.clan_points)
+      };
+    })
   }, env);
 }
 
@@ -1440,13 +1461,16 @@ async function searchGlobalRankCandidates(env, clan, query) {
     displayName: lookup.display_name,
     avatarUrl: avatarMap.get(userId) || null
   });
+  const leaderboardName = globalRankLeaderboardLabel(env, run);
+  row.leaderboard_name = leaderboardName;
+  row.event_name = leaderboardName;
   const history = await searchGlobalRankCandidateHistory(env, clan, userId, row);
 
   return {
     ok: true,
     query,
     clan_name: clan,
-    run,
+    run: { ...run, leaderboard_name: leaderboardName, event_name: leaderboardName },
     row,
     history
   };
@@ -1508,12 +1532,14 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
       const totalGlobalPlayers = toNumber(run.total_global_players) ||
         toNumber(run.candidate_player_count) ||
         toNumber(currentRow?.total_global_players);
+      const leaderboardName = globalRankLeaderboardLabel(env, run);
 
       return {
         run_key: run.run_key,
         user_id: toNumber(candidate.user_id),
         fetched_at: candidate.fetched_at || run.finished_at || run.updated_at || run.started_at || null,
-        event_name: run.event_name || candidate.battle_display_name || run.battle_display_name || null,
+        event_name: leaderboardName,
+        leaderboard_name: leaderboardName,
         battle_key: candidate.battle_key || run.battle_key || null,
         battle_display_name: cleanBattleDisplayName(
           candidate.battle_key || run.battle_key,
@@ -1813,6 +1839,15 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
         last_error: null,
         updated_at: finishedAt
       });
+      const retentionCleanup = await cleanupGlobalRankRetention(env, {
+        clan,
+        currentRunKey: runKey,
+        currentBattleKey: latest?.battle_key || null,
+        currentBattleEndedAt: latest?.battle_ended_at || null
+      }).catch(err => {
+        console.warn("global rank retention cleanup failed", err?.message || String(err));
+        return null;
+      });
 
       return json({
         ok: true,
@@ -1834,7 +1869,8 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
         candidate_player_count: candidatePlayerCount,
         clan_member_count: clanMembers.length,
         total_global_players: candidatePlayerCount,
-        published_current: publishCurrent
+        published_current: publishCurrent,
+        retention_cleanup: retentionCleanup
       }, 202);
     }
 
@@ -2122,6 +2158,15 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
         last_error: null,
         updated_at: finishedAt
       });
+      const retentionCleanup = await cleanupGlobalRankRetention(env, {
+        clan,
+        currentRunKey: runKey,
+        currentBattleKey: latest?.battle_key || null,
+        currentBattleEndedAt: latest?.battle_ended_at || null
+      }).catch(err => {
+        console.warn("global rank retention cleanup failed", err?.message || String(err));
+        return null;
+      });
 
       return json({
         ok: true,
@@ -2146,6 +2191,7 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
         clan_member_count: clanMembers.length,
         total_global_players: candidatePlayerCount,
         published_current: publishCurrent,
+        retention_cleanup: retentionCleanup,
         shards: shardSummary.rows
       }, 202);
     }
@@ -6617,6 +6663,85 @@ async function shouldPublishGlobalRankCurrent(env, { runKey, clan, startedAt }) 
   return !latestStartedMs || !currentStartedMs || latestStartedMs <= currentStartedMs;
 }
 
+async function cleanupGlobalRankRetention(env, {
+  clan,
+  currentRunKey,
+  currentBattleKey,
+  currentBattleEndedAt
+}) {
+  if (String(env.GLOBAL_RANK_RETENTION_ENABLED || "true").toLowerCase() === "false") {
+    return { deleted_runs: 0, disabled: true };
+  }
+
+  const retentionHours = globalRankRetentionHours(env);
+  if (!(retentionHours > 0)) return { deleted_runs: 0, retention_hours: retentionHours };
+
+  const rows = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+    select: "run_key,battle_key,status,started_at,finished_at,updated_at",
+    clan_name: `eq.${clan}`,
+    status: "neq.running",
+    order: "started_at.desc",
+    limit: String(globalRankRetentionRunLimit(env))
+  });
+  const cutoffMs = Date.now() - retentionHours * 60 * 60 * 1000;
+  const currentBattleEnded = currentBattleEndedAt && isoToMs(currentBattleEndedAt) && isoToMs(currentBattleEndedAt) <= Date.now();
+  const groups = new Map();
+
+  for (const row of rows) {
+    const key = String(row.battle_key || "unknown");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  const deleteKeys = new Set();
+  for (const [battleKeyValue, group] of groups.entries()) {
+    const sorted = group
+      .slice()
+      .sort((a, b) => globalRankRunSortTime(b) - globalRankRunSortTime(a));
+    const isCurrentBattle = currentBattleKey && battleKeyValue === String(currentBattleKey);
+    const isEndedGroup = !isCurrentBattle || currentBattleEnded;
+    const keepFinal = isEndedGroup ? (sorted.find(row => String(row.status || "").toLowerCase() === "ok") || sorted[0] || null) : null;
+
+    for (const row of sorted) {
+      const runKey = String(row.run_key || "").trim();
+      if (!runKey) continue;
+      if (runKey === currentRunKey) continue;
+      if (keepFinal?.run_key && runKey === String(keepFinal.run_key)) continue;
+
+      const runMs = globalRankRunSortTime(row);
+      if (isEndedGroup || (runMs && runMs < cutoffMs)) {
+        deleteKeys.add(runKey);
+      }
+    }
+  }
+
+  const deletedRuns = await deleteGlobalRankRunData(env, [...deleteKeys]);
+  return {
+    deleted_runs: deletedRuns,
+    retention_hours: retentionHours,
+    mode: currentBattleEnded ? "final-snapshot" : "rolling"
+  };
+}
+
+function globalRankRunSortTime(row) {
+  return isoToMs(row?.finished_at) || isoToMs(row?.updated_at) || isoToMs(row?.started_at) || 0;
+}
+
+async function deleteGlobalRankRunData(env, runKeys) {
+  const keys = [...new Set((runKeys || []).map(key => String(key || "").trim()).filter(Boolean))];
+  if (!keys.length) return 0;
+
+  for (const chunk of chunkValues(keys, 50)) {
+    const filter = postgrestInFilter(chunk);
+    await supabaseDelete(env, GLOBAL_RANK_CANDIDATES_TABLE, { run_key: filter });
+    await supabaseDelete(env, GLOBAL_RANK_HISTORY_TABLE, { run_key: filter });
+    await supabaseDelete(env, GLOBAL_RANK_SHARDS_TABLE, { run_key: filter });
+    await supabaseDelete(env, GLOBAL_RANK_RUNS_TABLE, { run_key: filter });
+  }
+
+  return keys.length;
+}
+
 function dedupeGlobalCandidateRows(rows) {
   const byUser = new Map();
 
@@ -8264,6 +8389,24 @@ async function resolveGlobalSearchIdentity(query, env) {
 }
 
 function globalRankEventName(env, latest) {
+  return globalRankLeaderboardLabel(env, latest);
+}
+
+function globalRankLeaderboardLabel(env, latest) {
+  const stored = String(latest?.leaderboard_name || latest?.event_name || "").trim();
+  if (stored) return stored;
+
+  const explicit = String(env.GLOBAL_RANK_LEADERBOARD_LABEL || env.PLAYER_REWARD_LEADERBOARD_LABEL || "").trim();
+  if (explicit) return explicit;
+
+  const updateLabel = String(env.PS99_UPDATE_LABEL || "").trim();
+  if (updateLabel) {
+    return /\bleaderboard\b/i.test(updateLabel) ? updateLabel : `${updateLabel} Leaderboard`;
+  }
+
+  const updateNumber = String(env.PS99_UPDATE_NUMBER || "").trim();
+  if (updateNumber) return `Update ${updateNumber} Leaderboard`;
+
   return String(
     env.GLOBAL_RANK_EVENT_NAME ||
     cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name) ||
@@ -8340,6 +8483,14 @@ function globalRankCandidateHistoryLimit(env) {
   return clamp(Number(env.GLOBAL_RANK_CANDIDATE_HISTORY_LIMIT || 48), 1, 96);
 }
 
+function globalRankRetentionHours(env) {
+  return clamp(Number(env.GLOBAL_RANK_RETENTION_HOURS || 24), 0, 24 * 365 * 10);
+}
+
+function globalRankRetentionRunLimit(env) {
+  return clamp(Number(env.GLOBAL_RANK_RETENTION_RUN_LIMIT || 2000), 100, 10000);
+}
+
 function globalRankRuntimeConfig(env) {
   const shardCount = globalRankShardCount(env);
 
@@ -8357,7 +8508,8 @@ function globalRankRuntimeConfig(env) {
     retry_attempts: globalRankRetryAttempts(env),
     retry_base_ms: globalRankRetryBaseMs(env),
     schedule_minutes: globalRankScheduleMinutes(env),
-    schedule_offset_minutes: globalRankScheduleOffsetMinutes(env)
+    schedule_offset_minutes: globalRankScheduleOffsetMinutes(env),
+    retention_hours: globalRankRetentionHours(env)
   };
 }
 

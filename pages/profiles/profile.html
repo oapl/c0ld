@@ -43,7 +43,7 @@
     .summary-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
     .summary-title{margin:0 0 5px;font-size:20px}
     .summary-meta{text-align:right;color:var(--muted);font-size:13px;line-height:1.45}
-    .summary-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 18px}
+    .summary-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 18px}
     .summary-stat{min-width:0}
     .summary-stat .value{font-size:18px;font-weight:700;overflow-wrap:anywhere}
     select{min-width:230px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text)}
@@ -68,7 +68,7 @@
       .history-control-row{justify-content:stretch}
       .summary-head{display:block}
       .summary-meta{text-align:left;margin-top:6px}
-      .summary-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .summary-stats{grid-template-columns:1fr}
       .stat-row{grid-template-columns:1fr}
       .stat-value{text-align:left}
       .chart{height:230px}
@@ -467,9 +467,11 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
     rows.push({
       run_key:currentRunKey,
       fetched_at:fallbackRow.fetched_at||run.finished_at||run.updated_at||null,
-      event_name:fallbackRow.event_name||run.event_name||null,
+      leaderboard_name:fallbackRow.leaderboard_name||run.leaderboard_name||null,
+      event_name:fallbackRow.leaderboard_name||run.leaderboard_name||fallbackRow.event_name||run.event_name||null,
       battle_key:fallbackRow.battle_key||run.battle_key||null,
       battle_display_name:fallbackRow.battle_display_name||run.battle_display_name||null,
+      source_clan:fallbackRow.source_clan||fallbackRow.clan_name||null,
       global_rank:fallbackRow.global_rank,
       global_points:fallbackRow.global_points,
       total_global_players:fallbackRow.total_global_players
@@ -482,7 +484,7 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
     const points=finite(row.global_points??row.points);
     if(rank===null&&points===null)continue;
 
-    const key=row.run_key||row.battle_key||row.event_name||row.fetched_at||`leaderboard-${groups.size}`;
+    const key=normalize(row.leaderboard_name||row.event_name||row.battle_display_name||row.battle_key||"Global Leaderboard");
     if(!groups.has(key))groups.set(key,[]);
     groups.get(key).push(row);
   }
@@ -496,10 +498,13 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
     const ranks=ordered.map(row=>finite(row.global_rank)).filter(Number.isFinite);
     const points=ordered.map(row=>finite(row.global_points??row.points)).filter(Number.isFinite);
     const label=
+      latest.leaderboard_name||
       latest.event_name||
       latest.battle_display_name||
+      first.leaderboard_name||
       first.event_name||
       first.battle_display_name||
+      run.leaderboard_name||
       run.event_name||
       run.battle_display_name||
       "Global Leaderboard";
@@ -508,9 +513,12 @@ function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
       type:"leaderboard",
       run_key:latest.run_key||first.run_key||run.run_key||null,
       label,
+      leaderboard_name:label,
       event_name:label,
       battle_key:latest.battle_key||first.battle_key||run.battle_key||null,
       battle_display_name:latest.battle_display_name||first.battle_display_name||run.battle_display_name||null,
+      clan_name:latest.source_clan||latest.clan_name||first.source_clan||first.clan_name||fallbackRow.source_clan||fallbackRow.clan_name||null,
+      source_clan:latest.source_clan||first.source_clan||fallbackRow.source_clan||fallbackRow.clan_name||null,
       final_rank:finite(latest.global_rank),
       best_rank:ranks.length?Math.min(...ranks):null,
       final_points:finite(latest.global_points??latest.points),
@@ -528,6 +536,8 @@ function normalizeLeagueSummaryRows(rows){
     .map(row=>({
       type:"league",
       league_run_key:row.league_run_key||null,
+      run_label:row.run_label||row.event_name||null,
+      event_name:row.event_name||row.run_label||null,
       league_name:row.league_name||"League",
       league_id:row.league_id||null,
       league_level:finite(row.league_level),
@@ -939,6 +949,23 @@ function clanHistoryBattles(){
   return sortedBattles().filter(battle=>battle.source!=="global");
 }
 
+function clanPlacementSummaries(){
+  return clanHistoryBattles().map(battle=>{
+    const row=recalcBattle(battle);
+    return{
+      type:"clan",
+      battle:row.battle||null,
+      label:row.display_name||row.battle||"Clan Battle",
+      clan_name:row.clan_name||profile?.source_clan||profile?.clan_name||clan().label,
+      final_rank:finite(row.ending_rank??row.end_rank??row.last_rank),
+      final_points:finite(row.ending_points),
+      first_snapshot_at:row.battle_first_snapshot||row.first_seen||null,
+      final_snapshot_at:row.battle_last_snapshot||row.last_seen||null,
+      snapshot_count:Array.isArray(row.series)?row.series.length:null
+    };
+  }).filter(row=>row.final_rank!==null||row.final_points!==null);
+}
+
 function leagueHistorySummaries(){
   return normalizeLeagueSummaryRows(profile?.league_summaries||[]);
 }
@@ -949,7 +976,7 @@ function leaderboardHistorySummaries(){
 
 function availableHistoryTabs(){
   const tabs=[];
-  if(clanHistoryBattles().length)tabs.push({id:"clan",label:"Clan History"});
+  if(clanPlacementSummaries().length)tabs.push({id:"clan",label:"Clan History"});
   if(leagueHistorySummaries().length)tabs.push({id:"league",label:"League History"});
   if(leaderboardHistorySummaries().length)tabs.push({id:"leaderboard",label:"Leaderboard History"});
   if(!tabs.some(tab=>tab.id===activeHistoryTab))activeHistoryTab=tabs[0]?.id||"clan";
@@ -1151,25 +1178,27 @@ function summaryStat(label,value){
 }
 
 function summaryTitle(row,type){
-  if(type==="league")return row.league_name||"League";
-  return row.event_name||row.battle_display_name||row.label||"Global Leaderboard";
+  if(type==="league")return row.run_label||row.event_name||row.league_name||"League";
+  if(type==="leaderboard")return row.leaderboard_name||row.event_name||row.battle_display_name||row.label||"Global Leaderboard";
+  return row.label||row.battle_display_name||row.battle||"Clan Battle";
 }
 
 function summarySubtitle(row,type){
-  const parts=[];
+  const name=placementName(row,type);
+  if(!name)return"";
+  if(type==="league")return`League: ${name}`;
+  return`Clan: ${name}`;
+}
 
-  if(type==="league"){
-    if(row.league_run_key)parts.push(row.league_run_key);
-    if(row.role)parts.push(row.role);
-  }else{
-    if(row.run_key)parts.push(`Update ${row.run_key}`);
-  }
-
-  return parts.join(" • ");
+function placementName(row,type){
+  if(type==="league")return row.league_name||"";
+  return row.clan_name||row.source_clan||profile?.source_clan||profile?.clan_name||clan().label||"";
 }
 
 function renderSummaryCards(rows,type){
-  if(!rows.length)return`<section class="empty">No ${type==="league"?"league":"leaderboard"} history found.</section>`;
+  const emptyLabel=type==="league"?"league":type==="clan"?"clan":"leaderboard";
+  if(!rows.length)return`<section class="empty">No ${emptyLabel} history found.</section>`;
+  const placementLabel=type==="league"?"League":"Clan";
 
   return`
     <section class="summary-list">
@@ -1183,13 +1212,28 @@ function renderSummaryCards(rows,type){
             <div class="summary-meta">${fmtDateTime(row.final_snapshot_at)}</div>
           </div>
           <div class="summary-stats">
-            ${summaryStat("Final Rank",rankDisplay(row.final_rank,row.total_ranked))}
-            ${summaryStat("Best Rank",rankDisplay(row.best_rank,row.total_ranked))}
-            ${summaryStat("Final Points",fmt(row.final_points))}
-            ${summaryStat("Highest Points",fmt(row.highest_points))}
+            ${summaryStat(placementLabel,escapeHtml(placementName(row,type)||"—"))}
+            ${summaryStat("Rank",rankDisplay(row.final_rank,row.total_ranked))}
+            ${summaryStat("Points",fmt(row.final_points))}
           </div>
         </article>
       `).join("")}
+    </section>
+  `;
+}
+
+function renderBattleChartSection(battles){
+  return`
+    <section class="history-shell">
+      <div class="section-title-row">
+        <h2 class="section-title">Current Battle</h2>
+        <select id="battle-chart-select">
+          ${battles.map((battle,index)=>`
+            <option value="${index}" ${index===battleIndex?"selected":""}>${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
+          `).join("")}
+        </select>
+      </div>
+      <section id="battle-chart-detail"></section>
     </section>
   `;
 }
@@ -1214,6 +1258,7 @@ function renderHistoryTabs(tabs){
 
 function render(){
   const app=document.getElementById("app");
+  const chartBattles=clanHistoryBattles();
   const tabs=availableHistoryTabs();
   const hasHistory=tabs.length>0;
 
@@ -1235,6 +1280,8 @@ function render(){
 
     ${renderRewardLine()}
 
+    ${chartBattles.length?renderBattleChartSection(chartBattles):""}
+
     ${hasHistory?renderHistoryTabs(tabs):`<section class="empty">No history found.</section>`}
   `;
 
@@ -1243,12 +1290,20 @@ function render(){
     this.src=DEFAULT_AVATAR;
   };
 
+  if(chartBattles.length){
+    battleIndex=Math.min(Math.max(0,battleIndex),chartBattles.length-1);
+    document.getElementById("battle-chart-select").onchange=event=>{
+      battleIndex=Number(event.target.value||0);
+      renderBattle();
+    };
+    renderBattle();
+  }
+
   if(!hasHistory)return;
 
   app.querySelectorAll("[data-history-tab]").forEach(button=>{
     button.addEventListener("click",()=>{
       activeHistoryTab=button.dataset.historyTab;
-      if(activeHistoryTab==="clan")battleIndex=0;
       renderHistoryDetail();
     });
   });
@@ -1264,58 +1319,37 @@ function renderHistoryDetail(){
     button.classList.toggle("active",button.dataset.historyTab===activeHistoryTab);
   });
 
+  if(activeHistoryTab==="clan"){
+    detail.innerHTML=renderSummaryCards(clanPlacementSummaries(),"clan");
+    notifyEmbedHeight();
+    return;
+  }
+
   if(activeHistoryTab==="league"){
     detail.innerHTML=renderSummaryCards(leagueHistorySummaries(),"league");
-    chartCache=null;
     notifyEmbedHeight();
     return;
   }
 
   if(activeHistoryTab==="leaderboard"){
     detail.innerHTML=renderSummaryCards(leaderboardHistorySummaries(),"leaderboard");
-    chartCache=null;
     notifyEmbedHeight();
     return;
   }
-
-  const battles=clanHistoryBattles();
-  if(!battles.length){
-    detail.innerHTML=`<section class="empty">No clan history found.</section>`;
-    chartCache=null;
-    notifyEmbedHeight();
-    return;
-  }
-
-  battleIndex=Math.min(Math.max(0,battleIndex),battles.length-1);
-  detail.innerHTML=`
-    <div class="history-control-row">
-      <select id="battle-select">
-        ${battles.map((battle,index)=>`
-          <option value="${index}" ${index===battleIndex?"selected":""}>${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
-        `).join("")}
-      </select>
-    </div>
-    <section id="battle-detail"></section>
-  `;
-
-  document.getElementById("battle-select").onchange=event=>{
-    battleIndex=Number(event.target.value||0);
-    renderBattle();
-  };
-
-  renderBattle();
 }
 
 function renderBattle(){
   const battle=clanHistoryBattles()[battleIndex];
   if(!battle)return;
+  const detail=document.getElementById("battle-chart-detail");
+  if(!detail)return;
 
   const range=eventRange(battle);
   const endRank=battle.ending_rank??battle.end_rank??battle.last_rank??null;
   const activity=activitySummary(battle);
   const isGlobalBattle=battle.source==="global";
 
-  document.getElementById("battle-detail").innerHTML=`
+  detail.innerHTML=`
     <article class="battle-card">
       <div class="battle-head">
         <h2 class="battle-title">${escapeHtml(battle.display_name||battle.battle||"Unknown Battle")}</h2>
@@ -1445,7 +1479,7 @@ function drawActivityStrip(ctx,points,x,stripY){
 function drawChart(){
   const canvas=document.getElementById("chart");
   const tooltip=document.getElementById("tip");
-  if(!canvas||activeHistoryTab!=="clan")return;
+  if(!canvas)return;
 
   const ctx=canvas.getContext("2d");
   const rect=canvas.getBoundingClientRect();
@@ -1633,7 +1667,7 @@ async function main(){
   try{
     optionalJson(ACTIVE_BATTLE).then(info=>{
       activeInfo=info;
-      if(profile&&document.getElementById("battle-detail")){
+      if(profile&&document.getElementById("battle-chart-detail")){
         renderBattle();
         notifyEmbedHeight();
       }

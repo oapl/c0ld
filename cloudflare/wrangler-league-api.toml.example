@@ -6,6 +6,13 @@ compatibility_date = "2026-06-20"
 LEAGUE_NAME = "YAMO"
 # Change this when a new league run starts. Existing database rows are "legacy".
 LEAGUE_RUN_KEY = "active"
+# Optional display label for this league run, such as "Tap Heroes".
+LEAGUE_RUN_LABEL = ""
+# Optional per-run labels. Keys are LEAGUE_RUN_KEY values.
+LEAGUE_RUN_LABELS_JSON = ""
+PS99_UPDATE_THEME = ""
+PS99_UPDATE_LABEL = ""
+PS99_UPDATE_NUMBER = ""
 # Comma-separated league list used for scheduled pulls.
 LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,C0LD,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr,zee2"
 SITE_ORIGINS = "https://oapl.github.io,*"

@@ -805,7 +805,7 @@ async function handleProfile(request, env) {
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
-  const summaries = summarizeLeagueProfileRows(rows)
+  const summaries = summarizeLeagueProfileRows(rows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit);
   const latest = summaries[0] || null;
@@ -821,7 +821,7 @@ async function handleProfile(request, env) {
   }, env);
 }
 
-function summarizeLeagueProfileRows(rows) {
+function summarizeLeagueProfileRows(rows, env) {
   const groups = new Map();
 
   for (const row of rows || []) {
@@ -835,10 +835,10 @@ function summarizeLeagueProfileRows(rows) {
     groups.get(key).push(row);
   }
 
-  return [...groups.values()].map(summarizeLeagueProfileGroup).filter(Boolean);
+  return [...groups.values()].map(rows => summarizeLeagueProfileGroup(rows, env)).filter(Boolean);
 }
 
-function summarizeLeagueProfileGroup(rows) {
+function summarizeLeagueProfileGroup(rows, env) {
   const ordered = rows
     .slice()
     .filter(row => row?.fetched_at)
@@ -850,8 +850,13 @@ function summarizeLeagueProfileGroup(rows) {
   const ranks = ordered.map(row => toNumber(row.rank)).filter(Number.isFinite);
   const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
 
+  const runKey = latest.league_run_key || first.league_run_key || DEFAULT_LEAGUE_RUN_KEY;
+  const runLabel = leagueRunLabel(env, runKey);
+
   return {
-    league_run_key: latest.league_run_key || first.league_run_key || DEFAULT_LEAGUE_RUN_KEY,
+    league_run_key: runKey,
+    run_label: runLabel,
+    event_name: runLabel,
     league_name: latest.league_name || first.league_name || null,
     league_id: latest.league_id || first.league_id || null,
     league_level: toNumber(latest.league_level ?? first.league_level),
@@ -2057,6 +2062,26 @@ function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME)
 function leagueNames(env) { const raw = String(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME); const names = raw.split(",").map(item => item.trim()).filter(Boolean); return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME]; }
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
 function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function leagueRunLabel(env, runKey) {
+  const key = normalizeRunKey(runKey || leagueRunKey(env));
+  const labels = parseJsonObject(env.LEAGUE_RUN_LABELS_JSON || env.LEAGUE_EVENT_LABELS_JSON);
+  const mapped = String(labels[key] || labels[key.toLowerCase()] || labels.default || "").trim();
+  if (mapped) return mapped;
+
+  const explicit = String(env.LEAGUE_RUN_LABEL || env.LEAGUE_EVENT_LABEL || "").trim();
+  if (explicit) return explicit;
+
+  const updateTheme = String(env.PS99_UPDATE_THEME || env.PS99_UPDATE_NAME || "").trim();
+  if (updateTheme) return updateTheme;
+
+  const updateLabel = String(env.PS99_UPDATE_LABEL || "").trim();
+  if (updateLabel) return updateLabel;
+
+  const updateNumber = String(env.PS99_UPDATE_NUMBER || "").trim();
+  if (updateNumber) return `Update ${updateNumber}`;
+
+  return key && key !== DEFAULT_LEAGUE_RUN_KEY ? key : "";
+}
 function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
