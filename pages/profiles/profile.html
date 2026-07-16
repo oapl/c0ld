@@ -107,6 +107,7 @@ const MEMBER_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/curr
 const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
 const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/search";
+const CLANS_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 const PLAYER_REWARD_RANKS=[3,100,1000,1050,1150,6150,30000];
 const CLAN_REWARD_RANKS=[3,10,50,100,500];
@@ -688,6 +689,31 @@ async function loadGlobalProfile(id){
   };
 }
 
+async function loadCurrentClanLeaderboard(){
+  return optionalJson(CLANS_CURRENT);
+}
+
+function applyCurrentClanLeaderboardRank(target,clansCurrent){
+  if(!target||!clansCurrent)return target;
+
+  const currentClan=currentClanDisplayFor(target);
+  const currentKey=normalize(currentClan);
+  if(!currentKey)return target;
+
+  const row=(clansCurrent.rows||[]).find(item=>normalize(item.clan_name)===currentKey)||null;
+  const isTrackedClan=normalize(clansCurrent.clan_name)===currentKey;
+  const rank=finite(row?.rank??(isTrackedClan?clansCurrent.clan_rank:null));
+  const points=finite(row?.points??(isTrackedClan?clansCurrent.clan_points:null));
+
+  if(rank===null&&points===null)return target;
+
+  return{
+    ...target,
+    source_clan_leaderboard_rank:rank??target.source_clan_leaderboard_rank??null,
+    source_clan_leaderboard_points:points??target.source_clan_leaderboard_points??null
+  };
+}
+
 function filterProfileBattles(source){
   if(!source)return null;
   const battles=(source.battles||[])
@@ -890,8 +916,12 @@ function currentPoints(){
   return profile.member_points??profile.global_points??profile.latest_points;
 }
 
+function currentClanDisplayFor(source){
+  return source?.source_clan||source?.clan_name||clan().label||"—";
+}
+
 function currentClanDisplay(){
-  return profile.source_clan||profile.clan_name||clan().label||"—";
+  return currentClanDisplayFor(profile);
 }
 
 function rewardLabel(rank,tiers){
@@ -900,6 +930,21 @@ function rewardLabel(rank,tiers){
 
   const tier=tiers.find(item=>value<=item);
   return tier?`Top ${fmt(tier)}`:"None";
+}
+
+function rewardRangeLabel(rank,tiers){
+  const value=finite(rank);
+  if(value===null)return"—";
+
+  for(let index=0;index<tiers.length;index++){
+    const upper=tiers[index];
+    if(value>upper)continue;
+
+    const lower=index?tiers[index-1]+1:1;
+    return lower===1?`Top ${fmt(upper)}`:`Top ${fmt(lower)}-${fmt(upper)}`;
+  }
+
+  return"None";
 }
 
 function renderRewardLine(){
@@ -913,7 +958,7 @@ function renderRewardLine(){
       <span class="muted">Rewards:</span>
       Global ${escapeHtml(rewardLabel(globalRank,PLAYER_REWARD_RANKS))}
       <span class="reward-divider">•</span>
-      Clan ${escapeHtml(rewardLabel(clanLeaderboardRank,CLAN_REWARD_RANKS))}
+      Clan ${escapeHtml(rewardRangeLabel(clanLeaderboardRank,CLAN_REWARD_RANKS))}
     </section>
   `;
 }
@@ -1312,10 +1357,11 @@ async function main(){
       }
     });
 
-    const[live,staticProfile,globalProfile]=await Promise.all([
+    const[live,staticProfile,globalProfile,clansCurrent]=await Promise.all([
       loadLiveProfile(id).catch(()=>null),
       clan().key==="c0ld"?loadStaticProfile(id).catch(()=>null):Promise.resolve(null),
-      loadGlobalProfile(id).catch(()=>null)
+      loadGlobalProfile(id).catch(()=>null),
+      loadCurrentClanLeaderboard().catch(()=>null)
     ]);
 
     profile=mergeProfiles(staticProfile,live);
@@ -1349,6 +1395,8 @@ async function main(){
         is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
       };
     }
+
+    profile=applyCurrentClanLeaderboardRank(profile,clansCurrent);
 
     if(!profile)throw new Error(`Could not load profile ${id}.`);
 
