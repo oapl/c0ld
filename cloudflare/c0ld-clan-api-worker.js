@@ -52,7 +52,7 @@ const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
 const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 5;
 const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
-const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 5;
+const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 10;
 const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
 const DEFAULT_PS99_RESTART_CONFIRMATIONS = 2;
 const DEFAULT_PS99_RESTART_COOLDOWN_MINUTES = 10;
@@ -3646,9 +3646,21 @@ async function handlePs99RestartIngest(env, source) {
 
   if (batch.length < sampleSize) {
     status = "insufficient";
+  } else if (trackedServers.length !== sampleSize) {
+    // A detector-size change invalidates the old reference/candidate set. Rebuild
+    // it immediately so a partial baseline can never satisfy the new threshold.
+    trackedServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
+    candidateServers = [];
+    status = "monitoring";
+    baselineSampledAt = checkedAt;
+    baselinePlaceVersion = currentVersion;
+    candidateStartedAt = null;
+    candidateConfirmations = 0;
+    candidatePlaceVersion = null;
+    cooldownUntil = null;
   } else if (status === "cooldown" && isoToMs(cooldownUntil) > checkedMs) {
     // Keep observing the replacement sample, but suppress new alerts during stabilization.
-  } else if (status === "cooldown" || trackedServers.length < sampleSize) {
+  } else if (status === "cooldown") {
     trackedServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
     candidateServers = [];
     status = "monitoring";

@@ -185,7 +185,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
 | `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. Set to `true` after running migration `022` to monitor coordinated PS99 public-server turnover. |
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per one-minute observation. Roblox accepts `10`, `25`, `50`, or `100`. |
-| `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `5`; persistent high-occupancy public-server IDs used as the reference sample. |
+| `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `10`; persistent high-occupancy public-server IDs used as the reference sample. |
 | `PS99_RESTART_CONFIRMATIONS` | Optional. Defaults to `2`; consecutive one-minute observations required before a restart event is confirmed. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
@@ -205,7 +205,7 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
-The public Roblox server list does not include creation time or place version. The restart detector therefore labels server age as unavailable, persists five server IDs, refreshes individually missing IDs during normal churn, and only starts confirmation when all five disappear in the same one-minute observation.
+The public Roblox server list does not include creation time or place version. The restart detector therefore labels server age as unavailable, persists ten server IDs, refreshes individually missing IDs during normal churn, and only starts confirmation when all ten disappear in the same one-minute observation.
 
 ## Scheduled pulls
 
@@ -282,7 +282,7 @@ Invoke-RestMethod -Method Post `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-To register the first five-server restart sample after running migration `022`, run:
+To register the first ten-server restart sample after running migration `022`, run:
 
 ```powershell
 Invoke-RestMethod -Method Post `

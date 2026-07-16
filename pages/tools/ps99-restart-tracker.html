@@ -308,7 +308,7 @@
     <section class="hero">
       <div>
         <h1>PS99 Restart Tracker</h1>
-        <div id="subtitle" class="muted">Watching five public Pet Simulator 99 servers for coordinated turnover.</div>
+        <div id="subtitle" class="muted">Watching ten public Pet Simulator 99 servers for coordinated turnover.</div>
       </div>
       <button id="refresh" class="btn" type="button">Refresh</button>
     </section>
@@ -751,12 +751,13 @@
       const status = state?.status || "initializing";
       const confirmations = Number(state?.candidate_confirmations || 0);
       const required = Number(state?.detector?.confirmation_scans || 2);
+      const sampleSize = Number(state?.detector?.sample_size || 10);
       const copies = {
         monitoring: ["No restart detected", "All missing IDs are replaced individually during ordinary server churn; only coordinated turnover starts an alert."],
-        candidate: ["Possible restart — confirming", `All five reference IDs disappeared together. Replacement confirmation ${confirmations}/${required}.`],
+        candidate: ["Possible restart — confirming", `All ${sampleSize} reference IDs disappeared together. Replacement confirmation ${confirmations}/${required}.`],
         cooldown: ["Restart confirmed", `The detector is stabilizing until ${fmtDate(state?.cooldown_until)} before registering a fresh reference sample.`],
-        insufficient: ["Waiting for enough public servers", "Roblox returned fewer servers than the configured five-server sample."],
-        initializing: ["Registering reference servers", "The first five-server baseline will appear after the next successful scan."]
+        insufficient: ["Waiting for enough public servers", `Roblox returned fewer servers than the configured ${sampleSize}-server sample.`],
+        initializing: ["Registering reference servers", `The first ${sampleSize}-server baseline will appear after the next successful scan.`]
       };
       return copies[status] || copies.initializing;
     }
@@ -803,7 +804,7 @@
       els.statusNotice.className = `notice ${status}`;
       els.statusTitle.textContent = title;
       els.statusDetail.textContent = detail;
-      els.trackedPresent.textContent = `${Number(state.tracked_present || 0)} / ${Number(data?.detector?.sample_size || 5)}`;
+      els.trackedPresent.textContent = `${Number(state.tracked_present || 0)} / ${Number(data?.detector?.sample_size || 10)}`;
       els.placeVersion.textContent = fmtVersion(state.candidate_place_version ?? state.baseline_place_version);
       els.sampleMeta.textContent = state.last_checked_at
         ? `${Number(state.last_batch_size || 0).toLocaleString()} servers checked at ${fmtDate(state.last_checked_at)}`
@@ -829,7 +830,7 @@
               <td>${fmtDate(event.detected_at)}</td>
               <td><span class="pill ${event.version_correlated ? "good" : "info"}">${event.version_correlated ? "High · version matched" : "Confirmed · identity"}</span></td>
               <td>${version}</td>
-              <td>${text(event.reason || "Five-server replacement confirmed.")}</td>
+              <td>${text(event.reason || "Coordinated server replacement confirmed.")}</td>
               <td>${fmtDate(event.cooldown_until)}</td>
             </tr>
           `;
