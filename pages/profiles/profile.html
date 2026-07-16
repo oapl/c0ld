@@ -27,7 +27,7 @@
     .meta,.label,.dates,.chart-title,.muted{color:var(--muted);font-size:13px;line-height:1.45}
     .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:14px}
     .card{padding:16px;min-height:82px}
-    .value{font-size:21px;font-weight:700}
+    .value{font-size:21px;font-weight:700;overflow-wrap:anywhere}
     .reward-strip{margin:0 0 24px;color:var(--text);font-size:14px}
     .reward-strip .muted{color:var(--muted)}
     .reward-divider{color:var(--muted);padding:0 8px}
@@ -555,6 +555,12 @@ async function loadLiveProfile(id){
     latest_points:latestPoints,
     latest_seen:latestSeen,
     joined_at:joinedAt,
+    source_clan:clan().label,
+    clan_name:clan().label,
+    clan_rank:latestRank,
+    clan_points:latestPoints,
+    member_rank:latestRank,
+    member_points:latestPoints,
     battles
   };
 }
@@ -572,15 +578,17 @@ async function loadGlobalProfile(id){
 
   const seen=row.fetched_at||row.updated_at||payload.run?.finished_at||payload.run?.updated_at||null;
   const globalPoints=finite(row.global_points);
-  const clanPoints=finite(row.clan_points);
+  const memberPoints=finite(row.member_points??row.clan_points??row.global_points);
+  const clanPoints=memberPoints;
   const points=globalPoints??clanPoints??0;
   const globalRank=finite(row.global_rank);
-  const clanRank=finite(row.clan_rank);
+  const memberRank=finite(row.member_rank??row.clan_rank);
+  const clanRank=memberRank;
   const rawHistory=Array.isArray(payload.history)?payload.history:[];
   const clanSeries=mergeSeries([],rawHistory.map(item=>({
     t:item.fetched_at,
-    rank:finite(item.source_clan_rank??item.clan_rank),
-    points:finite(item.source_clan_points??item.clan_points)
+    rank:finite(item.member_rank??item.clan_rank),
+    points:finite(item.member_points??item.clan_points??item.global_points??item.points)
   })));
   const globalSeries=mergeSeries([],rawHistory.map(item=>({
     t:item.fetched_at,
@@ -662,8 +670,14 @@ async function loadGlobalProfile(id){
     latest_points:points,
     latest_seen:seen,
     source_clan:row.source_clan||row.clan_name||null,
+    clan_rank:row.clan_rank??memberRank??null,
+    clan_points:row.clan_points??memberPoints??null,
     source_clan_rank:row.source_clan_rank??clanRank??null,
     source_clan_points:row.source_clan_points??clanPoints??null,
+    source_clan_leaderboard_rank:row.source_clan_leaderboard_rank??row.source_clan_rank??null,
+    source_clan_leaderboard_points:row.source_clan_leaderboard_points??row.source_clan_points??null,
+    member_rank:memberRank,
+    member_points:memberPoints,
     global_points:globalPoints??points,
     global_rank:row.global_rank??null,
     total_global_players:row.total_global_players??null,
@@ -726,6 +740,11 @@ function mergeProfiles(staticProfile,liveProfile){
     latest_seen:liveProfile.latest_seen??staticProfile.latest_seen??null,
     joined_at:liveProfile.joined_at??staticProfile.joined_at??null,
     source_clan:liveProfile.source_clan??staticProfile.source_clan??null,
+    clan_name:liveProfile.clan_name??staticProfile.clan_name??null,
+    clan_rank:liveProfile.clan_rank??staticProfile.clan_rank??null,
+    clan_points:liveProfile.clan_points??staticProfile.clan_points??null,
+    member_rank:liveProfile.member_rank??staticProfile.member_rank??liveProfile.latest_rank??staticProfile.latest_rank??null,
+    member_points:liveProfile.member_points??staticProfile.member_points??liveProfile.latest_points??staticProfile.latest_points??null,
     source_clan_rank:liveProfile.source_clan_rank??staticProfile.source_clan_rank??null,
     source_clan_points:liveProfile.source_clan_points??staticProfile.source_clan_points??null,
     global_rank:liveProfile.global_rank??staticProfile.global_rank??null,
@@ -860,7 +879,7 @@ function rankDisplay(value,total){
 }
 
 function clanRankDisplay(){
-  const rank=finite(profile.source_clan_rank);
+  const rank=finite(profile.member_rank??profile.clan_rank);
   if(rank!==null)return`#${fmt(rank)}`;
 
   const latest=finite(profile.latest_rank);
@@ -868,7 +887,11 @@ function clanRankDisplay(){
 }
 
 function currentPoints(){
-  return profile.global_points??profile.latest_points;
+  return profile.member_points??profile.global_points??profile.latest_points;
+}
+
+function currentClanDisplay(){
+  return profile.source_clan||profile.clan_name||clan().label||"—";
 }
 
 function rewardLabel(rank,tiers){
@@ -881,7 +904,7 @@ function rewardLabel(rank,tiers){
 
 function renderRewardLine(){
   const globalRank=finite(profile.global_rank);
-  const clanRank=finite(profile.source_clan_rank);
+  const clanRank=finite(profile.member_rank??profile.clan_rank);
 
   if(globalRank===null&&clanRank===null)return"";
 
@@ -890,7 +913,7 @@ function renderRewardLine(){
       <span class="muted">Rewards:</span>
       Global ${escapeHtml(rewardLabel(globalRank,PLAYER_REWARD_RANKS))}
       <span class="reward-divider">•</span>
-      Clan ${escapeHtml(rewardLabel(clanRank,CLAN_REWARD_RANKS))}
+      Clan ${escapeHtml(rewardLabel(clanRank,PLAYER_REWARD_RANKS))}
     </section>
   `;
 }
@@ -901,10 +924,10 @@ function renderProfileCards(){
   const rankLabel=hasGlobalRank?"Global Rank":"Latest Rank";
 
   return`
+    <div class="card"><div class="label">Current Clan</div><div class="value">${escapeHtml(currentClanDisplay())}</div></div>
     <div class="card"><div class="label">Clan Rank</div><div class="value">${clanRankDisplay()}</div></div>
     <div class="card"><div class="label">${rankLabel}</div><div class="value">${hasGlobalRank?rankDisplay(rankValue,profile.total_global_players):fmt(rankValue)}</div></div>
     <div class="card"><div class="label">Current Points</div><div class="value">${fmt(currentPoints())}</div></div>
-    <div class="card"><div class="label">Joined</div><div class="value">${fmtJoinedDate(profile.joined_at)}</div></div>
   `;
 }
 
@@ -1306,8 +1329,15 @@ async function main(){
       profile={
         ...profile,
         source_clan:globalProfile.source_clan??profile.source_clan??null,
+        clan_name:globalProfile.clan_name??profile.clan_name??null,
+        clan_rank:globalProfile.clan_rank??profile.clan_rank??null,
+        clan_points:globalProfile.clan_points??profile.clan_points??null,
+        member_rank:globalProfile.member_rank??profile.member_rank??null,
+        member_points:globalProfile.member_points??profile.member_points??null,
         source_clan_rank:globalProfile.source_clan_rank??profile.source_clan_rank??null,
         source_clan_points:globalProfile.source_clan_points??profile.source_clan_points??null,
+        source_clan_leaderboard_rank:globalProfile.source_clan_leaderboard_rank??profile.source_clan_leaderboard_rank??null,
+        source_clan_leaderboard_points:globalProfile.source_clan_leaderboard_points??profile.source_clan_leaderboard_points??null,
         global_rank:globalProfile.global_rank??profile.global_rank??null,
         global_points:globalProfile.global_points??profile.global_points??null,
         total_global_players:globalProfile.total_global_players??profile.total_global_players??null,

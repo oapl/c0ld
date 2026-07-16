@@ -1183,6 +1183,24 @@ function globalCandidateDisplayName(row) {
   ) || "").trim() || null;
 }
 
+function candidateMemberRankFromRaw(row) {
+  const raw = parseGlobalCandidateRaw(row?.raw_candidate);
+  return toNumber(firstDefined(
+    raw.member_rank,
+    raw.memberRank,
+    raw.member?.member_rank,
+    raw.member?.memberRank,
+    raw.member?.Rank,
+    raw.member?.rank,
+    raw.contribution?.member_rank,
+    raw.contribution?.memberRank,
+    raw.contribution?.Rank,
+    raw.contribution?.rank,
+    raw.contribution?.Position,
+    raw.contribution?.position
+  ));
+}
+
 function parseGlobalCandidateRaw(value) {
   if (!value) return {};
   if (typeof value === "object") return value;
@@ -1296,6 +1314,8 @@ async function handleGlobalSearch(request, env) {
           avatar_url: found.avatar_url || candidateResult.row.avatar_url,
           clan_rank: toNumber(found.clan_rank) || candidateResult.row.clan_rank,
           clan_points: toNumber(found.clan_points) || candidateResult.row.clan_points,
+          member_rank: toNumber(found.clan_rank) || candidateResult.row.member_rank,
+          member_points: toNumber(found.clan_points) || candidateResult.row.member_points,
           clan_member_count: toNumber(run?.clan_member_count) || null,
           source_clan: found.clan_name || clan
         },
@@ -1385,7 +1405,7 @@ async function searchGlobalRankCandidates(env, clan, query) {
 
   const points = toNumber(candidate.points) || 0;
   const userId = toNumber(candidate.user_id);
-  const [higherCount, tiedBeforeCount, avatarMap] = await Promise.all([
+  const [higherCount, tiedBeforeCount, memberHigherCount, memberTiedBeforeCount, avatarMap] = await Promise.all([
     supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
       run_key: `eq.${run.run_key}`,
       points: `gt.${points}`
@@ -1395,6 +1415,8 @@ async function searchGlobalRankCandidates(env, clan, query) {
       points: `eq.${points}`,
       user_id: `lt.${userId}`
     }),
+    countHigherSourceClanMembers(env, run.run_key, candidate),
+    countTiedBeforeSourceClanMembers(env, run.run_key, candidate),
     resolveRobloxAvatarHeadshots([userId], env).catch(() => new Map())
   ]);
   const total = toNumber(run.total_global_players) ||
@@ -1408,6 +1430,7 @@ async function searchGlobalRankCandidates(env, clan, query) {
   const row = normalizeGlobalCandidateSearchOutput(candidate, {
     run,
     globalRank: higherCount + tiedBeforeCount + 1,
+    memberRank: memberHigherCount + memberTiedBeforeCount + 1,
     totalGlobalPlayers: total,
     username,
     displayName: lookup.display_name,
@@ -1476,6 +1499,9 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
       if (!candidate) return null;
 
       const isCurrent = currentRunKey && currentRunKey === run.run_key;
+      const memberRank = isCurrent
+        ? toNumber(currentRow.member_rank)
+        : candidateMemberRankFromRaw(candidate);
       const totalGlobalPlayers = toNumber(run.total_global_players) ||
         toNumber(run.candidate_player_count) ||
         toNumber(currentRow?.total_global_players);
@@ -1492,8 +1518,12 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
         source_clan: candidate.source_clan || null,
         source_clan_rank: toNumber(candidate.source_clan_rank),
         source_clan_points: toNumber(candidate.source_clan_points) || 0,
-        clan_rank: toNumber(candidate.source_clan_rank),
-        clan_points: toNumber(candidate.source_clan_points) || 0,
+        source_clan_leaderboard_rank: toNumber(candidate.source_clan_rank),
+        source_clan_leaderboard_points: toNumber(candidate.source_clan_points) || 0,
+        member_rank: memberRank,
+        member_points: toNumber(candidate.points),
+        clan_rank: memberRank,
+        clan_points: toNumber(candidate.points),
         global_rank: isCurrent ? toNumber(currentRow.global_rank) : null,
         global_points: toNumber(candidate.points),
         total_global_players: totalGlobalPlayers,
@@ -1502,6 +1532,32 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
     })
     .filter(Boolean)
     .sort((a, b) => new Date(b.fetched_at || 0) - new Date(a.fetched_at || 0));
+}
+
+async function countHigherSourceClanMembers(env, runKey, row) {
+  const points = toNumber(row?.points);
+  const sourceClan = String(row?.source_clan || "").trim();
+  if (!runKey || points === null || !sourceClan) return 0;
+
+  return supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    run_key: `eq.${runKey}`,
+    source_clan: `eq.${sourceClan}`,
+    points: `gt.${points}`
+  });
+}
+
+async function countTiedBeforeSourceClanMembers(env, runKey, row) {
+  const points = toNumber(row?.points);
+  const userId = toNumber(row?.user_id);
+  const sourceClan = String(row?.source_clan || "").trim();
+  if (!runKey || points === null || !userId || !sourceClan) return 0;
+
+  return supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+    run_key: `eq.${runKey}`,
+    source_clan: `eq.${sourceClan}`,
+    points: `eq.${points}`,
+    user_id: `lt.${userId}`
+  });
 }
 
 async function handleGlobalRankIngest(env, source, requestedClan, force = false) {
@@ -5775,7 +5831,18 @@ async function collectGlobalRankCandidatesForClan(env, {
     allowEnvDisplayName: false,
     allowEnvTiming: false
   });
-  const rows = normalizeMembers(data, battle);
+  const rows = normalizeMembers(data, battle)
+    .slice()
+    .sort((a, b) => {
+      const ap = toNumber(a.total_points) || 0;
+      const bp = toNumber(b.total_points) || 0;
+      if (bp !== ap) return bp - ap;
+      return (toNumber(a.user_id) || 0) - (toNumber(b.user_id) || 0);
+    })
+    .map((row, index) => ({
+      ...row,
+      member_rank: index + 1
+    }));
   const byUser = new Map();
 
   for (const row of rows) {
@@ -5797,6 +5864,10 @@ async function collectGlobalRankCandidatesForClan(env, {
       battle_display_name: cleanBattleDisplayName(resolvedBattleKey, battleMeta.displayName),
       fetched_at: fetchedAt,
       raw_candidate: {
+        member_rank: row.member_rank,
+        member_points: points,
+        source_clan_leaderboard_rank: toNumber(clanRow.rank),
+        source_clan_leaderboard_points: toNumber(clanRow.points) || 0,
         clan: clanRow.raw_clan || {},
         member: row.raw_member || {},
         contribution: row.raw_contribution || {}
@@ -7890,6 +7961,9 @@ function normalizeGlobalCurrentOutput(row) {
     avatar_url: row.avatar_url,
     clan_rank: toNumber(row.clan_rank),
     clan_points: toNumber(row.clan_points) || 0,
+    member_rank: toNumber(row.clan_rank),
+    member_points: toNumber(row.clan_points) || 0,
+    source_clan: row.clan_name,
     battle_key: row.battle_key,
     battle_display_name: row.battle_display_name,
     event_name: row.event_name,
@@ -7906,6 +7980,7 @@ function normalizeGlobalCurrentOutput(row) {
 function normalizeGlobalCandidateSearchOutput(row, {
   run,
   globalRank,
+  memberRank,
   totalGlobalPlayers,
   username,
   displayName,
@@ -7920,8 +7995,14 @@ function normalizeGlobalCandidateSearchOutput(row, {
     username: username || `user_${userId}`,
     display_name: displayName || username || `user_${userId}`,
     avatar_url: avatarUrl || null,
-    clan_rank: toNumber(row.source_clan_rank),
-    clan_points: toNumber(row.source_clan_points) || 0,
+    clan_rank: toNumber(memberRank),
+    clan_points: toNumber(row.points) || 0,
+    member_rank: toNumber(memberRank),
+    member_points: toNumber(row.points) || 0,
+    source_clan_rank: toNumber(row.source_clan_rank),
+    source_clan_points: toNumber(row.source_clan_points) || 0,
+    source_clan_leaderboard_rank: toNumber(row.source_clan_rank),
+    source_clan_leaderboard_points: toNumber(row.source_clan_points) || 0,
     battle_key: row.battle_key || run?.battle_key || null,
     battle_display_name: cleanBattleDisplayName(
       row.battle_key || run?.battle_key,
