@@ -132,7 +132,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -157,6 +157,74 @@
       font-size: 20px;
       font-weight: bold;
       line-height: 1.25;
+    }
+
+    .audio-stat {
+      align-items: stretch;
+      text-align: left;
+    }
+
+    .audio-stat .stat-label { text-align: center; }
+
+    .audio-controls {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .audio-controls select,
+    .audio-controls input {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    .audio-controls input[aria-invalid="true"] { border-color: var(--accent); }
+
+    .ccu-stat { gap: 8px; }
+
+    .ccu-divider {
+      width: 100%;
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 0;
+    }
+
+    .ccu-values {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .ccu-value + .ccu-value { border-left: 1px solid var(--border); }
+
+    .ccu-value span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .ccu-value strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .audio-player-host {
+      position: fixed;
+      left: -10000px;
+      bottom: 0;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
     }
 
     .panel {
@@ -253,6 +321,36 @@
     </section>
 
     <section class="stats">
+      <article class="stat audio-stat">
+        <div class="stat-label">Audio Alert</div>
+        <div class="audio-controls">
+          <select id="audio-alert-state" aria-label="Audio alert state">
+            <option value="disabled">Disabled</option>
+            <option value="enabled">Enabled</option>
+          </select>
+          <input
+            id="audio-alert-url"
+            type="url"
+            aria-label="YouTube audio alert URL"
+            value="https://www.youtube.com/watch?v=enYdAxVcNZA"
+            spellcheck="false"
+          />
+        </div>
+      </article>
+      <article class="stat ccu-stat">
+        <div class="stat-label">CCU</div>
+        <hr class="ccu-divider" />
+        <div class="ccu-values">
+          <div class="ccu-value">
+            <span>10 Min Ago</span>
+            <strong id="ccu-ten-minutes-ago">-</strong>
+          </div>
+          <div class="ccu-value">
+            <span>Now</span>
+            <strong id="ccu-now">-</strong>
+          </div>
+        </div>
+      </article>
       <article class="stat">
         <div class="stat-label">Last Detected</div>
         <div id="last-detected" class="stat-value">-</div>
@@ -262,6 +360,7 @@
         <div id="last-scanned" class="stat-value">-</div>
       </article>
     </section>
+    <div id="audio-player-host" class="audio-player-host" aria-hidden="true"></div>
 
     <section class="panel">
       <div class="panel-header">
@@ -308,10 +407,30 @@
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
     const CACHE_KEY = "c0ld:ps99-version-history:v1";
+    const AUDIO_SETTINGS_KEY = "c0ld:ps99-restart-audio:v1";
+    const DEFAULT_AUDIO_ALERT_URL = "https://www.youtube.com/watch?v=enYdAxVcNZA";
+    const RESTART_POLL_INTERVAL_MS = 30000;
+    const CCU_POLL_INTERVAL_MS = 60000;
+
+    let audioSettings = readAudioSettings();
+    let youtubeApiPromise = null;
+    let audioPlayer = null;
+    let audioPlayerPromise = null;
+    let audioPlayerVideoId = null;
+    let audioSaveTimer = null;
+    let restartMonitorInitialized = false;
+    let lastRestartEventId = null;
+    let restartPollInFlight = false;
+    let ccuPollInFlight = false;
 
     const els = {
       subtitle: document.getElementById("subtitle"),
       refresh: document.getElementById("refresh"),
+      audioState: document.getElementById("audio-alert-state"),
+      audioUrl: document.getElementById("audio-alert-url"),
+      audioPlayerHost: document.getElementById("audio-player-host"),
+      ccuTenMinutesAgo: document.getElementById("ccu-ten-minutes-ago"),
+      ccuNow: document.getElementById("ccu-now"),
       lastDetected: document.getElementById("last-detected"),
       lastScanned: document.getElementById("last-scanned"),
       placesMeta: document.getElementById("places-meta"),
@@ -338,6 +457,14 @@
       return Number.isFinite(n) ? String(Math.trunc(n)) : "-";
     }
 
+    function fmtCcu(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "-";
+      if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+      if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+      return Math.round(n).toLocaleString();
+    }
+
     function robloxPlaceUrl(value) {
       const placeId = String(value ?? "").replace(/\D/g, "");
       return placeId ? `https://www.roblox.com/games/${placeId}` : "https://www.roblox.com/games/";
@@ -351,6 +478,255 @@
         "\"": "&quot;",
         "'": "&#39;"
       }[char]));
+    }
+
+    function readAudioSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(AUDIO_SETTINGS_KEY) || "null");
+        return {
+          enabled: saved?.enabled === true,
+          url: typeof saved?.url === "string" && saved.url.trim()
+            ? saved.url.trim()
+            : DEFAULT_AUDIO_ALERT_URL
+        };
+      } catch {
+        return { enabled: false, url: DEFAULT_AUDIO_ALERT_URL };
+      }
+    }
+
+    function saveAudioSettings() {
+      try {
+        localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings));
+      } catch {
+      }
+    }
+
+    function youtubeVideoId(value) {
+      const raw = String(value || "").trim();
+      if (/^[A-Za-z0-9_-]{11}$/.test(raw)) return raw;
+
+      try {
+        const url = new URL(raw);
+        const host = url.hostname.toLowerCase().replace(/^(www\.|m\.)/, "");
+        let candidate = "";
+
+        if (host === "youtu.be") {
+          candidate = url.pathname.split("/").filter(Boolean)[0] || "";
+        } else if (
+          host === "youtube.com"
+          || host.endsWith(".youtube.com")
+          || host === "youtube-nocookie.com"
+          || host.endsWith(".youtube-nocookie.com")
+        ) {
+          candidate = url.searchParams.get("v") || "";
+          if (!candidate) {
+            const parts = url.pathname.split("/").filter(Boolean);
+            if (["embed", "shorts", "live"].includes(parts[0])) candidate = parts[1] || "";
+          }
+        }
+
+        return /^[A-Za-z0-9_-]{11}$/.test(candidate) ? candidate : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function resetAudioPlayer() {
+      try { audioPlayer?.destroy?.(); } catch {}
+      audioPlayer = null;
+      audioPlayerPromise = null;
+      audioPlayerVideoId = null;
+      els.audioPlayerHost.replaceChildren();
+    }
+
+    function loadYouTubeApi() {
+      if (window.YT && typeof window.YT.Player === "function") return Promise.resolve(window.YT);
+      if (youtubeApiPromise) return youtubeApiPromise;
+
+      youtubeApiPromise = new Promise((resolve, reject) => {
+        const previousReady = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => {
+          try { previousReady?.(); } finally { resolve(window.YT); }
+        };
+
+        let script = document.querySelector("script[data-ps99-youtube-api]");
+        if (!script) {
+          script = document.createElement("script");
+          script.src = "https://www.youtube.com/iframe_api";
+          script.async = true;
+          script.dataset.ps99YoutubeApi = "true";
+          document.head.appendChild(script);
+        }
+        script.addEventListener("error", () => {
+          youtubeApiPromise = null;
+          reject(new Error("YouTube audio player could not be loaded."));
+        }, { once: true });
+      });
+
+      return youtubeApiPromise;
+    }
+
+    async function ensureAudioPlayer(videoId) {
+      if (audioPlayer && audioPlayerVideoId === videoId && audioPlayerPromise) {
+        return audioPlayerPromise;
+      }
+
+      resetAudioPlayer();
+      const YT = await loadYouTubeApi();
+      const mount = document.createElement("div");
+      mount.id = "ps99-audio-player";
+      els.audioPlayerHost.appendChild(mount);
+      audioPlayerVideoId = videoId;
+      audioPlayerPromise = new Promise((resolve, reject) => {
+        audioPlayer = new YT.Player(mount.id, {
+          width: "1",
+          height: "1",
+          videoId,
+          playerVars: {
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            playsinline: 1,
+            rel: 0
+          },
+          events: {
+            onReady: event => resolve(event.target),
+            onError: () => {
+              els.audioUrl.setAttribute("aria-invalid", "true");
+              reject(new Error("This YouTube video could not be used for the audio alert."));
+            }
+          }
+        });
+      });
+
+      return audioPlayerPromise;
+    }
+
+    async function prepareAudioPlayer({ prime = false } = {}) {
+      const videoId = youtubeVideoId(audioSettings.url);
+      els.audioUrl.setAttribute("aria-invalid", videoId ? "false" : "true");
+      if (!audioSettings.enabled || !videoId) return null;
+
+      const player = await ensureAudioPlayer(videoId);
+      if (prime) {
+        player.mute();
+        player.playVideo();
+        window.setTimeout(() => {
+          if (audioPlayerVideoId !== videoId) return;
+          player.pauseVideo();
+          player.seekTo(0, true);
+          player.unMute();
+        }, 400);
+      }
+      return player;
+    }
+
+    async function playRestartAudio() {
+      if (!audioSettings.enabled) return;
+      const videoId = youtubeVideoId(audioSettings.url);
+      if (!videoId) return;
+
+      try {
+        const player = await ensureAudioPlayer(videoId);
+        player.seekTo(0, true);
+        player.setVolume(100);
+        player.unMute();
+        player.playVideo();
+      } catch {
+      }
+    }
+
+    function syncAudioSettings({ prime = false } = {}) {
+      const enteredUrl = els.audioUrl.value.trim() || DEFAULT_AUDIO_ALERT_URL;
+      if (!els.audioUrl.value.trim()) els.audioUrl.value = enteredUrl;
+      const previousVideoId = youtubeVideoId(audioSettings.url);
+      const nextVideoId = youtubeVideoId(enteredUrl);
+      audioSettings = {
+        enabled: els.audioState.value === "enabled",
+        url: enteredUrl
+      };
+      saveAudioSettings();
+      els.audioUrl.setAttribute("aria-invalid", nextVideoId ? "false" : "true");
+
+      if (previousVideoId !== nextVideoId) resetAudioPlayer();
+      if (audioSettings.enabled && nextVideoId) {
+        prepareAudioPlayer({ prime }).catch(() => {});
+      } else {
+        try { audioPlayer?.pauseVideo?.(); } catch {}
+      }
+    }
+
+    function restartEventId(event) {
+      return event?.event_id
+        || [event?.place_id, event?.candidate_started_at, event?.detected_at].filter(Boolean).join(":")
+        || null;
+    }
+
+    async function pollRestartAlert() {
+      if (restartPollInFlight) return;
+      restartPollInFlight = true;
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/ps99/restarts?limit=1&_=${Date.now()}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
+        const event = data.latest_restart || (Array.isArray(data.events) ? data.events[0] : null);
+        const eventId = restartEventId(event);
+
+        if (!restartMonitorInitialized) {
+          restartMonitorInitialized = true;
+          lastRestartEventId = eventId;
+          return;
+        }
+
+        if (!eventId || eventId === lastRestartEventId) return;
+        lastRestartEventId = eventId;
+        await playRestartAudio();
+      } catch {
+      } finally {
+        restartPollInFlight = false;
+      }
+    }
+
+    async function pollCcu() {
+      if (ccuPollInFlight) return;
+      ccuPollInFlight = true;
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/ps99/ccu?limit=20&_=${Date.now()}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
+
+        const samples = Array.isArray(data.samples) ? data.samples : [];
+        const latest = data.latest || samples[0] || null;
+        const latestTime = new Date(latest?.sampled_at || 0).getTime();
+        const tenMinuteTarget = latestTime - 10 * 60000;
+        const tenMinutesAgo = Number.isFinite(latestTime)
+          ? samples.find(sample => new Date(sample?.sampled_at || 0).getTime() <= tenMinuteTarget)
+          : null;
+
+        els.ccuNow.textContent = fmtCcu(latest?.ccu);
+        els.ccuTenMinutesAgo.textContent = fmtCcu(tenMinutesAgo?.ccu);
+      } catch {
+        els.ccuNow.textContent = "-";
+        els.ccuTenMinutesAgo.textContent = "-";
+      } finally {
+        ccuPollInFlight = false;
+      }
+    }
+
+    function initializeAudioAlert() {
+      els.audioState.value = audioSettings.enabled ? "enabled" : "disabled";
+      els.audioUrl.value = audioSettings.url;
+      els.audioUrl.setAttribute("aria-invalid", youtubeVideoId(audioSettings.url) ? "false" : "true");
+
+      if (audioSettings.enabled) prepareAudioPlayer().catch(() => {});
     }
 
     function render(data, stale = false) {
@@ -421,7 +797,36 @@
       }
     }
 
-    els.refresh.addEventListener("click", () => load({ force: true }));
+    els.audioState.addEventListener("change", () => {
+      syncAudioSettings({ prime: els.audioState.value === "enabled" });
+    });
+
+    els.audioUrl.addEventListener("input", () => {
+      window.clearTimeout(audioSaveTimer);
+      audioSaveTimer = window.setTimeout(() => syncAudioSettings(), 350);
+    });
+
+    els.audioUrl.addEventListener("change", () => {
+      syncAudioSettings({ prime: els.audioState.value === "enabled" });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        pollRestartAlert();
+        pollCcu();
+      }
+    });
+
+    els.refresh.addEventListener("click", () => {
+      load({ force: true });
+      pollCcu();
+    });
+
+    initializeAudioAlert();
+    pollRestartAlert();
+    pollCcu();
+    window.setInterval(pollRestartAlert, RESTART_POLL_INTERVAL_MS);
+    window.setInterval(pollCcu, CCU_POLL_INTERVAL_MS);
     load();
   </script>
 </body>
