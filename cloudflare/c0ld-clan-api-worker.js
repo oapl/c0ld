@@ -2799,24 +2799,23 @@ async function handleClanActivityIngest(env, source, options = {}) {
   }
 
   await supabaseInsertChunked(env, CLAN_ACTIVITY_ROSTER_TABLE, rosterRows, 500);
-  await supabaseUpsertChunked(env, CLAN_ACTIVITY_CURRENT_TABLE, rosterRows.map(row => ({
+  const currentRows = rosterRows.map(row => ({
     ...row,
     updated_at: fetchedAt
-  })), "battle_key,clan_key,user_id", 500);
+  }));
   await supabaseDelete(env, CLAN_ACTIVITY_CURRENT_TABLE, {
-    battle_key: `eq.${resolvedBattleKey}`,
-    snapshot_id: `neq.${snapshotId}`
+    battle_key: `eq.${resolvedBattleKey}`
   });
+  await supabaseInsertChunked(env, CLAN_ACTIVITY_CURRENT_TABLE, currentRows, 500);
 
   if (eventRows.length) {
     await supabaseUpsertChunked(env, CLAN_ACTIVITY_EVENTS_TABLE, eventRows, "event_id", 500);
   }
 
-  await supabaseUpsertChunked(env, CLAN_ACTIVITY_SUMMARY_TABLE, summaryRows, "battle_key,clan_key", 500);
   await supabaseDelete(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
-    battle_key: `eq.${resolvedBattleKey}`,
-    latest_snapshot_id: `neq.${snapshotId}`
+    battle_key: `eq.${resolvedBattleKey}`
   });
+  await supabaseInsertChunked(env, CLAN_ACTIVITY_SUMMARY_TABLE, summaryRows, 500);
 
   return json({
     ok: true,
@@ -3826,7 +3825,10 @@ async function resolveActivityBattleKey(env, requestedBattle) {
     limit: "1"
   });
 
-  return rows[0]?.battle_key || battleKey(env);
+  if (rows[0]?.battle_key) return rows[0].battle_key;
+
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  return activeBattleMeta?.battleKey || battleKey(env);
 }
 
 async function clanActivityRecentSnapshotGate(env, battleKeyValue, fetchedAt, bypassRecentGuard = false) {
