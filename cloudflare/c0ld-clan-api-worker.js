@@ -35,7 +35,8 @@ const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 29;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
-const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [3, 10, 50, 100, 500];
+const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
@@ -912,7 +913,10 @@ function rewardCutoffRanks(url, env, type) {
     .split(/[,\s]+/)
     .map(value => Math.round(Number(value)))
     .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank);
-  const ranks = parsed.length ? parsed : fallback;
+  const normalizedRaw = [...new Set(parsed)].sort((a, b) => a - b).join(",");
+  const ranks = parsed.length && (!isClans || normalizedRaw !== LEGACY_CLAN_REWARD_CUTOFF_RANKS)
+    ? parsed
+    : fallback;
 
   return [...new Set(ranks)]
     .sort((a, b) => a - b)

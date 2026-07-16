@@ -169,7 +169,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional display override such as `LunarBattle2026`. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `3,10,50,100,500`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
 | `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
 | `CLAN_ACTIVITY_CONCURRENCY` | Optional. Defaults to `8`; number of top-clan detail pulls to run at once during activity scans. |
@@ -391,7 +391,7 @@ Required Worker variables:
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `3,10,50,100,500`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -502,7 +502,7 @@ The reward cutoff commands are:
 ```
 
 They post the current point minimums for the configured reward ranks. Defaults
-are `3,100,1000,1050,1150,6150,30000` for players and `3,10,50,100,500` for
+are `3,100,1000,1050,1150,6150,30000` for players and `1,3,10,30,50,250,500` for
 clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
 `CLAN_REWARD_CUTOFF_RANKS` on either Worker. For the player command header, set
 `PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or

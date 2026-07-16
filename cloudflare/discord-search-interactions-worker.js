@@ -7,6 +7,18 @@ const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
+const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
+const CLAN_REWARD_CATEGORIES = [
+  { label: "#1", rank: 1 },
+  { label: "#2-3", rank: 3 },
+  { label: "#4-10", rank: 10 },
+  { label: "#11-50", rank: 50 },
+  { label: "#51-250", rank: 250 },
+  { label: "Top 30", rank: 30 },
+  { label: "Top 50", rank: 50 },
+  { label: "Top 500", rank: 500 }
+];
 
 export default {
   async fetch(request, env) {
@@ -339,8 +351,8 @@ function rewardCutoffDescription(payload, type, env) {
     ""
   ];
 
-  for (const cutoff of payload.cutoffs || []) {
-    lines.push(rewardCutoffLine(cutoff));
+  for (const line of rewardCutoffLines(payload, type)) {
+    lines.push(line);
   }
 
   const unavailable = (payload.cutoffs || []).some(cutoff => cutoff.points === null || cutoff.points === undefined);
@@ -350,6 +362,19 @@ function rewardCutoffDescription(payload, type, env) {
   }
 
   return lines.join("\n");
+}
+
+function rewardCutoffLines(payload, type) {
+  if (type !== "clans") {
+    return (payload.cutoffs || []).map(cutoff => rewardCutoffLine(cutoff));
+  }
+
+  const byRank = new Map((payload.cutoffs || []).map(cutoff => [Number(cutoff.rank), cutoff]));
+  return CLAN_REWARD_CATEGORIES.map(category => rewardCutoffLine({
+    ...(byRank.get(category.rank) || {}),
+    rank: category.rank,
+    label: category.label
+  }));
 }
 
 function rewardCutoffLine(cutoff) {
@@ -388,13 +413,22 @@ function rewardCommandType(interaction) {
 
 function configuredRewardRanks(type, env) {
   const raw = String(type === "clans" ? env.CLAN_REWARD_CUTOFF_RANKS || "" : env.PLAYER_REWARD_CUTOFF_RANKS || "");
-  if (!raw.trim()) return [];
-
   const maxRank = type === "clans" ? 10000 : 100000;
-  return [...new Set(raw
+  const parsed = raw
     .split(/[,\s]+/)
     .map(value => Math.round(Number(value)))
-    .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank))]
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank);
+
+  if (type === "clans") {
+    const normalizedRaw = [...new Set(parsed)].sort((a, b) => a - b).join(",");
+    if (!raw.trim() || normalizedRaw === LEGACY_CLAN_REWARD_CUTOFF_RANKS) {
+      return DEFAULT_CLAN_REWARD_CUTOFF_RANKS;
+    }
+  } else if (!raw.trim()) {
+    return [];
+  }
+
+  return [...new Set(parsed)]
     .sort((a, b) => a - b)
     .slice(0, 20);
 }
