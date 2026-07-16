@@ -169,7 +169,7 @@ async function buildSearchResponse(query, env) {
       betterThanLine(row),
       "",
       `Last Update: ${discordTime(row.fetched_at)}`,
-      "Refreshed every hour"
+      "Updates every 30 minutes"
     ].filter(line => line !== null).join("\n")
   };
 
