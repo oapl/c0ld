@@ -3484,22 +3484,29 @@ async function handlePs99Restarts(request, env) {
     500
   );
   const placeId = ps99RootPlaceId(env);
-  const [states, events] = await Promise.all([
+  const [states, events, testAlerts] = await Promise.all([
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
-      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot,updated_at",
+      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,updated_at",
       place_id: `eq.${placeId}`,
       limit: "1"
     }),
     supabaseSelect(env, PS99_RESTART_EVENTS_TABLE, {
       select: "event_id,universe_id,place_id,place_name,candidate_started_at,detected_at,cooldown_until,previous_place_version,current_place_version,version_correlated,confidence,previous_servers,replacement_servers,reason,source,details,created_at",
       place_id: `eq.${placeId}`,
+      source: "neq.test",
       order: "detected_at.desc,id.desc",
       limit: String(limit)
+    }),
+    supabaseSelect(env, PS99_RESTART_EVENTS_TABLE, {
+      select: "details",
+      place_id: `eq.${placeId}`,
+      source: "eq.test",
+      order: "detected_at.desc,id.desc",
+      limit: "1"
     })
   ]);
   const state = states[0] ? normalizePs99RestartStateOutput(states[0]) : null;
-  const rawSnapshot = parseJsonObject(states[0]?.raw_snapshot) || {};
-  const latestTestAlert = normalizePs99RestartTestSignal(rawSnapshot.restart_test_alert);
+  const latestTestAlert = normalizePs99RestartTestSignal(testAlerts[0]?.details);
 
   return cacheJson({
     ok: true,
@@ -3575,8 +3582,6 @@ async function handlePs99RestartIngest(env, source) {
   const currentVersion = toNumber(versionContext.currentVersion);
   const currentById = new Map(batch.map(server => [server.server_id, server]));
   const previous = stateRows[0] || {};
-  const previousRawSnapshot = parseJsonObject(previous.raw_snapshot) || {};
-  const activeTestAlert = normalizePs99RestartTestSignal(previousRawSnapshot.restart_test_alert);
   const previousStatus = String(previous.status || "initializing");
   const previousTrackedPresent = Math.round(toNumber(previous.tracked_present) || 0);
   let status = previousStatus === "insufficient" ? "monitoring" : previousStatus;
@@ -3754,8 +3759,7 @@ async function handlePs99RestartIngest(env, source) {
       ccu: toNumber(ccuSample?.ccu),
       ccu_sampled_at: safeIso(ccuSample?.sampled_at),
       ccu_error: ccuError,
-      server_ids: batch.map(server => server.server_id),
-      ...(activeTestAlert ? { restart_test_alert: activeTestAlert } : {})
+      server_ids: batch.map(server => server.server_id)
     },
     updated_at: checkedAt
   };
@@ -3841,6 +3845,7 @@ async function handlePs99AlertTest(env, url) {
       supabaseSelect(env, PS99_RESTART_EVENTS_TABLE, {
         select: "detected_at",
         place_id: `eq.${placeId}`,
+        source: "neq.test",
         order: "detected_at.desc,id.desc",
         limit: "1"
       }).catch(() => [])
@@ -3864,7 +3869,8 @@ async function handlePs99AlertTest(env, url) {
     restartTestSignal = await publishPs99RestartTestSignal(env, {
       placeId,
       placeName,
-      testedAt
+      testedAt,
+      currentVersion
     });
   }
 
@@ -3881,13 +3887,7 @@ async function handlePs99AlertTest(env, url) {
   }, ok ? 200 : 502);
 }
 
-async function publishPs99RestartTestSignal(env, { placeId, placeName, testedAt }) {
-  const rows = await supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
-    select: "raw_snapshot",
-    place_id: `eq.${placeId}`,
-    limit: "1"
-  });
-  const rawSnapshot = parseJsonObject(rows[0]?.raw_snapshot) || {};
+async function publishPs99RestartTestSignal(env, { placeId, placeName, testedAt, currentVersion }) {
   const testedMs = isoToMs(testedAt) || Date.now();
   const signal = {
     signal_id: `ps99-restart-test:${new Date(testedMs).toISOString()}`,
@@ -3896,15 +3896,24 @@ async function publishPs99RestartTestSignal(env, { placeId, placeName, testedAt 
     expires_at: new Date(testedMs + 5 * 60000).toISOString()
   };
 
-  await supabaseUpsert(env, PS99_RESTART_STATE_TABLE, [{
-    place_id: placeId,
+  await supabaseUpsert(env, PS99_RESTART_EVENTS_TABLE, [{
+    event_id: `ps99-restart-test:${placeId}`,
     universe_id: ps99UniverseId(env),
+    place_id: placeId,
     place_name: placeName || "Pet Simulator 99",
-    raw_snapshot: {
-      ...rawSnapshot,
-      restart_test_alert: signal
-    }
-  }], "place_id");
+    candidate_started_at: signal.triggered_at,
+    detected_at: signal.triggered_at,
+    cooldown_until: signal.expires_at,
+    previous_place_version: currentVersion,
+    current_place_version: currentVersion,
+    version_correlated: currentVersion !== null,
+    confidence: "confirmed",
+    previous_servers: [],
+    replacement_servers: [],
+    reason: "End-to-end restart alert test signal.",
+    source: "test",
+    details: signal
+  }], "event_id");
 
   return signal;
 }

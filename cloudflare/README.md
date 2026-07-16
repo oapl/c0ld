@@ -257,7 +257,7 @@ Useful endpoints:
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
 | `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
-| `/api/ps99/alerts/test?type=both` | Protected manual preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; does not create history records. `POST` only. |
+| `/api/ps99/alerts/test?type=both` | Protected end-to-end preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; restart tests also publish a five-minute webpage audio-test signal without creating a confirmed restart-history record. `POST` only. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
