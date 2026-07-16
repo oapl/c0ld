@@ -842,14 +842,26 @@
       mvpName: document.getElementById("mvp-name"),
       mvpValue: document.getElementById("mvp-value"),
       mvpDescription: document.getElementById("mvp-description"),
-      volatileAvatar: document.getElementById("volatile-avatar"),
-      volatileName: document.getElementById("volatile-name"),
-      volatileValue: document.getElementById("volatile-value"),
-      volatileDescription: document.getElementById("volatile-description"),
+      pointsAvatar: document.getElementById("points-avatar"),
+      pointsName: document.getElementById("points-name"),
+      pointsValue: document.getElementById("points-value"),
+      pointsDescription: document.getElementById("points-description"),
       sleeperAvatar: document.getElementById("sleeper-avatar"),
       sleeperName: document.getElementById("sleeper-name"),
       sleeperValue: document.getElementById("sleeper-value"),
-      sleeperDescription: document.getElementById("sleeper-description")
+      sleeperDescription: document.getElementById("sleeper-description"),
+      downtimeAvatar: document.getElementById("downtime-avatar"),
+      downtimeName: document.getElementById("downtime-name"),
+      downtimeValue: document.getElementById("downtime-value"),
+      downtimeDescription: document.getElementById("downtime-description"),
+      glassesAvatar: document.getElementById("glasses-avatar"),
+      glassesName: document.getElementById("glasses-name"),
+      glassesValue: document.getElementById("glasses-value"),
+      glassesDescription: document.getElementById("glasses-description"),
+      lvpAvatar: document.getElementById("lvp-avatar"),
+      lvpName: document.getElementById("lvp-name"),
+      lvpValue: document.getElementById("lvp-value"),
+      lvpDescription: document.getElementById("lvp-description")
     };
 
     let countdownEndsAt = null;
@@ -1083,23 +1095,21 @@
 
     function renderAwards(snapshots, currentRows) {
       setAwardAvatar(els.mvpAvatar, null);
-      setAwardAvatar(els.volatileAvatar, null);
+      setAwardAvatar(els.pointsAvatar, null);
       setAwardAvatar(els.sleeperAvatar, null);
 
       if (!snapshots.length) {
         awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No snapshots were returned for the current battle.");
-        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "Rank movement needs at least two snapshots.");
+        awardFallback(els.pointsName, els.pointsValue, els.pointsDescription, "No point totals were returned for the current battle.");
         awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "Rank improvement needs at least two snapshots.");
         return;
       }
 
       const timeAtOne = new Map();
-      const changeCounts = new Map();
       const playerNames = new Map();
       const playerProfiles = new Map();
       const firstRanks = new Map();
       const latestRanks = new Map();
-      let previousRanks = new Map();
 
       for (const snapshot of snapshots) {
         for (const row of snapshot.rows) {
@@ -1127,7 +1137,6 @@
       snapshots.forEach((snapshot, index) => {
         const nextTime = snapshots[index + 1]?.time || snapshot.time;
         const duration = Math.max(0, Math.min(nextTime - snapshot.time, 10 * 60000));
-        const currentRanks = rankMap(snapshot);
         const leader = snapshot.rows.find(row => finite(row.rank) === 1);
         if (leader) {
           const key = playerKey(leader);
@@ -1143,10 +1152,7 @@
           if (rank === null) continue;
           if (!firstRanks.has(key)) firstRanks.set(key, rank);
           latestRanks.set(key, rank);
-          const previous = finite(previousRanks.get(key)?.rank);
-          if (previous !== null && previous !== rank) changeCounts.set(key, (changeCounts.get(key) || 0) + 1);
         }
-        previousRanks = currentRanks;
       });
 
       const currentLeader = [...(currentRows || [])].sort((a, b) => finite(a.rank) - finite(b.rank))[0];
@@ -1165,14 +1171,18 @@
         awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No current leader is available.");
       }
 
-      const volatile = [...changeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (volatile && volatile[1] > 0) {
-        els.volatileName.textContent = playerNames.get(volatile[0]) || "Unknown player";
-        els.volatileValue.textContent = `${volatile[1]} rank change${volatile[1] === 1 ? "" : "s"}`;
-        els.volatileDescription.textContent = "Most changes in rank throughout the battle.";
-        setAwardAvatar(els.volatileAvatar, playerProfiles.get(volatile[0]));
+      const pointRows = currentRows?.length ? currentRows : (snapshots.at(-1)?.rows || []);
+      const pointLeader = [...pointRows]
+        .filter(row => row.total_points !== null && row.total_points !== undefined && Number.isFinite(Number(row.total_points)))
+        .sort((a, b) => Number(b.total_points) - Number(a.total_points))[0];
+      if (pointLeader) {
+        const key = playerKey(pointLeader);
+        els.pointsName.textContent = pointLeader.username || playerNames.get(key) || "Unknown player";
+        els.pointsValue.textContent = `${formatNumber(pointLeader.total_points)} points`;
+        els.pointsDescription.textContent = "Most points in the current battle.";
+        setAwardAvatar(els.pointsAvatar, playerProfiles.get(key) || pointLeader);
       } else {
-        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "No player-rank changes have been observed in the current battle.");
+        awardFallback(els.pointsName, els.pointsValue, els.pointsDescription, "No point totals are available for the current battle.");
       }
 
       const sleepers = [...latestRanks.entries()]
@@ -1188,6 +1198,111 @@
         setAwardAvatar(els.sleeperAvatar, playerProfiles.get(sleeper.key));
       } else {
         awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "No upward player-rank climb has been observed in the current battle.");
+      }
+    }
+
+    function renderBootlegAwards(snapshots, currentRows) {
+      setAwardAvatar(els.downtimeAvatar, null);
+      setAwardAvatar(els.glassesAvatar, null);
+      setAwardAvatar(els.lvpAvatar, null);
+
+      if (snapshots.length < 2) {
+        awardFallback(els.downtimeName, els.downtimeValue, els.downtimeDescription, "Downtime needs at least two battle snapshots.");
+        awardFallback(els.glassesName, els.glassesValue, els.glassesDescription, "Rank movement needs at least two battle snapshots.");
+        awardFallback(els.lvpName, els.lvpValue, els.lvpDescription, "Last-place time needs at least two battle snapshots.");
+        return;
+      }
+
+      const profiles = new Map();
+      const rememberPlayer = row => {
+        const key = playerKey(row);
+        if (!key) return;
+        const prior = profiles.get(key) || {};
+        profiles.set(key, {
+          username: row.username || prior.username || `user_${row.user_id}`,
+          user_id: row.user_id || prior.user_id,
+          avatar_url: row.avatar_url || prior.avatar_url
+        });
+      };
+      for (const snapshot of snapshots) snapshot.rows.forEach(rememberPlayer);
+      (currentRows || []).forEach(rememberPlayer);
+
+      const downtimeByPlayer = new Map();
+      const changesByPlayer = new Map();
+      const timeAtLast = new Map();
+      const observedRank = row => row?.rank === null || row?.rank === undefined || row?.rank === ""
+        ? null
+        : finite(row.rank);
+
+      snapshots.forEach((snapshot, index) => {
+        const nextTime = snapshots[index + 1]?.time || snapshot.time;
+        const visibleDuration = Math.max(0, Math.min(nextTime - snapshot.time, 10 * 60000));
+        const rankedRows = snapshot.rows.filter(row => observedRank(row) !== null);
+        const lastRank = rankedRows.length ? Math.max(...rankedRows.map(row => observedRank(row))) : null;
+
+        if (lastRank !== null && visibleDuration > 0) {
+          for (const row of rankedRows) {
+            if (observedRank(row) !== lastRank) continue;
+            const key = playerKey(row);
+            timeAtLast.set(key, (timeAtLast.get(key) || 0) + visibleDuration);
+          }
+        }
+
+        if (index === 0) return;
+        const previousSnapshot = snapshots[index - 1];
+        const previousRows = rankMap(previousSnapshot);
+        const interval = Math.max(0, Math.min(snapshot.time - previousSnapshot.time, 10 * 60000));
+
+        for (const row of snapshot.rows) {
+          const key = playerKey(row);
+          const previous = previousRows.get(key);
+          if (!key || !previous) continue;
+
+          const currentPoints = row.total_points === null || row.total_points === undefined ? null : Number(row.total_points);
+          const previousPoints = previous.total_points === null || previous.total_points === undefined ? null : Number(previous.total_points);
+          if (Number.isFinite(currentPoints) && Number.isFinite(previousPoints) && currentPoints === previousPoints) {
+            downtimeByPlayer.set(key, (downtimeByPlayer.get(key) || 0) + interval);
+          }
+
+          const currentRank = observedRank(row);
+          const previousRank = observedRank(previous);
+          if (currentRank !== null && previousRank !== null && currentRank !== previousRank) {
+            changesByPlayer.set(key, (changesByPlayer.get(key) || 0) + 1);
+          }
+        }
+      });
+
+      const downtime = [...downtimeByPlayer.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (downtime && downtime[1] > 0) {
+        const player = profiles.get(downtime[0]);
+        els.downtimeName.textContent = player?.username || "Unknown player";
+        els.downtimeValue.textContent = `${formatDuration(downtime[1])} idle`;
+        els.downtimeDescription.textContent = "Most accumulated time without a recorded point gain.";
+        setAwardAvatar(els.downtimeAvatar, player);
+      } else {
+        awardFallback(els.downtimeName, els.downtimeValue, els.downtimeDescription, "No measurable downtime was found in this battle.");
+      }
+
+      const glasses = [...changesByPlayer.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (glasses && glasses[1] > 0) {
+        const player = profiles.get(glasses[0]);
+        els.glassesName.textContent = player?.username || "Unknown player";
+        els.glassesValue.textContent = `${glasses[1]} rank change${glasses[1] === 1 ? "" : "s"}`;
+        els.glassesDescription.textContent = "Most changes in rank throughout the battle.";
+        setAwardAvatar(els.glassesAvatar, player);
+      } else {
+        awardFallback(els.glassesName, els.glassesValue, els.glassesDescription, "No rank changes were observed in this battle.");
+      }
+
+      const lvp = [...timeAtLast.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (lvp && lvp[1] > 0) {
+        const player = profiles.get(lvp[0]);
+        els.lvpName.textContent = player?.username || "Unknown player";
+        els.lvpValue.textContent = `${formatDuration(lvp[1])} in last`;
+        els.lvpDescription.textContent = "Most observed time holding last place.";
+        setAwardAvatar(els.lvpAvatar, player);
+      } else {
+        awardFallback(els.lvpName, els.lvpValue, els.lvpDescription, "No last-place history was available for this battle.");
       }
     }
 
@@ -1286,6 +1401,7 @@
         renderActivity(detail, announcement);
         renderRankActivity(snapshots, currentRows);
         renderAwards(snapshots, currentRows);
+        renderBootlegAwards(snapshots, currentRows);
 
         els.lastRestart.textContent = latestRestart ? relativeTime(latestRestart.detected_at) : "None logged";
         els.lastRestartDetail.textContent = latestRestart ? formatDate(latestRestart.detected_at) : "No confirmed restart yet";
