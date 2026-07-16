@@ -1799,6 +1799,7 @@ async function handleHistory(request, env) {
   const userId = url.searchParams.get("user_id");
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
+  const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, 10000000);
   const afterIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const orderDir = String(url.searchParams.get("order_dir") || url.searchParams.get("order") || "desc").toLowerCase() === "asc"
     ? "asc"
@@ -1810,20 +1811,24 @@ async function handleHistory(request, env) {
     battle_key: `eq.${battle}`,
     fetched_at: `gte.${afterIso}`,
     order: `fetched_at.${orderDir},rank.asc`,
-    limit: String(limit)
+    limit: String(limit),
+    offset: String(offset)
   };
 
   if (userId) {
     params.user_id = `eq.${userId}`;
   }
 
-  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  const rows = await supabaseSelectPaged(env, SNAPSHOT_TABLE, params, limit, 1000);
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     clan_name: clan,
     battle,
     hours,
+    limit,
+    offset,
+    has_more: rows.length === limit,
     rows
   }, env);
 }
@@ -5103,11 +5108,27 @@ async function fetchActiveClanBattleMeta(env) {
         allowEnvDisplayName: false,
         allowEnvTiming: false
       });
+      const createdAt = safeIso(firstDefined(
+        data.dateCreated,
+        data.createdAt,
+        data.created_at,
+        configData.dateCreated,
+        configData.createdAt,
+        configData.created_at
+      ));
+      const startedMs = new Date(meta.startedAt || 0).getTime();
+      const createdMs = new Date(createdAt || 0).getTime();
+      const startPredatesRecordByOverADay =
+        Number.isFinite(startedMs) &&
+        Number.isFinite(createdMs) &&
+        createdMs - startedMs > 24 * 60 * 60 * 1000;
 
       return {
         battleKey: activeKey || meta.displayName || null,
         displayName: meta.displayName,
-        startedAt: meta.startedAt,
+        // BIG Games occasionally publishes a stale StartTime from the preceding update.
+        // The API record creation time is the safer boundary when that happens.
+        startedAt: startPredatesRecordByOverADay ? createdAt : (meta.startedAt || createdAt),
         endedAt: meta.endedAt,
         raw: data
       };

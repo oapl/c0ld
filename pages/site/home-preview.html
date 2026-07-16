@@ -10,15 +10,15 @@
 
     :root {
       color-scheme: dark;
-      --bg: #090d13;
-      --panel: #141a22;
-      --panel-2: #0d1219;
-      --panel-3: #19212c;
-      --border: #303944;
-      --text: #edf3f8;
-      --muted: #8f9baa;
-      --accent: #ff8f8a;
-      --accent-soft: rgba(255, 105, 97, 0.12);
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #0d1117;
+      --panel-3: #1f2630;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #ff9b96;
+      --accent-soft: rgba(248, 81, 73, 0.12);
       --blue: #67b7ff;
       --green: #4cdb93;
       --gold: #f2c75c;
@@ -30,10 +30,7 @@
       margin: 0;
       min-height: 100vh;
       overflow-x: hidden;
-      background:
-        radial-gradient(circle at 50% -20%, rgba(255, 112, 104, 0.13), transparent 34%),
-        radial-gradient(circle at 82% 28%, rgba(103, 183, 255, 0.06), transparent 26%),
-        var(--bg);
+      background: var(--bg);
       color: var(--text);
       font-family: Arial, Helvetica, sans-serif;
     }
@@ -43,8 +40,7 @@
 
     header {
       border-bottom: 1px solid var(--border);
-      background: rgba(20, 26, 34, 0.94);
-      backdrop-filter: blur(14px);
+      background: var(--panel);
       padding: 12px 22px 10px;
     }
 
@@ -119,12 +115,11 @@
       padding: 24px 0 60px;
     }
 
-    .hero {
+    .dashboard-toolbar {
       display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 18px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-bottom: 14px;
     }
 
     .eyebrow {
@@ -137,8 +132,6 @@
     }
 
     h1, h2, h3, p { margin-top: 0; }
-    h1 { margin-bottom: 5px; font-size: clamp(25px, 3vw, 36px); letter-spacing: -0.03em; }
-    .hero p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
 
     .live-state {
       display: flex;
@@ -152,8 +145,7 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 14px rgba(76, 219, 147, 0.8);
+      background: var(--muted);
     }
 
     .dashboard-grid {
@@ -167,8 +159,8 @@
     .status-card,
     .battle-stage {
       border: 1px solid var(--border);
-      border-radius: 12px;
-      background: linear-gradient(150deg, rgba(25, 33, 44, 0.82), rgba(15, 20, 28, 0.96));
+      border-radius: 10px;
+      background: var(--panel);
     }
 
     .side-panel {
@@ -218,11 +210,11 @@
     }
 
     .event-icon.join,
-    .event-icon.promote { color: var(--green); border-color: rgba(76, 219, 147, 0.35); }
+    .event-icon.promote,
     .event-icon.leave,
-    .event-icon.demote { color: var(--danger); border-color: rgba(255, 107, 114, 0.35); }
-    .event-icon.announcement { color: var(--gold); border-color: rgba(242, 199, 92, 0.4); }
-    .event-icon.donation { color: var(--purple); border-color: rgba(187, 145, 255, 0.4); }
+    .event-icon.demote,
+    .event-icon.announcement,
+    .event-icon.donation { color: var(--muted); border-color: var(--border); }
 
     .event-copy {
       min-width: 0;
@@ -265,15 +257,6 @@
       overflow: hidden;
     }
 
-    .status-card::before {
-      content: "";
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: 3px;
-      background: var(--status-color, var(--accent));
-      box-shadow: 0 0 20px var(--status-color, var(--accent));
-    }
-
     .status-label { color: var(--muted); font-size: 11px; margin-bottom: 7px; }
     .status-value { font-size: clamp(17px, 1.6vw, 22px); font-weight: 800; line-height: 1.15; }
     .status-detail { color: var(--muted); font-size: 10px; margin-top: 6px; }
@@ -288,35 +271,9 @@
       overflow: hidden;
       padding: 36px 28px;
       text-align: center;
-      isolation: isolate;
     }
 
-    .battle-stage::before,
-    .battle-stage::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      z-index: -1;
-      filter: blur(2px);
-    }
-
-    .battle-stage::before {
-      width: 310px;
-      height: 310px;
-      border: 1px solid rgba(255, 143, 138, 0.18);
-      box-shadow: inset 0 0 90px rgba(255, 112, 104, 0.08), 0 0 80px rgba(255, 112, 104, 0.06);
-    }
-
-    .battle-stage::after {
-      width: 190px;
-      height: 190px;
-      border: 1px dashed rgba(103, 183, 255, 0.22);
-      animation: orbit 28s linear infinite;
-    }
-
-    @keyframes orbit { to { transform: rotate(360deg); } }
-
-    .battle-kicker { color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: 0.24em; text-transform: uppercase; }
+    .battle-kicker { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
     .battle-name { margin: 9px 0 18px; font-size: clamp(23px, 3vw, 38px); letter-spacing: -0.04em; }
 
     .battle-core {
@@ -345,25 +302,49 @@
     .rank-player { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
     .rank-time { color: var(--muted); font-size: 10px; }
     .rank-direction { font-size: 16px; font-weight: 900; }
-    .rank-direction.up { color: var(--green); }
-    .rank-direction.down { color: var(--danger); }
+    .rank-direction.up,
+    .rank-direction.down { color: var(--muted); }
 
     .spotlight {
       position: relative;
-      margin-top: 22px;
+      margin-top: 28px;
       padding: 1px;
       border-radius: 16px;
-      background: linear-gradient(115deg, rgba(242, 199, 92, 0.78), rgba(255, 105, 97, 0.7), rgba(103, 183, 255, 0.75));
-      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34), 0 0 42px rgba(255, 112, 104, 0.08);
+      background: linear-gradient(115deg, #f2c75c, #ff6b72, #bb91ff, #67b7ff, #f2c75c);
+      background-size: 250% 250%;
+      box-shadow: 0 20px 65px rgba(0, 0, 0, 0.42), 0 0 45px rgba(255, 107, 114, 0.12);
       overflow: hidden;
+      animation: spotlight-border 12s ease infinite;
+    }
+
+    .spotlight::before {
+      content: "";
+      position: absolute;
+      inset: -40% -10%;
+      background:
+        radial-gradient(circle at 15% 50%, rgba(242, 199, 92, 0.09), transparent 24%),
+        radial-gradient(circle at 50% 10%, rgba(255, 107, 114, 0.08), transparent 24%),
+        radial-gradient(circle at 85% 55%, rgba(103, 183, 255, 0.09), transparent 24%);
+      pointer-events: none;
+      animation: spotlight-haze 10s ease-in-out infinite alternate;
+    }
+
+    @keyframes spotlight-border {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    @keyframes spotlight-haze {
+      to { transform: translate3d(2%, 4%, 0) scale(1.05); }
     }
 
     .spotlight-inner {
+      position: relative;
       border-radius: 15px;
       background:
-        linear-gradient(120deg, rgba(255, 255, 255, 0.03), transparent 34%),
+        linear-gradient(120deg, rgba(255, 255, 255, 0.035), transparent 34%),
         #10161e;
-      padding: 23px;
+      padding: 25px 23px 24px;
     }
 
     .spotlight-header {
@@ -382,16 +363,24 @@
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 14px;
+      padding-top: 52px;
     }
 
     .award {
       position: relative;
-      min-height: 210px;
-      overflow: hidden;
+      min-height: 228px;
       border: 1px solid var(--border);
       border-radius: 13px;
       background: linear-gradient(145deg, rgba(25, 33, 44, 0.96), rgba(10, 14, 20, 0.98));
-      padding: 18px;
+      padding: 59px 18px 18px;
+      isolation: isolate;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .award:hover {
+      transform: translateY(-4px);
+      border-color: color-mix(in srgb, var(--award-color) 65%, var(--border));
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 24px color-mix(in srgb, var(--award-color) 14%, transparent);
     }
 
     .award::after {
@@ -403,9 +392,56 @@
       top: -70px;
       border-radius: 50%;
       background: var(--award-color);
-      opacity: 0.13;
+      opacity: 0.12;
       filter: blur(2px);
       box-shadow: 0 0 60px var(--award-color);
+      z-index: -1;
+    }
+
+    .award-avatar-shell {
+      position: absolute;
+      top: -52px;
+      left: 50%;
+      width: 104px;
+      height: 104px;
+      padding: 3px;
+      border-radius: 50%;
+      background: conic-gradient(from 180deg, transparent 0 8%, var(--award-color) 23%, #fff 35%, var(--award-color) 50%, transparent 66% 75%, var(--award-color) 92%);
+      transform: translateX(-50%);
+      filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
+      animation: avatar-aura 4.5s ease-in-out infinite;
+    }
+
+    .award-avatar {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 4px solid #111821;
+      border-radius: 50%;
+      background: #111821;
+      object-fit: cover;
+    }
+
+    .award-medal {
+      position: absolute;
+      right: -4px;
+      bottom: 5px;
+      min-width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border: 2px solid #111821;
+      border-radius: 50%;
+      background: var(--award-color);
+      color: #090d13;
+      font-size: 11px;
+      font-weight: 900;
+      box-shadow: 0 0 16px var(--award-color);
+    }
+
+    @keyframes avatar-aura {
+      0%, 100% { filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 4px transparent); }
+      50% { filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 10px var(--award-color)); }
     }
 
     .award.gold { --award-color: var(--gold); }
@@ -413,7 +449,7 @@
     .award.blue { --award-color: var(--blue); }
 
     .award-title { color: var(--award-color); font-size: 10px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; }
-    .award-name { margin: 18px 0 5px; font-size: clamp(20px, 2.2vw, 30px); font-weight: 900; letter-spacing: -0.03em; overflow-wrap: anywhere; }
+    .award-name { margin: 13px 0 5px; font-size: clamp(20px, 2.2vw, 30px); font-weight: 900; letter-spacing: -0.03em; overflow-wrap: anywhere; }
     .award-value { color: var(--award-color); font-size: 15px; font-weight: 800; }
     .award-rule { width: 42px; height: 2px; margin: 15px 0 12px; background: var(--award-color); box-shadow: 0 0 12px var(--award-color); }
     .award-description { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -437,10 +473,10 @@
 
     @media (max-width: 760px) {
       main { width: min(100% - 20px, 1500px); padding-top: 16px; }
-      .hero { align-items: flex-start; flex-direction: column; }
       .dashboard-grid { grid-template-columns: 1fr; }
       .center-column { grid-column: auto; }
       .status-grid, .award-grid { grid-template-columns: 1fr; }
+      .award-grid { gap: 72px; }
       .battle-stage { min-height: 320px; padding-inline: 14px; }
       .battle-core { grid-template-columns: 1fr; }
       .battle-metric + .battle-metric { border-left: 0; border-top: 1px solid var(--border); }
@@ -478,12 +514,7 @@
   </header>
 
   <main>
-    <section class="hero">
-      <div>
-        <div class="eyebrow">Clan command center</div>
-        <h1>c0ld, at a glance.</h1>
-        <p>Live clan movement, PS99 status, battle momentum, and standout members.</p>
-      </div>
+    <section class="dashboard-toolbar" aria-label="Dashboard controls">
       <div class="live-state">
         <span class="live-dot"></span>
         <span id="last-updated">Connecting to live data…</span>
@@ -506,17 +537,17 @@
 
       <section class="center-column">
         <div class="status-grid">
-          <article class="status-card" style="--status-color: var(--accent)">
+          <article class="status-card">
             <div class="status-label">Last Restart</div>
             <div id="last-restart" class="status-value">—</div>
             <div id="last-restart-detail" class="status-detail">Checking detector history</div>
           </article>
-          <article class="status-card" style="--status-color: var(--blue)">
+          <article class="status-card">
             <div class="status-label">Current Version</div>
             <div id="current-version" class="status-value">—</div>
             <div id="current-version-detail" class="status-detail">Pet Simulator 99</div>
           </article>
-          <article class="status-card" style="--status-color: var(--gold)">
+          <article class="status-card">
             <div id="battle-countdown-label" class="status-label">Current Battle Ends in:</div>
             <div id="battle-countdown" class="status-value">—</div>
             <div id="battle-countdown-detail" class="status-detail">Resolving schedule</div>
@@ -560,13 +591,17 @@
           <div>
             <div class="eyebrow">Battle recognition</div>
             <h2>c0ld Spotlight</h2>
-            <p>Provisional awards calculated from the latest 24 hours of current-battle snapshots.</p>
+            <p>Live honors calculated across every recorded snapshot of the current battle.</p>
           </div>
           <span class="prototype-tag">Live prototype</span>
         </div>
 
         <div class="award-grid">
           <article class="award gold">
+            <div class="award-avatar-shell">
+              <img id="mvp-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="MVP Roblox avatar" />
+              <span class="award-medal">1</span>
+            </div>
             <div class="award-title">MVP</div>
             <div id="mvp-name" class="award-name">Calculating…</div>
             <div id="mvp-value" class="award-value">—</div>
@@ -575,6 +610,10 @@
           </article>
 
           <article class="award red">
+            <div class="award-avatar-shell">
+              <img id="volatile-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Most inconsistent Roblox avatar" />
+              <span class="award-medal">↕</span>
+            </div>
             <div class="award-title">Most Inconsistent</div>
             <div id="volatile-name" class="award-name">Calculating…</div>
             <div id="volatile-value" class="award-value">—</div>
@@ -583,6 +622,10 @@
           </article>
 
           <article class="award blue">
+            <div class="award-avatar-shell">
+              <img id="sleeper-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Underdog Roblox avatar" />
+              <span class="award-medal">↑</span>
+            </div>
             <div class="award-title">Underdog / Sleeper</div>
             <div id="sleeper-name" class="award-name">Calculating…</div>
             <div id="sleeper-value" class="award-value">—</div>
@@ -597,7 +640,8 @@
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
     const CLAN_NAME = "c0ld";
-    const HISTORY_HOURS = 24;
+    const HISTORY_ROW_LIMIT = 10000;
+    const HISTORY_FALLBACK_HOURS = 100000;
     const REFRESH_MS = 60 * 1000;
     const DEFAULT_AVATAR = "assets/c0ld-kitsune-logo.gif";
 
@@ -619,12 +663,15 @@
       clanRank: document.getElementById("clan-rank"),
       clanPoints: document.getElementById("clan-points"),
       rosterCount: document.getElementById("roster-count"),
+      mvpAvatar: document.getElementById("mvp-avatar"),
       mvpName: document.getElementById("mvp-name"),
       mvpValue: document.getElementById("mvp-value"),
       mvpDescription: document.getElementById("mvp-description"),
+      volatileAvatar: document.getElementById("volatile-avatar"),
       volatileName: document.getElementById("volatile-name"),
       volatileValue: document.getElementById("volatile-value"),
       volatileDescription: document.getElementById("volatile-description"),
+      sleeperAvatar: document.getElementById("sleeper-avatar"),
       sleeperName: document.getElementById("sleeper-name"),
       sleeperValue: document.getElementById("sleeper-value"),
       sleeperDescription: document.getElementById("sleeper-description")
@@ -632,6 +679,7 @@
 
     let countdownEndsAt = null;
     let loading = false;
+    let historyCache = { battle: "", rows: [] };
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, character => ({
@@ -776,6 +824,26 @@
       return String(row?.user_id || row?.username || "").toLowerCase();
     }
 
+    function robloxHeadshotUrl(userId) {
+      const id = finite(userId);
+      return id === null
+        ? ""
+        : `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(Math.trunc(id))}&width=150&height=150&format=png`;
+    }
+
+    function setAwardAvatar(image, player) {
+      if (!image) return;
+      const username = player?.username || "recognized player";
+      image.alt = `${username} Roblox avatar`;
+      image.dataset.fallbackApplied = "false";
+      image.onerror = () => {
+        if (image.dataset.fallbackApplied === "true") return;
+        image.dataset.fallbackApplied = "true";
+        image.src = DEFAULT_AVATAR;
+      };
+      image.src = player?.avatar_url || robloxHeadshotUrl(player?.user_id) || DEFAULT_AVATAR;
+    }
+
     function rankMap(snapshot) {
       return new Map(snapshot.rows.map(row => [playerKey(row), row]));
     }
@@ -839,8 +907,12 @@
     }
 
     function renderAwards(snapshots, currentRows) {
+      setAwardAvatar(els.mvpAvatar, null);
+      setAwardAvatar(els.volatileAvatar, null);
+      setAwardAvatar(els.sleeperAvatar, null);
+
       if (!snapshots.length) {
-        awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No battle snapshots were returned for the observed period.");
+        awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No snapshots were returned for the current battle.");
         awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "Rank movement needs at least two snapshots.");
         awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "Rank improvement needs at least two snapshots.");
         return;
@@ -849,9 +921,33 @@
       const timeAtOne = new Map();
       const changeCounts = new Map();
       const playerNames = new Map();
+      const playerProfiles = new Map();
       const firstRanks = new Map();
       const latestRanks = new Map();
       let previousRanks = new Map();
+
+      for (const snapshot of snapshots) {
+        for (const row of snapshot.rows) {
+          const key = playerKey(row);
+          if (!key) continue;
+          const prior = playerProfiles.get(key) || {};
+          playerProfiles.set(key, {
+            username: row.username || prior.username,
+            user_id: row.user_id || prior.user_id,
+            avatar_url: row.avatar_url || prior.avatar_url
+          });
+        }
+      }
+      for (const row of currentRows || []) {
+        const key = playerKey(row);
+        if (!key) continue;
+        const prior = playerProfiles.get(key) || {};
+        playerProfiles.set(key, {
+          username: row.username || prior.username,
+          user_id: row.user_id || prior.user_id,
+          avatar_url: row.avatar_url || prior.avatar_url
+        });
+      }
 
       snapshots.forEach((snapshot, index) => {
         const nextTime = snapshots[index + 1]?.time || snapshot.time;
@@ -883,11 +979,13 @@
       if (mvp) {
         els.mvpName.textContent = playerNames.get(mvp[0]) || "Unknown player";
         els.mvpValue.textContent = `${formatDuration(mvp[1])} at #1`;
-        els.mvpDescription.textContent = `Longest observed hold of the #1 player position across the latest ${HISTORY_HOURS} hours.`;
+        els.mvpDescription.textContent = "Longest observed hold of the #1 player position across the entire current battle.";
+        setAwardAvatar(els.mvpAvatar, playerProfiles.get(mvp[0]));
       } else if (currentLeader) {
         els.mvpName.textContent = currentLeader.username || "Current leader";
         els.mvpValue.textContent = `#1 · ${formatNumber(currentLeader.total_points)} points`;
         els.mvpDescription.textContent = "Current points leader; time-at-rank history is still accumulating.";
+        setAwardAvatar(els.mvpAvatar, currentLeader);
       } else {
         awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No current leader is available.");
       }
@@ -896,9 +994,10 @@
       if (volatile && volatile[1] > 0) {
         els.volatileName.textContent = playerNames.get(volatile[0]) || "Unknown player";
         els.volatileValue.textContent = `${volatile[1]} rank change${volatile[1] === 1 ? "" : "s"}`;
-        els.volatileDescription.textContent = `Most movement between observed leaderboard snapshots in the latest ${HISTORY_HOURS} hours.`;
+        els.volatileDescription.textContent = "Most movement between observed leaderboard snapshots across the entire current battle.";
+        setAwardAvatar(els.volatileAvatar, playerProfiles.get(volatile[0]));
       } else {
-        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "No player-rank changes were observed in the current window.");
+        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "No player-rank changes have been observed in the current battle.");
       }
 
       const sleepers = [...latestRanks.entries()]
@@ -910,9 +1009,10 @@
         const percentage = (sleeper.gain / sleeper.first) * 100;
         els.sleeperName.textContent = playerNames.get(sleeper.key) || "Unknown player";
         els.sleeperValue.textContent = `#${sleeper.first} → #${sleeper.latest}`;
-        els.sleeperDescription.textContent = `Climbed ${sleeper.gain} places (${percentage.toFixed(0)}%) during the observed ${HISTORY_HOURS}-hour window.`;
+        els.sleeperDescription.textContent = `Climbed ${sleeper.gain} places (${percentage.toFixed(0)}%) from their first recorded rank in this battle to now.`;
+        setAwardAvatar(els.sleeperAvatar, playerProfiles.get(sleeper.key));
       } else {
-        awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "No upward player-rank climb was observed in the current window.");
+        awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "No upward player-rank climb has been observed in the current battle.");
       }
     }
 
@@ -945,6 +1045,48 @@
       }
     }
 
+    function mergeHistoryRows(...collections) {
+      const unique = new Map();
+      for (const rows of collections) {
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const key = `${row.snapshot_id || row.fetched_at || "snapshot"}:${row.user_id || row.username || row.rank || "player"}`;
+          unique.set(key, row);
+        }
+      }
+      return [...unique.values()];
+    }
+
+    async function fetchBattleHistory(battle) {
+      const sameBattle = historyCache.battle === battle && historyCache.rows.length > 0;
+      // The battle key is the authoritative boundary. Do not trust upstream StartTime metadata here.
+      const hours = sameBattle ? 2 : HISTORY_FALLBACK_HOURS;
+      const base = `${API_BASE}/api/history?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}&hours=${hours}&limit=${HISTORY_ROW_LIMIT}`;
+      let incoming = [];
+      let offset = 0;
+      let priorPageSignature = "";
+
+      while (true) {
+        const page = await fetchJson(`${base}&order=asc&offset=${offset}`, { rows: [] });
+        const rows = Array.isArray(page.rows) ? page.rows : [];
+        const pageSignature = rows.length
+          ? `${rows.length}:${rows[0]?.snapshot_id || rows[0]?.fetched_at}:${rows.at(-1)?.snapshot_id || rows.at(-1)?.fetched_at}`
+          : "empty";
+
+        // Prevent a loop if this page is opened against an older worker that does not support offsets yet.
+        if (offset > 0 && pageSignature === priorPageSignature) break;
+        incoming = mergeHistoryRows(incoming, rows);
+        priorPageSignature = pageSignature;
+        if (rows.length < HISTORY_ROW_LIMIT || sameBattle) break;
+        offset += HISTORY_ROW_LIMIT;
+      }
+
+      historyCache = {
+        battle,
+        rows: mergeHistoryRows(sameBattle ? historyCache.rows : [], incoming)
+      };
+      return { rows: historyCache.rows, hours };
+    }
+
     async function load() {
       if (loading) return;
       loading = true;
@@ -955,17 +1097,14 @@
       try {
         const [detail, current, restarts, versions, announcement] = await Promise.all([
           fetchJson(`${API_BASE}/api/clans/activity/detail?clan=${CLAN_NAME}&limit=120`, {}),
-          fetchJson(`${API_BASE}/api/current?clan=${CLAN_NAME}&avatars=false&downtime=false`),
+          fetchJson(`${API_BASE}/api/current?clan=${CLAN_NAME}&avatars=true&downtime=false`),
           fetchJson(`${API_BASE}/api/ps99/restarts?limit=1`, {}),
           fetchJson(`${API_BASE}/api/ps99/versions?limit=20`, {}),
           fetchJson("Data/announcement.json", {})
         ]);
 
         const battle = current.battle || detail.battle || "current";
-        const history = await fetchJson(
-          `${API_BASE}/api/history?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}&hours=${HISTORY_HOURS}&limit=30000&order=asc`,
-          { rows: [] }
-        );
+        const history = await fetchBattleHistory(battle);
         const currentRows = Array.isArray(current.rows) ? current.rows : [];
         const snapshots = groupSnapshots(history.rows);
         const rootPlace = (versions.places || []).find(place => place.root_place) || versions.places?.[0] || null;
