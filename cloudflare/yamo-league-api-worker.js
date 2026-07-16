@@ -38,6 +38,8 @@ export default {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
         response = await handleHistory(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/profile") {
+        response = await handleProfile(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
@@ -780,6 +782,97 @@ async function handleHistory(request, env) {
   if (userId) params.user_id = `eq.${userId}`;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
   return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows }, env);
+}
+
+async function handleProfile(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const userId = toNumber(url.searchParams.get("user_id") || url.searchParams.get("id"));
+  if (!userId) throw httpError(400, "Missing numeric user_id.");
+
+  const rawRun = runKeyParam(url);
+  const requestedLeague = String(url.searchParams.get("league") || "").trim();
+  const limit = clamp(Number(url.searchParams.get("limit") || 2000), 1, 20000);
+  const summaryLimit = clamp(Number(url.searchParams.get("summary_limit") || 100), 1, 500);
+  const params = {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
+    user_id: `eq.${userId}`,
+    order: "fetched_at.desc,rank.asc",
+    limit: String(limit)
+  };
+
+  if (rawRun && String(rawRun).toLowerCase() !== "all") params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
+  if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
+
+  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  const summaries = summarizeLeagueProfileRows(rows)
+    .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
+    .slice(0, summaryLimit);
+  const latest = summaries[0] || null;
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    user_id: userId,
+    username: latest?.display_name || null,
+    profile_url: `https://www.roblox.com/users/${userId}/profile`,
+    rows_scanned: rows.length,
+    rows: summaries
+  }, env);
+}
+
+function summarizeLeagueProfileRows(rows) {
+  const groups = new Map();
+
+  for (const row of rows || []) {
+    const keyParts = [
+      String(row.league_run_key || DEFAULT_LEAGUE_RUN_KEY).trim(),
+      String(row.league_id || "").trim(),
+      String(row.league_name || "").trim()
+    ];
+    const key = keyParts.join("\u0000");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  return [...groups.values()].map(summarizeLeagueProfileGroup).filter(Boolean);
+}
+
+function summarizeLeagueProfileGroup(rows) {
+  const ordered = rows
+    .slice()
+    .filter(row => row?.fetched_at)
+    .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+  if (!ordered.length) return null;
+
+  const first = ordered[0];
+  const latest = ordered[ordered.length - 1];
+  const ranks = ordered.map(row => toNumber(row.rank)).filter(Number.isFinite);
+  const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
+
+  return {
+    league_run_key: latest.league_run_key || first.league_run_key || DEFAULT_LEAGUE_RUN_KEY,
+    league_name: latest.league_name || first.league_name || null,
+    league_id: latest.league_id || first.league_id || null,
+    league_level: toNumber(latest.league_level ?? first.league_level),
+    league_points: toNumber(latest.league_points ?? first.league_points) || 0,
+    league_icon: latest.league_icon || first.league_icon || null,
+    member_capacity: toNumber(latest.member_capacity ?? first.member_capacity),
+    user_id: toNumber(latest.user_id ?? first.user_id),
+    display_name: latest.display_name || first.display_name || null,
+    final_rank: toNumber(latest.rank),
+    best_rank: ranks.length ? Math.min(...ranks) : null,
+    final_points: toNumber(latest.points) || 0,
+    highest_points: points.length ? Math.max(...points) : 0,
+    first_snapshot_at: first.fetched_at || null,
+    final_snapshot_at: latest.fetched_at || null,
+    snapshot_count: ordered.length,
+    last_contribution_at: latest.last_contribution_at || null,
+    permission_level: latest.permission_level ?? null,
+    role: latest.role || null,
+    join_time: latest.join_time || null,
+    source: latest.source || first.source || null
+  };
 }
 
 async function fetchClanCurrentForOverlap(env, clan, preferLive = false) {

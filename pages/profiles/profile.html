@@ -33,6 +33,19 @@
     .reward-divider{color:var(--muted);padding:0 8px}
     .section-title-row{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:24px 0 14px}
     .section-title{margin:0;font-size:24px}
+    .history-shell{margin-top:24px}
+    .history-tabs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+    .history-tab{appearance:none;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+    .history-tab:hover,.history-tab.active{border-color:var(--link);color:var(--link);background:#1f2630}
+    .history-control-row{display:flex;justify-content:flex-end;margin:0 0 14px}
+    .summary-list{display:grid;grid-template-columns:1fr;gap:12px}
+    .summary-card{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:16px}
+    .summary-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+    .summary-title{margin:0 0 5px;font-size:20px}
+    .summary-meta{text-align:right;color:var(--muted);font-size:13px;line-height:1.45}
+    .summary-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 18px}
+    .summary-stat{min-width:0}
+    .summary-stat .value{font-size:18px;font-weight:700;overflow-wrap:anywhere}
     select{min-width:230px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text)}
     .battle-card{overflow:hidden}
     .battle-head{padding:16px;border-bottom:1px solid var(--border)}
@@ -52,6 +65,10 @@
       main{padding:16px}
       .menu-bar{justify-content:flex-start}
       .cards{grid-template-columns:1fr}
+      .history-control-row{justify-content:stretch}
+      .summary-head{display:block}
+      .summary-meta{text-align:left;margin-top:6px}
+      .summary-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
       .stat-row{grid-template-columns:1fr}
       .stat-value{text-align:left}
       .chart{height:230px}
@@ -108,9 +125,10 @@ const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/hist
 const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
 const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/search";
 const CLANS_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+const LEAGUE_PROFILE="https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/profile";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 const PLAYER_REWARD_RANKS=[3,100,1000,1050,1150,6150,30000];
-const CLAN_REWARD_RANKS=[3,10,50,100,500];
+const CLAN_REWARD_RANKS=[1,3,10,50,250,500];
 const EMBEDDED_HISTORY_BATTLE_LIMIT=24;
 const FULL_HISTORY_BATTLE_LIMIT=60;
 const HISTORY_FETCH_CONCURRENCY=5;
@@ -126,6 +144,7 @@ const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
 let activeInfo=null;
 let profile=null;
 let battleIndex=0;
+let activeHistoryTab="clan";
 let showPoints=true;
 let showRank=true;
 let chartCache=null;
@@ -415,6 +434,121 @@ function recalcBattle(battle){
   };
 }
 
+function summaryKey(row,type){
+  return[
+    type||row?.type||"",
+    row?.league_run_key||row?.run_key||"",
+    row?.league_id||"",
+    normalize(row?.league_name||row?.event_name||row?.battle_display_name||row?.label||""),
+    row?.final_snapshot_at||""
+  ].join("|");
+}
+
+function mergeSummaries(type,...lists){
+  const map=new Map();
+
+  for(const row of lists.flat().filter(Boolean)){
+    const key=summaryKey(row,type);
+    const existing=map.get(key);
+    if(!existing||new Date(row.final_snapshot_at||0)>new Date(existing.final_snapshot_at||0)){
+      map.set(key,{...existing,...row,type:row.type||type});
+    }
+  }
+
+  return[...map.values()].sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
+}
+
+function summarizeLeaderboardRows(rawRows,fallbackRow={},run={}){
+  const rows=Array.isArray(rawRows)?rawRows.slice():[];
+  const currentRunKey=fallbackRow.run_key||run.run_key||null;
+  const hasCurrent=currentRunKey&&rows.some(row=>String(row.run_key||"")===String(currentRunKey));
+
+  if(!rows.length||!hasCurrent){
+    rows.push({
+      run_key:currentRunKey,
+      fetched_at:fallbackRow.fetched_at||run.finished_at||run.updated_at||null,
+      event_name:fallbackRow.event_name||run.event_name||null,
+      battle_key:fallbackRow.battle_key||run.battle_key||null,
+      battle_display_name:fallbackRow.battle_display_name||run.battle_display_name||null,
+      global_rank:fallbackRow.global_rank,
+      global_points:fallbackRow.global_points,
+      total_global_players:fallbackRow.total_global_players
+    });
+  }
+
+  const groups=new Map();
+  for(const row of rows){
+    const rank=finite(row.global_rank);
+    const points=finite(row.global_points??row.points);
+    if(rank===null&&points===null)continue;
+
+    const key=row.run_key||row.battle_key||row.event_name||row.fetched_at||`leaderboard-${groups.size}`;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(row);
+  }
+
+  return[...groups.values()].map(group=>{
+    const ordered=group
+      .slice()
+      .sort((a,b)=>new Date(a.fetched_at||0)-new Date(b.fetched_at||0));
+    const first=ordered[0]||{};
+    const latest=ordered[ordered.length-1]||first;
+    const ranks=ordered.map(row=>finite(row.global_rank)).filter(Number.isFinite);
+    const points=ordered.map(row=>finite(row.global_points??row.points)).filter(Number.isFinite);
+    const label=
+      latest.event_name||
+      latest.battle_display_name||
+      first.event_name||
+      first.battle_display_name||
+      run.event_name||
+      run.battle_display_name||
+      "Global Leaderboard";
+
+    return{
+      type:"leaderboard",
+      run_key:latest.run_key||first.run_key||run.run_key||null,
+      label,
+      event_name:label,
+      battle_key:latest.battle_key||first.battle_key||run.battle_key||null,
+      battle_display_name:latest.battle_display_name||first.battle_display_name||run.battle_display_name||null,
+      final_rank:finite(latest.global_rank),
+      best_rank:ranks.length?Math.min(...ranks):null,
+      final_points:finite(latest.global_points??latest.points),
+      highest_points:points.length?Math.max(...points):null,
+      total_ranked:finite(latest.total_global_players??first.total_global_players??run.total_global_players??run.candidate_player_count),
+      first_snapshot_at:first.fetched_at||null,
+      final_snapshot_at:latest.fetched_at||run.finished_at||run.updated_at||null,
+      snapshot_count:ordered.length
+    };
+  }).filter(row=>row.final_rank!==null||row.final_points!==null);
+}
+
+function normalizeLeagueSummaryRows(rows){
+  return(Array.isArray(rows)?rows:[])
+    .map(row=>({
+      type:"league",
+      league_run_key:row.league_run_key||null,
+      league_name:row.league_name||"League",
+      league_id:row.league_id||null,
+      league_level:finite(row.league_level),
+      league_points:finite(row.league_points),
+      league_icon:row.league_icon||null,
+      member_capacity:finite(row.member_capacity),
+      display_name:row.display_name||null,
+      final_rank:finite(row.final_rank),
+      best_rank:finite(row.best_rank),
+      final_points:finite(row.final_points),
+      highest_points:finite(row.highest_points),
+      first_snapshot_at:row.first_snapshot_at||null,
+      final_snapshot_at:row.final_snapshot_at||null,
+      snapshot_count:finite(row.snapshot_count),
+      role:row.role||null,
+      join_time:row.join_time||null
+    }))
+    .filter(row=>row.final_rank!==null||row.final_points!==null)
+    .sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
+}
+
 function downsampleSeriesByMinutes(series,minutes){
   const bucketMs=Math.max(1,minutes)*60*1000;
   const buckets=new Map();
@@ -625,6 +759,7 @@ async function loadGlobalProfile(id){
     payload.run?.battle_key||
     "Clan Battle";
   const sourceClan=row.source_clan||row.clan_name||"Clan";
+  const leaderboardSummaries=summarizeLeaderboardRows(rawHistory,row,payload.run||{});
   const battles=[];
 
   if(clanSeries.length>1){
@@ -640,22 +775,6 @@ async function loadGlobalProfile(id){
       ending_rank:clanRank??clanSeries[clanSeries.length-1]?.rank??null,
       ending_points:clanPoints??clanSeries[clanSeries.length-1]?.points??null,
       series:clanSeries
-    }));
-  }
-
-  if(globalSeries.length>1){
-    battles.push(recalcBattle({
-    battle:"global-leaderboard",
-    source:"global",
-    display_name:"Global Leaderboard",
-    battle_first_snapshot:globalSeries[0]?.t||null,
-    battle_last_snapshot:globalSeries[globalSeries.length-1]?.t||null,
-    first_seen:globalSeries[0]?.t||null,
-    last_seen:globalSeries[globalSeries.length-1]?.t||null,
-    starting_rank:globalSeries[0]?.rank??null,
-    ending_rank:globalRank??globalSeries[globalSeries.length-1]?.rank??null,
-    ending_points:points,
-    series:globalSeries
     }));
   }
 
@@ -685,7 +804,30 @@ async function loadGlobalProfile(id){
     battle_key:row.battle_key||null,
     battle_display_name:row.battle_display_name||null,
     event_name:row.event_name||null,
+    leaderboard_summaries:leaderboardSummaries,
     battles
+  };
+}
+
+async function loadLeagueProfile(userId){
+  const id=finite(userId);
+  if(id===null)return null;
+
+  const payload=await optionalJson(`${LEAGUE_PROFILE}?user_id=${encodeURIComponent(id)}&limit=2000&summary_limit=100`);
+  const rows=normalizeLeagueSummaryRows(payload?.rows||[]);
+  if(!payload?.ok||!rows.length)return null;
+
+  const latest=rows[0]||{};
+
+  return{
+    aliases:[String(id)],
+    username:payload.username||latest.display_name||`user_${id}`,
+    user_id:id,
+    profile_url:payload.profile_url||`https://www.roblox.com/users/${id}/profile`,
+    latest_seen:latest.final_snapshot_at||null,
+    latest_points:latest.final_points??null,
+    league_summaries:rows,
+    battles:[]
   };
 }
 
@@ -780,6 +922,8 @@ function mergeProfiles(staticProfile,liveProfile){
     battle_key:liveProfile.battle_key??staticProfile.battle_key??null,
     battle_display_name:liveProfile.battle_display_name??staticProfile.battle_display_name??null,
     event_name:liveProfile.event_name??staticProfile.event_name??null,
+    leaderboard_summaries:mergeSummaries("leaderboard",staticProfile.leaderboard_summaries,liveProfile.leaderboard_summaries),
+    league_summaries:mergeSummaries("league",staticProfile.league_summaries,liveProfile.league_summaries),
     battles
   };
 }
@@ -789,6 +933,27 @@ function sortedBattles(){
     .filter(battle=>!isLegacyNongBattle(battle))
     .map(recalcBattle)
     .sort((a,b)=>new Date(b.battle_last_snapshot||b.last_seen||0)-new Date(a.battle_last_snapshot||a.last_seen||0));
+}
+
+function clanHistoryBattles(){
+  return sortedBattles().filter(battle=>battle.source!=="global");
+}
+
+function leagueHistorySummaries(){
+  return normalizeLeagueSummaryRows(profile?.league_summaries||[]);
+}
+
+function leaderboardHistorySummaries(){
+  return mergeSummaries("leaderboard",profile?.leaderboard_summaries||[]);
+}
+
+function availableHistoryTabs(){
+  const tabs=[];
+  if(clanHistoryBattles().length)tabs.push({id:"clan",label:"Clan History"});
+  if(leagueHistorySummaries().length)tabs.push({id:"league",label:"League History"});
+  if(leaderboardHistorySummaries().length)tabs.push({id:"leaderboard",label:"Leaderboard History"});
+  if(!tabs.some(tab=>tab.id===activeHistoryTab))activeHistoryTab=tabs[0]?.id||"clan";
+  return tabs;
 }
 
 function chartPoints(series){
@@ -976,11 +1141,81 @@ function renderProfileCards(){
   `;
 }
 
+function summaryStat(label,value){
+  return`
+    <div class="summary-stat">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value">${value}</div>
+    </div>
+  `;
+}
+
+function summaryTitle(row,type){
+  if(type==="league")return row.league_name||"League";
+  return row.event_name||row.battle_display_name||row.label||"Global Leaderboard";
+}
+
+function summarySubtitle(row,type){
+  const parts=[];
+
+  if(type==="league"){
+    if(row.league_run_key)parts.push(row.league_run_key);
+    if(row.role)parts.push(row.role);
+  }else{
+    if(row.run_key)parts.push(`Update ${row.run_key}`);
+  }
+
+  return parts.join(" • ");
+}
+
+function renderSummaryCards(rows,type){
+  if(!rows.length)return`<section class="empty">No ${type==="league"?"league":"leaderboard"} history found.</section>`;
+
+  return`
+    <section class="summary-list">
+      ${rows.map(row=>`
+        <article class="summary-card">
+          <div class="summary-head">
+            <div>
+              <h3 class="summary-title">${escapeHtml(summaryTitle(row,type))}</h3>
+              <div class="muted">${escapeHtml(summarySubtitle(row,type))}</div>
+            </div>
+            <div class="summary-meta">${fmtDateTime(row.final_snapshot_at)}</div>
+          </div>
+          <div class="summary-stats">
+            ${summaryStat("Final Rank",rankDisplay(row.final_rank,row.total_ranked))}
+            ${summaryStat("Best Rank",rankDisplay(row.best_rank,row.total_ranked))}
+            ${summaryStat("Final Points",fmt(row.final_points))}
+            ${summaryStat("Highest Points",fmt(row.highest_points))}
+          </div>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderHistoryTabs(tabs){
+  return`
+    <section class="history-shell">
+      <div class="section-title-row">
+        <h2 class="section-title">History</h2>
+      </div>
+      <div class="history-tabs" role="tablist" aria-label="Profile history">
+        ${tabs.map(tab=>`
+          <button class="history-tab ${tab.id===activeHistoryTab?"active":""}" type="button" data-history-tab="${tab.id}">
+            ${escapeHtml(tab.label)}
+          </button>
+        `).join("")}
+      </div>
+      <section id="history-detail"></section>
+    </section>
+  `;
+}
+
 function render(){
   const app=document.getElementById("app");
-  const battles=sortedBattles();
-  const hasHistory=battles.length>0;
-  const historyTitle=battles.every(battle=>battle.source==="global")?"History":"Battle History";
+  const tabs=availableHistoryTabs();
+  const hasHistory=tabs.length>0;
 
   app.innerHTML=`
     <section class="profile-header">
@@ -1000,18 +1235,7 @@ function render(){
 
     ${renderRewardLine()}
 
-    ${hasHistory?`
-      <div class="section-title-row">
-        <h2 class="section-title">${historyTitle}</h2>
-        <select id="battle-select">
-          ${battles.map((battle,index)=>`
-            <option value="${index}">${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
-          `).join("")}
-        </select>
-      </div>
-
-      <section id="battle-detail"></section>
-    `:`<section class="empty">No history found.</section>`}
+    ${hasHistory?renderHistoryTabs(tabs):`<section class="empty">No history found.</section>`}
   `;
 
   app.querySelector(".avatar").onerror=function(){
@@ -1020,6 +1244,59 @@ function render(){
   };
 
   if(!hasHistory)return;
+
+  app.querySelectorAll("[data-history-tab]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      activeHistoryTab=button.dataset.historyTab;
+      if(activeHistoryTab==="clan")battleIndex=0;
+      renderHistoryDetail();
+    });
+  });
+
+  renderHistoryDetail();
+}
+
+function renderHistoryDetail(){
+  const detail=document.getElementById("history-detail");
+  if(!detail)return;
+
+  document.querySelectorAll("[data-history-tab]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.historyTab===activeHistoryTab);
+  });
+
+  if(activeHistoryTab==="league"){
+    detail.innerHTML=renderSummaryCards(leagueHistorySummaries(),"league");
+    chartCache=null;
+    notifyEmbedHeight();
+    return;
+  }
+
+  if(activeHistoryTab==="leaderboard"){
+    detail.innerHTML=renderSummaryCards(leaderboardHistorySummaries(),"leaderboard");
+    chartCache=null;
+    notifyEmbedHeight();
+    return;
+  }
+
+  const battles=clanHistoryBattles();
+  if(!battles.length){
+    detail.innerHTML=`<section class="empty">No clan history found.</section>`;
+    chartCache=null;
+    notifyEmbedHeight();
+    return;
+  }
+
+  battleIndex=Math.min(Math.max(0,battleIndex),battles.length-1);
+  detail.innerHTML=`
+    <div class="history-control-row">
+      <select id="battle-select">
+        ${battles.map((battle,index)=>`
+          <option value="${index}" ${index===battleIndex?"selected":""}>${escapeHtml(battle.display_name||battle.battle||`Battle ${index+1}`)}</option>
+        `).join("")}
+      </select>
+    </div>
+    <section id="battle-detail"></section>
+  `;
 
   document.getElementById("battle-select").onchange=event=>{
     battleIndex=Number(event.target.value||0);
@@ -1030,7 +1307,9 @@ function render(){
 }
 
 function renderBattle(){
-  const battle=sortedBattles()[battleIndex];
+  const battle=clanHistoryBattles()[battleIndex];
+  if(!battle)return;
+
   const range=eventRange(battle);
   const endRank=battle.ending_rank??battle.end_rank??battle.last_rank??null;
   const activity=activitySummary(battle);
@@ -1099,6 +1378,7 @@ function renderBattle(){
   });
 
   requestAnimationFrame(drawChart);
+  notifyEmbedHeight();
 }
 
 function yScale(value,min,max,top,height,type){
@@ -1165,12 +1445,14 @@ function drawActivityStrip(ctx,points,x,stripY){
 function drawChart(){
   const canvas=document.getElementById("chart");
   const tooltip=document.getElementById("tip");
-  if(!canvas)return;
+  if(!canvas||activeHistoryTab!=="clan")return;
 
   const ctx=canvas.getContext("2d");
   const rect=canvas.getBoundingClientRect();
   const dpr=devicePixelRatio||1;
-  const battle=sortedBattles()[battleIndex];
+  const battle=clanHistoryBattles()[battleIndex];
+  if(!battle)return;
+
   const all=trackedChartPoints(battle);
   const strip=trackedPoints(battle);
   const pointSeries=showPoints?all.filter(point=>point.points!==null):[];
@@ -1390,9 +1672,32 @@ async function main(){
         latest_seen:globalProfile.latest_seen??profile.latest_seen??null,
         latest_points:globalProfile.latest_points??profile.latest_points??null,
         joined_at:profile.joined_at??globalProfile.joined_at??null,
+        leaderboard_summaries:mergeSummaries("leaderboard",profile.leaderboard_summaries,globalProfile.leaderboard_summaries),
+        league_summaries:mergeSummaries("league",profile.league_summaries,globalProfile.league_summaries),
         battles:[...existingBattles,...globalBattles],
         total_battles:existingBattles.length+globalBattles.length,
         is_global_profile:Boolean(profile.is_global_profile||globalProfile.is_global_profile)
+      };
+    }
+
+    const lookupUserId=
+      profile?.user_id||
+      globalProfile?.user_id||
+      live?.user_id||
+      staticProfile?.user_id||
+      (/^\d+$/.test(String(id))?String(id):null);
+    const leagueProfile=lookupUserId?await loadLeagueProfile(lookupUserId).catch(()=>null):null;
+
+    if(!profile){
+      profile=leagueProfile;
+    }else if(leagueProfile){
+      profile={
+        ...profile,
+        username:profile.username||leagueProfile.username,
+        user_id:profile.user_id||leagueProfile.user_id,
+        profile_url:profile.profile_url||leagueProfile.profile_url,
+        latest_seen:profile.latest_seen??leagueProfile.latest_seen??null,
+        league_summaries:mergeSummaries("league",profile.league_summaries,leagueProfile.league_summaries)
       };
     }
 

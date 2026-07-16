@@ -209,7 +209,7 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
-The public Roblox server list does not include creation time or place version, and this Worker does not have a public direct "status by job ID" endpoint for PS99. The restart detector therefore pages through the public server list, matches persisted server IDs when they appear in those pages, refreshes individually missing IDs during normal churn, and only starts confirmation when all tracked IDs disappear together. By default, confirmed restart events also require correlation with a PS99 place version change so transient public-list misses are suppressed instead of recorded as restarts.
+The public Roblox server list does not include creation time or true per-server place version, and this Worker does not have a public direct "status by job ID" endpoint for PS99. The restart detector therefore pages through the public server list, matches persisted server IDs when they appear in those pages, refreshes individually missing IDs during normal churn, and only starts confirmation when all tracked IDs disappear together. The displayed sampled version is the known place version when the server ID was first registered; the detector intentionally preserves different sampled-version cohorts when they remain visible and seeds one current-version server when a new place version appears. By default, confirmed restart events also require correlation with a PS99 place version change so transient public-list misses are suppressed instead of recorded as restarts.
 
 ## Scheduled pulls
 
@@ -519,6 +519,7 @@ Useful endpoints:
 |---|---|
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 
 The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through

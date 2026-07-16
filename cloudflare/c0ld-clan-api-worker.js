@@ -1331,7 +1331,7 @@ async function handleGlobalSearch(request, env) {
   }
 
   const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
-    select: "run_key,fetched_at,event_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
+    select: "run_key,fetched_at,event_name,battle_key,battle_display_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
     clan_name: `eq.${clan}`,
     user_id: `eq.${found.user_id}`,
     order: "fetched_at.desc",
@@ -1496,8 +1496,7 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
   }
 
   const currentRunKey = String(currentRow?.run_key || "").trim();
-
-  return runs
+  const summaries = runs
     .map(run => {
       const candidate = byRun.get(run.run_key);
       if (!candidate) return null;
@@ -1512,6 +1511,7 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
 
       return {
         run_key: run.run_key,
+        user_id: toNumber(candidate.user_id),
         fetched_at: candidate.fetched_at || run.finished_at || run.updated_at || run.started_at || null,
         event_name: run.event_name || candidate.battle_display_name || run.battle_display_name || null,
         battle_key: candidate.battle_key || run.battle_key || null,
@@ -1534,7 +1534,38 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
         found: true
       };
     })
-    .filter(Boolean)
+    .filter(Boolean);
+
+  const withGlobalRanks = [];
+  for (const batch of chunkValues(summaries, 6)) {
+    withGlobalRanks.push(...await Promise.all(batch.map(async row => {
+      if (toNumber(row.global_rank) !== null) return row;
+
+      const points = toNumber(row.global_points);
+      const userIdValue = toNumber(row.user_id);
+      if (!row.run_key || points === null || !userIdValue) return row;
+
+      const [higherCount, tiedBeforeCount] = await Promise.all([
+        supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+          run_key: `eq.${row.run_key}`,
+          points: `gt.${points}`
+        }),
+        supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+          run_key: `eq.${row.run_key}`,
+          points: `eq.${points}`,
+          user_id: `lt.${userIdValue}`
+        })
+      ]);
+
+      return {
+        ...row,
+        global_rank: higherCount + tiedBeforeCount + 1
+      };
+    })));
+  }
+
+  return withGlobalRanks
+    .map(({ user_id, ...row }) => row)
     .sort((a, b) => new Date(b.fetched_at || 0) - new Date(a.fetched_at || 0));
 }
 
@@ -4751,21 +4782,94 @@ function normalizePs99PublicServer(row) {
   };
 }
 
-function samplePs99RestartServers(batch, count, observedAt, placeVersion, excludedIds = new Set()) {
-  const pool = batch.filter(server => !excludedIds.has(server.server_id));
+function normalizePs99RestartSampleServer(server, observedAt, placeVersion) {
+  return {
+    ...server,
+    first_seen_at: safeIso(server.first_seen_at) || observedAt,
+    last_seen_at: observedAt,
+    observed_place_version: toNumber(server.observed_place_version) ?? toNumber(placeVersion),
+    present: true
+  };
+}
 
-  for (let index = pool.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+function comparePs99RestartServerQuality(a, b) {
+  const ap = toNumber(a.playing) || 0;
+  const bp = toNumber(b.playing) || 0;
+  if (bp !== ap) return bp - ap;
+
+  const af = toNumber(a.fps);
+  const bf = toNumber(b.fps);
+  if ((bf ?? -1) !== (af ?? -1)) return (bf ?? -1) - (af ?? -1);
+
+  const ag = toNumber(a.ping);
+  const bg = toNumber(b.ping);
+  if ((ag ?? Number.MAX_SAFE_INTEGER) !== (bg ?? Number.MAX_SAFE_INTEGER)) {
+    return (ag ?? Number.MAX_SAFE_INTEGER) - (bg ?? Number.MAX_SAFE_INTEGER);
   }
 
-  return pool.slice(0, count).map(server => ({
-    ...server,
-    first_seen_at: observedAt,
-    last_seen_at: observedAt,
-    observed_place_version: toNumber(placeVersion),
-    present: true
-  }));
+  return String(a.server_id || "").localeCompare(String(b.server_id || ""));
+}
+
+function ps99RestartVersionKey(server) {
+  const version = toNumber(server?.observed_place_version);
+  return version === null ? "unknown" : String(version);
+}
+
+function selectPs99RestartServersDiverse(candidates, count, existingVersions = new Set()) {
+  const wanted = Math.max(0, Math.round(Number(count) || 0));
+  if (!wanted) return [];
+
+  const byVersion = new Map();
+  for (const server of candidates || []) {
+    if (!server?.server_id) continue;
+
+    const key = ps99RestartVersionKey(server);
+    if (!byVersion.has(key)) byVersion.set(key, []);
+    byVersion.get(key).push(server);
+  }
+
+  for (const rows of byVersion.values()) {
+    rows.sort(comparePs99RestartServerQuality);
+  }
+
+  const selected = [];
+  const selectedIds = new Set();
+  const versions = [...byVersion.keys()]
+    .sort((a, b) => {
+      const aExisting = existingVersions.has(a) ? 1 : 0;
+      const bExisting = existingVersions.has(b) ? 1 : 0;
+      if (aExisting !== bExisting) return aExisting - bExisting;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+
+  for (const key of versions) {
+    if (selected.length >= wanted) break;
+    const row = byVersion.get(key)?.find(server => !selectedIds.has(server.server_id));
+    if (!row) continue;
+    selected.push(row);
+    selectedIds.add(row.server_id);
+  }
+
+  const remaining = [...byVersion.values()]
+    .flat()
+    .filter(server => !selectedIds.has(server.server_id))
+    .sort(comparePs99RestartServerQuality);
+
+  for (const row of remaining) {
+    if (selected.length >= wanted) break;
+    selected.push(row);
+    selectedIds.add(row.server_id);
+  }
+
+  return selected;
+}
+
+function samplePs99RestartServers(batch, count, observedAt, placeVersion, excludedIds = new Set()) {
+  const pool = batch
+    .filter(server => server?.server_id && !excludedIds.has(server.server_id))
+    .map(server => normalizePs99RestartSampleServer(server, observedAt, placeVersion));
+
+  return selectPs99RestartServersDiverse(pool, count);
 }
 
 function refreshPs99ObservedServers(servers, currentById, checkedAt) {
@@ -4791,17 +4895,65 @@ function refreshPs99ObservedServers(servers, currentById, checkedAt) {
 }
 
 function refillPs99RestartSample(trackedServers, batch, sampleSize, checkedAt, placeVersion) {
-  const survivors = trackedServers.filter(server => server.present).slice(0, sampleSize);
+  let survivors = trackedServers.filter(server => server.present);
+  if (survivors.length > sampleSize) {
+    survivors = selectPs99RestartServersDiverse(survivors, sampleSize);
+  }
+
   const excluded = new Set(survivors.map(server => server.server_id));
-  const replacements = samplePs99RestartServers(
-    batch,
-    Math.max(0, sampleSize - survivors.length),
-    checkedAt,
-    placeVersion,
-    excluded
-  );
+  const replacementPool = batch
+    .filter(server => server?.server_id && !excluded.has(server.server_id))
+    .map(server => normalizePs99RestartSampleServer(server, checkedAt, placeVersion));
+  const currentVersionKey = toNumber(placeVersion) === null ? null : String(toNumber(placeVersion));
+
+  if (
+    survivors.length >= sampleSize &&
+    currentVersionKey &&
+    !survivors.some(server => ps99RestartVersionKey(server) === currentVersionKey) &&
+    replacementPool.length
+  ) {
+    const replaceIndex = ps99RestartVersionDiversityReplacementIndex(survivors);
+    if (replaceIndex >= 0) {
+      const currentVersionReplacement = replacementPool
+        .filter(server => ps99RestartVersionKey(server) === currentVersionKey)
+        .sort(comparePs99RestartServerQuality)[0] || replacementPool.sort(comparePs99RestartServerQuality)[0];
+
+      if (currentVersionReplacement) {
+        survivors = survivors.slice();
+        survivors[replaceIndex] = currentVersionReplacement;
+      }
+    }
+  }
+
+  const survivorVersions = new Set(survivors.map(ps99RestartVersionKey));
+  const replacements = survivors.length < sampleSize
+    ? selectPs99RestartServersDiverse(replacementPool, sampleSize - survivors.length, survivorVersions)
+    : [];
 
   return [...survivors, ...replacements];
+}
+
+function ps99RestartVersionDiversityReplacementIndex(servers) {
+  const groups = new Map();
+  servers.forEach((server, index) => {
+    const key = ps99RestartVersionKey(server);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ server, index });
+  });
+
+  const duplicateGroups = [...groups.entries()]
+    .filter(([, rows]) => rows.length > 1)
+    .sort((a, b) => {
+      if (b[1].length !== a[1].length) return b[1].length - a[1].length;
+      return b[0].localeCompare(a[0], undefined, { numeric: true });
+    });
+
+  if (!duplicateGroups.length) return -1;
+
+  return duplicateGroups[0][1]
+    .slice()
+    .sort((a, b) => comparePs99RestartServerQuality(b.server, a.server))[0]
+    .index;
 }
 
 function normalizePs99RestartStateOutput(row) {
@@ -8366,7 +8518,8 @@ function ps99RestartRuntimeConfig(env) {
     ccu_source: "Roblox universe playing count",
     ccu_used_for_detection: false,
     server_age_available: false,
-    version_correlation: true
+    version_correlation: true,
+    observed_version_diversity: true
   };
 }
 
