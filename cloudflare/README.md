@@ -256,6 +256,7 @@ Useful endpoints:
 | `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
+| `/api/ps99/alerts/test?type=both` | Protected manual preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; does not create history records. `POST` only. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
@@ -285,6 +286,16 @@ Invoke-RestMethod -Method Post `
   -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/restarts/ingest" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
+
+To preview the Discord alerts without creating fake version or restart history, run:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/alerts/test?type=both" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Change `type=both` to `type=version` or `type=restart` to preview only one alert.
 
 To compare global-rank scan configs, deploy the Worker and run:
 

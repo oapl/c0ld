@@ -171,6 +171,9 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/ps99/restarts/ingest") {
         requireAdmin(request, env);
         response = await handlePs99RestartIngest(env, "manual");
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/alerts/test") {
+        requireAdmin(request, env);
+        response = await handlePs99AlertTest(env, url);
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -2814,10 +2817,13 @@ async function handleClanActivityIngest(env, source, options = {}) {
     await supabaseUpsertChunked(env, CLAN_ACTIVITY_EVENTS_TABLE, eventRows, "event_id", 500);
   }
 
-  await supabaseDelete(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
-    battle_key: `eq.${resolvedBattleKey}`
-  });
-  await supabaseInsertChunked(env, CLAN_ACTIVITY_SUMMARY_TABLE, summaryRows, 500);
+  await supabaseUpsertChunked(
+    env,
+    CLAN_ACTIVITY_SUMMARY_TABLE,
+    summaryRows,
+    "battle_key,clan_key",
+    500
+  );
 
   return json({
     ok: true,
@@ -2843,20 +2849,48 @@ async function handleClanActivitySummary(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
   const requestedBattle = url.searchParams.get("battle") || "";
   const battle = await resolveActivityBattleKey(env, requestedBattle);
-  const rows = await supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
-    select: "battle_key,battle_display_name,battle_started_at,battle_ended_at,clan_name,clan_rank,previous_clan_rank,clan_points,icon_id,icon_url,kick_available,starting_members,current_members,new_members,lost_members,promotions,demotions,rank_changes,first_seen_at,last_seen_at,latest_snapshot_id,updated_at",
-    battle_key: `eq.${battle}`,
-    order: "clan_rank.asc",
-    limit: String(limit)
+  const [summaryRows, eventRows] = await Promise.all([
+    supabaseSelect(env, CLAN_ACTIVITY_SUMMARY_TABLE, {
+      select: "battle_key,battle_display_name,battle_started_at,battle_ended_at,clan_name,clan_rank,previous_clan_rank,clan_points,icon_id,icon_url,kick_available,starting_members,current_members,new_members,lost_members,promotions,demotions,rank_changes,first_seen_at,last_seen_at,latest_snapshot_id,updated_at",
+      battle_key: `eq.${battle}`,
+      order: "last_seen_at.desc,clan_rank.asc",
+      limit: "500"
+    }),
+    supabaseSelectPaged(env, CLAN_ACTIVITY_EVENTS_TABLE, {
+      select: "event_id,event_at,event_type,clan_name,clan_key,user_id,previous_value,current_value,previous_rank,current_rank",
+      battle_key: `eq.${battle}`,
+      order: "event_id.asc"
+    }, 25000, 1000).catch(() => [])
+  ]);
+  const latestSnapshotId = summaryRows[0]?.latest_snapshot_id || null;
+  const currentRows = (latestSnapshotId
+    ? summaryRows.filter(row => row.latest_snapshot_id === latestSnapshotId)
+    : summaryRows)
+    .sort((a, b) => (toNumber(a.clan_rank) || Number.MAX_SAFE_INTEGER) - (toNumber(b.clan_rank) || Number.MAX_SAFE_INTEGER))
+    .slice(0, limit);
+  const eventCounters = clanActivityEventCounters(eventRows);
+  const rows = currentRows.map(row => {
+    const normalized = normalizeClanActivitySummaryOutput(row);
+    const recovered = eventCounters.get(normalizeText(row.clan_key || row.clan_name));
+    if (!recovered) return normalized;
+
+    return {
+      ...normalized,
+      new_members: Math.max(normalized.new_members, recovered.newMembers),
+      lost_members: Math.max(normalized.lost_members, recovered.lostMembers),
+      promotions: Math.max(normalized.promotions, recovered.promotions),
+      demotions: Math.max(normalized.demotions, recovered.demotions),
+      rank_changes: Math.max(normalized.rank_changes, recovered.rankChanges)
+    };
   });
 
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
     battle,
-    display_name: cleanBattleDisplayName(battle, rows[0]?.battle_display_name),
+    display_name: cleanBattleDisplayName(battle, currentRows[0]?.battle_display_name),
     snapshot_at: rows[0]?.last_seen_at || null,
-    rows: rows.map(normalizeClanActivitySummaryOutput)
+    rows
   }, env);
 }
 
@@ -3679,7 +3713,78 @@ async function handlePs99RestartIngest(env, source) {
   }, 202);
 }
 
-async function postPs99VersionAlert(env, events, detectedAt) {
+async function handlePs99AlertTest(env, url) {
+  requireSupabase(env);
+
+  const type = String(url.searchParams.get("type") || "both").trim().toLowerCase();
+  if (!["version", "restart", "both"].includes(type)) {
+    throw httpError(400, "Use ?type=version, ?type=restart, or ?type=both.");
+  }
+
+  const testedAt = new Date().toISOString();
+  const placeId = ps99RootPlaceId(env);
+  const [places, versionEvents] = await Promise.all([
+    supabaseSelect(env, PS99_PLACES_TABLE, {
+      select: "place_id,place_name,latest_version,latest_published_at,latest_checked_at",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }),
+    supabaseSelect(env, PS99_VERSION_EVENTS_TABLE, {
+      select: "place_name,previous_version,current_version,current_published_at,detected_at",
+      place_id: `eq.${placeId}`,
+      order: "detected_at.desc,id.desc",
+      limit: "1"
+    })
+  ]);
+  const place = places[0] || {};
+  const latestVersionEvent = versionEvents[0] || {};
+  const currentVersion = toNumber(place.latest_version) ?? toNumber(latestVersionEvent.current_version);
+  const publishedAt = safeIso(place.latest_published_at)
+    || safeIso(latestVersionEvent.current_published_at);
+  const placeName = stringOrNull(place.place_name)
+    || stringOrNull(latestVersionEvent.place_name)
+    || "Pet Simulator 99";
+  const results = {};
+
+  if (type === "version" || type === "both") {
+    if (currentVersion === null) {
+      throw httpError(409, "No stored PS99 root-place version is available yet. Run the version ingest first.");
+    }
+
+    results.version = await postPs99VersionAlert(env, [{
+      place_id: placeId,
+      place_name: placeName,
+      previous_version: Math.max(0, Math.trunc(currentVersion) - 1),
+      current_version: currentVersion,
+      current_published_at: publishedAt,
+      detected_at: testedAt
+    }], testedAt, { test: true });
+  }
+
+  if (type === "restart" || type === "both") {
+    results.restart = await postPs99RestartAlert(env, {
+      place_id: placeId,
+      place_name: placeName,
+      current_place_version: currentVersion,
+      version_correlated: currentVersion !== null,
+      detected_at: testedAt,
+      reason: "Test alert only. No server restart was detected. This is how a confirmed five-server replacement notification will look."
+    }, { test: true });
+  }
+
+  const requestedResults = Object.values(results);
+  const ok = requestedResults.length > 0 && requestedResults.every(result => result?.posted === true);
+  return json({
+    ok,
+    test: true,
+    type,
+    tested_at: testedAt,
+    alert_config: ps99AlertRuntimeConfig(env),
+    results
+  }, ok ? 200 : 502);
+}
+
+async function postPs99VersionAlert(env, events, detectedAt, options = {}) {
   const lines = events.slice(0, 20).map(event => {
     const placeName = escapeDiscordMarkdown(event.place_name || `Place ${event.place_id}`);
     const placeUrl = `https://www.roblox.com/games/${Math.round(toNumber(event.place_id) || 0)}`;
@@ -3690,23 +3795,28 @@ async function postPs99VersionAlert(env, events, detectedAt) {
   });
   const extraCount = Math.max(0, events.length - 20);
   if (extraCount) lines.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
+  const description = options.test
+    ? `**Test alert only — no place-version change was detected.**\n\n${lines.join("\n\n")}`
+    : lines.join("\n\n");
 
   return postPs99DiscordAlert(env, {
     username: "PS99 Update Tracker",
     embeds: [{
-      title: "PS99 Place Version Updated",
+      title: options.test ? "[TEST] PS99 Place Version Updated" : "PS99 Place Version Updated",
       url: "https://c0ld-clan.com/ps99-version-history.html",
-      description: lines.join("\n\n").slice(0, 4096),
+      description: description.slice(0, 4096),
       color: 0x62b5ff,
       footer: {
-        text: `${events.length} watched place${events.length === 1 ? "" : "s"} updated`
+        text: options.test
+          ? "Manual preview • no history record created"
+          : `${events.length} watched place${events.length === 1 ? "" : "s"} updated`
       },
       timestamp: safeIso(detectedAt) || new Date().toISOString()
     }]
   });
 }
 
-async function postPs99RestartAlert(env, event) {
+async function postPs99RestartAlert(env, event, options = {}) {
   const placeId = Math.round(toNumber(event.place_id) || ps99RootPlaceId(env));
   const placeName = escapeDiscordMarkdown(event.place_name || "Pet Simulator 99");
   const confidence = event.version_correlated
@@ -3716,7 +3826,7 @@ async function postPs99RestartAlert(env, event) {
   return postPs99DiscordAlert(env, {
     username: "PS99 Update Tracker",
     embeds: [{
-      title: "PS99 Server Restart Detected",
+      title: options.test ? "[TEST] PS99 Server Restart Detected" : "PS99 Server Restart Detected",
       url: "https://c0ld-clan.com/ps99-restart-tracker.html",
       description: String(event.reason || "The monitored PS99 public servers were replaced together.").slice(0, 4096),
       color: 0xff9b96,
@@ -4507,6 +4617,34 @@ function normalizeClanActivitySummaryOutput(row) {
     latest_snapshot_id: row.latest_snapshot_id || null,
     updated_at: row.updated_at || null
   };
+}
+
+function clanActivityEventCounters(rows) {
+  const counters = new Map();
+
+  for (const row of rows || []) {
+    const clanKey = normalizeText(row.clan_key || row.clan_name);
+    if (!clanKey) continue;
+
+    if (!counters.has(clanKey)) {
+      counters.set(clanKey, {
+        newMembers: 0,
+        lostMembers: 0,
+        promotions: 0,
+        demotions: 0,
+        rankChanges: 0
+      });
+    }
+
+    const counter = counters.get(clanKey);
+    if (row.event_type === "member_joined") counter.newMembers += 1;
+    if (row.event_type === "member_left" || row.event_type === "member_kicked") counter.lostMembers += 1;
+    if (row.event_type === "member_promoted") counter.promotions += 1;
+    if (row.event_type === "member_demoted") counter.demotions += 1;
+    if (row.event_type === "rank_up" || row.event_type === "rank_down") counter.rankChanges += 1;
+  }
+
+  return counters;
 }
 
 function normalizeClanActivityRosterOutput(row) {
