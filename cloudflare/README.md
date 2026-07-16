@@ -168,6 +168,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional display override such as `LunarBattle2026`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `3,10,50,100,500`. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
 | `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
 | `CLAN_ACTIVITY_CONCURRENCY` | Optional. Defaults to `8`; number of top-clan detail pulls to run at once during activity scans. |
@@ -184,9 +186,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_VERSION_PLACE_DELAY_MS` | Optional. Defaults to `0`; delay between watched place version checks. |
 | `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
 | `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. Set to `true` after running migration `022` to monitor coordinated PS99 public-server turnover. |
-| `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per one-minute observation. Roblox accepts `10`, `25`, `50`, or `100`. |
+| `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
+| `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
 | `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `10`; persistent high-occupancy public-server IDs used as the reference sample. |
 | `PS99_RESTART_CONFIRMATIONS` | Optional. Defaults to `2`; consecutive one-minute observations required before a restart event is confirmed. |
+| `PS99_RESTART_REQUIRE_VERSION_CORRELATION` | Optional. Defaults to `true`; suppresses server-turnover restart events unless they line up with a PS99 place version change or recent version event. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
 | `PS99_ALERT_ROLE_ID` | Optional Discord role ID to mention when a PS99 place update or confirmed restart is detected. |
@@ -205,7 +209,7 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
-The public Roblox server list does not include creation time or place version. The restart detector therefore labels server age as unavailable, persists ten server IDs, refreshes individually missing IDs during normal churn, and only starts confirmation when all ten disappear in the same one-minute observation.
+The public Roblox server list does not include creation time or place version, and this Worker does not have a public direct "status by job ID" endpoint for PS99. The restart detector therefore pages through the public server list, matches persisted server IDs when they appear in those pages, refreshes individually missing IDs during normal churn, and only starts confirmation when all tracked IDs disappear together. By default, confirmed restart events also require correlation with a PS99 place version change so transient public-list misses are suppressed instead of recorded as restarts.
 
 ## Scheduled pulls
 
@@ -250,6 +254,7 @@ Useful endpoints:
 | `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
+| `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
 | `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
@@ -353,7 +358,7 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search` and `/version` Worker
+## Discord `/search`, `/version`, and `/rewards` Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
@@ -385,6 +390,8 @@ Required Worker variables:
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `3,10,50,100,500`. |
 
 Required Worker secrets:
 
@@ -422,6 +429,10 @@ Invoke-RestMethod -Method Post `
 
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-version-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-rewards-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
@@ -479,6 +490,18 @@ It reports the root PS99 place version, its release time, and the most recent
 completed version scan. Register it through the same admin script, or call
 `POST /admin/register-version-command?guild_id=YOUR_GUILD_ID` with the same
 admin bearer token.
+
+The reward cutoff commands are:
+
+```text
+/rewards players
+/rewards clans
+```
+
+They post the current point minimums for the configured reward ranks. Defaults
+are `3,100,1000,1050,1150,6150,30000` for players and `3,10,50,100,500` for
+clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
+`CLAN_REWARD_CUTOFF_RANKS` on either Worker.
 
 ## League API Worker
 

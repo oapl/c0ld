@@ -4,6 +4,7 @@ const INTERACTION_TYPE_APPLICATION_COMMAND = 2;
 const INTERACTION_RESPONSE_PONG = 1;
 const INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
 const APPLICATION_COMMAND_CHAT_INPUT = 1;
+const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 
@@ -28,6 +29,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-version-command") {
         requireAdmin(request, env);
         return await registerVersionCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-rewards-command") {
+        requireAdmin(request, env);
+        return await registerRewardsCommand(url, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/commands") {
@@ -89,6 +95,17 @@ async function handleInteraction(request, env) {
     } catch (err) {
       return interactionJson(messageResponse(
         `Version lookup failed: ${err?.message || String(err)}`,
+        true
+      ));
+    }
+  }
+
+  if (commandName === "rewards") {
+    try {
+      return interactionJson(await buildRewardsResponse(interaction, env));
+    } catch (err) {
+      return interactionJson(messageResponse(
+        `Rewards lookup failed: ${err?.message || String(err)}`,
         true
       ));
     }
@@ -177,6 +194,10 @@ async function registerVersionCommand(url, env) {
   return registerCommand(url, env, versionCommandPayload());
 }
 
+async function registerRewardsCommand(url, env) {
+  return registerCommand(url, env, rewardsCommandPayload());
+}
+
 async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
@@ -249,6 +270,122 @@ async function buildVersionResponse(env) {
   return messageResponse(
     `Newest PS99 Version: ${version} | Release: ${release} | Last Scanned: ${lastScanned}`
   );
+}
+
+async function buildRewardsResponse(interaction, env) {
+  const type = rewardCommandType(interaction);
+  const payload = await fetchRewardCutoffsPayload(type, env);
+
+  if (!payload.ok) {
+    return messageResponse(payload.message || "No reward cutoff data is available yet.", true);
+  }
+
+  const embed = {
+    title: type === "clans" ? "Clan Reward Cutoffs" : "Player Reward Cutoffs",
+    color: type === "clans" ? 0xf2cc60 : 0x58a6ff,
+    description: rewardCutoffDescription(payload, type),
+    footer: {
+      text: "Cutoff points are the current points held at each reward rank."
+    }
+  };
+
+  const timestamp = payload.snapshot_at || payload.generated_at;
+  if (timestamp && Number.isFinite(new Date(timestamp).getTime())) {
+    embed.timestamp = new Date(timestamp).toISOString();
+  }
+
+  return {
+    type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+    data: {
+      embeds: [embed]
+    }
+  };
+}
+
+async function fetchRewardCutoffsPayload(type, env) {
+  const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/reward-cutoffs", apiBase);
+  apiUrl.searchParams.set("type", type);
+
+  if (type === "players") {
+    apiUrl.searchParams.set("clan", scanClan);
+  }
+
+  const ranks = configuredRewardRanks(type, env);
+  if (ranks.length) {
+    apiUrl.searchParams.set("ranks", ranks.join(","));
+  }
+
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Rewards-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Reward cutoff API failed (${response.status}).`);
+  }
+
+  return payload;
+}
+
+function rewardCutoffDescription(payload, type) {
+  const titleParts = [
+    payload.event_name || payload.display_name || payload.battle || "Current Event"
+  ];
+
+  if (payload.snapshot_at) {
+    titleParts.push(`updated ${discordTime(payload.snapshot_at)}`);
+  }
+
+  const lines = [
+    `**${titleParts.filter(Boolean).join(" | ")}**`,
+    ""
+  ];
+
+  for (const cutoff of payload.cutoffs || []) {
+    lines.push(rewardCutoffLine(cutoff));
+  }
+
+  const unavailable = (payload.cutoffs || []).some(cutoff => cutoff.points === null || cutoff.points === undefined);
+  if (unavailable && payload.available_rank_max) {
+    lines.push("");
+    lines.push(`Only Top ${fullNumber(payload.available_rank_max)} is available from the latest stored scan.`);
+  }
+
+  return lines.join("\n");
+}
+
+function rewardCutoffLine(cutoff) {
+  const label = cutoff.label || `Top ${fullNumber(cutoff.rank)}`;
+  if (cutoff.points === null || cutoff.points === undefined) {
+    return `**${label}:** not recorded yet`;
+  }
+
+  return `**${label}:** ${fullNumber(cutoff.points)} pts`;
+}
+
+function rewardCommandType(interaction) {
+  const option = (interaction.data?.options || [])[0] || null;
+  const name = String(option?.name || "").toLowerCase();
+  return name === "clans" ? "clans" : "players";
+}
+
+function configuredRewardRanks(type, env) {
+  const raw = String(type === "clans" ? env.CLAN_REWARD_CUTOFF_RANKS || "" : env.PLAYER_REWARD_CUTOFF_RANKS || "");
+  if (!raw.trim()) return [];
+
+  const maxRank = type === "clans" ? 10000 : 100000;
+  return [...new Set(raw
+    .split(/[,\s]+/)
+    .map(value => Math.round(Number(value)))
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank))]
+    .sort((a, b) => a - b)
+    .slice(0, 20);
 }
 
 async function listCommands(url, env) {
@@ -620,6 +757,27 @@ function versionCommandPayload() {
   };
 }
 
+function rewardsCommandPayload() {
+  return {
+    name: "rewards",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Show current reward point cutoffs.",
+    dm_permission: false,
+    options: [
+      {
+        name: "players",
+        description: "Show player reward cutoff points from the global leaderboard.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "clans",
+        description: "Show clan reward cutoff points from the clan leaderboard.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -758,6 +916,11 @@ function shortNumber(value) {
   }
 
   return n.toLocaleString("en-US");
+}
+
+function fullNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "-";
 }
 
 function betterThanLine(row) {

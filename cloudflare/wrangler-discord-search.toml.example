@@ -15,6 +15,9 @@ DISCORD_GUILD_ID = ""
 # Optional. Comma-separated Discord role IDs allowed to use /search.
 # Leave blank to allow everyone who can see the command.
 DISCORD_ALLOWED_ROLE_IDS = "1489032328855556096,1501632370082840576"
+# Optional. Comma-separated reward cutoff ranks used by /rewards.
+PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000"
+CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500"
 
 [[services]]
 binding = "CLAN_API_WORKER"

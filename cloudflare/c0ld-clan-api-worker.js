@@ -34,6 +34,8 @@ const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 29;
+const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
+const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [3, 10, 50, 100, 500];
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
@@ -54,6 +56,7 @@ const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
 const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 10;
 const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
+const DEFAULT_PS99_RESTART_PAGE_COUNT = 5;
 const DEFAULT_PS99_RESTART_CONFIRMATIONS = 2;
 const DEFAULT_PS99_RESTART_COOLDOWN_MINUTES = 10;
 const DEFAULT_PS99_RESTART_HISTORY_LIMIT = 100;
@@ -137,6 +140,8 @@ export default {
         response = await handleGlobalCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/leaderboard") {
         response = await handleGlobalLeaderboard(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/reward-cutoffs") {
+        response = await handleRewardCutoffs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
@@ -698,6 +703,220 @@ async function handleGlobalLeaderboard(request, env) {
       totalGlobalPlayers
     }))
   }, env, publicCacheSeconds(env, includeGains ? "GLOBAL_LEADERBOARD" : "GLOBAL_LEADERBOARD_FAST"));
+}
+
+async function handleRewardCutoffs(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const rawType = String(url.searchParams.get("type") || "players").trim().toLowerCase();
+  const type = rawType.startsWith("clan") ? "clans" : "players";
+  const ranks = rewardCutoffRanks(url, env, type);
+
+  if (type === "clans") {
+    return cacheJson(await buildClanRewardCutoffs(url, env, ranks), env, publicCacheSeconds(env, "CLANS_CURRENT"));
+  }
+
+  return cacheJson(await buildPlayerRewardCutoffs(url, env, ranks), env, publicCacheSeconds(env, "GLOBAL_LEADERBOARD_FAST"));
+}
+
+async function buildPlayerRewardCutoffs(url, env, ranks) {
+  const clan = url.searchParams.get("clan") || clanName(env);
+  const run = await findLatestGlobalRankSearchRun(env, clan);
+
+  if (!run?.run_key) {
+    return {
+      ok: false,
+      type: "players",
+      message: "No completed global rank scan is available yet.",
+      clan_name: clan,
+      ranks,
+      cutoffs: []
+    };
+  }
+
+  const byRank = await readGlobalRankRewardCutoffRows(env, run.run_key, ranks);
+  const totalGlobalPlayers =
+    toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    0;
+  const snapshotAt = run.finished_at || run.updated_at || run.started_at || null;
+
+  return {
+    ok: true,
+    type: "players",
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    snapshot_at: snapshotAt,
+    battle: run.battle_key || null,
+    display_name: cleanBattleDisplayName(run.battle_key, run.battle_display_name),
+    event_name: run.event_name || run.battle_display_name || run.battle_key || null,
+    total_ranked: totalGlobalPlayers,
+    available_rank_max: totalGlobalPlayers || Math.max(...[...byRank.values()].map(row => toNumber(row?.global_rank) || 0), 0),
+    ranks,
+    cutoffs: ranks.map(rankValue => playerRewardCutoffRow(rankValue, byRank.get(rankValue), run, totalGlobalPlayers))
+  };
+}
+
+async function readGlobalRankRewardCutoffRows(env, runKey, ranks) {
+  const entries = await Promise.all([...new Set(ranks)].map(async rankValue => {
+    const rows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
+      run_key: `eq.${runKey}`,
+      order: "points.desc,user_id.asc",
+      limit: "1",
+      offset: String(Math.max(0, rankValue - 1))
+    });
+
+    return [rankValue, rows[0] ? { ...rows[0], global_rank: rankValue } : null];
+  }));
+
+  return new Map(entries);
+}
+
+function playerRewardCutoffRow(rankValue, row, run, totalGlobalPlayers) {
+  if (!row) {
+    return {
+      rank: rankValue,
+      label: `Top ${rankValue.toLocaleString("en-US")}`,
+      points: null,
+      holder: null
+    };
+  }
+
+  const userId = toNumber(row.user_id);
+  const username = globalCandidateUsername(row, new Map());
+  return {
+    rank: rankValue,
+    label: `Top ${rankValue.toLocaleString("en-US")}`,
+    points: toNumber(row.points) || 0,
+    holder: {
+      user_id: userId,
+      username,
+      display_name: globalCandidateDisplayName(row) || username || (userId ? `user_${userId}` : null),
+      source_clan: String(row.source_clan || "").trim() || null,
+      source_clan_rank: toNumber(row.source_clan_rank),
+      source_clan_points: toNumber(row.source_clan_points)
+    },
+    battle_key: row.battle_key || run?.battle_key || null,
+    battle_display_name: cleanBattleDisplayName(row.battle_key || run?.battle_key, row.battle_display_name || run?.battle_display_name),
+    total_ranked: toNumber(totalGlobalPlayers),
+    fetched_at: row.fetched_at || run?.finished_at || run?.updated_at || null
+  };
+}
+
+async function buildClanRewardCutoffs(url, env, ranks) {
+  const requestedBattle = url.searchParams.get("battle") || "";
+  const explicitBattle =
+    requestedBattle &&
+    !["current", "auto"].includes(String(requestedBattle).toLowerCase());
+  const maxRank = Math.max(...ranks);
+
+  let latest = null;
+  let rows = [];
+
+  if (explicitBattle) {
+    latest = await fetchLatestClanSnapshotMeta(env, requestedBattle);
+    if (latest) rows = await fetchClanSnapshotRows(env, latest.snapshot_id, maxRank);
+  } else {
+    rows = await supabaseSelect(env, CLANS_CURRENT_TABLE, {
+      select: "snapshot_id,fetched_at,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,clan_name,points,icon_id,icon_url",
+      order: "rank.asc",
+      limit: String(maxRank)
+    });
+    latest = latestClanMetaFromRows(rows);
+  }
+
+  const activeBattleMeta = latest && !explicitBattle
+    ? await fetchActiveClanBattleMeta(env).catch(() => null)
+    : null;
+  const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
+  const liveCutoffs = !explicitBattle
+    ? await fetchLiveClanRewardCutoffRows(env, ranks.filter(rankValue => !byRank.has(rankValue))).catch(() => new Map())
+    : new Map();
+
+  for (const [rankValue, row] of liveCutoffs.entries()) {
+    if (row && !byRank.has(rankValue)) byRank.set(rankValue, row);
+  }
+  const availableRankMax = Math.max(
+    rows.reduce((max, row) => Math.max(max, toNumber(row.rank) || 0), 0),
+    ...[...liveCutoffs.values()].map(row => toNumber(row?.rank) || 0)
+  );
+
+  return {
+    ok: true,
+    type: "clans",
+    generated_at: new Date().toISOString(),
+    snapshot_at: latestWithActiveMeta?.fetched_at || null,
+    battle: latestWithActiveMeta?.battle_key || null,
+    display_name: latestWithActiveMeta
+      ? cleanBattleDisplayName(latestWithActiveMeta.battle_key, latestWithActiveMeta.battle_display_name)
+      : null,
+    battle_start_iso: latestWithActiveMeta?.battle_started_at || null,
+    battle_end_iso: latestWithActiveMeta?.battle_ended_at || null,
+    total_ranked: rows.length,
+    available_rank_max: availableRankMax,
+    ranks,
+    cutoffs: ranks.map(rankValue => clanRewardCutoffRow(rankValue, byRank.get(rankValue)))
+  };
+}
+
+async function fetchLiveClanRewardCutoffRows(env, ranks) {
+  const uniqueRanks = [...new Set((ranks || []).map(value => Math.round(Number(value))).filter(value => Number.isFinite(value) && value > 0))];
+  if (!uniqueRanks.length) return new Map();
+
+  const pageSize = globalRankClanPageSize(env);
+  const cache = new Map();
+  const entries = await Promise.all(uniqueRanks.map(async rankValue => {
+    const row = await fetchClanRankRowAtOffset(env, rankValue - 1, pageSize, cache);
+    return [rankValue, row ? { ...row, fetched_at: new Date().toISOString(), source: "live_clan_leaderboard" } : null];
+  }));
+
+  return new Map(entries);
+}
+
+function clanRewardCutoffRow(rankValue, row) {
+  if (!row) {
+    return {
+      rank: rankValue,
+      label: `Top ${rankValue.toLocaleString("en-US")}`,
+      points: null,
+      holder: null
+    };
+  }
+
+  return {
+    rank: rankValue,
+    label: `Top ${rankValue.toLocaleString("en-US")}`,
+    points: toNumber(row.points) || 0,
+    holder: {
+      clan_name: row.clan_name || null,
+      icon_id: row.icon_id || null,
+      icon_url: row.icon_url || null
+    },
+    fetched_at: row.fetched_at || null
+  };
+}
+
+function rewardCutoffRanks(url, env, type) {
+  const isClans = type === "clans";
+  const raw = String(
+    url.searchParams.get("ranks") ||
+    (isClans ? env.CLAN_REWARD_CUTOFF_RANKS : env.PLAYER_REWARD_CUTOFF_RANKS) ||
+    ""
+  );
+  const fallback = isClans ? DEFAULT_CLAN_REWARD_CUTOFF_RANKS : DEFAULT_PLAYER_REWARD_CUTOFF_RANKS;
+  const maxRank = isClans ? 10000 : 100000;
+  const parsed = raw
+    .split(/[,\s]+/)
+    .map(value => Math.round(Number(value)))
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank);
+  const ranks = parsed.length ? parsed : fallback;
+
+  return [...new Set(ranks)]
+    .sort((a, b) => a - b)
+    .slice(0, 20);
 }
 
 async function handleGlobalRankStatus(request, env) {
@@ -3532,7 +3751,7 @@ async function handlePs99Restarts(request, env) {
   const placeId = ps99RootPlaceId(env);
   const [states, events, testAlerts] = await Promise.all([
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
-      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,updated_at",
+      select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot,updated_at",
       place_id: `eq.${placeId}`,
       limit: "1"
     }),
@@ -3601,10 +3820,12 @@ async function handlePs99RestartIngest(env, source) {
   const universeId = ps99UniverseId(env);
   const sampleSize = ps99RestartSampleSize(env);
   const batchSize = ps99RestartBatchSize(env);
+  const pageCount = ps99RestartPageCount(env);
   const confirmationsRequired = ps99RestartConfirmations(env);
   const cooldownMinutes = ps99RestartCooldownMinutes(env);
-  const [batch, stateRows, versionContext, ccuObservation] = await Promise.all([
-    fetchPs99PublicServerBatch(placeId, batchSize),
+  const requireVersionCorrelation = ps99RestartRequireVersionCorrelation(env);
+  const [serverObservation, stateRows, versionContext, ccuObservation] = await Promise.all([
+    fetchPs99PublicServerBatch(placeId, batchSize, pageCount),
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
       select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot",
       place_id: `eq.${placeId}`,
@@ -3616,6 +3837,8 @@ async function handlePs99RestartIngest(env, source) {
       error: err?.message || String(err)
     }))
   ]);
+  const batch = serverObservation.servers;
+  const serverScan = serverObservation.scan;
   const ccuSample = ccuObservation?.sample || null;
   let ccuError = ccuObservation?.error || null;
   if (ccuSample) {
@@ -3642,6 +3865,8 @@ async function handlePs99RestartIngest(env, source) {
   let lastRestartDetectedAt = previousRestartDetectedAt;
   let cooldownUntil = safeIso(previous.cooldown_until);
   let eventRow = null;
+  let suppressedRestart = null;
+  let detectorNote = null;
   let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_restart_detected" };
 
   if (batch.length < sampleSize) {
@@ -3699,50 +3924,76 @@ async function handlePs99RestartIngest(env, source) {
       if (candidateConfirmations >= confirmationsRequired) {
         const restartDetectedAt = checkedAt;
         const candidateStart = candidateStartedAt || checkedAt;
-        cooldownUntil = new Date(checkedMs + cooldownMinutes * 60000).toISOString();
         const recentVersionEventMs = isoToMs(versionContext.detectedAt);
         const versionCorrelated = Boolean(
           (baselinePlaceVersion !== null && currentVersion !== null && baselinePlaceVersion !== currentVersion)
           || (recentVersionEventMs && checkedMs - recentVersionEventMs >= 0 && checkedMs - recentVersionEventMs <= 30 * 60000)
         );
 
-        eventRow = {
-          event_id: `ps99-restart:${placeId}:${candidateStart}`,
-          universe_id: universeId,
-          place_id: placeId,
-          place_name: versionContext.placeName || "Pet Simulator 99",
-          candidate_started_at: candidateStart,
-          detected_at: restartDetectedAt,
-          cooldown_until: cooldownUntil,
-          previous_place_version: versionCorrelated
-            ? (toNumber(versionContext.previousVersion) ?? baselinePlaceVersion)
-            : baselinePlaceVersion,
-          current_place_version: currentVersion,
-          version_correlated: versionCorrelated,
-          confidence: versionCorrelated ? "high" : "confirmed",
-          previous_servers: trackedServers,
-          replacement_servers: candidateServers,
-          reason: `All ${sampleSize} tracked server IDs disappeared together and ${sampleSize} replacements persisted across ${confirmationsRequired} one-minute scans.`,
-          source,
-           details: {
-             batch_size: batch.length,
-             sample_size: sampleSize,
-             confirmation_scans: candidateConfirmations,
-             version_event_detected_at: versionContext.detectedAt || null,
-             previous_restart_detected_at: previousRestartDetectedAt,
-             restart_place_version: candidatePlaceVersion ?? currentVersion,
-             server_age_available: false
-           }
-        };
-        trackedServers = candidateServers;
-        candidateServers = [];
-        status = "cooldown";
-        baselineSampledAt = candidateStart;
-        baselinePlaceVersion = currentVersion;
-        candidateStartedAt = null;
-        candidateConfirmations = 0;
-        candidatePlaceVersion = null;
-        lastRestartDetectedAt = restartDetectedAt;
+        if (requireVersionCorrelation && !versionCorrelated) {
+          suppressedRestart = {
+            reason: "candidate_turnover_without_version_correlation",
+            candidate_started_at: candidateStart,
+            confirmation_scans: candidateConfirmations,
+            observed_servers: batch.length,
+            observed_pages: serverScan.pages_fetched,
+            previous_place_version: baselinePlaceVersion,
+            current_place_version: currentVersion,
+            version_event_detected_at: versionContext.detectedAt || null
+          };
+          detectorNote = "Suppressed possible restart because public server turnover did not correlate with a PS99 place version change.";
+          trackedServers = candidateServers.length === sampleSize
+            ? candidateServers
+            : samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
+          candidateServers = [];
+          status = "monitoring";
+          baselineSampledAt = checkedAt;
+          baselinePlaceVersion = currentVersion;
+          candidateStartedAt = null;
+          candidateConfirmations = 0;
+          candidatePlaceVersion = null;
+          cooldownUntil = null;
+        } else {
+          cooldownUntil = new Date(checkedMs + cooldownMinutes * 60000).toISOString();
+          eventRow = {
+            event_id: `ps99-restart:${placeId}:${candidateStart}`,
+            universe_id: universeId,
+            place_id: placeId,
+            place_name: versionContext.placeName || "Pet Simulator 99",
+            candidate_started_at: candidateStart,
+            detected_at: restartDetectedAt,
+            cooldown_until: cooldownUntil,
+            previous_place_version: versionCorrelated
+              ? (toNumber(versionContext.previousVersion) ?? baselinePlaceVersion)
+              : baselinePlaceVersion,
+            current_place_version: currentVersion,
+            version_correlated: versionCorrelated,
+            confidence: versionCorrelated ? "high" : "confirmed",
+            previous_servers: trackedServers,
+            replacement_servers: candidateServers,
+            reason: `All ${sampleSize} tracked server IDs disappeared together and ${sampleSize} replacements persisted across ${confirmationsRequired} one-minute scans.`,
+            source,
+            details: {
+              batch_size: batch.length,
+              observed_pages: serverScan.pages_fetched,
+              sample_size: sampleSize,
+              confirmation_scans: candidateConfirmations,
+              version_event_detected_at: versionContext.detectedAt || null,
+              previous_restart_detected_at: previousRestartDetectedAt,
+              restart_place_version: candidatePlaceVersion ?? currentVersion,
+              server_age_available: false
+            }
+          };
+          trackedServers = candidateServers;
+          candidateServers = [];
+          status = "cooldown";
+          baselineSampledAt = candidateStart;
+          baselinePlaceVersion = currentVersion;
+          candidateStartedAt = null;
+          candidateConfirmations = 0;
+          candidatePlaceVersion = null;
+          lastRestartDetectedAt = restartDetectedAt;
+        }
       }
     } else {
       candidateServers = samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
@@ -3810,14 +4061,20 @@ async function handlePs99RestartIngest(env, source) {
     last_checked_at: checkedAt,
     last_restart_detected_at: lastRestartDetectedAt,
     cooldown_until: cooldownUntil,
-    last_error: null,
+    last_error: detectorNote,
     raw_snapshot: {
       fetched_at: checkedAt,
       sort_order: "Desc",
+      pages_requested: serverScan.pages_requested,
+      pages_fetched: serverScan.pages_fetched,
+      page_size: serverScan.page_size,
+      total_observed: serverScan.total_observed,
+      exhausted: serverScan.exhausted,
       ccu: toNumber(ccuSample?.ccu),
       ccu_sampled_at: safeIso(ccuSample?.sampled_at),
       ccu_error: ccuError,
-      server_ids: batch.map(server => server.server_id)
+      server_ids: batch.map(server => server.server_id),
+      suppressed_restart: suppressedRestart
     },
     updated_at: checkedAt
   };
@@ -3839,7 +4096,9 @@ async function handlePs99RestartIngest(env, source) {
     tracked_present: trackedPresent,
     candidate_confirmations: candidateConfirmations,
     restart_detected: Boolean(eventRow),
+    restart_suppressed: Boolean(suppressedRestart),
     cooldown_until: cooldownUntil,
+    server_scan: serverScan,
     ccu_sample: ccuSample ? normalizePs99CcuSampleOutput(ccuSample) : null,
     ccu_error: ccuError,
     webhook_alert: webhookAlert
@@ -4250,19 +4509,60 @@ async function fetchPs99CcuAtOrBefore(env, targetAt, maxAgeMs = 3 * 60000) {
   return sample;
 }
 
-async function fetchPs99PublicServerBatch(placeId, batchSize) {
-  const url = new URL(`https://games.roblox.com/v1/games/${placeId}/servers/Public`);
-  url.searchParams.set("sortOrder", "Desc");
-  url.searchParams.set("excludeFullGames", "false");
-  url.searchParams.set("limit", String(batchSize));
-  const payload = await fetchJsonWithRetry(url, "Roblox public servers", {
-    attempts: 3,
-    baseDelayMs: 1000
-  });
+async function fetchPs99PublicServerBatch(placeId, batchSize, pageCount = 1) {
+  const safePageCount = clamp(Number(pageCount || 1), 1, 10);
+  const seen = new Map();
+  let cursor = "";
+  let pagesFetched = 0;
+  let exhausted = false;
 
-  return extractRobloxArray(payload)
-    .map(normalizePs99PublicServer)
-    .filter(server => server.server_id);
+  for (let page = 1; page <= safePageCount; page += 1) {
+    const url = new URL(`https://games.roblox.com/v1/games/${placeId}/servers/Public`);
+    url.searchParams.set("sortOrder", "Desc");
+    url.searchParams.set("excludeFullGames", "false");
+    url.searchParams.set("limit", String(batchSize));
+    if (cursor) url.searchParams.set("cursor", cursor);
+
+    const payload = await fetchJsonWithRetry(url, `Roblox public servers page ${page}`, {
+      attempts: 3,
+      baseDelayMs: 1000
+    });
+
+    pagesFetched += 1;
+    for (const server of extractRobloxArray(payload).map(normalizePs99PublicServer)) {
+      if (server.server_id && !seen.has(server.server_id)) {
+        seen.set(server.server_id, server);
+      }
+    }
+
+    cursor = robloxNextPageCursor(payload);
+    if (!cursor) {
+      exhausted = true;
+      break;
+    }
+  }
+
+  const servers = [...seen.values()];
+  return {
+    servers,
+    scan: {
+      pages_requested: safePageCount,
+      pages_fetched: pagesFetched,
+      page_size: batchSize,
+      total_observed: servers.length,
+      exhausted
+    }
+  };
+}
+
+function robloxNextPageCursor(payload) {
+  return String(
+    payload?.nextPageCursor ||
+    payload?.next_page_cursor ||
+    payload?.nextCursor ||
+    payload?.next_cursor ||
+    ""
+  ).trim();
 }
 
 async function fetchPs99RestartVersionContext(env, placeId) {
@@ -4354,6 +4654,7 @@ function refillPs99RestartSample(trackedServers, batch, sampleSize, checkedAt, p
 }
 
 function normalizePs99RestartStateOutput(row) {
+  const rawSnapshot = parseJsonObject(row.raw_snapshot) || {};
   return {
     place_id: toNumber(row.place_id),
     universe_id: toNumber(row.universe_id),
@@ -4372,6 +4673,14 @@ function normalizePs99RestartStateOutput(row) {
     last_restart_detected_at: row.last_restart_detected_at || null,
     cooldown_until: row.cooldown_until || null,
     last_error: row.last_error || null,
+    server_scan: {
+      pages_requested: toNumber(rawSnapshot.pages_requested),
+      pages_fetched: toNumber(rawSnapshot.pages_fetched),
+      page_size: toNumber(rawSnapshot.page_size),
+      total_observed: toNumber(rawSnapshot.total_observed) || (Array.isArray(rawSnapshot.server_ids) ? rawSnapshot.server_ids.length : toNumber(row.last_batch_size) || 0),
+      exhausted: rawSnapshot.exhausted ?? null
+    },
+    suppressed_restart: parseJsonObject(rawSnapshot.suppressed_restart) || rawSnapshot.suppressed_restart || null,
     updated_at: row.updated_at || null
   };
 }
@@ -5327,12 +5636,12 @@ async function fetchClanLeaderboardPageUncached(env, { page: safePage, pageSize:
   throw httpError(502, `Big Games clans page ${safePage} failed: ${lastError?.message || "unknown error"}`);
 }
 
-async function fetchClanRankRowAtOffset(env, offset, pageSize) {
+async function fetchClanRankRowAtOffset(env, offset, pageSize, cache = null) {
   if (offset < 0) return null;
 
   const page = Math.floor(offset / pageSize) + 1;
   const pageIndex = offset % pageSize;
-  const rows = await fetchClanLeaderboardPage(env, { page, pageSize });
+  const rows = await fetchClanLeaderboardPage(env, { page, pageSize, cache });
   return rows[pageIndex] || null;
 }
 
@@ -7860,9 +8169,11 @@ function ps99RestartRuntimeConfig(env) {
     place_id: ps99RootPlaceId(env),
     schedule_minutes: 1,
     batch_size: ps99RestartBatchSize(env),
+    page_count: ps99RestartPageCount(env),
     sample_size: ps99RestartSampleSize(env),
     confirmation_scans: ps99RestartConfirmations(env),
     cooldown_minutes: ps99RestartCooldownMinutes(env),
+    require_version_correlation: ps99RestartRequireVersionCorrelation(env),
     ccu_monitoring: true,
     ccu_source: "Roblox universe playing count",
     ccu_used_for_detection: false,
@@ -7896,12 +8207,24 @@ function ps99RestartBatchSize(env) {
   return 100;
 }
 
+function ps99RestartPageCount(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PAGE_COUNT || DEFAULT_PS99_RESTART_PAGE_COUNT),
+    1,
+    10
+  );
+}
+
 function ps99RestartConfirmations(env) {
   return clamp(
     Number(env.PS99_RESTART_CONFIRMATIONS || DEFAULT_PS99_RESTART_CONFIRMATIONS),
     2,
     5
   );
+}
+
+function ps99RestartRequireVersionCorrelation(env) {
+  return String(env.PS99_RESTART_REQUIRE_VERSION_CORRELATION || "true").toLowerCase() !== "false";
 }
 
 function ps99RestartCooldownMinutes(env) {
