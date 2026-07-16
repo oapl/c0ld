@@ -43,8 +43,9 @@
     .history-column-title{margin:0 0 12px;text-align:center;font-size:18px}
     .history-lines{display:grid;gap:10px}
     .history-line{border:1px solid var(--border);border-radius:8px;background:var(--panel2);padding:12px}
-    .history-line-title{font-weight:700;text-align:center;font-size:16px;line-height:1.25;margin-bottom:8px;overflow-wrap:anywhere}
-    .history-line-data{display:grid;gap:5px}
+    .history-line-title{font-weight:700;text-align:center;font-size:16px;line-height:1.25;overflow-wrap:anywhere}
+    .history-line-date{text-align:center;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}
+    .history-line-data{display:grid;gap:5px;border-top:1px solid rgba(139,148,158,.28);margin-top:10px;padding-top:9px}
     .history-line-row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(139,148,158,.22);padding-top:5px;font-size:13px}
     .history-line-row:first-child{border-top:0;padding-top:0}
     .history-line-row .label{margin:0}
@@ -1326,8 +1327,17 @@ function historyLineRows(row,type){
     lines.push(["Points",fmt(row.final_points)]);
   }
 
-  if(row.final_snapshot_at)lines.push(["Final Pull",fmtDateTime(row.final_snapshot_at)]);
   return lines;
+}
+
+function historyDateLabel(row){
+  const start=row.period_start_at||row.first_snapshot_at||null;
+  const end=row.period_end_at||row.final_snapshot_at||null;
+  const startLabel=start?fmtDate(start):"";
+  const endLabel=end?fmtDate(end):"";
+
+  if(startLabel&&endLabel&&startLabel!==endLabel)return`${startLabel} - ${endLabel}`;
+  return endLabel||startLabel||"";
 }
 
 function renderHistoryColumn(title,rows,type){
@@ -1338,6 +1348,7 @@ function renderHistoryColumn(title,rows,type){
         ${rows.length?rows.map(row=>`
           <section class="history-line">
             <div class="history-line-title">${escapeHtml(summaryTitle(row,type))}</div>
+            ${historyDateLabel(row)?`<div class="history-line-date">${escapeHtml(historyDateLabel(row))}</div>`:""}
             <div class="history-line-data">
               ${historyLineRows(row,type).map(([label,value])=>`
                 <div class="history-line-row">
