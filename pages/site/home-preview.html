@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>c0ld Home Preview</title>
+  <meta name="description" content="Prototype c0ld clan command center with live activity, PS99 status, battle movement, and member spotlights." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      color-scheme: dark;
+      --bg: #090d13;
+      --panel: #141a22;
+      --panel-2: #0d1219;
+      --panel-3: #19212c;
+      --border: #303944;
+      --text: #edf3f8;
+      --muted: #8f9baa;
+      --accent: #ff8f8a;
+      --accent-soft: rgba(255, 105, 97, 0.12);
+      --blue: #67b7ff;
+      --green: #4cdb93;
+      --gold: #f2c75c;
+      --purple: #bb91ff;
+      --danger: #ff6b72;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 50% -20%, rgba(255, 112, 104, 0.13), transparent 34%),
+        radial-gradient(circle at 82% 28%, rgba(103, 183, 255, 0.06), transparent 26%),
+        var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: rgba(20, 26, 34, 0.94);
+      backdrop-filter: blur(14px);
+      padding: 12px 22px 10px;
+    }
+
+    .brand {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .brand img {
+      display: block;
+      width: 76px;
+      height: auto;
+    }
+
+    nav {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .menu-btn,
+    .refresh-btn {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 7px 12px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .menu-btn:hover,
+    .refresh-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .menu-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .lookup-menu { position: relative; }
+    .lookup-menu summary { list-style: none; }
+    .lookup-menu summary::-webkit-details-marker { display: none; }
+    .lookup-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 30;
+      min-width: 180px;
+      padding: 7px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+    }
+    .lookup-menu[open] .lookup-panel { display: grid; gap: 5px; }
+
+    main {
+      width: min(1500px, calc(100% - 38px));
+      margin: 0 auto;
+      padding: 24px 0 60px;
+    }
+
+    .hero {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 5px; font-size: clamp(25px, 3vw, 36px); letter-spacing: -0.03em; }
+    .hero p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+
+    .live-state {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(76, 219, 147, 0.8);
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.95fr) minmax(480px, 1.65fr) minmax(280px, 0.95fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .panel,
+    .status-card,
+    .battle-stage {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: linear-gradient(150deg, rgba(25, 33, 44, 0.82), rgba(15, 20, 28, 0.96));
+    }
+
+    .side-panel {
+      min-height: 500px;
+      overflow: hidden;
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-heading h2 { margin: 0; font-size: 16px; }
+    .panel-heading span { color: var(--muted); font-size: 11px; }
+
+    .feed {
+      list-style: none;
+      margin: 0;
+      padding: 4px 0;
+    }
+
+    .feed-item {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(48, 57, 68, 0.72);
+    }
+
+    .feed-item:last-child { border-bottom: 0; }
+
+    .event-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .event-icon.join,
+    .event-icon.promote { color: var(--green); border-color: rgba(76, 219, 147, 0.35); }
+    .event-icon.leave,
+    .event-icon.demote { color: var(--danger); border-color: rgba(255, 107, 114, 0.35); }
+    .event-icon.announcement { color: var(--gold); border-color: rgba(242, 199, 92, 0.4); }
+    .event-icon.donation { color: var(--purple); border-color: rgba(187, 145, 255, 0.4); }
+
+    .event-copy {
+      min-width: 0;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .event-copy strong { color: var(--text); }
+    .event-meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+    .empty-state {
+      padding: 30px 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      text-align: center;
+    }
+
+    .center-column {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .status-card {
+      position: relative;
+      min-height: 108px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 15px 12px;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .status-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: var(--status-color, var(--accent));
+      box-shadow: 0 0 20px var(--status-color, var(--accent));
+    }
+
+    .status-label { color: var(--muted); font-size: 11px; margin-bottom: 7px; }
+    .status-value { font-size: clamp(17px, 1.6vw, 22px); font-weight: 800; line-height: 1.15; }
+    .status-detail { color: var(--muted); font-size: 10px; margin-top: 6px; }
+
+    .battle-stage {
+      position: relative;
+      min-height: 360px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 36px 28px;
+      text-align: center;
+      isolation: isolate;
+    }
+
+    .battle-stage::before,
+    .battle-stage::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      z-index: -1;
+      filter: blur(2px);
+    }
+
+    .battle-stage::before {
+      width: 310px;
+      height: 310px;
+      border: 1px solid rgba(255, 143, 138, 0.18);
+      box-shadow: inset 0 0 90px rgba(255, 112, 104, 0.08), 0 0 80px rgba(255, 112, 104, 0.06);
+    }
+
+    .battle-stage::after {
+      width: 190px;
+      height: 190px;
+      border: 1px dashed rgba(103, 183, 255, 0.22);
+      animation: orbit 28s linear infinite;
+    }
+
+    @keyframes orbit { to { transform: rotate(360deg); } }
+
+    .battle-kicker { color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: 0.24em; text-transform: uppercase; }
+    .battle-name { margin: 9px 0 18px; font-size: clamp(23px, 3vw, 38px); letter-spacing: -0.04em; }
+
+    .battle-core {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(90px, 1fr));
+      width: min(520px, 100%);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .battle-metric { padding: 16px 10px; }
+    .battle-metric + .battle-metric { border-left: 1px solid var(--border); }
+    .battle-metric span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .battle-metric strong { display: block; font-size: 20px; }
+
+    .rank-feed-item {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(48, 57, 68, 0.72);
+    }
+    .rank-feed-item:last-child { border-bottom: 0; }
+    .rank-number { font-size: 14px; font-weight: 900; font-variant-numeric: tabular-nums; }
+    .rank-player { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+    .rank-time { color: var(--muted); font-size: 10px; }
+    .rank-direction { font-size: 16px; font-weight: 900; }
+    .rank-direction.up { color: var(--green); }
+    .rank-direction.down { color: var(--danger); }
+
+    .spotlight {
+      position: relative;
+      margin-top: 22px;
+      padding: 1px;
+      border-radius: 16px;
+      background: linear-gradient(115deg, rgba(242, 199, 92, 0.78), rgba(255, 105, 97, 0.7), rgba(103, 183, 255, 0.75));
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34), 0 0 42px rgba(255, 112, 104, 0.08);
+      overflow: hidden;
+    }
+
+    .spotlight-inner {
+      border-radius: 15px;
+      background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.03), transparent 34%),
+        #10161e;
+      padding: 23px;
+    }
+
+    .spotlight-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .spotlight-header h2 { margin: 0 0 4px; font-size: 22px; }
+    .spotlight-header p { margin: 0; color: var(--muted); font-size: 12px; }
+    .prototype-tag { color: var(--gold); border: 1px solid rgba(242, 199, 92, 0.4); border-radius: 999px; padding: 5px 9px; font-size: 10px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
+
+    .award-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .award {
+      position: relative;
+      min-height: 210px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: linear-gradient(145deg, rgba(25, 33, 44, 0.96), rgba(10, 14, 20, 0.98));
+      padding: 18px;
+    }
+
+    .award::after {
+      content: "";
+      position: absolute;
+      width: 150px;
+      height: 150px;
+      right: -65px;
+      top: -70px;
+      border-radius: 50%;
+      background: var(--award-color);
+      opacity: 0.13;
+      filter: blur(2px);
+      box-shadow: 0 0 60px var(--award-color);
+    }
+
+    .award.gold { --award-color: var(--gold); }
+    .award.red { --award-color: var(--danger); }
+    .award.blue { --award-color: var(--blue); }
+
+    .award-title { color: var(--award-color); font-size: 10px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; }
+    .award-name { margin: 18px 0 5px; font-size: clamp(20px, 2.2vw, 30px); font-weight: 900; letter-spacing: -0.03em; overflow-wrap: anywhere; }
+    .award-value { color: var(--award-color); font-size: 15px; font-weight: 800; }
+    .award-rule { width: 42px; height: 2px; margin: 15px 0 12px; background: var(--award-color); box-shadow: 0 0 12px var(--award-color); }
+    .award-description { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .error-banner {
+      display: none;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(255, 107, 114, 0.6);
+      border-radius: 10px;
+      background: rgba(255, 107, 114, 0.08);
+      color: #ffb3b7;
+      font-size: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .center-column { grid-column: 1 / -1; grid-row: 1; }
+      .side-panel { min-height: 430px; }
+    }
+
+    @media (max-width: 760px) {
+      main { width: min(100% - 20px, 1500px); padding-top: 16px; }
+      .hero { align-items: flex-start; flex-direction: column; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .center-column { grid-column: auto; }
+      .status-grid, .award-grid { grid-template-columns: 1fr; }
+      .battle-stage { min-height: 320px; padding-inline: 14px; }
+      .battle-core { grid-template-columns: 1fr; }
+      .battle-metric + .battle-metric { border-left: 0; border-top: 1px solid var(--border); }
+      .spotlight-header { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand header-inner">
+      <a class="site-logo-link" href="home-preview.html" aria-label="c0ld home preview">
+        <img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
+      </a>
+    </div>
+    <nav class="menu-bar">
+      <a class="menu-btn active" href="home-preview.html">c0ld Home</a>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <details class="lookup-menu">
+        <summary class="menu-btn">Tools</summary>
+        <div class="lookup-panel">
+          <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+          <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+          <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+          <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Clan command center</div>
+        <h1>c0ld, at a glance.</h1>
+        <p>Live clan movement, PS99 status, battle momentum, and standout members.</p>
+      </div>
+      <div class="live-state">
+        <span class="live-dot"></span>
+        <span id="last-updated">Connecting to live data…</span>
+        <button id="refresh" class="refresh-btn" type="button">Refresh</button>
+      </div>
+    </section>
+
+    <div id="error-banner" class="error-banner"></div>
+
+    <section class="dashboard-grid">
+      <article class="panel side-panel">
+        <div class="panel-heading">
+          <h2>Recent c0ld Changes</h2>
+          <span id="activity-count">Live feed</span>
+        </div>
+        <ul id="activity-feed" class="feed">
+          <li class="empty-state">Loading clan activity…</li>
+        </ul>
+      </article>
+
+      <section class="center-column">
+        <div class="status-grid">
+          <article class="status-card" style="--status-color: var(--accent)">
+            <div class="status-label">Last Restart</div>
+            <div id="last-restart" class="status-value">—</div>
+            <div id="last-restart-detail" class="status-detail">Checking detector history</div>
+          </article>
+          <article class="status-card" style="--status-color: var(--blue)">
+            <div class="status-label">Current Version</div>
+            <div id="current-version" class="status-value">—</div>
+            <div id="current-version-detail" class="status-detail">Pet Simulator 99</div>
+          </article>
+          <article class="status-card" style="--status-color: var(--gold)">
+            <div id="battle-countdown-label" class="status-label">Current Battle Ends in:</div>
+            <div id="battle-countdown" class="status-value">—</div>
+            <div id="battle-countdown-detail" class="status-detail">Resolving schedule</div>
+          </article>
+        </div>
+
+        <article class="battle-stage">
+          <div class="battle-kicker">Current operation</div>
+          <h2 id="battle-name" class="battle-name">Current Clan Battle</h2>
+          <div class="battle-core">
+            <div class="battle-metric">
+              <span>Clan Rank</span>
+              <strong id="clan-rank">—</strong>
+            </div>
+            <div class="battle-metric">
+              <span>Clan Points</span>
+              <strong id="clan-points">—</strong>
+            </div>
+            <div class="battle-metric">
+              <span>Active Roster</span>
+              <strong id="roster-count">—</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <article class="panel side-panel">
+        <div class="panel-heading">
+          <h2>Recent Rank Activity</h2>
+          <span>Current battle</span>
+        </div>
+        <div id="rank-feed">
+          <div class="empty-state">Loading player movement…</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="spotlight">
+      <div class="spotlight-inner">
+        <div class="spotlight-header">
+          <div>
+            <div class="eyebrow">Battle recognition</div>
+            <h2>c0ld Spotlight</h2>
+            <p>Provisional awards calculated from the latest 24 hours of current-battle snapshots.</p>
+          </div>
+          <span class="prototype-tag">Live prototype</span>
+        </div>
+
+        <div class="award-grid">
+          <article class="award gold">
+            <div class="award-title">MVP</div>
+            <div id="mvp-name" class="award-name">Calculating…</div>
+            <div id="mvp-value" class="award-value">—</div>
+            <div class="award-rule"></div>
+            <div id="mvp-description" class="award-description">Most observed time holding the #1 player position.</div>
+          </article>
+
+          <article class="award red">
+            <div class="award-title">Most Inconsistent</div>
+            <div id="volatile-name" class="award-name">Calculating…</div>
+            <div id="volatile-value" class="award-value">—</div>
+            <div class="award-rule"></div>
+            <div id="volatile-description" class="award-description">The highest number of observed player-rank changes.</div>
+          </article>
+
+          <article class="award blue">
+            <div class="award-title">Underdog / Sleeper</div>
+            <div id="sleeper-name" class="award-name">Calculating…</div>
+            <div id="sleeper-value" class="award-value">—</div>
+            <div class="award-rule"></div>
+            <div id="sleeper-description" class="award-description">The largest upward rank climb over the observed period.</div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
+    const CLAN_NAME = "c0ld";
+    const HISTORY_HOURS = 24;
+    const REFRESH_MS = 60 * 1000;
+    const DEFAULT_AVATAR = "assets/c0ld-kitsune-logo.gif";
+
+    const els = {
+      refresh: document.getElementById("refresh"),
+      lastUpdated: document.getElementById("last-updated"),
+      errorBanner: document.getElementById("error-banner"),
+      activityCount: document.getElementById("activity-count"),
+      activityFeed: document.getElementById("activity-feed"),
+      rankFeed: document.getElementById("rank-feed"),
+      lastRestart: document.getElementById("last-restart"),
+      lastRestartDetail: document.getElementById("last-restart-detail"),
+      currentVersion: document.getElementById("current-version"),
+      currentVersionDetail: document.getElementById("current-version-detail"),
+      battleCountdownLabel: document.getElementById("battle-countdown-label"),
+      battleCountdown: document.getElementById("battle-countdown"),
+      battleCountdownDetail: document.getElementById("battle-countdown-detail"),
+      battleName: document.getElementById("battle-name"),
+      clanRank: document.getElementById("clan-rank"),
+      clanPoints: document.getElementById("clan-points"),
+      rosterCount: document.getElementById("roster-count"),
+      mvpName: document.getElementById("mvp-name"),
+      mvpValue: document.getElementById("mvp-value"),
+      mvpDescription: document.getElementById("mvp-description"),
+      volatileName: document.getElementById("volatile-name"),
+      volatileValue: document.getElementById("volatile-value"),
+      volatileDescription: document.getElementById("volatile-description"),
+      sleeperName: document.getElementById("sleeper-name"),
+      sleeperValue: document.getElementById("sleeper-value"),
+      sleeperDescription: document.getElementById("sleeper-description")
+    };
+
+    let countdownEndsAt = null;
+    let loading = false;
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, character => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+      }[character]));
+    }
+
+    function finite(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function formatNumber(value) {
+      const number = finite(value);
+      if (number === null) return "—";
+      if (Math.abs(number) >= 1000000) return `${(number / 1000000).toFixed(2).replace(/\.?0+$/, "")}M`;
+      if (Math.abs(number) >= 1000) return `${(number / 1000).toFixed(2).replace(/\.?0+$/, "")}K`;
+      return Math.round(number).toLocaleString();
+    }
+
+    function formatDuration(milliseconds) {
+      const totalMinutes = Math.max(0, Math.round(milliseconds / 60000));
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+    }
+
+    function relativeTime(value) {
+      const time = new Date(value || 0).getTime();
+      if (!Number.isFinite(time) || !value) return "—";
+      const seconds = Math.round((Date.now() - time) / 1000);
+      const future = seconds < 0;
+      const absolute = Math.abs(seconds);
+      let amount;
+      let unit;
+      if (absolute < 60) { amount = absolute; unit = "sec"; }
+      else if (absolute < 3600) { amount = Math.round(absolute / 60); unit = "min"; }
+      else if (absolute < 86400) { amount = Math.round(absolute / 3600); unit = "hr"; }
+      else { amount = Math.round(absolute / 86400); unit = "day"; }
+      if (amount !== 1) unit += "s";
+      return future ? `in ${amount} ${unit}` : `${amount} ${unit} ago`;
+    }
+
+    function formatDate(value) {
+      const date = new Date(value || 0);
+      if (!value || Number.isNaN(date.getTime())) return "—";
+      return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+
+    function prettifyBattle(value) {
+      return String(value || "Current Clan Battle")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/(\D)(20\d{2})$/, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function eventAt(event) {
+      return event?.event_at || event?.detected_at || event?.created_at || null;
+    }
+
+    function eventClass(type) {
+      const classes = {
+        member_joined: "join", member_left: "leave", member_kicked: "leave",
+        member_promoted: "promote", member_demoted: "demote",
+        announcement: "announcement", donation: "donation"
+      };
+      return classes[type] || "";
+    }
+
+    function eventIcon(type) {
+      const icons = {
+        member_joined: "+", member_left: "−", member_kicked: "K",
+        member_promoted: "↑", member_demoted: "↓", kick_used: "K",
+        rank_up: "↑", rank_down: "↓", announcement: "!", donation: "$"
+      };
+      return icons[type] || "•";
+    }
+
+    function eventCopy(event) {
+      const name = escapeHtml(event.username || event.display_name || event.clan_name || "c0ld");
+      const previousRole = escapeHtml(event.previous_member_role || event.previous_value || "member");
+      const currentRole = escapeHtml(event.current_member_role || event.current_value || "member");
+      switch (event.event_type) {
+        case "member_joined": return `<strong>${name}</strong> joined c0ld.`;
+        case "member_left": return `<strong>${name}</strong> left c0ld.`;
+        case "member_kicked": return `<strong>${name}</strong> was removed from c0ld.`;
+        case "member_promoted": return `<strong>${name}</strong> promoted from ${previousRole} to ${currentRole}.`;
+        case "member_demoted": return `<strong>${name}</strong> moved from ${previousRole} to ${currentRole}.`;
+        case "kick_used": return `<strong>c0ld</strong> used its available clan kick.`;
+        case "rank_up": return `<strong>c0ld</strong> moved from #${escapeHtml(event.previous_rank)} to #${escapeHtml(event.current_rank)}.`;
+        case "rank_down": return `<strong>c0ld</strong> moved from #${escapeHtml(event.previous_rank)} to #${escapeHtml(event.current_rank)}.`;
+        case "announcement": return `<strong>Announcement:</strong> ${escapeHtml(event.message || event.text || "Clan update")}`;
+        case "donation": return `<strong>${name}</strong> donated ${escapeHtml(event.amount || event.current_value || "to the clan")}.`;
+        default: return `<strong>${name}</strong> · ${escapeHtml(String(event.event_type || "activity").replaceAll("_", " "))}`;
+      }
+    }
+
+    function renderActivity(detail, announcement) {
+      const rows = [
+        ...(Array.isArray(detail?.clan_events) ? detail.clan_events : []),
+        ...(Array.isArray(detail?.rank_events) ? detail.rank_events : [])
+      ];
+      if (announcement?.enabled && (announcement.message || announcement.text)) {
+        rows.push({
+          event_type: "announcement",
+          message: announcement.message || announcement.text,
+          event_at: announcement.updated_at || announcement.created_at || new Date().toISOString()
+        });
+      }
+      rows.sort((a, b) => new Date(eventAt(b) || 0) - new Date(eventAt(a) || 0));
+      const visible = rows.slice(0, 9);
+      els.activityCount.textContent = visible.length ? `${visible.length} recent` : "No changes yet";
+      els.activityFeed.innerHTML = visible.length
+        ? visible.map(event => `
+          <li class="feed-item">
+            <span class="event-icon ${eventClass(event.event_type)}">${eventIcon(event.event_type)}</span>
+            <div class="event-copy">
+              <div>${eventCopy(event)}</div>
+              <div class="event-meta">${escapeHtml(relativeTime(eventAt(event)))}</div>
+            </div>
+          </li>
+        `).join("")
+        : `<li class="empty-state">No c0ld roster or role changes have been detected since this battle’s activity baseline was established. Donations will appear here when a donation source is connected.</li>`;
+    }
+
+    function groupSnapshots(rows) {
+      const groups = new Map();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const key = row.fetched_at || row.snapshot_id;
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+      }
+      return [...groups.entries()]
+        .map(([at, snapshotRows]) => ({ at, time: new Date(at).getTime(), rows: snapshotRows }))
+        .filter(snapshot => Number.isFinite(snapshot.time))
+        .sort((a, b) => a.time - b.time);
+    }
+
+    function playerKey(row) {
+      return String(row?.user_id || row?.username || "").toLowerCase();
+    }
+
+    function rankMap(snapshot) {
+      return new Map(snapshot.rows.map(row => [playerKey(row), row]));
+    }
+
+    function deriveRankActivity(snapshots) {
+      const changes = [];
+      for (let index = 1; index < snapshots.length; index += 1) {
+        const previous = rankMap(snapshots[index - 1]);
+        for (const row of snapshots[index].rows) {
+          const prior = previous.get(playerKey(row));
+          const priorRank = finite(prior?.rank);
+          const currentRank = finite(row.rank);
+          if (priorRank === null || currentRank === null || priorRank === currentRank) continue;
+          changes.push({
+            username: row.username || prior.username || `user_${row.user_id}`,
+            previousRank: priorRank,
+            currentRank,
+            at: snapshots[index].at,
+            direction: currentRank < priorRank ? "up" : "down"
+          });
+        }
+      }
+      return changes.sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 10);
+    }
+
+    function renderRankActivity(snapshots, currentRows) {
+      const changes = deriveRankActivity(snapshots);
+      if (changes.length) {
+        els.rankFeed.innerHTML = changes.map(change => `
+          <div class="rank-feed-item">
+            <span class="rank-number">#${change.currentRank}</span>
+            <div>
+              <div class="rank-player">${escapeHtml(change.username)}</div>
+              <div class="rank-time">from #${change.previousRank} · ${escapeHtml(relativeTime(change.at))}</div>
+            </div>
+            <span class="rank-direction ${change.direction}">${change.direction === "up" ? "↑" : "↓"}</span>
+          </div>
+        `).join("");
+        return;
+      }
+
+      const leaders = [...(currentRows || [])].sort((a, b) => finite(a.rank) - finite(b.rank)).slice(0, 7);
+      els.rankFeed.innerHTML = leaders.length
+        ? leaders.map(row => `
+          <div class="rank-feed-item">
+            <span class="rank-number">#${escapeHtml(row.rank)}</span>
+            <div>
+              <div class="rank-player">${escapeHtml(row.username)}</div>
+              <div class="rank-time">Current position</div>
+            </div>
+            <span class="rank-direction">•</span>
+          </div>
+        `).join("")
+        : `<div class="empty-state">No member-rank history is available yet.</div>`;
+    }
+
+    function awardFallback(target, valueTarget, descriptionTarget, description) {
+      target.textContent = "Awaiting history";
+      valueTarget.textContent = "—";
+      descriptionTarget.textContent = description;
+    }
+
+    function renderAwards(snapshots, currentRows) {
+      if (!snapshots.length) {
+        awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No battle snapshots were returned for the observed period.");
+        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "Rank movement needs at least two snapshots.");
+        awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "Rank improvement needs at least two snapshots.");
+        return;
+      }
+
+      const timeAtOne = new Map();
+      const changeCounts = new Map();
+      const playerNames = new Map();
+      const firstRanks = new Map();
+      const latestRanks = new Map();
+      let previousRanks = new Map();
+
+      snapshots.forEach((snapshot, index) => {
+        const nextTime = snapshots[index + 1]?.time || snapshot.time;
+        const duration = Math.max(0, Math.min(nextTime - snapshot.time, 10 * 60000));
+        const currentRanks = rankMap(snapshot);
+        const leader = snapshot.rows.find(row => finite(row.rank) === 1);
+        if (leader) {
+          const key = playerKey(leader);
+          timeAtOne.set(key, (timeAtOne.get(key) || 0) + duration);
+          playerNames.set(key, leader.username || `user_${leader.user_id}`);
+        }
+
+        for (const row of snapshot.rows) {
+          const key = playerKey(row);
+          if (!key) continue;
+          playerNames.set(key, row.username || `user_${row.user_id}`);
+          const rank = finite(row.rank);
+          if (rank === null) continue;
+          if (!firstRanks.has(key)) firstRanks.set(key, rank);
+          latestRanks.set(key, rank);
+          const previous = finite(previousRanks.get(key)?.rank);
+          if (previous !== null && previous !== rank) changeCounts.set(key, (changeCounts.get(key) || 0) + 1);
+        }
+        previousRanks = currentRanks;
+      });
+
+      const currentLeader = [...(currentRows || [])].sort((a, b) => finite(a.rank) - finite(b.rank))[0];
+      const mvp = [...timeAtOne.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (mvp) {
+        els.mvpName.textContent = playerNames.get(mvp[0]) || "Unknown player";
+        els.mvpValue.textContent = `${formatDuration(mvp[1])} at #1`;
+        els.mvpDescription.textContent = `Longest observed hold of the #1 player position across the latest ${HISTORY_HOURS} hours.`;
+      } else if (currentLeader) {
+        els.mvpName.textContent = currentLeader.username || "Current leader";
+        els.mvpValue.textContent = `#1 · ${formatNumber(currentLeader.total_points)} points`;
+        els.mvpDescription.textContent = "Current points leader; time-at-rank history is still accumulating.";
+      } else {
+        awardFallback(els.mvpName, els.mvpValue, els.mvpDescription, "No current leader is available.");
+      }
+
+      const volatile = [...changeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (volatile && volatile[1] > 0) {
+        els.volatileName.textContent = playerNames.get(volatile[0]) || "Unknown player";
+        els.volatileValue.textContent = `${volatile[1]} rank change${volatile[1] === 1 ? "" : "s"}`;
+        els.volatileDescription.textContent = `Most movement between observed leaderboard snapshots in the latest ${HISTORY_HOURS} hours.`;
+      } else {
+        awardFallback(els.volatileName, els.volatileValue, els.volatileDescription, "No player-rank changes were observed in the current window.");
+      }
+
+      const sleepers = [...latestRanks.entries()]
+        .map(([key, latest]) => ({ key, latest, first: firstRanks.get(key), gain: (firstRanks.get(key) || latest) - latest }))
+        .filter(item => item.first && item.gain > 0)
+        .sort((a, b) => b.gain - a.gain || a.latest - b.latest);
+      const sleeper = sleepers[0];
+      if (sleeper) {
+        const percentage = (sleeper.gain / sleeper.first) * 100;
+        els.sleeperName.textContent = playerNames.get(sleeper.key) || "Unknown player";
+        els.sleeperValue.textContent = `#${sleeper.first} → #${sleeper.latest}`;
+        els.sleeperDescription.textContent = `Climbed ${sleeper.gain} places (${percentage.toFixed(0)}%) during the observed ${HISTORY_HOURS}-hour window.`;
+      } else {
+        awardFallback(els.sleeperName, els.sleeperValue, els.sleeperDescription, "No upward player-rank climb was observed in the current window.");
+      }
+    }
+
+    function updateCountdown() {
+      const end = new Date(countdownEndsAt || 0).getTime();
+      if (!countdownEndsAt || !Number.isFinite(end)) {
+        els.battleCountdown.textContent = "—";
+        return;
+      }
+      const remaining = Math.max(0, end - Date.now());
+      const totalSeconds = Math.floor(remaining / 1000);
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      els.battleCountdown.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+      els.battleCountdownDetail.textContent = remaining ? formatDate(countdownEndsAt) : "Battle window ended";
+    }
+
+    async function fetchJson(url, fallback = null) {
+      try {
+        const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data?.ok === false) throw new Error(data.message || "API error");
+        return data;
+      } catch (error) {
+        if (fallback !== null) return fallback;
+        throw error;
+      }
+    }
+
+    async function load() {
+      if (loading) return;
+      loading = true;
+      els.refresh.disabled = true;
+      els.refresh.textContent = "Refreshing…";
+      els.errorBanner.style.display = "none";
+
+      try {
+        const [detail, current, restarts, versions, announcement] = await Promise.all([
+          fetchJson(`${API_BASE}/api/clans/activity/detail?clan=${CLAN_NAME}&limit=120`, {}),
+          fetchJson(`${API_BASE}/api/current?clan=${CLAN_NAME}&avatars=false&downtime=false`),
+          fetchJson(`${API_BASE}/api/ps99/restarts?limit=1`, {}),
+          fetchJson(`${API_BASE}/api/ps99/versions?limit=20`, {}),
+          fetchJson("Data/announcement.json", {})
+        ]);
+
+        const battle = current.battle || detail.battle || "current";
+        const history = await fetchJson(
+          `${API_BASE}/api/history?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}&hours=${HISTORY_HOURS}&limit=30000&order=asc`,
+          { rows: [] }
+        );
+        const currentRows = Array.isArray(current.rows) ? current.rows : [];
+        const snapshots = groupSnapshots(history.rows);
+        const rootPlace = (versions.places || []).find(place => place.root_place) || versions.places?.[0] || null;
+        const latestRestart = restarts.latest_restart || restarts.events?.[0] || null;
+
+        renderActivity(detail, announcement);
+        renderRankActivity(snapshots, currentRows);
+        renderAwards(snapshots, currentRows);
+
+        els.lastRestart.textContent = latestRestart ? relativeTime(latestRestart.detected_at) : "None logged";
+        els.lastRestartDetail.textContent = latestRestart ? formatDate(latestRestart.detected_at) : "No confirmed restart yet";
+        els.currentVersion.textContent = finite(rootPlace?.latest_version) === null ? "—" : String(Math.trunc(rootPlace.latest_version));
+        els.currentVersionDetail.textContent = rootPlace?.latest_published_at
+          ? `Published ${relativeTime(rootPlace.latest_published_at)}`
+          : "Pet Simulator 99 root place";
+
+        const battleName = current.display_name || detail.display_name || battle;
+        countdownEndsAt = current.battle_end_iso || detail.summary?.battle_ended_at || null;
+        els.battleCountdownLabel.textContent = `${battleName || "Current Battle"} Ends in:`;
+        els.battleName.textContent = prettifyBattle(battleName);
+        els.clanRank.textContent = finite(detail.summary?.rank ?? current.clan_rank) === null
+          ? "—"
+          : `#${detail.summary?.rank ?? current.clan_rank}`;
+        els.clanPoints.textContent = formatNumber(detail.summary?.points ?? current.clan_points);
+        els.rosterCount.textContent = String(detail.summary?.current_members ?? currentRows.length ?? "—");
+        updateCountdown();
+
+        els.lastUpdated.textContent = `Updated ${relativeTime(current.generated_at || current.snapshot_at || new Date().toISOString())}`;
+      } catch (error) {
+        els.errorBanner.textContent = `Some live dashboard data could not be loaded: ${error.message || error}`;
+        els.errorBanner.style.display = "block";
+        els.lastUpdated.textContent = "Live data partially unavailable";
+      } finally {
+        loading = false;
+        els.refresh.disabled = false;
+        els.refresh.textContent = "Refresh";
+      }
+    }
+
+    els.refresh.addEventListener("click", load);
+    load();
+    window.setInterval(updateCountdown, 1000);
+    window.setInterval(load, REFRESH_MS);
+  </script>
+</body>
+</html>
