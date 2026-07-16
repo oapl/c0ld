@@ -38,18 +38,20 @@
     .history-tab{appearance:none;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
     .history-tab:hover,.history-tab.active{border-color:var(--link);color:var(--link);background:#1f2630}
     .history-control-row{display:flex;justify-content:flex-end;margin:0 0 14px}
-    .history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
-    .history-column{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:14px;min-width:0}
-    .history-column-title{margin:0 0 12px;text-align:center;font-size:18px}
-    .history-lines{display:grid;gap:10px}
-    .history-line{border:1px solid var(--border);border-radius:8px;background:var(--panel2);padding:12px}
-    .history-line-title{font-weight:700;text-align:center;font-size:16px;line-height:1.25;overflow-wrap:anywhere}
-    .history-line-date{text-align:center;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}
-    .history-line-data{display:grid;gap:5px;border-top:1px solid rgba(139,148,158,.28);margin-top:10px;padding-top:9px}
-    .history-line-row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(139,148,158,.22);padding-top:5px;font-size:13px}
-    .history-line-row:first-child{border-top:0;padding-top:0}
-    .history-line-row .label{margin:0}
-    .history-line-value{text-align:right;font-weight:700;overflow-wrap:anywhere}
+    .history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;align-items:stretch;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
+    .history-column{padding:14px;min-width:0}
+    .history-column+.history-column{border-left:1px solid var(--border)}
+    .history-column-title{margin:0;padding:0 0 11px;text-align:center;font-size:18px;border-bottom:1px solid var(--border)}
+    .history-lines{display:grid}
+    .history-line{display:grid;grid-template-columns:minmax(120px,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(139,148,158,.22)}
+    .history-line:first-child{border-top:0}
+    .history-line-title{font-weight:700;text-align:left;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
+    .history-line-date{text-align:left;color:var(--muted);font-size:11px;line-height:1.25;margin-top:3px}
+    .history-line-data{display:flex;align-items:center;justify-content:flex-end;gap:0;min-width:0}
+    .history-line-chip{min-width:48px;padding:0 8px;text-align:center;border-left:1px solid rgba(139,148,158,.28)}
+    .history-line-chip:first-child{border-left:0}
+    .history-line-chip .label{display:block;margin:0 0 1px;color:var(--muted);font-size:10px;line-height:1.1}
+    .history-line-value{display:block;font-size:13px;line-height:1.15;font-weight:700;overflow-wrap:anywhere}
     .history-empty{border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;color:var(--muted);font-size:13px}
     .summary-list{display:grid;grid-template-columns:1fr;gap:12px}
     .summary-card{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:16px}
@@ -76,6 +78,7 @@
     .error{border-color:#f85149;background:rgba(248,81,73,.12);color:#ffb4ad}
     @media(max-width:1000px){
       .history-grid{grid-template-columns:1fr}
+      .history-column+.history-column{border-left:0;border-top:1px solid var(--border)}
     }
     @media(max-width:700px){
       main{padding:16px}
@@ -1316,15 +1319,15 @@ function historyLineRows(row,type){
   if(type==="clan"){
     lines.push(["Clan",placementName(row,type)||"—"]);
     lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked)]);
-    lines.push(["Points",fmt(row.final_points)]);
+    lines.push(["Pts",fmt(row.final_points)]);
   }else if(type==="league"){
     lines.push(["League",placementName(row,type)||"—"]);
     lines.push(["Rank",rankDisplay(row.league_rank,row.total_leagues)]);
-    lines.push(["League Rank",rankDisplay(row.player_league_rank)]);
-    lines.push(["Points",fmt(row.final_points)]);
+    lines.push(["L Rank",rankDisplay(row.player_league_rank)]);
+    lines.push(["Pts",fmt(row.final_points)]);
   }else{
     lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked)]);
-    lines.push(["Points",fmt(row.final_points)]);
+    lines.push(["Pts",fmt(row.final_points)]);
   }
 
   return lines;
@@ -1347,11 +1350,13 @@ function renderHistoryColumn(title,rows,type){
       <div class="history-lines">
         ${rows.length?rows.map(row=>`
           <section class="history-line">
-            <div class="history-line-title">${escapeHtml(summaryTitle(row,type))}</div>
-            ${historyDateLabel(row)?`<div class="history-line-date">${escapeHtml(historyDateLabel(row))}</div>`:""}
+            <div class="history-line-main">
+              <div class="history-line-title">${escapeHtml(summaryTitle(row,type))}</div>
+              ${historyDateLabel(row)?`<div class="history-line-date">${escapeHtml(historyDateLabel(row))}</div>`:""}
+            </div>
             <div class="history-line-data">
               ${historyLineRows(row,type).map(([label,value])=>`
-                <div class="history-line-row">
+                <div class="history-line-chip">
                   <span class="label">${escapeHtml(label)}</span>
                   <span class="history-line-value">${escapeHtml(value)}</span>
                 </div>

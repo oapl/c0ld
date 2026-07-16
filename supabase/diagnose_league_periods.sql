@@ -2,48 +2,92 @@
 -- Safe to run in Supabase SQL Editor. This only creates temporary tables for
 -- the current SQL session; it does not modify permanent c0ld data.
 --
--- Adjust both `interval '36 hours'` settings below if you change
--- LEAGUE_PROFILE_PERIOD_GAP_HOURS in the league Worker.
+-- If Supabase times out, set from_ts/to_ts below to a smaller window and rerun.
+-- Keep gap_threshold aligned with LEAGUE_PROFILE_PERIOD_GAP_HOURS.
 
+drop table if exists pg_temp.league_audit_settings;
 drop table if exists pg_temp.league_period_audit;
+drop table if exists pg_temp.league_period_base;
 drop table if exists pg_temp.league_snapshot_gap_audit;
+drop table if exists pg_temp.league_member_snapshot_audit;
+drop table if exists pg_temp.league_top_snapshot_audit;
+
+create temporary table league_audit_settings as
+select
+  interval '36 hours' as gap_threshold,
+  null::timestamptz as from_ts,
+  null::timestamptz as to_ts;
+
+-- Example narrower window:
+-- update pg_temp.league_audit_settings
+-- set from_ts = '2026-07-01 00:00:00+00',
+--     to_ts   = '2026-07-18 00:00:00+00';
+
+create temporary table league_member_snapshot_audit as
+select
+  coalesce(nullif(s.league_run_key, ''), 'active') as league_run_key,
+  s.league_name,
+  nullif(s.league_id, '') as league_id,
+  coalesce(
+    nullif(s.league_id, ''),
+    regexp_replace(lower(s.league_name), '[^a-z0-9]', '', 'g')
+  ) as league_identity_key,
+  regexp_replace(lower(s.league_name), '[^a-z0-9]', '', 'g') as league_name_key,
+  s.snapshot_id,
+  min(s.fetched_at) as snapshot_at,
+  count(*) as row_count,
+  count(distinct s.user_id) as player_count,
+  sum(coalesce(s.points, 0)) as player_points,
+  max(coalesce(s.league_points, 0)) as league_points
+from public.ps99_league_snapshots s
+cross join pg_temp.league_audit_settings cfg
+where s.league_name is not null
+  and s.league_name not in (
+    'GLOBAL_TOP_1000_LEAGUES',
+    'GLOBAL_TOP_10000_LEAGUES',
+    'C0LD_DISCOVERED_LEAGUES'
+  )
+  and coalesce(s.role, '') not in ('Top League', 'Discovered c0ld League')
+  and (cfg.from_ts is null or s.fetched_at >= cfg.from_ts)
+  and (cfg.to_ts is null or s.fetched_at <= cfg.to_ts)
+group by 1, 2, 3, 4, 5, 6;
+
+create index league_member_snapshot_audit_period_idx
+  on league_member_snapshot_audit (league_run_key, league_identity_key, snapshot_at);
+
+create temporary table league_top_snapshot_audit as
+select
+  coalesce(nullif(s.league_run_key, ''), 'active') as league_run_key,
+  s.league_name as source_list,
+  nullif(s.league_id, '') as league_id,
+  regexp_replace(lower(s.display_name), '[^a-z0-9]', '', 'g') as league_name_key,
+  s.display_name,
+  s.rank,
+  s.fetched_at
+from public.ps99_league_snapshots s
+cross join pg_temp.league_audit_settings cfg
+where s.league_name in ('GLOBAL_TOP_1000_LEAGUES', 'GLOBAL_TOP_10000_LEAGUES')
+  and (cfg.from_ts is null or s.fetched_at >= cfg.from_ts - cfg.gap_threshold)
+  and (cfg.to_ts is null or s.fetched_at <= cfg.to_ts + cfg.gap_threshold);
+
+create index league_top_snapshot_audit_id_idx
+  on league_top_snapshot_audit (league_run_key, league_id, fetched_at desc, rank);
+
+create index league_top_snapshot_audit_name_idx
+  on league_top_snapshot_audit (league_run_key, league_name_key, fetched_at desc, rank);
+
+analyze league_member_snapshot_audit;
+analyze league_top_snapshot_audit;
 
 create temporary table league_snapshot_gap_audit as
-with settings as (
-  select interval '36 hours' as gap_threshold
-),
-member_snapshots as (
-  select
-    coalesce(nullif(league_run_key, ''), 'active') as league_run_key,
-    league_name,
-    nullif(league_id, '') as league_id,
-    snapshot_id,
-    min(fetched_at) as snapshot_at,
-    count(*) as row_count,
-    count(distinct user_id) as player_count,
-    sum(coalesce(points, 0)) as player_points,
-    max(coalesce(league_points, 0)) as league_points
-  from public.ps99_league_snapshots
-  where league_name is not null
-    and league_name not in (
-      'GLOBAL_TOP_1000_LEAGUES',
-      'GLOBAL_TOP_10000_LEAGUES',
-      'C0LD_DISCOVERED_LEAGUES'
-    )
-    and coalesce(role, '') not in ('Top League', 'Discovered c0ld League')
-  group by 1, 2, 3, 4
-),
-gaps as (
+with gaps as (
   select
     m.*,
     lag(snapshot_at) over league_window as previous_snapshot_at,
     snapshot_at - lag(snapshot_at) over league_window as gap_from_previous
-  from member_snapshots m
+  from pg_temp.league_member_snapshot_audit m
   window league_window as (
-    partition by
-      league_run_key,
-      coalesce(league_id, ''),
-      regexp_replace(lower(league_name), '[^a-z0-9]', '', 'g')
+    partition by league_run_key, league_identity_key
     order by snapshot_at
   )
 )
@@ -51,63 +95,69 @@ select
   league_run_key,
   league_name,
   league_id,
+  league_identity_key,
+  league_name_key,
   snapshot_id,
   previous_snapshot_at,
   snapshot_at,
   gap_from_previous,
-  gap_from_previous > (select gap_threshold from settings) as starts_new_period,
+  gap_from_previous > (select gap_threshold from pg_temp.league_audit_settings) as starts_new_period,
   row_count,
   player_count,
   player_points,
   league_points
 from gaps;
 
-create temporary table league_period_audit as
-with settings as (
-  select interval '36 hours' as gap_threshold
-),
-period_marks as (
+create index league_snapshot_gap_audit_period_idx
+  on league_snapshot_gap_audit (league_run_key, league_identity_key, snapshot_at);
+
+create temporary table league_period_base as
+with period_marks as (
   select
     g.*,
     sum(
       case
         when previous_snapshot_at is null
-          or gap_from_previous > (select gap_threshold from settings)
+          or gap_from_previous > (select gap_threshold from pg_temp.league_audit_settings)
         then 1
         else 0
       end
     ) over (
-      partition by
-        league_run_key,
-        coalesce(league_id, ''),
-        regexp_replace(lower(league_name), '[^a-z0-9]', '', 'g')
+      partition by league_run_key, league_identity_key
       order by snapshot_at
     ) as period_number
   from pg_temp.league_snapshot_gap_audit g
-),
-periods as (
-  select
-    league_run_key,
-    league_name,
-    league_id,
-    period_number,
-    min(snapshot_at) as period_start_at,
-    max(snapshot_at) as period_end_at,
-    count(*) as snapshot_count,
-    sum(row_count) as row_count,
-    max(player_count) as max_player_count,
-    (array_agg(player_count order by snapshot_at desc))[1] as final_player_count,
-    (array_agg(player_points order by snapshot_at desc))[1] as final_player_points,
-    (array_agg(league_points order by snapshot_at desc))[1] as final_league_points,
-    max(gap_from_previous) filter (where gap_from_previous is not null) as largest_gap_seen
-  from period_marks
-  group by 1, 2, 3, 4
 )
+select
+  league_run_key,
+  league_name,
+  league_id,
+  league_identity_key,
+  league_name_key,
+  period_number,
+  min(snapshot_at) as period_start_at,
+  max(snapshot_at) as period_end_at,
+  count(*) as snapshot_count,
+  sum(row_count) as row_count,
+  max(player_count) as max_player_count,
+  (array_agg(player_count order by snapshot_at desc))[1] as final_player_count,
+  (array_agg(player_points order by snapshot_at desc))[1] as final_player_points,
+  (array_agg(league_points order by snapshot_at desc))[1] as final_league_points,
+  max(gap_from_previous) filter (where gap_from_previous is not null) as largest_gap_seen
+from period_marks
+group by 1, 2, 3, 4, 5, 6;
+
+create index league_period_base_lookup_idx
+  on league_period_base (league_run_key, league_identity_key, period_end_at);
+
+analyze league_period_base;
+
+create temporary table league_period_audit as
 select
   concat(
     p.league_run_key,
     ':',
-    regexp_replace(lower(p.league_name), '[^a-z0-9]', '', 'g'),
+    p.league_name_key,
     ':',
     to_char(p.period_start_at at time zone 'UTC', 'YYYY-MM-DD')
   ) as label_key,
@@ -133,19 +183,18 @@ select
     when rank_after.rank is not null then 'top-leagues after period end'
     else 'no matching top-leagues snapshot found'
   end as league_rank_status
-from periods p
-cross join settings s
+from pg_temp.league_period_base p
+cross join pg_temp.league_audit_settings cfg
 left join lateral (
   select
     t.rank,
     t.fetched_at,
-    t.league_name as source_list
-  from public.ps99_league_snapshots t
-  where coalesce(nullif(t.league_run_key, ''), 'active') = p.league_run_key
-    and t.league_name in ('GLOBAL_TOP_1000_LEAGUES', 'GLOBAL_TOP_10000_LEAGUES')
+    t.source_list
+  from pg_temp.league_top_snapshot_audit t
+  where t.league_run_key = p.league_run_key
     and (
       (p.league_id is not null and t.league_id = p.league_id)
-      or lower(t.display_name) = lower(p.league_name)
+      or (p.league_name_key <> '' and t.league_name_key = p.league_name_key)
     )
     and t.fetched_at <= p.period_end_at
   order by t.fetched_at desc, t.rank asc
@@ -155,22 +204,21 @@ left join lateral (
   select
     t.rank,
     t.fetched_at,
-    t.league_name as source_list
-  from public.ps99_league_snapshots t
+    t.source_list
+  from pg_temp.league_top_snapshot_audit t
   where rank_before.rank is null
-    and coalesce(nullif(t.league_run_key, ''), 'active') = p.league_run_key
-    and t.league_name in ('GLOBAL_TOP_1000_LEAGUES', 'GLOBAL_TOP_10000_LEAGUES')
+    and t.league_run_key = p.league_run_key
     and (
       (p.league_id is not null and t.league_id = p.league_id)
-      or lower(t.display_name) = lower(p.league_name)
+      or (p.league_name_key <> '' and t.league_name_key = p.league_name_key)
     )
     and t.fetched_at > p.period_end_at
-    and t.fetched_at <= p.period_end_at + s.gap_threshold
+    and t.fetched_at <= p.period_end_at + cfg.gap_threshold
   order by t.fetched_at asc, t.rank asc
   limit 1
 ) rank_after on true;
 
--- 1) Main result: these are the exact ranges/keys to name.
+-- 1) Main result: exact ranges/keys to name.
 select *
 from pg_temp.league_period_audit
 order by period_start_at desc, league_name;
@@ -179,69 +227,50 @@ order by period_start_at desc, league_name;
 select jsonb_pretty(jsonb_object_agg(label_key, '' order by period_start_at)) as league_run_labels_json_template
 from pg_temp.league_period_audit;
 
--- 3) The biggest gaps are the split points that caused separate periods.
+-- 3) Biggest gaps: these are the split points that caused separate periods.
 select *
 from pg_temp.league_snapshot_gap_audit
 where gap_from_previous is not null
 order by gap_from_previous desc
 limit 100;
 
--- 4) These periods do not have a matching top-leagues snapshot/rank.
+-- 4) Periods that do not have a matching top-leagues snapshot/rank.
 select *
 from pg_temp.league_period_audit
 where league_rank is null
 order by period_start_at desc, league_name;
 
--- 5) Current table vs latest snapshot counts, useful for spotting live-table disparities.
+-- 5) Current table vs latest materialized snapshot counts.
 with current_counts as (
   select
-    coalesce(nullif(league_run_key, ''), 'active') as league_run_key,
-    league_name,
+    coalesce(nullif(c.league_run_key, ''), 'active') as league_run_key,
+    c.league_name,
+    coalesce(
+      nullif(c.league_id, ''),
+      regexp_replace(lower(c.league_name), '[^a-z0-9]', '', 'g')
+    ) as league_identity_key,
     count(*) as current_rows,
-    count(distinct user_id) as current_players,
-    max(fetched_at) as current_snapshot_at
-  from public.ps99_league_current
-  where league_name not in (
+    count(distinct c.user_id) as current_players,
+    max(c.fetched_at) as current_snapshot_at
+  from public.ps99_league_current c
+  where c.league_name not in (
     'GLOBAL_TOP_1000_LEAGUES',
     'GLOBAL_TOP_10000_LEAGUES',
     'C0LD_DISCOVERED_LEAGUES'
   )
-  group by 1, 2
-),
-latest_snapshot_ids as (
-  select distinct on (
-    coalesce(nullif(league_run_key, ''), 'active'),
-    league_name
-  )
-    coalesce(nullif(league_run_key, ''), 'active') as league_run_key,
-    league_name,
-    snapshot_id,
-    fetched_at
-  from public.ps99_league_snapshots
-  where league_name not in (
-    'GLOBAL_TOP_1000_LEAGUES',
-    'GLOBAL_TOP_10000_LEAGUES',
-    'C0LD_DISCOVERED_LEAGUES'
-  )
-  order by
-    coalesce(nullif(league_run_key, ''), 'active'),
-    league_name,
-    fetched_at desc
+  group by 1, 2, 3
 ),
 latest_snapshot_counts as (
-  select
-    l.league_run_key,
-    l.league_name,
-    l.snapshot_id,
-    l.fetched_at as latest_snapshot_at,
-    count(*) as latest_snapshot_rows,
-    count(distinct s.user_id) as latest_snapshot_players
-  from latest_snapshot_ids l
-  join public.ps99_league_snapshots s
-    on coalesce(nullif(s.league_run_key, ''), 'active') = l.league_run_key
-   and s.league_name = l.league_name
-   and s.snapshot_id = l.snapshot_id
-  group by 1, 2, 3, 4
+  select distinct on (league_run_key, league_identity_key)
+    league_run_key,
+    league_name,
+    league_identity_key,
+    snapshot_id,
+    snapshot_at as latest_snapshot_at,
+    row_count as latest_snapshot_rows,
+    player_count as latest_snapshot_players
+  from pg_temp.league_member_snapshot_audit
+  order by league_run_key, league_identity_key, snapshot_at desc
 )
 select
   coalesce(c.league_run_key, s.league_run_key) as league_run_key,
@@ -256,6 +285,6 @@ select
 from current_counts c
 full join latest_snapshot_counts s
   on s.league_run_key = c.league_run_key
- and s.league_name = c.league_name
+ and s.league_identity_key = c.league_identity_key
 order by abs(coalesce(c.current_players, 0) - coalesce(s.latest_snapshot_players, 0)) desc,
   coalesce(c.current_snapshot_at, s.latest_snapshot_at) desc;
