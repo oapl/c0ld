@@ -198,6 +198,14 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
 | `PS99_ALERT_ROLE_ID` | Optional Discord role ID to mention when a PS99 place update or confirmed restart is detected. |
+| `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migration `025` to allow profile-page CW_Bot message-link imports. |
+| `CW_BOT_USER_ID` | Optional. Defaults to `1219229814150398003`; Discord user/app ID that imported messages must be authored by. |
+| `CW_BOT_IMPORT_GUILD_IDS` | Optional comma-separated allowlist of Discord server IDs accepted for CW_Bot imports. |
+| `CW_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated allowlist of Discord channel IDs accepted for CW_Bot imports. |
+| `CW_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Defaults to `false`; when `true`, imports require `INGEST_ADMIN_TOKEN`. |
+| `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_external_player_history` until reviewed. |
+| `OPENAI_API_KEY` | Optional secret. Enables image OCR when the CW_Bot message is image-only. |
+| `CW_BOT_OCR_MODEL` | Optional. Model used for OCR. Defaults to `gpt-5.6`. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -210,6 +218,8 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
 | `PS99_ALERT_WEBHOOK_URL` | Discord webhook used for PS99 place-version and confirmed-restart alerts. Store this as a secret. |
+| `DISCORD_BOT_TOKEN` | Discord bot token. Required for CW_Bot message-link imports so the Worker can fetch the linked message. |
+| `OPENAI_API_KEY` | Optional OpenAI API key for CW_Bot image OCR. Store this as a secret. |
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
@@ -258,6 +268,8 @@ Useful endpoints:
 | `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
+| `/api/external-history?user_id=123&source=cw_bot` | Approved external history rows for a player. Non-approved statuses require the admin token. |
+| `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
@@ -538,10 +550,12 @@ the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
 
 League profile summaries can display an update/theme name when `LEAGUE_RUN_LABEL`
-is set, such as `Tap Heroes`, or when `LEAGUE_RUN_LABELS_JSON` maps a
-`LEAGUE_RUN_KEY` to a label. The public BIG Games league payload exposes league
-names, IDs, points, rosters, and contribution timestamps, but not a separate
-update theme, so this label is owned by the Worker config.
+is set, such as `Tap Heroes`, or when `LEAGUE_RUN_LABELS_JSON` maps a period key
+to a label. Exact keys look like `active:yamo:2026-07-11`; date-cohort wildcard
+keys such as `active:*:2026-07-11` can label every league period that started on
+that date unless an exact key overrides it. The public BIG Games league payload
+exposes league names, IDs, points, rosters, and contribution timestamps, but not
+a separate update theme, so this label is owned by the Worker config.
 
 `c0ld-league-matches.html` is the hidden reassessment/scanner page. The normal
 `c0ld-leagues.html` page uses the known c0ld overlap league list and expects the

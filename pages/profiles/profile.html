@@ -24,6 +24,9 @@
     .profile-header{display:flex;gap:18px;align-items:center;padding:18px;margin-bottom:24px}
     .avatar{width:96px;height:96px;border-radius:10px;background:#21262d;object-fit:cover}
     .profile-name{margin:0 0 6px;font-size:34px}
+    .profile-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}
+    .profile-action{appearance:none;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:7px 10px;font:inherit;font-size:13px;cursor:pointer}
+    .profile-action:hover,.profile-action:focus{border-color:var(--link);color:var(--link);background:#1f2630}
     .meta,.label,.dates,.chart-title,.muted{color:var(--muted);font-size:13px;line-height:1.45}
     .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:14px}
     .card{padding:16px;min-height:82px}
@@ -76,6 +79,17 @@
     .tip{position:absolute;display:none;pointer-events:none;z-index:5;min-width:220px;max-width:320px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#0b0f14;box-shadow:0 8px 24px #0008;font-size:13px;line-height:1.45}
     .empty,.error{padding:18px;color:var(--muted)}
     .error{border-color:#f85149;background:rgba(248,81,73,.12);color:#ffb4ad}
+    .modal-backdrop{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(1,4,9,.72)}
+    .modal{width:min(560px,100%);border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:18px}
+    .modal h2{margin:0 0 8px;font-size:22px}
+    .modal p{margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.45}
+    .modal label{display:block;margin:0 0 7px;color:var(--muted);font-size:13px}
+    .modal input{width:100%;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:10px 11px;font:inherit}
+    .modal input:focus{outline:none;border-color:var(--link);background:#1f2630}
+    .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px;flex-wrap:wrap}
+    .modal-status{min-height:20px;margin-top:10px;color:var(--muted);font-size:13px;line-height:1.45}
+    .modal-status.error-text{color:#ffb4ad}
+    .modal-status.success-text{color:#7ee787}
     @media(max-width:1000px){
       .history-grid{grid-template-columns:1fr}
       .history-column+.history-column{border-left:0;border-top:1px solid var(--border)}
@@ -143,6 +157,8 @@ const MEMBER_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/curr
 const MEMBER_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
 const MEMBER_BATTLES="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/battles";
 const GLOBAL_SEARCH="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/search";
+const EXTERNAL_HISTORY="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/external-history";
+const CW_BOT_IMPORT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/external-history/cwbot/import";
 const CLANS_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
 const LEAGUE_PROFILE="https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/profile";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
@@ -917,6 +933,38 @@ async function loadLeagueProfile(userId){
   };
 }
 
+function normalizeExternalClanSummaryRows(rows){
+  return(Array.isArray(rows)?rows:[])
+    .map(row=>({
+      type:"clan",
+      source:row.source||"cw_bot",
+      battle:row.battle||row.battle_key||null,
+      label:row.battle_name||row.label||row.battle_key||"Clan Battle",
+      clan_name:row.clan_name||null,
+      final_rank:finite(row.final_rank),
+      total_ranked:finite(row.total_ranked),
+      final_points:finite(row.final_points),
+      first_snapshot_at:row.final_snapshot_at||row.created_at||null,
+      final_snapshot_at:row.final_snapshot_at||row.created_at||null,
+      snapshot_count:1,
+      imported_from:row.imported_from||null,
+      discord_message_url:row.discord_message_url||null
+    }))
+    .filter(row=>row.final_rank!==null||row.final_points!==null);
+}
+
+async function loadExternalHistory(userId){
+  const id=finite(userId);
+  if(id===null)return null;
+
+  const payload=await optionalJson(`${EXTERNAL_HISTORY}?user_id=${encodeURIComponent(id)}&source=cw_bot&limit=300`);
+  if(!payload?.ok)return null;
+
+  return{
+    external_clan_summaries:normalizeExternalClanSummaryRows(payload.rows||[])
+  };
+}
+
 async function loadCurrentClanLeaderboard(){
   return optionalJson(CLANS_CURRENT);
 }
@@ -1038,8 +1086,35 @@ function clanHistoryBattles(){
   return[...map.values()].sort((a,b)=>new Date(b.battle_last_snapshot||b.last_seen||0)-new Date(a.battle_last_snapshot||a.last_seen||0));
 }
 
+function clanPlacementKey(row){
+  return normalize(stripClanPrefix(row?.battle||row?.battle_key||row?.label||row?.battle_name||row?.battle_display_name||"",row));
+}
+
+function mergeClanPlacementRows(...lists){
+  const map=new Map();
+
+  for(const row of lists.flat().filter(Boolean)){
+    const key=clanPlacementKey(row)||`row-${map.size}`;
+    const existing=map.get(key);
+
+    if(!existing){
+      map.set(key,row);
+      continue;
+    }
+
+    const existingImported=Boolean(existing.imported_from||existing.source==="cw_bot");
+    const rowImported=Boolean(row.imported_from||row.source==="cw_bot");
+
+    if(existingImported&&!rowImported){
+      map.set(key,row);
+    }
+  }
+
+  return[...map.values()].sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
+}
+
 function clanPlacementSummaries(){
-  return clanHistoryBattles().map(battle=>{
+  const tracked=clanHistoryBattles().map(battle=>{
     const row=recalcBattle(battle);
     return{
       type:"clan",
@@ -1053,6 +1128,8 @@ function clanPlacementSummaries(){
       snapshot_count:Array.isArray(row.series)?row.series.length:null
     };
   }).filter(row=>row.final_rank!==null||row.final_points!==null);
+
+  return mergeClanPlacementRows(tracked,normalizeExternalClanSummaryRows(profile?.external_clan_summaries||[]));
 }
 
 function leagueHistorySummaries(){
@@ -1404,6 +1481,107 @@ function renderHistoryGrid(){
   `;
 }
 
+function closeCwBotImportModal(){
+  document.getElementById("cwbot-import-modal")?.remove();
+  notifyEmbedHeight();
+}
+
+function setCwBotImportStatus(text,type=""){
+  const el=document.getElementById("cwbot-import-status");
+  if(!el)return;
+  el.className=`modal-status ${type}`;
+  el.textContent=text;
+}
+
+function openCwBotImportModal(){
+  if(!profile?.user_id)return;
+  closeCwBotImportModal();
+
+  const modal=document.createElement("div");
+  modal.id="cwbot-import-modal";
+  modal.className="modal-backdrop";
+  modal.innerHTML=`
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="cwbot-import-title">
+      <h2 id="cwbot-import-title">Import CW_Bot History</h2>
+      <p>Run CW_Bot normally, copy the Discord message link from its result, then paste it here. New rows are stored as CW_Bot manual imports for review.</p>
+      <label for="cwbot-message-url">Discord message link</label>
+      <input id="cwbot-message-url" placeholder="https://discord.com/channels/.../.../...">
+      <div id="cwbot-import-status" class="modal-status"></div>
+      <div class="modal-actions">
+        <button class="profile-action" id="cwbot-import-cancel" type="button">Cancel</button>
+        <button class="profile-action" id="cwbot-import-submit" type="button">Import</button>
+      </div>
+    </section>
+  `;
+
+  modal.addEventListener("click",event=>{
+    if(event.target===modal)closeCwBotImportModal();
+  });
+  document.body.appendChild(modal);
+  document.getElementById("cwbot-import-cancel").onclick=closeCwBotImportModal;
+  document.getElementById("cwbot-import-submit").onclick=submitCwBotImport;
+  document.getElementById("cwbot-message-url").focus();
+  notifyEmbedHeight();
+}
+
+async function refreshExternalHistory(){
+  if(!profile?.user_id)return;
+  const external=await loadExternalHistory(profile.user_id).catch(()=>null);
+  profile={
+    ...profile,
+    external_clan_summaries:mergeClanPlacementRows(
+      profile.external_clan_summaries||[],
+      external?.external_clan_summaries||[]
+    )
+  };
+}
+
+async function submitCwBotImport(){
+  const input=document.getElementById("cwbot-message-url");
+  const button=document.getElementById("cwbot-import-submit");
+  const messageUrl=String(input?.value||"").trim();
+
+  if(!messageUrl){
+    setCwBotImportStatus("Paste a Discord message link first.","error-text");
+    return;
+  }
+
+  button.disabled=true;
+  setCwBotImportStatus("Fetching CW_Bot message and checking for duplicate battles...");
+
+  try{
+    const res=await fetch(CW_BOT_IMPORT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        user_id:profile.user_id,
+        username:profile.username,
+        message_url:messageUrl
+      })
+    });
+    const payload=await res.json().catch(()=>({}));
+    if(!res.ok||payload.ok===false)throw new Error(payload.message||`Import failed with HTTP ${res.status}`);
+
+    const statusText=payload.status==="approved"
+      ? `${payload.imported_count||0} new battle${payload.imported_count===1?"":"s"} imported.`
+      : `${payload.imported_count||0} new battle${payload.imported_count===1?"":"s"} saved as pending review.`;
+    const skippedText=payload.skipped_count?` ${payload.skipped_count} duplicate/known row${payload.skipped_count===1?"":"s"} skipped.`:"";
+
+    await refreshExternalHistory();
+    render();
+    setCwBotImportStatus(statusText+skippedText,"success-text");
+
+    if(payload.status==="approved"&&payload.imported_count){
+      setTimeout(closeCwBotImportModal,900);
+    }else{
+      button.disabled=false;
+    }
+  }catch(error){
+    setCwBotImportStatus(error.message||String(error),"error-text");
+    button.disabled=false;
+  }
+}
+
 function render(){
   const app=document.getElementById("app");
   const chartBattles=clanHistoryBattles();
@@ -1415,8 +1593,11 @@ function render(){
       <div>
         <h1 class="profile-name">${escapeHtml(profile.username||"Unknown")}</h1>
         <div class="meta">
-          User ID: ${escapeHtml(profile.user_id??"N/A")}<br>
-          ${profile.profile_url?`<a href="${escapeHtml(profile.profile_url)}" target="_blank" rel="noopener">Open Roblox Profile</a>`:""}
+          User ID: ${escapeHtml(profile.user_id??"N/A")}
+          <div class="profile-actions">
+            ${profile.profile_url?`<a href="${escapeHtml(profile.profile_url)}" target="_blank" rel="noopener">Open Roblox Profile</a>`:""}
+            ${profile.user_id?`<button class="profile-action" id="cwbot-import-button" type="button">Import CW_Bot History</button>`:""}
+          </div>
         </div>
       </div>
     </section>
@@ -1445,6 +1626,9 @@ function render(){
     };
     renderBattle();
   }
+
+  const importButton=document.getElementById("cwbot-import-button");
+  if(importButton)importButton.onclick=openCwBotImportModal;
 
   if(!hasHistory)return;
   notifyEmbedHeight();
@@ -1881,6 +2065,17 @@ async function main(){
     profile.profile_url=profile.user_id
       ?`https://www.roblox.com/users/${profile.user_id}/profile`
       :profile.profile_url;
+
+    const externalProfile=profile.user_id?await loadExternalHistory(profile.user_id).catch(()=>null):null;
+    if(externalProfile){
+      profile={
+        ...profile,
+        external_clan_summaries:mergeClanPlacementRows(
+          profile.external_clan_summaries||[],
+          externalProfile.external_clan_summaries||[]
+        )
+      };
+    }
 
     document.title=`${profile.username||"Player"} - ${clan().label} Profile`;
     render();

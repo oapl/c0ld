@@ -2207,8 +2207,11 @@ function leagueProfilePeriodLabel(env, periodKey, runKey, finalSnapshotAt) {
   const key = normalizeRunKey(runKey || leagueRunKey(env));
   const labels = parseJsonObject(env.LEAGUE_RUN_LABELS_JSON || env.LEAGUE_EVENT_LABELS_JSON);
   const period = String(periodKey || "").trim();
-  const periodMapped = String(labels[period] || labels[period.toLowerCase()] || "").trim();
-  if (periodMapped) return periodMapped;
+
+  for (const candidate of leagueProfilePeriodLabelCandidates(period, key)) {
+    const mapped = String(labels[candidate] || labels[candidate.toLowerCase()] || "").trim();
+    if (mapped) return mapped;
+  }
 
   const runMapped = String(labels[key] || labels[key.toLowerCase()] || labels.default || "").trim();
   if (runMapped && (key !== DEFAULT_LEAGUE_RUN_KEY || isRecentProfilePeriod(env, finalSnapshotAt))) return runMapped;
@@ -2219,6 +2222,23 @@ function leagueProfilePeriodLabel(env, periodKey, runKey, finalSnapshotAt) {
   }
 
   return period || (key && key !== DEFAULT_LEAGUE_RUN_KEY ? key : "");
+}
+function leagueProfilePeriodLabelCandidates(periodKey, runKey) {
+  const period = String(periodKey || "").trim();
+  const key = normalizeRunKey(runKey || DEFAULT_LEAGUE_RUN_KEY);
+  const candidates = [];
+  if (period) candidates.push(period);
+
+  const parts = period.split(":");
+  const dateKey = parts.length >= 3 ? parts[parts.length - 1] : "";
+  if (dateKey) {
+    candidates.push(`${key}:*:${dateKey}`);
+    candidates.push(`*:*:${dateKey}`);
+    candidates.push(`date:${dateKey}`);
+    candidates.push(dateKey);
+  }
+
+  return [...new Set(candidates.filter(Boolean))];
 }
 function leagueRunLabel(env, runKey) {
   const key = normalizeRunKey(runKey || leagueRunKey(env));

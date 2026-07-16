@@ -11,6 +11,7 @@ const GLOBAL_RANK_CANDIDATES_TABLE = "c0ld_global_rank_candidates";
 const GLOBAL_RANK_CURRENT_TABLE = "c0ld_global_ranks_current";
 const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
 const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
+const EXTERNAL_PLAYER_HISTORY_TABLE = "c0ld_external_player_history";
 const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
@@ -20,6 +21,8 @@ const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
 const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
+const DISCORD_API_BASE = "https://discord.com/api/v10";
+const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -145,6 +148,10 @@ export default {
         response = await handleRewardCutoffs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/external-history") {
+        response = await handleExternalHistory(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/import") {
+        response = await handleCwBotHistoryImport(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
         response = await handleClanActivitySummary(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/status") {
@@ -1473,6 +1480,203 @@ async function handleGlobalSearch(request, env) {
       };
     })
   }, env);
+}
+
+async function handleExternalHistory(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const userId = toNumber(url.searchParams.get("user_id"));
+  const source = String(url.searchParams.get("source") || "cw_bot").trim() || "cw_bot";
+  const status = String(url.searchParams.get("status") || "approved").trim().toLowerCase();
+  const limit = clamp(Number(url.searchParams.get("limit") || 200), 1, 500);
+
+  if (!userId) {
+    throw httpError(400, "Missing user_id.");
+  }
+
+  if (status !== "approved") {
+    requireAdmin(request, env);
+  }
+
+  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+    select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
+    source: `eq.${source}`,
+    user_id: `eq.${userId}`,
+    status: status === "all" ? undefined : `eq.${status || "approved"}`,
+    order: "final_snapshot_at.desc.nullslast,created_at.desc",
+    limit: String(limit)
+  }).catch(err => {
+    if (String(err?.message || "").includes("c0ld_external_player_history")) return [];
+    throw err;
+  });
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    user_id: userId,
+    source,
+    status,
+    rows: rows.map(normalizeExternalHistoryOutput)
+  }, env, 30);
+}
+
+async function handleCwBotHistoryImport(request, env) {
+  requireSupabase(env);
+
+  if (String(env.CW_BOT_IMPORT_ENABLED || "false").toLowerCase() !== "true") {
+    throw httpError(403, "CW_Bot imports are not enabled. Set CW_BOT_IMPORT_ENABLED=true on the Worker.");
+  }
+
+  if (String(env.CW_BOT_IMPORT_REQUIRE_ADMIN || "false").toLowerCase() === "true") {
+    requireAdmin(request, env);
+  }
+
+  const body = await readJsonRequest(request);
+  const userId = toNumber(body.user_id || body.roblox_user_id);
+  const username = stringOrNull(body.username || body.display_name || body.query);
+  const messageUrl = String(body.message_url || body.discord_message_url || "").trim();
+
+  if (!userId) throw httpError(400, "Missing user_id.");
+  if (!messageUrl) throw httpError(400, "Missing message_url.");
+
+  const messageRef = parseDiscordMessageLink(messageUrl);
+  validateCwBotImportTarget(messageRef, env);
+
+  const message = await fetchDiscordMessage(env, messageRef.channelId, messageRef.messageId);
+  const expectedBotId = String(env.CW_BOT_USER_ID || DEFAULT_CW_BOT_USER_ID);
+  const authorId = String(message?.author?.id || "");
+
+  if (authorId !== expectedBotId) {
+    throw httpError(400, `Discord message author ${authorId || "unknown"} is not CW_Bot (${expectedBotId}).`);
+  }
+
+  const messageText = discordMessageText(message);
+  const imageUrl = firstDiscordMessageImageUrl(message);
+  let parseSource = "discord_message";
+  let parsed = parseCwBotHistoryText(messageText);
+  let ocrText = "";
+
+  if (!parsed.rows.length && imageUrl) {
+    ocrText = await ocrCwBotHistoryImage(env, imageUrl, { userId, username }).catch(err => {
+      if (err?.status) throw err;
+      throw httpError(502, `CW_Bot OCR failed: ${err?.message || String(err)}`);
+    });
+
+    if (ocrText) {
+      parseSource = "discord_image_ocr";
+      parsed = parseCwBotHistoryText(ocrText);
+    }
+  }
+
+  if (!parsed.rows.length) {
+    return json({
+      ok: false,
+      message: imageUrl && !env.OPENAI_API_KEY
+        ? "CW_Bot message looks image-only. Set OPENAI_API_KEY and CW_BOT_OCR_MODEL to enable image OCR."
+        : "No CW_Bot history rows could be parsed from that message.",
+      user_id: userId,
+      discord_message_url: canonicalDiscordMessageUrl(messageRef),
+      image_url: imageUrl || null,
+      raw_text_preview: messageText.slice(0, 1000)
+    }, 422);
+  }
+
+  const trackedKeys = await trackedHistoryBattleKeySet(env, userId);
+  const existingKeys = await externalHistoryBattleKeySet(env, userId, "cw_bot");
+  const importedAt = new Date().toISOString();
+  const importStatus = String(env.CW_BOT_IMPORT_AUTO_APPROVE || "false").toLowerCase() === "true"
+    ? "approved"
+    : "pending";
+  const rawFingerprintBase = await sha256Hex([
+    "cw_bot",
+    userId,
+    messageRef.guildId,
+    messageRef.channelId,
+    messageRef.messageId,
+    messageText,
+    ocrText
+  ].join("\n"));
+  const rows = [];
+  const skipped = [];
+
+  for (const parsedRow of parsed.rows) {
+    const battleName = cleanExternalBattleName(parsedRow.battle_name || parsedRow.battle || parsedRow.label);
+    const battleKeyValue = externalBattleKey(battleName);
+
+    if (!battleName || !battleKeyValue) {
+      skipped.push({ reason: "missing_battle", row: parsedRow });
+      continue;
+    }
+
+    if (trackedKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "already_tracked", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    if (existingKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.rank);
+    const totalRanked = toNumber(parsedRow.total_ranked ?? parsedRow.total);
+    const finalPoints = parseCwBotNumber(parsedRow.final_points ?? parsedRow.points);
+
+    if (finalRank === null && finalPoints === null) {
+      skipped.push({ reason: "missing_rank_and_points", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    rows.push({
+      source: "cw_bot",
+      user_id: userId,
+      username: stringOrNull(parsed.player_name || username),
+      battle_key: battleKeyValue,
+      battle_name: battleName,
+      clan_name: stringOrNull(parsedRow.clan_name || parsedRow.clan),
+      final_rank: finalRank,
+      total_ranked: totalRanked,
+      final_points: finalPoints,
+      final_snapshot_at: safeIso(parsedRow.final_snapshot_at || parsedRow.date) || safeIso(message.timestamp) || importedAt,
+      status: importStatus,
+      is_manual_import: true,
+      import_batch_id: rawFingerprintBase,
+      imported_from: parseSource,
+      discord_guild_id: messageRef.guildId,
+      discord_channel_id: messageRef.channelId,
+      discord_message_id: messageRef.messageId,
+      discord_message_url: canonicalDiscordMessageUrl(messageRef),
+      image_url: imageUrl || null,
+      raw_text: (ocrText || messageText || "").slice(0, 20000),
+      raw_payload: {
+        parser: parseSource,
+        discord_author_id: authorId,
+        discord_message_id: messageRef.messageId,
+        parsed_row: parsedRow
+      },
+      raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
+      updated_at: importedAt
+    });
+    existingKeys.add(battleKeyValue);
+  }
+
+  if (rows.length) {
+    await supabaseUpsertChunked(env, EXTERNAL_PLAYER_HISTORY_TABLE, rows, "source,user_id,battle_key", 100);
+  }
+
+  return json({
+    ok: true,
+    user_id: userId,
+    source: "cw_bot",
+    discord_message_url: canonicalDiscordMessageUrl(messageRef),
+    parsed_count: parsed.rows.length,
+    status: importStatus,
+    imported_count: rows.length,
+    skipped_count: skipped.length,
+    rows: rows.map(normalizeExternalHistoryOutput),
+    skipped
+  });
 }
 
 async function searchGlobalRankCandidates(env, clan, query) {
@@ -7822,6 +8026,417 @@ async function archiveThenPruneRows(env, sourceTable, archiveTable, filters) {
 
     if (rows.length < ARCHIVE_PRUNE_BATCH_SIZE) return;
   }
+}
+
+async function readJsonRequest(request) {
+  try {
+    const text = await request.text();
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw httpError(400, "Request body must be valid JSON.");
+  }
+}
+
+function parseDiscordMessageLink(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/discord(?:app)?\.com\/channels\/(\d+|@me)\/(\d+)\/(\d+)/i);
+
+  if (!match) {
+    throw httpError(400, "Paste a Discord message link like https://discord.com/channels/{guild}/{channel}/{message}.");
+  }
+
+  if (match[1] === "@me") {
+    throw httpError(400, "CW_Bot imports must come from a server channel message, not a DM.");
+  }
+
+  return {
+    guildId: match[1],
+    channelId: match[2],
+    messageId: match[3]
+  };
+}
+
+function canonicalDiscordMessageUrl(ref) {
+  return `https://discord.com/channels/${encodeURIComponent(ref.guildId)}/${encodeURIComponent(ref.channelId)}/${encodeURIComponent(ref.messageId)}`;
+}
+
+function csvSet(value) {
+  return new Set(String(value || "").split(",").map(item => item.trim()).filter(Boolean));
+}
+
+function validateCwBotImportTarget(ref, env) {
+  const guildIds = csvSet(env.CW_BOT_IMPORT_GUILD_IDS);
+  const channelIds = csvSet(env.CW_BOT_IMPORT_CHANNEL_IDS);
+
+  if (guildIds.size && !guildIds.has(String(ref.guildId))) {
+    throw httpError(403, "That Discord server is not allowed for CW_Bot imports.");
+  }
+
+  if (channelIds.size && !channelIds.has(String(ref.channelId))) {
+    throw httpError(403, "That Discord channel is not allowed for CW_Bot imports.");
+  }
+}
+
+async function fetchDiscordMessage(env, channelId, messageId) {
+  if (!env.DISCORD_BOT_TOKEN) {
+    throw httpError(500, "Missing required Worker secret: DISCORD_BOT_TOKEN");
+  }
+
+  const res = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
+    headers: {
+      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+      Accept: "application/json"
+    }
+  });
+
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw httpError(res.status === 403 ? 403 : 502, `Discord message fetch failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+
+  return text ? JSON.parse(text) : {};
+}
+
+function discordMessageText(message) {
+  const parts = [];
+  if (message?.content) parts.push(message.content);
+
+  for (const embed of message?.embeds || []) {
+    for (const value of [
+      embed.author?.name,
+      embed.title,
+      embed.description,
+      embed.footer?.text
+    ]) {
+      if (value) parts.push(value);
+    }
+
+    for (const field of embed.fields || []) {
+      if (field.name) parts.push(field.name);
+      if (field.value) parts.push(field.value);
+    }
+  }
+
+  for (const attachment of message?.attachments || []) {
+    if (attachment.description) parts.push(attachment.description);
+    if (attachment.filename) parts.push(attachment.filename);
+  }
+
+  return parts.join("\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function firstDiscordMessageImageUrl(message) {
+  for (const attachment of message?.attachments || []) {
+    const type = String(attachment.content_type || "").toLowerCase();
+    const url = String(attachment.url || attachment.proxy_url || "").trim();
+    const name = String(attachment.filename || "").toLowerCase();
+
+    if (url && (type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(name) || /\.(png|jpe?g|webp|gif)(?:\?|$)/i.test(url))) {
+      return url;
+    }
+  }
+
+  for (const embed of message?.embeds || []) {
+    const url = String(embed.image?.url || embed.thumbnail?.url || "").trim();
+    if (url) return url;
+  }
+
+  return "";
+}
+
+async function ocrCwBotHistoryImage(env, imageUrl, context = {}) {
+  if (!env.OPENAI_API_KEY) return "";
+
+  const model = String(env.CW_BOT_OCR_MODEL || env.OPENAI_OCR_MODEL || "gpt-5.6").trim();
+  const prompt = [
+    "Read this CW_Bot PS99 player history image.",
+    "Return only JSON with this shape:",
+    "{\"player_name\":string|null,\"player_id\":string|null,\"rows\":[{\"battle_name\":string,\"clan_name\":string|null,\"final_rank\":number|null,\"total_ranked\":number|null,\"final_points\":number|null}]}",
+    "Use null for unreadable values. Convert k/m/b/t point suffixes to full numbers.",
+    context.userId ? `Expected Roblox user ID: ${context.userId}.` : "",
+    context.username ? `Expected username: ${context.username}.` : ""
+  ].filter(Boolean).join("\n");
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: imageUrl } }
+        ]
+      }],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 1600
+    })
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw httpError(502, `OpenAI OCR request failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+
+  const payload = text ? JSON.parse(text) : {};
+  return String(payload?.choices?.[0]?.message?.content || "").trim();
+}
+
+function parseCwBotHistoryText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { rows: [] };
+
+  const jsonRows = parseCwBotJsonRows(raw);
+  if (jsonRows.rows.length) return jsonRows;
+
+  const lines = raw
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const playerName = firstDefined(
+    raw.match(/history\s+for\s+([A-Za-z0-9_]+)/i)?.[1],
+    raw.match(/name:\s*([A-Za-z0-9_]+)/i)?.[1]
+  ) || null;
+  const playerId = raw.match(/player\s*id:?\s*(\d+)/i)?.[1] || null;
+  const battleIndexes = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isCwBotBattleLine(lines[index])) battleIndexes.push(index);
+  }
+
+  const rows = [];
+
+  for (let i = 0; i < battleIndexes.length; i += 1) {
+    const start = battleIndexes[i];
+    const end = battleIndexes[i + 1] || Math.min(lines.length, start + 14);
+    const segment = lines.slice(start, end);
+    const battleName = cleanExternalBattleName(segment[0]);
+    const clanName = findCwBotClanName(segment);
+    const rankInfo = findCwBotRankInfo(segment);
+    const points = findCwBotPoints(segment);
+
+    if (!battleName || (rankInfo.rank === null && points === null)) continue;
+
+    rows.push({
+      battle_name: battleName,
+      clan_name: clanName,
+      final_rank: rankInfo.rank,
+      total_ranked: rankInfo.total,
+      final_points: points
+    });
+  }
+
+  return { player_name: playerName, player_id: playerId, rows };
+}
+
+function parseCwBotJsonRows(raw) {
+  const parsed = parseJsonObject(raw) || parseJsonObject(extractJsonObjectText(raw));
+  if (!parsed) return { rows: [] };
+
+  const sourceRows = Array.isArray(parsed.rows)
+    ? parsed.rows
+    : Array.isArray(parsed.history)
+      ? parsed.history
+      : Array.isArray(parsed.battles)
+        ? parsed.battles
+        : [];
+
+  const rows = sourceRows.map(row => ({
+    battle_name: row.battle_name || row.battle || row.name || row.title || row.event,
+    clan_name: row.clan_name || row.clan || row.guild,
+    final_rank: toNumber(row.final_rank ?? row.rank),
+    total_ranked: toNumber(row.total_ranked ?? row.total ?? row.total_players),
+    final_points: parseCwBotNumber(row.final_points ?? row.points),
+    final_snapshot_at: row.final_snapshot_at || row.date || null
+  })).filter(row => cleanExternalBattleName(row.battle_name) && (row.final_rank !== null || row.final_points !== null));
+
+  return {
+    player_name: parsed.player_name || parsed.username || parsed.name || null,
+    player_id: parsed.player_id || parsed.user_id || null,
+    rows
+  };
+}
+
+function extractJsonObjectText(value) {
+  const text = String(value || "").trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  if (fenced) return fenced.trim();
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  return start >= 0 && end > start ? text.slice(start, end + 1) : "";
+}
+
+function isCwBotBattleLine(value) {
+  const text = String(value || "").trim();
+  const key = normalizeText(text);
+  if (!key || key.length < 5) return false;
+  if (/history|playerid|betterthan|points|rank|clan|name/i.test(text)) return false;
+  return /battle/i.test(text) || /(christmas|turkey|spring|soccer|backrooms|angel|starry|lucky|trickortreat|blockparty|tower|basketball|balloon|poison|pixel|athena)/i.test(key);
+}
+
+function findCwBotClanName(segment) {
+  const stop = new Set(["points", "rank", "better than", "better", "than"]);
+
+  for (const line of segment.slice(1, 5)) {
+    const normalized = line.trim().toLowerCase();
+    if (!normalized || stop.has(normalized)) continue;
+    if (/\d/.test(line)) continue;
+    if (line.length > 18) continue;
+    return line;
+  }
+
+  return null;
+}
+
+function findCwBotRankInfo(segment) {
+  const joined = segment.join(" ");
+  const match = joined.match(/#?\s*([\d,]+)\s*\/\s*#?\s*([\d,]+)/);
+  if (match) {
+    return {
+      rank: toNumber(match[1].replace(/,/g, "")),
+      total: toNumber(match[2].replace(/,/g, ""))
+    };
+  }
+
+  for (let i = 0; i < segment.length; i += 1) {
+    if (!/^rank$/i.test(segment[i])) continue;
+    const previous = segment[i - 1] || "";
+    const single = previous.match(/#?\s*([\d,]+)/);
+    if (single) {
+      return {
+        rank: toNumber(single[1].replace(/,/g, "")),
+        total: null
+      };
+    }
+  }
+
+  return { rank: null, total: null };
+}
+
+function findCwBotPoints(segment) {
+  const joined = segment.join(" ");
+  const direct = joined.match(/([\d,.]+)\s*([kmbt])?\s*(?:points|pts)\b/i);
+  if (direct) return parseCwBotNumber(`${direct[1]}${direct[2] || ""}`);
+
+  for (let i = 0; i < segment.length; i += 1) {
+    if (!/^points?$/i.test(segment[i])) continue;
+    const previous = segment[i - 1] || "";
+    const value = parseCwBotNumber(previous);
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
+function parseCwBotNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? Math.round(value) : null;
+
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const parsed = parseThresholdNumber(raw);
+  if (parsed !== null) return parsed;
+
+  const cleaned = raw.replace(/,/g, "").match(/[\d.]+/);
+  if (!cleaned) return null;
+
+  const n = Number(cleaned[0]);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+function cleanExternalBattleName(value) {
+  let text = String(value || "").trim();
+  if (!text) return "";
+
+  text = text
+    .replace(/^\s*(?:c0ld|cold|wmsy|nogn|nong|dola)\s*[-:|]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text;
+}
+
+function externalBattleKey(value) {
+  return normalizeText(cleanExternalBattleName(value));
+}
+
+async function trackedHistoryBattleKeySet(env, userId) {
+  const keys = new Set();
+
+  for (const table of [SNAPSHOT_TABLE, SNAPSHOT_ARCHIVE_TABLE]) {
+    const rows = await supabaseSelect(env, table, {
+      select: "battle_key,battle_display_name",
+      user_id: `eq.${userId}`,
+      order: "fetched_at.desc",
+      limit: "50000"
+    }).catch(err => {
+      if (table === SNAPSHOT_ARCHIVE_TABLE && String(err?.message || "").includes(table)) return [];
+      throw err;
+    });
+
+    for (const row of rows) {
+      for (const value of [row.battle_key, row.battle_display_name]) {
+        const key = externalBattleKey(value);
+        if (key) keys.add(key);
+      }
+    }
+  }
+
+  return keys;
+}
+
+async function externalHistoryBattleKeySet(env, userId, source) {
+  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+    select: "battle_key",
+    source: `eq.${source}`,
+    user_id: `eq.${userId}`,
+    status: "neq.rejected",
+    limit: "1000"
+  }).catch(err => {
+    if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
+    throw err;
+  });
+
+  return new Set(rows.map(row => externalBattleKey(row.battle_key)).filter(Boolean));
+}
+
+function normalizeExternalHistoryOutput(row) {
+  return {
+    source: row.source || "cw_bot",
+    user_id: toNumber(row.user_id),
+    username: row.username || null,
+    battle_key: row.battle_key || externalBattleKey(row.battle_name),
+    battle_name: row.battle_name || row.battle_key || null,
+    clan_name: row.clan_name || null,
+    final_rank: toNumber(row.final_rank),
+    total_ranked: toNumber(row.total_ranked),
+    final_points: toNumber(row.final_points),
+    final_snapshot_at: row.final_snapshot_at || null,
+    status: row.status || null,
+    is_manual_import: row.is_manual_import === true,
+    import_batch_id: row.import_batch_id || null,
+    imported_from: row.imported_from || null,
+    discord_message_url: row.discord_message_url || null,
+    image_url: row.image_url || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    reviewed_at: row.reviewed_at || null,
+    reviewed_by: row.reviewed_by || null
+  };
+}
+
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(String(value || ""));
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function supabaseInsert(env, tableName, rows) {
