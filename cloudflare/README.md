@@ -177,7 +177,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_UNIVERSE_ID` | Optional. Defaults to `3317771874`. |
 | `PS99_ROOT_PLACE_ID` | Optional. Defaults to `8737899170`. |
 | `PS99_REFRESH_PLACE_LIST` | Optional. Defaults to `true`; lets the Worker refresh the watched PS99 place list from Roblox before checking versions. |
-| `PS99_VERSION_SCHEDULE_MINUTES` | Optional. Defaults to `10`; controls how often scheduled version checks run. |
+| `PS99_VERSION_SCHEDULE_MINUTES` | Optional. Defaults to `5`; controls how often scheduled version checks run. |
 | `PS99_VERSION_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the PS99 version schedule interval. |
 | `PS99_VERSION_PLACE_DELAY_MS` | Optional. Defaults to `0`; delay between watched place version checks. |
 | `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
@@ -192,7 +192,7 @@ When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanent
 |---|---|
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
-| `ROBLOX_SECURITY_COOKIE` | Optional. Add only if Roblox rejects the place-version-history endpoint without cookie auth. Store the raw `.ROBLOSECURITY` value or the full `.ROBLOSECURITY=...` cookie. |
+The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
 ## Scheduled pulls
 

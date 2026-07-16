@@ -46,9 +46,20 @@ const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 25;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 const DEFAULT_PS99_UNIVERSE_ID = 3317771874;
 const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
-const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 10;
+const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 5;
 const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
+const PS99_VERSION_SEED_HINTS = Object.freeze({
+  8737899170: 27147,
+  13764885284: 30,
+  15502339080: 989,
+  15588442388: 920,
+  16498369169: 1007,
+  17503543197: 885,
+  95635359880599: 370,
+  119454325063278: 353,
+  140403681187145: 393
+});
 
 export default {
   async fetch(request, env, ctx) {
@@ -3061,11 +3072,16 @@ async function handlePs99VersionIngest(env, source, options = {}) {
     if (!placeId) continue;
 
     try {
-      const version = await fetchPs99LatestPlaceVersion(env, placeId);
-      const latestVersion = toNumber(version.version);
-      const latestPublishedAt = safeIso(version.publishedAt);
       const previousVersion = toNumber(place.latest_version);
       const previousPublishedAt = safeIso(place.latest_published_at);
+      const version = await fetchPs99LatestPlaceVersion(
+        env,
+        placeId,
+        previousVersion ?? ps99VersionSeedHint(placeId),
+        previousPublishedAt
+      );
+      const latestVersion = toNumber(version.version);
+      const latestPublishedAt = safeIso(version.publishedAt);
       const placeName = stringOrNull(place.place_name || place.placeName) || `Place ${placeId}`;
 
       placeRows.push({
@@ -3192,91 +3208,141 @@ async function fetchPs99UniversePlaces(env) {
   return places;
 }
 
-async function fetchPs99LatestPlaceVersion(env, placeId) {
-  const url = new URL(`https://apis.roblox.com/place-version-history-api/v1/${placeId}/history`);
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("sortOrder", "Desc");
-  const payload = await fetchJsonWithRetryHeaders(url, "Roblox place version history", {
-    attempts: 3,
-    baseDelayMs: 2000,
-    headers: robloxVersionHistoryHeaders(env)
-  });
-  const rows = extractRobloxArray(payload);
-  const row = rows[0] || payload;
-  const version = toNumber(firstDefined(
-    row.versionNumber,
-    row.VersionNumber,
-    row.version,
-    row.Version,
-    row.versionId,
-    row.VersionId,
-    row.id,
-    row.Id
-  ));
-  const publishedAt = firstDefined(
-    row.created,
-    row.Created,
-    row.createdAt,
-    row.created_at,
-    row.publishedAt,
-    row.published_at,
-    row.timestamp,
-    row.date
-  );
+async function fetchPs99LatestPlaceVersion(env, placeId, knownVersion = null, knownPublishedAt = null) {
+  const probe = await findLatestPs99PlaceVersion(placeId, knownVersion);
+  let publishedAt = safeIso(knownPublishedAt);
+  let assetDetails = null;
+
+  if (probe.version !== toNumber(knownVersion) || !publishedAt) {
+    const detailsUrl = new URL(`https://economy.roblox.com/v2/assets/${placeId}/details`);
+    assetDetails = await fetchJsonWithRetry(detailsUrl, "Roblox place details", {
+      attempts: 3,
+      baseDelayMs: 1000
+    });
+    publishedAt = safeIso(firstDefined(assetDetails.Updated, assetDetails.updated));
+  }
 
   return {
-    version,
+    version: probe.version,
     publishedAt,
-    rawVersion: row && typeof row === "object" ? row : {}
+    rawVersion: {
+      source: "asset_delivery_boundary",
+      versionNumber: probe.version,
+      probeCount: probe.probeCount,
+      publishedAtSource: "economy_asset_updated",
+      assetUpdated: publishedAt,
+      ...(assetDetails && typeof assetDetails === "object" ? {
+        assetName: stringOrNull(firstDefined(assetDetails.Name, assetDetails.name))
+      } : {})
+    }
   };
 }
 
-async function fetchJsonWithRetryHeaders(url, label, { attempts, baseDelayMs, headers = {} }) {
+async function findLatestPs99PlaceVersion(placeId, knownVersion = null) {
+  let probeCount = 0;
+  const exists = async version => {
+    probeCount += 1;
+    return probePs99PlaceVersion(placeId, version);
+  };
+  const known = Math.max(0, Math.floor(toNumber(knownVersion) || 0));
+  let low = known;
+  let high;
+
+  if (known > 0) {
+    high = known + 1;
+    if (!await exists(high)) {
+      return { version: known, probeCount };
+    }
+    low = high;
+    high = known + 2;
+  } else {
+    if (!await exists(1)) {
+      return { version: null, probeCount };
+    }
+    low = 1;
+    high = 2;
+  }
+
+  while (await exists(high)) {
+    low = high;
+    const distance = Math.max(1, high - known);
+    high = known + distance * 2;
+
+    if (!Number.isSafeInteger(high) || high > 1_000_000_000) {
+      throw httpError(502, `Roblox place ${placeId} version search exceeded the safety limit`);
+    }
+  }
+
+  while (low + 1 < high) {
+    const midpoint = Math.floor((low + high) / 2);
+    if (await exists(midpoint)) low = midpoint;
+    else high = midpoint;
+  }
+
+  return { version: low, probeCount };
+}
+
+async function probePs99PlaceVersion(placeId, version) {
+  const url = new URL("https://assetdelivery.roblox.com/v1/asset/");
+  url.searchParams.set("id", String(placeId));
+  url.searchParams.set("version", String(version));
   let lastError = null;
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const res = await fetch(url.toString(), {
+        redirect: "manual",
         headers: {
           Accept: "application/json",
-          "User-Agent": "c0ld-Clan-API-Worker",
-          ...headers
+          "User-Agent": "c0ld-Clan-API-Worker"
         },
         cf: { cacheTtl: 0, cacheEverything: false }
       });
       const text = await res.text();
-      let payload = {};
+      const message = robloxAssetDeliveryMessage(text).toLowerCase();
 
-      try {
-        payload = text ? JSON.parse(text) : {};
-      } catch {
-        payload = { message: text || "Invalid JSON response" };
-      }
+      if (res.status === 404 || message.includes("not found")) return false;
+      if (res.status === 409 || message.includes("not authorized")) return true;
+      if (res.status >= 200 && res.status < 400) return true;
 
-      if (!res.ok || payload.ok === false || payload.status === "error") {
-        const retryAfter = parseRetryAfterSeconds(res.headers.get("Retry-After"));
-        const err = httpError(
-          res.status || 502,
-          payload.message || payload.error || `${label} failed with HTTP ${res.status}`
-        );
-        err.retryAfterMs = retryAfter ? retryAfter * 1000 : null;
-        throw err;
-      }
-
-      return payload;
+      const retryAfter = parseRetryAfterSeconds(res.headers.get("Retry-After"));
+      const err = httpError(
+        res.status || 502,
+        message || `Roblox asset version probe failed with HTTP ${res.status}`
+      );
+      err.retryAfterMs = retryAfter ? retryAfter * 1000 : null;
+      throw err;
     } catch (err) {
       lastError = err;
-      if (attempt >= attempts) break;
+      if (attempt >= 3) break;
 
       const retryAfterMs = Number(err?.retryAfterMs);
       const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
         ? retryAfterMs
-        : Math.min(120000, attempt * attempt * baseDelayMs);
+        : attempt * attempt * 1000;
       await sleep(delay);
     }
   }
 
-  throw lastError || httpError(502, `${label} failed`);
+  throw lastError || httpError(502, `Roblox place ${placeId} version probe failed`);
+}
+
+function robloxAssetDeliveryMessage(text) {
+  try {
+    const payload = text ? JSON.parse(text) : {};
+    return String(firstDefined(
+      payload.message,
+      payload.error,
+      payload.errors?.[0]?.message,
+      payload.errors?.[0]?.Message
+    ) || "");
+  } catch {
+    return String(text || "").slice(0, 500);
+  }
+}
+
+function ps99VersionSeedHint(placeId) {
+  return toNumber(PS99_VERSION_SEED_HINTS[Math.round(toNumber(placeId) || 0)]);
 }
 
 function normalizePs99UniversePlace(row, env) {
@@ -3305,17 +3371,6 @@ function extractRobloxArray(payload) {
   }
 
   return [];
-}
-
-function robloxVersionHistoryHeaders(env) {
-  const cookie = robloxVersionHistoryCookie(env);
-  return cookie ? { Cookie: cookie } : {};
-}
-
-function robloxVersionHistoryCookie(env) {
-  const raw = String(env.ROBLOX_SECURITY_COOKIE || env.ROBLOX_COOKIE || "").trim();
-  if (!raw) return "";
-  return raw.includes(".ROBLOSECURITY=") ? raw : `.ROBLOSECURITY=${raw}`;
 }
 
 function normalizePs99PlaceOutput(row) {
@@ -6704,7 +6759,7 @@ function ps99VersionRuntimeConfig(env) {
     schedule_minutes: ps99VersionScheduleMinutes(env),
     schedule_offset_minutes: ps99VersionScheduleOffsetMinutes(env),
     place_delay_ms: ps99VersionPlaceDelayMs(env),
-    version_history_auth_configured: Boolean(robloxVersionHistoryCookie(env))
+    version_probe_mode: "asset_delivery_boundary"
   };
 }
 
