@@ -19,6 +19,7 @@ const PS99_PLACES_TABLE = "c0ld_ps99_places";
 const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
 const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
+const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -148,6 +149,8 @@ export default {
         response = await handlePs99Versions(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
         response = await handlePs99Restarts(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/ccu") {
+        response = await handlePs99Ccu(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
@@ -3509,6 +3512,30 @@ async function handlePs99Restarts(request, env) {
   }, env, publicCacheSeconds(env, "PS99_RESTART"));
 }
 
+async function handlePs99Ccu(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || 180), 1, 1000);
+  const rows = await supabaseSelect(env, PS99_CCU_SAMPLES_TABLE, {
+    select: "sample_id,universe_id,place_id,ccu,sampled_at,source,created_at",
+    universe_id: `eq.${ps99UniverseId(env)}`,
+    order: "sampled_at.desc",
+    limit: String(limit)
+  });
+  const samples = rows.map(normalizePs99CcuSampleOutput);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    universe_id: ps99UniverseId(env),
+    place_id: ps99RootPlaceId(env),
+    source: "Roblox universe playing count",
+    latest: samples[0] || null,
+    samples
+  }, env, 60);
+}
+
 async function handlePs99RestartIngest(env, source) {
   requireSupabase(env);
 
@@ -3520,15 +3547,28 @@ async function handlePs99RestartIngest(env, source) {
   const batchSize = ps99RestartBatchSize(env);
   const confirmationsRequired = ps99RestartConfirmations(env);
   const cooldownMinutes = ps99RestartCooldownMinutes(env);
-  const [batch, stateRows, versionContext] = await Promise.all([
+  const [batch, stateRows, versionContext, ccuObservation] = await Promise.all([
     fetchPs99PublicServerBatch(placeId, batchSize),
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
       select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot",
       place_id: `eq.${placeId}`,
       limit: "1"
     }),
-    fetchPs99RestartVersionContext(env, placeId)
+    fetchPs99RestartVersionContext(env, placeId),
+    fetchPs99CcuSample(env, checkedAt, source).catch(err => ({
+      sample: null,
+      error: err?.message || String(err)
+    }))
   ]);
+  const ccuSample = ccuObservation?.sample || null;
+  let ccuError = ccuObservation?.error || null;
+  if (ccuSample) {
+    try {
+      await supabaseUpsert(env, PS99_CCU_SAMPLES_TABLE, [ccuSample], "sample_id");
+    } catch (err) {
+      ccuError = err?.message || String(err);
+    }
+  }
   const currentVersion = toNumber(versionContext.currentVersion);
   const currentById = new Map(batch.map(server => [server.server_id, server]));
   const previous = stateRows[0] || {};
@@ -3542,7 +3582,8 @@ async function handlePs99RestartIngest(env, source) {
   let candidateStartedAt = safeIso(previous.candidate_started_at);
   let candidateConfirmations = Math.round(toNumber(previous.candidate_confirmations) || 0);
   let candidatePlaceVersion = toNumber(previous.candidate_place_version);
-  let lastRestartDetectedAt = safeIso(previous.last_restart_detected_at);
+  const previousRestartDetectedAt = safeIso(previous.last_restart_detected_at);
+  let lastRestartDetectedAt = previousRestartDetectedAt;
   let cooldownUntil = safeIso(previous.cooldown_until);
   let eventRow = null;
   let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_restart_detected" };
@@ -3615,13 +3656,15 @@ async function handlePs99RestartIngest(env, source) {
           replacement_servers: candidateServers,
           reason: `All ${sampleSize} tracked server IDs disappeared together and ${sampleSize} replacements persisted across ${confirmationsRequired} one-minute scans.`,
           source,
-          details: {
-            batch_size: batch.length,
-            sample_size: sampleSize,
-            confirmation_scans: candidateConfirmations,
-            version_event_detected_at: versionContext.detectedAt || null,
-            server_age_available: false
-          }
+           details: {
+             batch_size: batch.length,
+             sample_size: sampleSize,
+             confirmation_scans: candidateConfirmations,
+             version_event_detected_at: versionContext.detectedAt || null,
+             previous_restart_detected_at: previousRestartDetectedAt,
+             restart_place_version: candidatePlaceVersion ?? currentVersion,
+             server_age_available: false
+           }
         };
         trackedServers = candidateServers;
         candidateServers = [];
@@ -3665,6 +3708,23 @@ async function handlePs99RestartIngest(env, source) {
   }
 
   const trackedPresent = trackedServers.filter(server => server.present).length;
+  if (eventRow) {
+    const tenMinutesBefore = new Date(checkedMs - 10 * 60000).toISOString();
+    const priorCcuSample = await fetchPs99CcuAtOrBefore(env, tenMinutesBefore, 3 * 60000)
+      .catch(err => {
+        ccuError = ccuError || err?.message || String(err);
+        return null;
+      });
+    eventRow.details = {
+      ...eventRow.details,
+      ccu_at_restart: toNumber(ccuSample?.ccu),
+      ccu_at_restart_sampled_at: safeIso(ccuSample?.sampled_at),
+      ccu_10_minutes_before: toNumber(priorCcuSample?.ccu),
+      ccu_10_minutes_before_sampled_at: safeIso(priorCcuSample?.sampled_at),
+      ccu_10_minutes_before_target_at: tenMinutesBefore,
+      ccu_sampling_error: ccuError
+    };
+  }
   const stateRow = {
     place_id: placeId,
     universe_id: universeId,
@@ -3686,6 +3746,9 @@ async function handlePs99RestartIngest(env, source) {
     raw_snapshot: {
       fetched_at: checkedAt,
       sort_order: "Desc",
+      ccu: toNumber(ccuSample?.ccu),
+      ccu_sampled_at: safeIso(ccuSample?.sampled_at),
+      ccu_error: ccuError,
       server_ids: batch.map(server => server.server_id)
     },
     updated_at: checkedAt
@@ -3709,6 +3772,8 @@ async function handlePs99RestartIngest(env, source) {
     candidate_confirmations: candidateConfirmations,
     restart_detected: Boolean(eventRow),
     cooldown_until: cooldownUntil,
+    ccu_sample: ccuSample ? normalizePs99CcuSampleOutput(ccuSample) : null,
+    ccu_error: ccuError,
     webhook_alert: webhookAlert
   }, 202);
 }
@@ -3762,13 +3827,32 @@ async function handlePs99AlertTest(env, url) {
   }
 
   if (type === "restart" || type === "both") {
+    const tenMinutesBefore = new Date((isoToMs(testedAt) || Date.now()) - 10 * 60000).toISOString();
+    const [testCcuObservation, priorCcuSample, previousRestarts] = await Promise.all([
+      fetchPs99CcuSample(env, testedAt, "test").catch(() => ({ sample: null, error: null })),
+      fetchPs99CcuAtOrBefore(env, tenMinutesBefore, 3 * 60000).catch(() => null),
+      supabaseSelect(env, PS99_RESTART_EVENTS_TABLE, {
+        select: "detected_at",
+        place_id: `eq.${placeId}`,
+        order: "detected_at.desc,id.desc",
+        limit: "1"
+      }).catch(() => [])
+    ]);
     results.restart = await postPs99RestartAlert(env, {
       place_id: placeId,
       place_name: placeName,
       current_place_version: currentVersion,
       version_correlated: currentVersion !== null,
       detected_at: testedAt,
-      reason: "Test alert only. No server restart was detected. This is how a confirmed five-server replacement notification will look."
+      reason: "Test alert only. No server restart was detected.",
+      details: {
+        previous_restart_detected_at: safeIso(previousRestarts[0]?.detected_at),
+        restart_place_version: currentVersion,
+        ccu_at_restart: toNumber(testCcuObservation?.sample?.ccu),
+        ccu_at_restart_sampled_at: safeIso(testCcuObservation?.sample?.sampled_at),
+        ccu_10_minutes_before: toNumber(priorCcuSample?.ccu),
+        ccu_10_minutes_before_sampled_at: safeIso(priorCcuSample?.sampled_at)
+      }
     }, { test: true });
   }
 
@@ -3785,74 +3869,71 @@ async function handlePs99AlertTest(env, url) {
 }
 
 async function postPs99VersionAlert(env, events, detectedAt, options = {}) {
-  const lines = events.slice(0, 20).map(event => {
+  const separator = "~~━━━━━━━━━━━~~";
+  const sections = events.slice(0, 20).map(event => {
     const placeName = escapeDiscordMarkdown(event.place_name || `Place ${event.place_id}`);
-    const placeUrl = `https://www.roblox.com/games/${Math.round(toNumber(event.place_id) || 0)}`;
     const previousVersion = ps99AlertVersion(event.previous_version);
     const currentVersion = ps99AlertVersion(event.current_version);
-    const published = discordTimestamp(event.current_published_at, "F");
-    return `**[${placeName}](${placeUrl})**\n${previousVersion} \u2192 **${currentVersion}**${published ? ` \u2022 Published ${published}` : ""}`;
+    const published = discordTimestamp(event.current_published_at, "R") || "Unknown";
+    return `**${placeName}**\nVersion: \`${previousVersion}\`  ➜  \`${currentVersion}\`\nPublished: ${published}`;
   });
   const extraCount = Math.max(0, events.length - 20);
-  if (extraCount) lines.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
-  const description = options.test
-    ? `**Test alert only — no place-version change was detected.**\n\n${lines.join("\n\n")}`
-    : lines.join("\n\n");
+  if (extraCount) sections.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
+  const description = `${separator}\n\n${sections.join(`\n\n${separator}\n\n`)}\n\n${separator}`;
 
   return postPs99DiscordAlert(env, {
-    username: "PS99 Update Tracker",
+    content: null,
+    username: "PS99 Alert Bot",
+    attachments: [],
     embeds: [{
-      title: options.test ? "[TEST] PS99 Place Version Updated" : "PS99 Place Version Updated",
-      url: "https://c0ld-clan.com/ps99-version-history.html",
+      title: options.test ? "[TEST] PS99 UPDATE DETECTED" : "PS99 UPDATE DETECTED",
       description: description.slice(0, 4096),
-      color: 0x62b5ff,
+      color: 0xff0000,
       footer: {
-        text: options.test
-          ? "Manual preview • no history record created"
-          : `${events.length} watched place${events.length === 1 ? "" : "s"} updated`
+        text: "Auditing Accuracy • it's fucking CAINOVER"
       },
-      timestamp: safeIso(detectedAt) || new Date().toISOString()
+      thumbnail: {
+        url: "https://i.imgur.com/aCHMjbP.png"
+      }
     }]
   });
 }
 
 async function postPs99RestartAlert(env, event, options = {}) {
-  const placeId = Math.round(toNumber(event.place_id) || ps99RootPlaceId(env));
-  const placeName = escapeDiscordMarkdown(event.place_name || "Pet Simulator 99");
-  const confidence = event.version_correlated
-    ? "High \u2014 place version matched"
-    : "Confirmed \u2014 server identity turnover";
+  const details = event?.details && typeof event.details === "object"
+    ? event.details
+    : (parseJsonObject(event?.details) || {});
+  const detectedAt = safeIso(event.detected_at) || new Date().toISOString();
+  const relativeTime = discordTimestamp(detectedAt, "R") || "Unknown";
+  const clockTime = discordTimestamp(detectedAt, "t") || "Unknown";
+  const previousRestartAt = safeIso(details.previous_restart_detected_at);
+  const restartVersion = details.restart_place_version ?? event.current_place_version;
+  const currentVersion = event.current_place_version;
+  const description = [
+    `**${relativeTime}**`,
+    "~~━━━━━━━━━━━~~",
+    `Restart @ ${clockTime}`,
+    `Time Since Last Restart: ${ps99AlertElapsed(previousRestartAt, detectedAt)}`,
+    `Place Version @ restart: ${ps99AlertVersion(restartVersion)}`,
+    `Place Version Now: ${ps99AlertVersion(currentVersion)}`,
+    `CCU at restart: ${ps99AlertCcu(details.ccu_at_restart)}`,
+    `CCU (10 min before restart): ${ps99AlertCcu(details.ccu_10_minutes_before)}`
+  ].join("\n");
 
   return postPs99DiscordAlert(env, {
-    username: "PS99 Update Tracker",
+    content: null,
+    username: "PS99 Alert Bot",
+    attachments: [],
     embeds: [{
-      title: options.test ? "[TEST] PS99 Server Restart Detected" : "PS99 Server Restart Detected",
-      url: "https://c0ld-clan.com/ps99-restart-tracker.html",
-      description: String(event.reason || "The monitored PS99 public servers were replaced together.").slice(0, 4096),
-      color: 0xff9b96,
-      fields: [
-        {
-          name: "Place",
-          value: `[${placeName}](https://www.roblox.com/games/${placeId})`,
-          inline: true
-        },
-        {
-          name: "Place Version",
-          value: ps99AlertVersion(event.current_place_version),
-          inline: true
-        },
-        {
-          name: "Confidence",
-          value: confidence,
-          inline: true
-        },
-        {
-          name: "Detected",
-          value: discordTimestamp(event.detected_at, "F") || "Unknown",
-          inline: false
-        }
-      ],
-      timestamp: safeIso(event.detected_at) || new Date().toISOString()
+      title: options.test ? "[TEST] PS99 SERVER RESTART DETECTED" : "PS99 SERVER RESTART DETECTED",
+      description: description.slice(0, 4096),
+      color: 0xff0000,
+      footer: {
+        text: "Auditing Accuracy • it's fucking CAINOVER"
+      },
+      thumbnail: {
+        url: "https://i.imgur.com/aCHMjbP.png"
+      }
     }]
   });
 }
@@ -3866,7 +3947,7 @@ async function postPs99DiscordAlert(env, payload) {
   const roleId = ps99AlertRoleId(env);
   const body = {
     ...payload,
-    content: roleId ? `<@&${roleId}>` : "",
+    content: roleId ? `<@&${roleId}>` : (payload.content ?? null),
     allowed_mentions: {
       parse: [],
       roles: roleId ? [roleId] : []
@@ -3967,6 +4048,34 @@ function ps99AlertVersion(value) {
   return version === null ? "Unknown" : String(Math.trunc(version));
 }
 
+function ps99AlertCcu(value) {
+  const ccu = toNumber(value);
+  if (ccu === null) return "Unknown";
+  if (ccu >= 1000000) return `${(ccu / 1000000).toFixed(ccu >= 10000000 ? 1 : 2).replace(/\.0+$/, "")}m`;
+  if (ccu >= 1000) return `${(ccu / 1000).toFixed(ccu >= 100000 ? 1 : 2).replace(/\.0+$/, "")}k`;
+  return String(Math.max(0, Math.round(ccu)));
+}
+
+function ps99AlertElapsed(previousAt, currentAt) {
+  const previousMs = isoToMs(previousAt);
+  const currentMs = isoToMs(currentAt);
+  if (previousMs === null || currentMs === null || currentMs <= previousMs) {
+    return "No prior confirmed restart";
+  }
+
+  let minutes = Math.max(0, Math.floor((currentMs - previousMs) / 60000));
+  if (minutes < 1) return "<1m";
+  const days = Math.floor(minutes / 1440);
+  minutes -= days * 1440;
+  const hours = Math.floor(minutes / 60);
+  minutes -= hours * 60;
+  return [
+    days ? `${days}d` : "",
+    hours ? `${hours}h` : "",
+    minutes ? `${minutes}m` : ""
+  ].filter(Boolean).join(" ");
+}
+
 function discordTimestamp(value, style = "R") {
   const ms = isoToMs(value);
   return ms === null ? "" : `<t:${Math.floor(ms / 1000)}:${style}>`;
@@ -3974,6 +4083,63 @@ function discordTimestamp(value, style = "R") {
 
 function escapeDiscordMarkdown(value) {
   return String(value || "").replace(/([\\`*_{}\[\]()<>#+\-.!|~])/g, "\\$1");
+}
+
+async function fetchPs99CcuSample(env, sampledAt, source) {
+  const universeId = ps99UniverseId(env);
+  const placeId = ps99RootPlaceId(env);
+  const url = new URL("https://games.roblox.com/v1/games");
+  url.searchParams.set("universeIds", String(universeId));
+  const payload = await fetchJsonWithRetry(url, "Roblox PS99 universe CCU", {
+    attempts: 3,
+    baseDelayMs: 750
+  });
+  const game = extractRobloxArray(payload)
+    .find(row => toNumber(row?.id) === universeId) || null;
+  const ccu = toNumber(game?.playing);
+  if (ccu === null) throw httpError(502, "Roblox PS99 universe response did not include a playing count.");
+
+  const sampledMs = isoToMs(sampledAt) || Date.now();
+  const sampledMinute = new Date(Math.floor(sampledMs / 60000) * 60000).toISOString();
+  return {
+    sample: {
+      sample_id: `ps99-ccu:${universeId}:${sampledMinute}`,
+      universe_id: universeId,
+      place_id: placeId,
+      ccu: Math.max(0, Math.round(ccu)),
+      sampled_at: sampledMinute,
+      source,
+      raw_game: {
+        id: toNumber(game?.id),
+        root_place_id: toNumber(game?.rootPlaceId),
+        name: stringOrNull(game?.name),
+        playing: Math.max(0, Math.round(ccu)),
+        updated_at: safeIso(game?.updated)
+      }
+    },
+    error: null
+  };
+}
+
+async function fetchPs99CcuAtOrBefore(env, targetAt, maxAgeMs = 3 * 60000) {
+  const targetIso = safeIso(targetAt);
+  const targetMs = isoToMs(targetIso);
+  if (!targetIso || targetMs === null) return null;
+
+  const rows = await supabaseSelect(env, PS99_CCU_SAMPLES_TABLE, {
+    select: "sample_id,universe_id,place_id,ccu,sampled_at,source,created_at",
+    universe_id: `eq.${ps99UniverseId(env)}`,
+    sampled_at: `lte.${targetIso}`,
+    order: "sampled_at.desc",
+    limit: "1"
+  });
+  const sample = rows[0] || null;
+  const sampleMs = isoToMs(sample?.sampled_at);
+  if (!sample || sampleMs === null || targetMs - sampleMs < 0 || targetMs - sampleMs > maxAgeMs) {
+    return null;
+  }
+
+  return sample;
 }
 
 async function fetchPs99PublicServerBatch(placeId, batchSize) {
@@ -4120,6 +4286,18 @@ function normalizePs99RestartEventOutput(row) {
     reason: row.reason || null,
     source: row.source || null,
     details: parseJsonObject(row.details) || {}
+  };
+}
+
+function normalizePs99CcuSampleOutput(row) {
+  return {
+    sample_id: row.sample_id || null,
+    universe_id: toNumber(row.universe_id),
+    place_id: toNumber(row.place_id),
+    ccu: toNumber(row.ccu),
+    sampled_at: row.sampled_at || null,
+    source: row.source || null,
+    created_at: row.created_at || null
   };
 }
 
@@ -7526,6 +7704,9 @@ function ps99RestartRuntimeConfig(env) {
     sample_size: ps99RestartSampleSize(env),
     confirmation_scans: ps99RestartConfirmations(env),
     cooldown_minutes: ps99RestartCooldownMinutes(env),
+    ccu_monitoring: true,
+    ccu_source: "Roblox universe playing count",
+    ccu_used_for_detection: false,
     server_age_available: false,
     version_correlation: true
   };

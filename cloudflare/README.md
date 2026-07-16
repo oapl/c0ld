@@ -256,6 +256,7 @@ Useful endpoints:
 | `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
+| `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
 | `/api/ps99/alerts/test?type=both` | Protected manual preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; does not create history records. `POST` only. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
@@ -286,6 +287,11 @@ Invoke-RestMethod -Method Post `
   -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/restarts/ingest" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
+
+Run migration `023_ps99_ccu_monitor.sql` before deploying CCU monitoring. Once
+installed, each one-minute restart observation also stores the Roblox universe
+`playing` count. CCU failures are recorded as audit context but never block or
+influence restart detection.
 
 To preview the Discord alerts without creating fake version or restart history, run:
 
