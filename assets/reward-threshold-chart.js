@@ -176,7 +176,7 @@
       @media (max-width: 700px) {
         #reward-threshold-chart { height: 310px; }
         .reward-threshold-controls, .reward-threshold-ranges, .reward-threshold-metrics { width: 100%; }
-        #reward-threshold-refresh { min-width: 0; width: 100%; }
+        #reward-threshold-refresh, #reward-chart-export, #duck-recap-link { min-width: 0; width: 100%; }
       }
     `;
     document.head.appendChild(style);
@@ -204,6 +204,7 @@
           </div>
           <div class="reward-threshold-metrics">
             <button id="reward-threshold-refresh" type="button">Refresh Chart</button>
+            <button id="reward-chart-export" type="button">Export PNG</button>
           </div>
         </div>
       </div>
@@ -232,6 +233,7 @@
     });
 
     panel.querySelector("#reward-threshold-refresh")?.addEventListener("click", () => loadData(true));
+    panel.querySelector("#reward-chart-export")?.addEventListener("click", exportVisibleChartPng);
     document.getElementById("battle-select")?.addEventListener("change", () => loadData(true));
   }
 
@@ -678,6 +680,53 @@
     canvas.addEventListener("touchend", hide);
   }
 
+  function exportFilename(prefix) {
+    const battle = String(currentData?.display_name || currentData?.battle || selectedBattleValue() || "current")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "current";
+    return `${prefix}-${battle}.png`;
+  }
+
+  function downloadCanvasPng(canvas, filename) {
+    if (!canvas) return;
+    const save = blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    if (canvas.toBlob) {
+      canvas.toBlob(save, "image/png");
+      return;
+    }
+
+    fetch(canvas.toDataURL("image/png"))
+      .then(response => response.blob())
+      .then(save)
+      .catch(error => console.warn("Chart export failed", error));
+  }
+
+  function exportLineChartPng() {
+    const canvas = document.getElementById("reward-threshold-chart");
+    if (!canvas?._rewardThresholdChart) draw();
+    downloadCanvasPng(canvas, exportFilename("c0ld-clan-line-chart"));
+  }
+
+  function exportVisibleChartPng() {
+    if (window.C0LD_DUCK_RACE?.visible && typeof window.C0LD_DUCK_RACE.exportPng === "function") {
+      window.C0LD_DUCK_RACE.exportPng();
+      return;
+    }
+    exportLineChartPng();
+  }
+
   function init() {
     if (!isClansPage()) return;
     ensurePanel();
@@ -693,4 +742,9 @@
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(draw, 120);
   });
+
+  window.C0LD_REWARD_THRESHOLD_CHART = {
+    draw,
+    exportPng: exportLineChartPng
+  };
 })();

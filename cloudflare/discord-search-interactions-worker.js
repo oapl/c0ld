@@ -67,6 +67,16 @@ export default {
         return await registerHistoryCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-clan-command") {
+        requireAdmin(request, env);
+        return await registerClanCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-duck-command") {
+        requireAdmin(request, env);
+        return await registerDuckCommand(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/commands") {
         requireAdmin(request, env);
         return await listCommands(url, env);
@@ -162,6 +172,22 @@ async function handleInteraction(request, env, ctx) {
       page: 0,
       ownerId: interactionUserId(interaction)
     }));
+
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "clan" || commandName === "duck") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "chart") {
+      return interactionJson(messageResponse(`Use \`/${commandName} chart\`.`, true));
+    }
+
+    ctx.waitUntil(completeChartInteraction(interaction, env, commandName === "duck" ? "duck" : "clan"));
 
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
@@ -285,6 +311,23 @@ async function completeHistoryInteraction(interaction, env, state) {
   } catch (err) {
     await editOriginalInteraction(interaction, {
       content: `History lookup failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+async function completeChartInteraction(interaction, env, chartType) {
+  try {
+    const message = chartType === "duck"
+      ? await buildDuckChartMessage(env)
+      : await buildClanChartMessage(env);
+    await editOriginalInteraction(interaction, message);
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Chart render failed: ${err?.message || String(err)}`,
       embeds: [],
       components: [],
       attachments: [],
@@ -771,6 +814,341 @@ async function historyMapLimit(items, limit, mapper) {
   });
   await Promise.all(workers);
   return results;
+}
+
+async function buildClanChartMessage(env) {
+  const data = await loadClanChartData(env);
+  const filename = `c0ld-clan-chart-${chartFilenamePart(data.current?.battle || "current")}.png`;
+  const bytes = await renderClanLineChartPng(data);
+  return {
+    content: null,
+    embeds: [{
+      title: "Clan Chart - Line View",
+      color: 0x58a6ff,
+      image: { url: `attachment://${filename}` }
+    }],
+    allowed_mentions: { parse: [] },
+    _file: { filename, contentType: "image/png", bytes }
+  };
+}
+
+async function buildDuckChartMessage(env) {
+  const data = await loadClanChartData(env, { history: false });
+  const filename = `c0ld-duck-chart-${chartFilenamePart(data.current?.battle || "current")}.png`;
+  const bytes = await renderDuckChartPng(data.current);
+  return {
+    content: null,
+    embeds: [{
+      title: "Duck Chart",
+      color: 0xf2cc60,
+      image: { url: `attachment://${filename}` }
+    }],
+    allowed_mentions: { parse: [] },
+    _file: { filename, contentType: "image/png", bytes }
+  };
+}
+
+async function loadClanChartData(env, options = {}) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const currentUrl = clanApiUrl(env, "/api/clans/current", apiBase);
+  currentUrl.searchParams.set("fresh", "1");
+  const currentResponse = await fetchClanApi(env, currentUrl, {
+    headers: { Accept: "application/json", "User-Agent": "c0ld-Discord-Chart-Worker" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const current = await currentResponse.json().catch(() => ({}));
+  if (!currentResponse.ok || current.ok === false) {
+    throw httpError(currentResponse.status || 502, current.message || `Clan current API failed (${currentResponse.status}).`);
+  }
+
+  if (options.history === false) return { current, history: { rows: [] } };
+
+  const historyUrl = clanApiUrl(env, "/api/clans/history", apiBase);
+  historyUrl.searchParams.set("battle", current.battle || "current");
+  historyUrl.searchParams.set("hours", "336");
+  historyUrl.searchParams.set("limit", "50000");
+  historyUrl.searchParams.set("order", "asc");
+  const historyResponse = await fetchClanApi(env, historyUrl, {
+    headers: { Accept: "application/json", "User-Agent": "c0ld-Discord-Chart-Worker" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const history = await historyResponse.json().catch(() => ({ rows: [] }));
+
+  return {
+    current,
+    history: historyResponse.ok && history.ok !== false ? history : { rows: [] }
+  };
+}
+
+async function renderClanLineChartPng(data) {
+  const fonts = await loadHistoryFonts();
+  const width = 1200;
+  const height = 675;
+  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 1);
+  const color = chartColors();
+  const rows = chartCurrentRows(data.current).filter(row => row.rank >= 1 && row.rank <= 10).slice(0, 10);
+  const series = rows.map((row, index) => chartBuildPointSeries(row, data.history, index)).filter(item => item.points.length >= 1);
+  const title = `${data.current?.display_name || data.current?.battle || "Current Battle"} - Clan Line Chart`;
+  const subtitle = "Current top clans by recorded point progression";
+
+  chartPanel(canvas, 24, 24, width - 48, height - 48, color);
+  canvas.drawFontText(fonts.bold, title, 52, 48, 28, color.white, 760);
+  canvas.drawFontText(fonts.regular, subtitle, 54, 86, 15, color.muted, 760);
+  canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(data.current?.snapshot_at || data.current?.generated_at)}`, 930, 60, 13, color.muted, 220);
+
+  const plot = { x: 78, y: 132, w: 960, h: 392 };
+  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
+  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+
+  if (!series.length) {
+    canvas.drawFontText(fonts.regular, "No clan chart data is available yet.", plot.x + 28, plot.y + 38, 18, color.muted, plot.w - 56);
+    return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+  }
+
+  const allPoints = series.flatMap(item => item.points);
+  const minT = Math.min(...allPoints.map(point => point.t));
+  const maxT = Math.max(...allPoints.map(point => point.t));
+  const minY = Math.min(...allPoints.map(point => point.points));
+  const maxY = Math.max(...allPoints.map(point => point.points));
+  const yPad = Math.max((maxY - minY) * 0.08, 1000);
+  const yMin = Math.max(0, minY - yPad);
+  const yMax = maxY + yPad;
+  const xFor = point => maxT === minT ? plot.x : plot.x + ((point.t - minT) / (maxT - minT)) * plot.w;
+  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.points - yMin) / (yMax - yMin))) * plot.h;
+
+  for (let i = 0; i <= 4; i += 1) {
+    const yy = plot.y + (i / 4) * plot.h;
+    const value = yMax - (i / 4) * (yMax - yMin);
+    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    canvas.drawFontText(fonts.regular, shortNumber(value), 12, yy - 8, 12, color.muted, 58);
+  }
+
+  series.forEach(item => {
+    for (let index = 1; index < item.points.length; index += 1) {
+      chartDrawLine(canvas, xFor(item.points[index - 1]), yFor(item.points[index - 1]), xFor(item.points[index]), yFor(item.points[index]), item.color, item.rank <= 4 ? 3 : 2);
+    }
+    const last = item.points[item.points.length - 1];
+    chartFillCircle(canvas, xFor(last), yFor(last), item.rank <= 4 ? 5 : 4, item.color);
+    if (item.rank <= 6) {
+      canvas.drawFontText(fonts.bold, `#${item.rank} ${item.clan_name}`, Math.min(plot.x + plot.w - 120, xFor(last) + 8), yFor(last) - 8, 12, item.color, 112);
+    }
+  });
+
+  canvas.drawFontText(fonts.regular, chartShortDate(minT), plot.x, plot.y + plot.h + 18, 12, color.muted, 120);
+  canvas.drawFontText(fonts.regular, chartShortDate(maxT), plot.x + plot.w - 120, plot.y + plot.h + 18, 12, color.muted, 120);
+
+  const legendX = 1060;
+  canvas.drawFontText(fonts.bold, "Top 10", legendX, 132, 18, color.white, 110);
+  series.slice(0, 10).forEach((item, index) => {
+    const y = 164 + index * 34;
+    canvas.fillRect(legendX, y + 7, 20, 4, item.color);
+    canvas.drawFontText(fonts.bold, `#${item.rank}`, legendX + 28, y, 12, item.color, 36);
+    canvas.drawFontText(fonts.regular, item.clan_name, legendX + 64, y, 12, color.white, 88);
+    canvas.drawFontText(fonts.regular, shortNumber(item.current.points), legendX + 64, y + 15, 10, color.muted, 88);
+  });
+
+  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 52, height - 42, 13, color.muted, 300);
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+async function renderDuckChartPng(current) {
+  const fonts = await loadHistoryFonts();
+  const width = 1200;
+  const height = 675;
+  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 1);
+  const color = chartColors();
+  const rows = chartCurrentRows(current).filter(row => row.rank >= 1 && row.rank <= 10).slice(0, 10);
+  const title = `${current?.display_name || current?.battle || "Current Battle"} - Duck Chart`;
+
+  chartPanel(canvas, 24, 24, width - 48, height - 48, color);
+  canvas.drawFontText(fonts.bold, title, 52, 48, 30, color.white, 720);
+  canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(current?.snapshot_at || current?.generated_at)}`, 54, 88, 15, color.muted, 420);
+
+  const track = { x: 52, y: 126, w: 1096, h: 480 };
+  canvas.fillRect(track.x, track.y, track.w, track.h, [10, 49, 74, 255]);
+  for (let stripe = 0; stripe < track.w; stripe += 36) {
+    canvas.fillRect(track.x + stripe, track.y + 58, 18, track.h - 58, stripe % 72 === 0 ? [25, 82, 113, 255] : [14, 61, 91, 255]);
+  }
+  canvas.fillRect(track.x, track.y, track.w, 58, [61, 127, 51, 255]);
+  canvas.fillRect(track.x, track.y + 56, track.w, 4, [123, 79, 38, 255]);
+  [132, 195, 262].forEach((x, index) => chartFillCircle(canvas, track.x + x, track.y + 28 + (index % 2) * 7, 22 + index * 2, [95, 189, 78, 255]));
+  const finishX = track.x + track.w - 58;
+  for (let y = track.y + 58; y < track.y + track.h; y += 20) {
+    const odd = Math.floor((y - track.y) / 20) % 2;
+    canvas.fillRect(finishX, y, 20, 20, odd ? color.black : color.white);
+    canvas.fillRect(finishX + 20, y, 20, 20, odd ? color.white : color.black);
+  }
+
+  if (!rows.length) {
+    canvas.drawFontText(fonts.regular, "No top 10 clan rows are available yet.", track.x + 28, track.y + 94, 18, color.muted, track.w - 56);
+    return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+  }
+
+  const points = rows.map(row => Number(row.points || 0));
+  const minPoints = Math.min(...points);
+  const maxPoints = Math.max(...points);
+  const range = maxPoints - minPoints;
+  rows.forEach((row, index) => {
+    const progress = range > 0 ? (Number(row.points || 0) - minPoints) / range : 1 - index * 0.08;
+    const x = track.x + 88 + Math.max(0, Math.min(1, progress)) * (track.w - 176);
+    const y = track.y + 188 + (index % 4) * 76 + Math.floor(index / 4) * 18;
+    chartDrawDuck(canvas, fonts, row, index, x, y, rows.length > 7 ? 0.82 : 0.94, color);
+  });
+
+  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 52, height - 42, 13, color.muted, 300);
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function chartBuildPointSeries(currentRow, history, index) {
+  const key = chartNormalize(currentRow.clan_name);
+  const points = (history?.rows || [])
+    .map(chartNormalizeClanRow)
+    .filter(row => chartNormalize(row.clan_name) === key && row.points !== null && row.t)
+    .sort((a, b) => a.t - b.t);
+  const currentPoint = chartNormalizeClanRow(currentRow);
+  if (currentPoint.t && currentPoint.points !== null && !points.some(point => point.t === currentPoint.t)) points.push(currentPoint);
+  const deduped = [];
+  for (const point of points.sort((a, b) => a.t - b.t)) {
+    const last = deduped[deduped.length - 1];
+    if (last && last.t === point.t) deduped[deduped.length - 1] = point.points >= last.points ? point : last;
+    else deduped.push(point);
+  }
+  return {
+    clan_name: currentRow.clan_name,
+    rank: currentRow.rank,
+    current: currentRow,
+    color: chartClanColor(currentRow.clan_name, index),
+    points: deduped
+  };
+}
+
+function chartCurrentRows(payload) {
+  return (payload?.rows || [])
+    .map(chartNormalizeClanRow)
+    .filter(row => row.clan_name && row.rank !== null && row.points !== null)
+    .sort((a, b) => a.rank - b.rank);
+}
+
+function chartNormalizeClanRow(row) {
+  return {
+    t: Date.parse(String(row.fetched_at || row.snapshot_at || row.generated_at || "")) || Date.parse(String(row.last_updated || "")) || 0,
+    rank: chartFinite(row.rank) === null ? null : Math.round(Number(row.rank)),
+    clan_name: String(row.clan_name || row.clan || row.name || row.tag || "").replace(/★/g, "").trim(),
+    points: chartFinite(row.points ?? row.total_points)
+  };
+}
+
+function chartFinite(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function chartNormalize(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function chartClanColor(name, index = 0) {
+  const specials = { c0ld: [255, 155, 150, 255], wmsy: [116, 217, 159, 255], nong: [246, 173, 85, 255] };
+  const palette = [
+    [88, 166, 255, 255], [210, 168, 255, 255], [121, 192, 255, 255], [255, 166, 87, 255], [165, 214, 255, 255],
+    [255, 123, 114, 255], [63, 185, 80, 255], [242, 204, 96, 255], [219, 97, 162, 255], [86, 212, 221, 255]
+  ];
+  return specials[chartNormalize(name)] || palette[index % palette.length];
+}
+
+function chartColors() {
+  return {
+    panel: [22, 29, 39, 255],
+    header: [25, 33, 44, 255],
+    inset: [13, 19, 27, 255],
+    line: [48, 60, 75, 255],
+    grid: [35, 45, 58, 255],
+    white: [239, 245, 252, 255],
+    muted: [176, 188, 204, 255],
+    red: [255, 100, 105, 255],
+    blue: [88, 166, 255, 255],
+    gold: [242, 204, 96, 255],
+    black: [10, 12, 16, 255]
+  };
+}
+
+function chartPanel(canvas, x, y, width, height, color) {
+  canvas.fillRect(x, y, width, height, color.panel);
+  canvas.fillRect(x, y, width, 1, color.line);
+  canvas.fillRect(x, y + height - 1, width, 1, color.line);
+  canvas.fillRect(x, y, 1, height, color.line);
+  canvas.fillRect(x + width - 1, y, 1, height, color.line);
+  canvas.fillRect(x, y, 6, height, color.red);
+}
+
+function chartDrawLine(canvas, x1, y1, x2, y2, rgba, width = 2) {
+  const steps = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1)));
+  for (let i = 0; i <= steps; i += 1) {
+    const pct = i / steps;
+    const x = x1 + (x2 - x1) * pct;
+    const y = y1 + (y2 - y1) * pct;
+    canvas.fillRect(x - width / 2, y - width / 2, width, width, rgba);
+  }
+}
+
+function chartFillCircle(canvas, cx, cy, radius, rgba) {
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      if (x * x + y * y <= radius * radius) canvas.fillRect(cx + x, cy + y, 1, 1, rgba);
+    }
+  }
+}
+
+function chartFillEllipse(canvas, cx, cy, rx, ry, rgba) {
+  for (let y = -ry; y <= ry; y += 1) {
+    for (let x = -rx; x <= rx; x += 1) {
+      if ((x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1) canvas.fillRect(cx + x, cy + y, 1, 1, rgba);
+    }
+  }
+}
+
+function chartDrawDuck(canvas, fonts, row, index, x, y, scale, color) {
+  const duck = [255, 242, 0, 255];
+  const outline = color.black;
+  const red = [255, 45, 32, 255];
+  const accent = chartClanColor(row.clan_name, index);
+  const sx = value => x + value * scale;
+  const sy = value => y + value * scale;
+  chartFillEllipse(canvas, sx(0), sy(28), 54 * scale, 34 * scale, outline);
+  chartFillEllipse(canvas, sx(0), sy(25), 48 * scale, 29 * scale, duck);
+  chartFillCircle(canvas, sx(33), sy(-4), 31 * scale, outline);
+  chartFillCircle(canvas, sx(33), sy(-4), 25 * scale, duck);
+  chartFillEllipse(canvas, sx(70), sy(8), 24 * scale, 12 * scale, outline);
+  chartFillEllipse(canvas, sx(72), sy(8), 18 * scale, 8 * scale, red);
+  chartFillCircle(canvas, sx(43), sy(-13), 5 * scale, outline);
+  canvas.fillRect(sx(-25), sy(16), 26 * scale, 26 * scale, outline);
+  canvas.fillRect(sx(-22), sy(19), 20 * scale, 20 * scale, accent);
+
+  const labelWidth = 148;
+  canvas.fillRect(x - labelWidth / 2, y - 76 * scale, labelWidth, 43, [13, 17, 23, 235]);
+  canvas.fillRect(x - labelWidth / 2, y - 76 * scale, labelWidth, 1, color.line);
+  canvas.drawFontText(fonts.bold, `#${row.rank} ${row.clan_name}`, x - labelWidth / 2 + 8, y - 68 * scale, 13, color.white, labelWidth - 16);
+  const next = row.rank && index >= 0 ? null : null;
+  canvas.drawFontText(fonts.regular, shortNumber(row.points), x - labelWidth / 2 + 8, y - 50 * scale, 11, color.muted, labelWidth - 16);
+}
+
+function chartDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", month: "numeric", day: "numeric", year: "2-digit", hour: "numeric", minute: "2-digit" });
+}
+
+function chartShortDate(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleDateString("en-US", { timeZone: "America/Guatemala", month: "short", day: "numeric" });
+}
+
+function chartFilenamePart(value) {
+  return String(value || "current").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "current";
 }
 
 function finiteHistoryNumber(value) {
@@ -1794,6 +2172,14 @@ async function registerHistoryCommand(url, env) {
   return registerCommand(url, env, historyCommandPayload());
 }
 
+async function registerClanCommand(url, env) {
+  return registerCommand(url, env, clanCommandPayload());
+}
+
+async function registerDuckCommand(url, env) {
+  return registerCommand(url, env, duckCommandPayload());
+}
+
 async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
@@ -1862,10 +2248,45 @@ async function buildVersionResponse(env) {
   const version = plainInteger(rootPlace?.latest_version ?? payload.newest_version);
   const release = formatPs99CommandDate(rootPlace?.latest_published_at);
   const lastScanned = formatPs99CommandDate(lastScannedAt || rootPlace?.latest_checked_at);
+  const roblox = await fetchRobloxReleasedVersionForCommand(env).catch(err => ({
+    version: "-",
+    upload: "-",
+    scanned: "-",
+    error: err?.message || String(err)
+  }));
+  const robloxSuffix = roblox.error
+    ? ` | Roblox Released: unavailable`
+    : ` | Roblox Released: ${roblox.version} | Roblox Scan: ${roblox.scanned}`;
 
   return messageResponse(
-    `Newest PS99 Version: ${version} | Release: ${release} | Last Scanned: ${lastScanned}`
+    `Newest PS99 Version: ${version} | Release: ${release} | Last Scanned: ${lastScanned}${robloxSuffix}`
   );
+}
+
+async function fetchRobloxReleasedVersionForCommand(env) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/roblox/versions", apiBase);
+  apiUrl.searchParams.set("limit", "1");
+  apiUrl.searchParams.set("fresh", "1");
+
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Version-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Roblox version API failed (${response.status}).`);
+  }
+
+  const state = Array.isArray(payload.states) ? payload.states[0] : null;
+  return {
+    version: state?.current_version || payload.current_version || "-",
+    upload: state?.client_version_upload || payload.client_version_upload || "-",
+    scanned: formatPs99CommandDate(state?.last_checked_at || payload.newest_detected_at)
+  };
 }
 
 async function buildRewardsResponse(interaction, env) {
@@ -2424,6 +2845,38 @@ function historyCommandPayload() {
   };
 }
 
+function clanCommandPayload() {
+  return {
+    name: "clan",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Clan leaderboard tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "chart",
+        description: "Post the current clan line chart as a PNG.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
+function duckCommandPayload() {
+  return {
+    name: "duck",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Duck chart tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "chart",
+        description: "Post the current duck chart as a PNG.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -2503,6 +2956,12 @@ function getCommandOption(interaction, name) {
   const option = (interaction.data?.options || [])
     .find(item => String(item?.name || "").toLowerCase() === name);
   return String(option?.value || "").trim();
+}
+
+function getSubcommandName(interaction) {
+  const option = (interaction.data?.options || [])
+    .find(item => Number(item?.type) === APPLICATION_COMMAND_OPTION_SUB_COMMAND);
+  return String(option?.name || "").trim().toLowerCase();
 }
 
 function messageResponse(content, forceEphemeral = false) {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PS99 Version History</title>
+  <title>Roblox Version History</title>
   <style>
     :root {
       color-scheme: dark;
@@ -49,7 +49,8 @@
       align-items: center;
     }
 
-    .menu-btn {
+    .menu-btn,
+    .btn {
       border: 1px solid var(--border);
       color: var(--text);
       background: var(--panel-2);
@@ -62,13 +63,9 @@
     }
 
     .btn {
-      border: 1px solid var(--border);
-      color: var(--text);
-      background: var(--panel-2);
       border-radius: 6px;
       padding: 9px 11px;
       font-size: 14px;
-      cursor: pointer;
     }
 
     .menu-btn.active,
@@ -132,7 +129,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -157,6 +154,7 @@
       font-size: 20px;
       font-weight: bold;
       line-height: 1.25;
+      overflow-wrap: anywhere;
     }
 
     .panel {
@@ -193,12 +191,9 @@
       font-weight: normal;
     }
 
-    .place-link {
-      color: var(--accent);
-      text-decoration: none;
-    }
-
     tbody tr:hover { background: var(--hover); }
+    .version { color: var(--accent); font-weight: 800; }
+    .upload { font-family: Consolas, "Courier New", monospace; font-size: 12px; color: var(--muted); }
 
     .empty,
     .error {
@@ -211,7 +206,7 @@
     @media (max-width: 900px) {
       main { padding: 16px 8px 60px; }
       .stats { grid-template-columns: repeat(2, 1fr); }
-      table { min-width: 760px; }
+      table { min-width: 860px; }
       .panel { overflow-x: auto; }
     }
 
@@ -233,8 +228,8 @@
           <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
           <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
           <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
-          <a class="menu-btn active" href="ps99-version-history.html">PS99 Versions</a>
-          <a class="menu-btn" href="roblox-version-history.html">Roblox Versions</a>
+          <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn active" href="roblox-version-history.html">Roblox Versions</a>
           <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
           <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
           <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
@@ -247,13 +242,21 @@
   <main>
     <section class="hero">
       <div>
-        <h1>PS99 Version History</h1>
-        <div id="subtitle" class="muted">Cataloging watched Pet Simulator 99 place updates.</div>
+        <h1>Roblox Version History</h1>
+        <div id="subtitle" class="muted">Tracking the released Roblox client version so PS99 update timing is easier to read.</div>
       </div>
       <button id="refresh" class="btn" type="button">Refresh</button>
     </section>
 
     <section class="stats">
+      <article class="stat">
+        <div class="stat-label">Released Version</div>
+        <div id="current-version" class="stat-value">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">Client Upload</div>
+        <div id="current-upload" class="stat-value">-</div>
+      </article>
       <article class="stat">
         <div class="stat-label">Last Detected</div>
         <div id="last-detected" class="stat-value">-</div>
@@ -266,41 +269,44 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Current Watched Places</h2>
-        <span id="places-meta" class="muted">Loading...</span>
+        <h2>Current Release</h2>
+        <span id="state-meta" class="muted">Loading...</span>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Place</th>
-            <th>Place ID</th>
-            <th>Latest Version</th>
-            <th>Updated</th>
+            <th>Channel</th>
+            <th>Binary</th>
+            <th>Version</th>
+            <th>Upload</th>
+            <th>Next</th>
+            <th>Scanned</th>
           </tr>
         </thead>
-        <tbody id="places-body">
-          <tr><td colspan="4" class="empty">Loading...</td></tr>
+        <tbody id="state-body">
+          <tr><td colspan="6" class="empty">Loading...</td></tr>
         </tbody>
       </table>
     </section>
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Version History</h2>
+        <h2>Release History</h2>
         <span id="history-meta" class="muted">Loading...</span>
       </div>
       <table>
         <thead>
           <tr>
             <th>Detected</th>
-            <th>Place</th>
+            <th>Channel</th>
+            <th>Binary</th>
             <th>Version</th>
             <th>Previous</th>
-            <th>Published</th>
+            <th>Upload</th>
           </tr>
         </thead>
         <tbody id="history-body">
-          <tr><td colspan="5" class="empty">Loading...</td></tr>
+          <tr><td colspan="6" class="empty">Loading...</td></tr>
         </tbody>
       </table>
     </section>
@@ -308,16 +314,18 @@
 
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
-    const CACHE_KEY = "c0ld:ps99-version-history:v1";
+    const CACHE_KEY = "c0ld:roblox-version-history:v1";
 
     const els = {
       subtitle: document.getElementById("subtitle"),
       refresh: document.getElementById("refresh"),
+      currentVersion: document.getElementById("current-version"),
+      currentUpload: document.getElementById("current-upload"),
       lastDetected: document.getElementById("last-detected"),
       lastScanned: document.getElementById("last-scanned"),
-      placesMeta: document.getElementById("places-meta"),
+      stateMeta: document.getElementById("state-meta"),
       historyMeta: document.getElementById("history-meta"),
-      placesBody: document.getElementById("places-body"),
+      stateBody: document.getElementById("state-body"),
       historyBody: document.getElementById("history-body")
     };
 
@@ -334,16 +342,6 @@
       });
     }
 
-    function fmtVersion(value) {
-      const n = Number(value);
-      return Number.isFinite(n) ? String(Math.trunc(n)) : "-";
-    }
-
-    function robloxPlaceUrl(value) {
-      const placeId = String(value ?? "").replace(/\D/g, "");
-      return placeId ? `https://www.roblox.com/games/${placeId}` : "https://www.roblox.com/games/";
-    }
-
     function text(value) {
       return String(value ?? "").replace(/[&<>"']/g, char => ({
         "&": "&amp;",
@@ -354,46 +352,58 @@
       }[char]));
     }
 
+    function shortUpload(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "-";
+      return raw.length > 34 ? `${raw.slice(0, 18)}...${raw.slice(-10)}` : raw;
+    }
+
     function render(data, stale = false) {
-      const places = Array.isArray(data?.places) ? data.places : [];
+      const states = Array.isArray(data?.states) ? data.states : [];
       const events = Array.isArray(data?.events) ? data.events : [];
-      const lastScannedAt = places.reduce((latest, place) => {
-        const checkedAt = new Date(place?.latest_checked_at || 0).getTime();
+      const current = states[0] || {};
+      const lastScannedAt = states.reduce((latest, state) => {
+        const checkedAt = new Date(state?.last_checked_at || 0).getTime();
         return Number.isFinite(checkedAt) && checkedAt > latest.time
-          ? { time: checkedAt, value: place.latest_checked_at }
+          ? { time: checkedAt, value: state.last_checked_at }
           : latest;
       }, { time: 0, value: null }).value;
 
       els.subtitle.textContent = stale
-        ? "Showing cached PS99 version data while refreshing..."
-        : `Loaded ${events.length.toLocaleString()} version history event${events.length === 1 ? "" : "s"}.`;
-      els.lastDetected.textContent = fmtDate(events[0]?.detected_at);
+        ? "Showing cached Roblox release data while refreshing..."
+        : `Loaded ${events.length.toLocaleString()} release event${events.length === 1 ? "" : "s"}.`;
+      els.currentVersion.textContent = current.current_version || data?.current_version || "-";
+      els.currentUpload.textContent = shortUpload(current.client_version_upload || data?.client_version_upload);
+      els.lastDetected.textContent = fmtDate(events[0]?.detected_at || data?.newest_detected_at);
       els.lastScanned.textContent = fmtDate(lastScannedAt);
-      els.placesMeta.textContent = `${places.length.toLocaleString()} active watched place${places.length === 1 ? "" : "s"}`;
-      els.historyMeta.textContent = events.length ? `Newest first` : "No version events yet";
+      els.stateMeta.textContent = `${states.length.toLocaleString()} tracked release target${states.length === 1 ? "" : "s"}`;
+      els.historyMeta.textContent = events.length ? "Newest first" : "No release events yet";
 
-      els.placesBody.innerHTML = places.length
-        ? places.map(place => `
+      els.stateBody.innerHTML = states.length
+        ? states.map(state => `
           <tr>
-            <td><a class="place-link" href="${robloxPlaceUrl(place.place_id)}" target="_blank" rel="noopener noreferrer">${text(place.place_name)}</a>${place.root_place ? ' <span class="good">root</span>' : ""}</td>
-            <td>${text(place.place_id)}</td>
-            <td class="version">${fmtVersion(place.latest_version)}</td>
-            <td>${fmtDate(place.latest_published_at)}</td>
+            <td>${text(state.channel)}</td>
+            <td>${text(state.binary_type)}</td>
+            <td class="version">${text(state.current_version || "-")}</td>
+            <td class="upload" title="${text(state.client_version_upload || "")}">${text(shortUpload(state.client_version_upload))}</td>
+            <td>${text(state.next_client_version || "-")}</td>
+            <td>${fmtDate(state.last_checked_at)}</td>
           </tr>
         `).join("")
-        : `<tr><td colspan="4" class="empty">No watched places found. Run the PS99 version migration and ingest once.</td></tr>`;
+        : `<tr><td colspan="6" class="empty">No Roblox release state found. Run the migration and trigger the release ingest once.</td></tr>`;
 
       els.historyBody.innerHTML = events.length
         ? events.map(event => `
           <tr>
             <td>${fmtDate(event.detected_at)}</td>
-            <td>${text(event.place_name)}</td>
-            <td class="version">${fmtVersion(event.current_version)}</td>
-            <td>${fmtVersion(event.previous_version)}</td>
-            <td>${fmtDate(event.current_published_at)}</td>
+            <td>${text(event.channel)}</td>
+            <td>${text(event.binary_type)}</td>
+            <td class="version">${text(event.current_version || "-")}</td>
+            <td>${text(event.previous_version || "-")}</td>
+            <td class="upload" title="${text(event.current_client_version_upload || "")}">${text(shortUpload(event.current_client_version_upload))}</td>
           </tr>
         `).join("")
-        : `<tr><td colspan="5" class="empty">No version history found yet. Run the protected ingest once to seed the catalog.</td></tr>`;
+        : `<tr><td colspan="6" class="empty">No release history found yet. Run the protected ingest once to seed the tracker.</td></tr>`;
     }
 
     async function load({ force = false } = {}) {
@@ -406,15 +416,15 @@
       els.refresh.textContent = "Refreshing...";
 
       try {
-        const response = await fetch(`${API_BASE}/api/ps99/versions?limit=200`, { cache: "no-store" });
+        const response = await fetch(`${API_BASE}/api/roblox/versions?limit=200`, { cache: "no-store" });
         const data = await response.json();
         if (!response.ok || data.ok === false) throw new Error(data.message || `HTTP ${response.status}`);
         sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
         render(data);
       } catch (err) {
         if (!cached) {
-          els.placesBody.innerHTML = `<tr><td colspan="4" class="error">${text(err.message || err)}</td></tr>`;
-          els.historyBody.innerHTML = `<tr><td colspan="5" class="error">${text(err.message || err)}</td></tr>`;
+          els.stateBody.innerHTML = `<tr><td colspan="6" class="error">${text(err.message || err)}</td></tr>`;
+          els.historyBody.innerHTML = `<tr><td colspan="6" class="error">${text(err.message || err)}</td></tr>`;
         }
       } finally {
         els.refresh.disabled = false;
@@ -425,5 +435,6 @@
     els.refresh.addEventListener("click", () => load({ force: true }));
     load();
   </script>
+  <script src="assets/protected-menus.js"></script>
 </body>
 </html>

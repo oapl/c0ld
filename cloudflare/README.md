@@ -116,6 +116,7 @@ supabase/migrations/007_c0ld_clans_leaderboard.sql
 supabase/migrations/019_clan_activity.sql
 supabase/migrations/021_ps99_version_history.sql
 supabase/migrations/024_home_awards_rpc.sql
+supabase/migrations/028_roblox_release_version_history.sql
 ```
 
 It creates:
@@ -134,6 +135,8 @@ It creates:
 | `c0ld_clan_activity_summary` | table | Per-clan activity counters for `clans-activity.html`. |
 | `c0ld_ps99_places` | table | Watched PS99 places and their latest known place version. |
 | `c0ld_ps99_version_events` | table | Append-only PS99 place version change catalog for `ps99-version-history.html`. |
+| `c0ld_roblox_release_state` | table | Latest tracked Roblox client release by binary type and channel. |
+| `c0ld_roblox_release_events` | table | Append-only Roblox released-version change catalog for `roblox-version-history.html`. |
 
 The older tables can stay while the site is migrated. New Worker pulls should write to `c0ld_clan_snapshots`.
 
@@ -214,6 +217,12 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_VERSION_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the PS99 version schedule interval. |
 | `PS99_VERSION_PLACE_DELAY_MS` | Optional. Defaults to `0`; delay between watched place version checks. |
 | `PS99_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/versions`. |
+| `INGEST_ROBLOX_RELEASE_VERSION_HISTORY` | Optional. Defaults to `false`. Set to `true` after running migration `028` to catalog Roblox released client version changes. |
+| `ROBLOX_RELEASE_BINARY_TYPE` | Optional. Defaults to `WindowsPlayer`. |
+| `ROBLOX_RELEASE_CHANNEL` | Optional. Defaults to `live`. |
+| `ROBLOX_RELEASE_SCHEDULE_MINUTES` | Optional. Defaults to `5`; controls how often scheduled Roblox release checks run. |
+| `ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the Roblox release schedule interval. |
+| `ROBLOX_RELEASE_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/roblox/versions`. |
 | `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. Set to `true` after running migration `022` to monitor coordinated PS99 public-server turnover. |
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
 | `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
@@ -313,6 +322,8 @@ Useful endpoints:
 | `/api/clans/activity/feed` | All-clans activity blotter split into clan activity and rank activity. |
 | `/api/ps99/versions/ingest` | Manual protected PS99 place-version ingest. `POST` only. |
 | `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
+| `/api/roblox/versions/ingest` | Manual protected Roblox released-version ingest. `POST` only. |
+| `/api/roblox/versions` | Public Roblox released-version catalog for `roblox-version-history.html`. |
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
 | `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
@@ -336,6 +347,14 @@ To seed PS99 version history after running migration `021`, run:
 ```powershell
 Invoke-RestMethod -Method Post `
   -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/versions/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+To seed Roblox released-version history after running migration `028`, run:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/roblox/versions/ingest?force=1" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
@@ -509,6 +528,14 @@ Invoke-RestMethod -Method Post `
   -Headers @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-clan-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-duck-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-rewards-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
 
@@ -583,9 +610,22 @@ The plain-text PS99 version command is:
 ```
 
 It reports the root PS99 place version, its release time, and the most recent
-completed version scan. Register it through the same admin script, or call
+completed version scan. It also appends the latest tracked Roblox released
+client version when `CLAN_API_BASE` can read `/api/roblox/versions`. Register it through the same admin script, or call
 `POST /admin/register-version-command?guild_id=YOUR_GUILD_ID` with the same
 admin bearer token.
+
+The chart commands are:
+
+```text
+/clan chart
+/duck chart
+```
+
+They render and post the current clan line chart or duck chart as a PNG
+attachment in Discord. Register them through the same admin script, or call
+`POST /admin/register-clan-command?guild_id=YOUR_GUILD_ID` and
+`POST /admin/register-duck-command?guild_id=YOUR_GUILD_ID`.
 
 The reward cutoff commands are:
 

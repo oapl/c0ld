@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>c0ld Home Draft</title>
-  <meta name="description" content="Prototype c0ld clan command center with live activity, PS99 status, battle movement, and member spotlights." />
+  <meta name="description" content="Prototype c0ld clan command center with live activity, PS99 status, and battle movement." />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -283,426 +283,6 @@
     .rank-direction.up,
     .rank-direction.down { color: var(--muted); }
 
-    .spotlight {
-      position: relative;
-      margin: 0 0 22px;
-      padding: 1px;
-      border-radius: 16px;
-      background: linear-gradient(115deg, #f2c75c, #ff6b72, #bb91ff, #67b7ff, #f2c75c);
-      background-size: 250% 250%;
-      box-shadow: 0 20px 65px rgba(0, 0, 0, 0.42), 0 0 45px rgba(255, 107, 114, 0.12);
-      overflow: hidden;
-      animation: spotlight-border 12s ease infinite;
-    }
-
-    .spotlight::before {
-      content: "";
-      position: absolute;
-      inset: -40% -10%;
-      background:
-        radial-gradient(circle at 15% 50%, rgba(242, 199, 92, 0.09), transparent 24%),
-        radial-gradient(circle at 50% 10%, rgba(255, 107, 114, 0.08), transparent 24%),
-        radial-gradient(circle at 85% 55%, rgba(103, 183, 255, 0.09), transparent 24%);
-      pointer-events: none;
-      animation: spotlight-haze 10s ease-in-out infinite alternate;
-    }
-
-    @keyframes spotlight-border {
-      0%, 100% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-    }
-
-    @keyframes spotlight-haze {
-      to { transform: translate3d(2%, 4%, 0) scale(1.05); }
-    }
-
-    .spotlight-inner {
-      position: relative;
-      border-radius: 15px;
-      background:
-        linear-gradient(120deg, rgba(255, 255, 255, 0.035), transparent 34%),
-        #10161e;
-      padding: 25px 23px 24px;
-    }
-
-    .award-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-      padding-top: 52px;
-    }
-
-    .award {
-      position: relative;
-      min-height: 228px;
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      background: linear-gradient(145deg, rgba(25, 33, 44, 0.96), rgba(10, 14, 20, 0.98));
-      padding: 59px 18px 18px;
-      isolation: isolate;
-      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .award:hover {
-      transform: translateY(-4px);
-      border-color: color-mix(in srgb, var(--award-color) 65%, var(--border));
-      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 24px color-mix(in srgb, var(--award-color) 14%, transparent);
-    }
-
-    .award::after {
-      content: "";
-      position: absolute;
-      width: 150px;
-      height: 150px;
-      right: -65px;
-      top: -70px;
-      border-radius: 50%;
-      background: var(--award-color);
-      opacity: 0.12;
-      filter: blur(2px);
-      box-shadow: 0 0 60px var(--award-color);
-      z-index: -1;
-    }
-
-    .award-avatar-shell {
-      position: absolute;
-      top: -52px;
-      left: 50%;
-      width: 104px;
-      height: 104px;
-      padding: 3px;
-      border-radius: 50%;
-      background: conic-gradient(from 180deg, transparent 0 8%, var(--award-color) 23%, #fff 35%, var(--award-color) 50%, transparent 66% 75%, var(--award-color) 92%);
-      transform: translateX(-50%);
-      filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
-      animation: avatar-aura 4.5s ease-in-out infinite;
-    }
-
-    .award-avatar {
-      display: block;
-      width: 100%;
-      height: 100%;
-      border: 4px solid #111821;
-      border-radius: 50%;
-      background: #111821;
-      object-fit: cover;
-    }
-
-    .award-medal {
-      position: absolute;
-      right: -4px;
-      bottom: 5px;
-      min-width: 26px;
-      height: 26px;
-      display: grid;
-      place-items: center;
-      border: 2px solid #111821;
-      border-radius: 50%;
-      background: var(--award-color);
-      color: #090d13;
-      font-size: 11px;
-      font-weight: 900;
-      box-shadow: 0 0 16px var(--award-color);
-    }
-
-    @keyframes avatar-aura {
-      0%, 100% { filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 4px transparent); }
-      50% { filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 10px var(--award-color)); }
-    }
-
-    .award.gold { --award-color: var(--gold); }
-    .award.red { --award-color: var(--danger); }
-    .award.blue { --award-color: var(--blue); }
-
-    .award-title { color: var(--award-color); font-size: 10px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; }
-    .award-name { margin: 13px 0 5px; font-size: clamp(20px, 2.2vw, 30px); font-weight: 900; letter-spacing: -0.03em; overflow-wrap: anywhere; }
-    .award-value { color: var(--award-color); font-size: 15px; font-weight: 800; }
-    .award-rule { width: 42px; height: 2px; margin: 15px 0 12px; background: var(--award-color); box-shadow: 0 0 12px var(--award-color); }
-    .award-description { color: var(--muted); font-size: 12px; line-height: 1.5; }
-
-    .bootleg-spotlight {
-      position: relative;
-      margin-top: 22px;
-      padding: 5px;
-      overflow: hidden;
-      border: 3px ridge #d7d7d7;
-      border-radius: 5px;
-      background:
-        linear-gradient(rgba(0, 255, 255, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 0, 255, 0.035) 1px, transparent 1px),
-        #03040d;
-      background-size: 22px 22px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 7px 7px 0 #050505;
-      font-family: "Courier New", Courier, monospace;
-    }
-
-    .bootleg-spotlight::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: 4;
-      pointer-events: none;
-      background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 255, 255, 0.025) 3px 4px);
-      mix-blend-mode: screen;
-    }
-
-    .bootleg-inner {
-      position: relative;
-      z-index: 2;
-      padding: 20px 18px 22px;
-      border: 2px inset #9a9a9a;
-      background: linear-gradient(135deg, rgba(10, 14, 32, 0.95), rgba(4, 5, 15, 0.97));
-    }
-
-    .bootleg-ticker {
-      margin: 14px 0 18px;
-      overflow: hidden;
-      border: 1px solid #00eaff;
-      background: #000;
-      color: #00ff8c;
-      font-size: 10px;
-      line-height: 24px;
-      white-space: nowrap;
-      box-shadow: inset 0 0 12px rgba(0, 234, 255, 0.18);
-    }
-    .bootleg-ticker span {
-      display: inline-block;
-      min-width: 100%;
-      padding-left: 100%;
-      animation: bootleg-scroll 18s linear infinite;
-    }
-
-    @keyframes bootleg-scroll { to { transform: translateX(-100%); } }
-    @keyframes bootleg-blink { 50% { opacity: 0.25; } }
-    @keyframes bootleg-jitter {
-      0%, 100% { transform: translate(0, 0); }
-      35% { transform: translate(1px, -1px); }
-      70% { transform: translate(-1px, 1px); }
-    }
-
-    .bootleg-blink { animation: bootleg-blink 0.9s steps(1, end) infinite; }
-
-    .bootleg-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 15px;
-    }
-
-    .bootleg-award {
-      --bootleg-color: #00eaff;
-      position: relative;
-      min-height: 286px;
-      overflow: hidden;
-      padding: 16px;
-      border: 2px solid var(--bootleg-color);
-      border-radius: 9px;
-      background:
-        radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--bootleg-color) 18%, transparent), transparent 34%),
-        linear-gradient(145deg, rgba(22, 27, 48, 0.94), rgba(5, 6, 17, 0.98));
-      box-shadow: inset 0 0 0 2px #050611, 0 0 20px color-mix(in srgb, var(--bootleg-color) 20%, transparent);
-      text-align: center;
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
-    }
-    .bootleg-award:hover {
-      transform: translateY(-4px) rotate(-0.25deg);
-      box-shadow: inset 0 0 0 2px #050611, 0 12px 28px rgba(0, 0, 0, 0.42), 0 0 30px color-mix(in srgb, var(--bootleg-color) 34%, transparent);
-    }
-    .bootleg-award.magenta { --bootleg-color: #ff42d0; }
-    .bootleg-award.lime { --bootleg-color: #b6ff39; }
-    .bootleg-award.orange { --bootleg-color: #ff9e2c; }
-
-    .bootleg-ribbon {
-      position: absolute;
-      top: 12px;
-      right: -35px;
-      width: 136px;
-      padding: 4px;
-      background: var(--bootleg-color);
-      color: #050505;
-      font-size: 9px;
-      font-weight: 900;
-      transform: rotate(35deg);
-      box-shadow: 0 2px 0 #000;
-    }
-
-    .bootleg-avatar-frame {
-      width: 94px;
-      height: 94px;
-      margin: 4px auto 13px;
-      padding: 4px;
-      border: 3px outset #f2f2f2;
-      background:
-        conic-gradient(#fff 25%, #8c8c8c 0 50%, #fff 0 75%, #8c8c8c 0) 0 0 / 10px 10px;
-      box-shadow: 5px 5px 0 #000, 0 0 20px var(--bootleg-color);
-      transform: rotate(-1.5deg);
-    }
-    .bootleg-avatar {
-      display: block;
-      width: 100%;
-      height: 100%;
-      border: 1px solid #000;
-      background: #111;
-      object-fit: cover;
-      image-rendering: pixelated;
-    }
-
-    .bootleg-title {
-      color: var(--bootleg-color);
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-    .bootleg-name {
-      min-height: 34px;
-      margin: 10px 0 5px;
-      color: #fff;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: clamp(19px, 2vw, 27px);
-      font-weight: 900;
-      overflow-wrap: anywhere;
-      text-shadow: 2px 2px 0 #000;
-    }
-    .bootleg-value {
-      color: var(--bootleg-color);
-      font-size: 14px;
-      font-weight: 900;
-      text-shadow: 0 0 9px var(--bootleg-color);
-    }
-    .bootleg-description {
-      margin-top: 13px;
-      padding-top: 12px;
-      border-top: 1px dashed color-mix(in srgb, var(--bootleg-color) 70%, #fff);
-      color: #aeb8c8;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .bootleg-footer {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 16px;
-      color: #0a0a0a;
-      font-size: 9px;
-      font-weight: 900;
-    }
-    .bootleg-badge {
-      padding: 4px 7px;
-      border: 2px outset #fff;
-      background: #ffef24;
-      box-shadow: 2px 2px 0 #000;
-    }
-    .bootleg-badge:nth-child(2) { background: #3dff91; }
-    .bootleg-badge:nth-child(3) { background: #ff6dd7; }
-    .bootleg-badge.visitor-badge { background: #ff6dd7; }
-
-    .wrapped-report {
-      margin-top: 22px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
-    }
-    .wrapped-heading {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 18px;
-      padding: 20px 22px 17px;
-    }
-    .wrapped-heading h2 { margin: 0; font-size: 24px; }
-    .wrapped-heading-meta { color: var(--muted); font-size: 11px; text-align: right; }
-    .wrapped-table-head,
-    .wrapped-tier {
-      display: grid;
-      grid-template-columns: 120px 100px minmax(0, 1fr);
-      gap: 18px;
-      align-items: start;
-      padding: 12px 22px;
-      border-top: 1px solid var(--border);
-    }
-    .wrapped-table-head {
-      padding-block: 9px;
-      color: var(--muted);
-      background: var(--panel-2);
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .wrapped-tier-name { font-size: 14px; font-weight: 800; }
-    .wrapped-tier-count { color: var(--accent); font-size: 14px; font-weight: 800; }
-    .wrapped-members { color: var(--muted); font-size: 12px; line-height: 1.55; }
-    .wrapped-member { color: var(--text); white-space: nowrap; }
-    .wrapped-member + .wrapped-member::before { content: " · "; color: var(--muted); }
-    .wrapped-secondary {
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-      border-top: 1px solid var(--border);
-    }
-    .wrapped-pane { min-width: 0; padding: 18px 22px 20px; }
-    .wrapped-pane + .wrapped-pane { border-left: 1px solid var(--border); }
-    .wrapped-pane h3 { margin: 0 0 13px; font-size: 15px; }
-    .rival-row {
-      display: grid;
-      grid-template-columns: minmax(90px, 1fr) 70px 70px;
-      gap: 12px;
-      padding: 8px 0;
-      border-top: 1px solid rgba(48, 57, 68, 0.72);
-      font-size: 12px;
-    }
-    .rival-row:first-child { border-top: 0; }
-    .rival-row.header { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
-    .rival-number { text-align: right; font-weight: 800; }
-    .rival-note { margin-top: 13px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-    .rival-note strong { color: var(--text); }
-    .fact-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 18px;
-      padding: 9px 0;
-      border-top: 1px solid rgba(48, 57, 68, 0.72);
-      font-size: 12px;
-    }
-    .fact-row:first-child { border-top: 0; }
-    .fact-label { color: var(--muted); }
-    .fact-value { text-align: right; font-weight: 800; }
-    .wrapped-loading { padding: 24px 22px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-    .wrapped-duck { border-top: 1px solid var(--border); background: var(--panel-2); }
-    .wrapped-duck-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-      padding: 16px 22px;
-    }
-    .wrapped-duck-title { margin: 0 0 4px; font-size: 15px; }
-    .wrapped-duck-copy { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
-    .wrapped-duck-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-    .wrapped-duck-button,
-    .wrapped-duck-link {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 34px;
-      padding: 8px 11px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--text);
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .wrapped-duck-button { border-color: var(--accent); color: var(--accent); }
-    .wrapped-duck-button:hover,
-    .wrapped-duck-link:hover { background: var(--panel-3); }
-    .wrapped-duck-stage { border-top: 1px solid var(--border); }
-    .wrapped-duck-stage[hidden] { display: none; }
-    .wrapped-duck-frame { display: block; width: 100%; height: 622px; border: 0; background: #0d1117; }
-
     .error-banner {
       display: none;
       margin-bottom: 16px;
@@ -724,21 +304,7 @@
       main { width: min(100% - 20px, 1500px); padding-top: 16px; }
       .dashboard-grid { grid-template-columns: 1fr; }
       .center-column { grid-column: auto; }
-      .status-grid, .award-grid { grid-template-columns: 1fr; }
-      .award-grid { gap: 72px; }
-      .bootleg-grid { grid-template-columns: 1fr; }
-      .wrapped-heading { align-items: flex-start; flex-direction: column; }
-      .wrapped-heading-meta { text-align: left; }
-      .wrapped-table-head,
-      .wrapped-tier { grid-template-columns: 82px 78px minmax(0, 1fr); gap: 10px; padding-inline: 14px; }
-      .wrapped-secondary { grid-template-columns: 1fr; }
-      .wrapped-pane { padding-inline: 14px; }
-      .wrapped-pane + .wrapped-pane { border-left: 0; border-top: 1px solid var(--border); }
-      .wrapped-duck-head { align-items: flex-start; flex-direction: column; padding-inline: 14px; }
-      .wrapped-duck-actions { width: 100%; }
-      .wrapped-duck-button,
-      .wrapped-duck-link { flex: 1; }
-      .wrapped-duck-frame { height: 562px; }
+      .status-grid { grid-template-columns: 1fr; }
       .battle-stage { min-height: 320px; padding-inline: 14px; }
       .battle-core { grid-template-columns: 1fr; }
       .battle-metric + .battle-metric { border-left: 0; border-top: 1px solid var(--border); }
@@ -768,6 +334,7 @@
           <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
           <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
           <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn" href="roblox-version-history.html">Roblox Versions</a>
           <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
         </div>
       </details>
@@ -776,48 +343,6 @@
 
   <main>
     <div id="error-banner" class="error-banner"></div>
-
-    <section class="spotlight">
-      <div class="spotlight-inner">
-        <div class="award-grid">
-          <article class="award gold">
-            <div class="award-avatar-shell">
-              <img id="mvp-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="MVP Roblox avatar" />
-              <span class="award-medal">1</span>
-            </div>
-            <div class="award-title">MVP</div>
-            <div id="mvp-name" class="award-name">Calculating…</div>
-            <div id="mvp-value" class="award-value">—</div>
-            <div class="award-rule"></div>
-            <div id="mvp-description" class="award-description">Most time holding rank #1.</div>
-          </article>
-
-          <article class="award red">
-            <div class="award-avatar-shell">
-              <img id="points-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Most Points Roblox avatar" />
-              <span class="award-medal">★</span>
-            </div>
-            <div class="award-title">Most Points</div>
-            <div id="points-name" class="award-name">Calculating…</div>
-            <div id="points-value" class="award-value">—</div>
-            <div class="award-rule"></div>
-            <div id="points-description" class="award-description">Most points in the current battle.</div>
-          </article>
-
-          <article class="award blue">
-            <div class="award-avatar-shell">
-              <img id="sleeper-avatar" class="award-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Sleeper Agent Roblox avatar" />
-              <span class="award-medal">↑</span>
-            </div>
-            <div class="award-title">Sleeper Agent</div>
-            <div id="sleeper-name" class="award-name">Calculating…</div>
-            <div id="sleeper-value" class="award-value">—</div>
-            <div class="award-rule"></div>
-            <div id="sleeper-description" class="award-description">The largest positive change in rank over the entire CB.</div>
-          </article>
-        </div>
-      </div>
-    </section>
 
     <section class="dashboard-grid">
       <article class="panel side-panel">
@@ -880,91 +405,6 @@
       </article>
     </section>
 
-    <section class="wrapped-report" aria-labelledby="wrapped-title">
-      <div class="wrapped-heading">
-        <div>
-          <div class="eyebrow">Clan Battle: Wrapped</div>
-          <h2 id="wrapped-title"><span id="wrapped-battle">Current Battle</span> in numbers</h2>
-        </div>
-        <div id="wrapped-snapshot" class="wrapped-heading-meta">Loading global placements…</div>
-      </div>
-      <div class="wrapped-table-head" aria-hidden="true"><span>Placement</span><span>c0ld</span><span>Members</span></div>
-      <div id="wrapped-placements" class="wrapped-loading"></div>
-      <div class="wrapped-secondary">
-        <section class="wrapped-pane" aria-labelledby="rival-title">
-          <h3 id="rival-title">c0ld vs UN0</h3>
-          <div id="wrapped-rival"><div class="wrapped-members">Waiting for the latest global leaderboard.</div></div>
-          <div id="wrapped-rival-note" class="rival-note"></div>
-        </section>
-        <section class="wrapped-pane" aria-labelledby="facts-title">
-          <h3 id="facts-title">Quick Read</h3>
-          <div id="wrapped-facts"><div class="wrapped-members">Calculating battle facts.</div></div>
-        </section>
-      </div>
-      <section class="wrapped-duck" aria-labelledby="wrapped-duck-title">
-        <div class="wrapped-duck-head">
-          <div>
-            <h3 id="wrapped-duck-title" class="wrapped-duck-title">The Battle in 18 Seconds</h3>
-            <p class="wrapped-duck-copy">Replay the Top 10 clan race from the battle snapshots, with every lead change compressed into one watchable finish.</p>
-          </div>
-          <div class="wrapped-duck-actions">
-            <button id="wrapped-duck-play" class="wrapped-duck-button" type="button" aria-expanded="false">Play Top Clan Race</button>
-            <a class="wrapped-duck-link" href="duck-recap.html">Full Duck Recap</a>
-          </div>
-        </div>
-        <div id="wrapped-duck-stage" class="wrapped-duck-stage" hidden>
-          <iframe id="wrapped-duck-frame" class="wrapped-duck-frame" title="Top clans duck race recap" loading="lazy"></iframe>
-        </div>
-      </section>
-    </section>
-
-    <section class="bootleg-spotlight" aria-label="Bootleg c0ld awards">
-      <div class="bootleg-inner">
-        <div class="bootleg-ticker" aria-hidden="true">
-          <span>WELCOME TO THE WORLD WIDE WEB'S PREMIER CLAN REVIEW PORTAL&nbsp;&nbsp;◆&nbsp;&nbsp;BEST VIEWED AT 800×600&nbsp;&nbsp;◆&nbsp;&nbsp;NO CHEAT ENGINE WAS USED IN THE PERFORMANCE OF THIS BATTLE&nbsp;&nbsp;◆&nbsp;&nbsp;</span>
-        </div>
-
-        <div class="bootleg-grid">
-          <article class="bootleg-award magenta">
-            <span class="bootleg-ribbon">AFK ROYALTY</span>
-            <div class="bootleg-avatar-frame">
-              <img id="downtime-avatar" class="bootleg-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Most Downtime Roblox avatar" />
-            </div>
-            <div class="bootleg-title">Most Downtime</div>
-            <div id="downtime-name" class="bootleg-name">Dialing up…</div>
-            <div id="downtime-value" class="bootleg-value">—</div>
-            <div id="downtime-description" class="bootleg-description">Most accumulated time without a recorded point gain.</div>
-          </article>
-
-          <article class="bootleg-award lime">
-            <span class="bootleg-ribbon">VISION TEST</span>
-            <div class="bootleg-avatar-frame">
-              <img id="glasses-avatar" class="bootleg-avatar" src="assets/c0ld-kitsune-logo.gif" alt="Needs New Glasses Roblox avatar" />
-            </div>
-            <div class="bootleg-title">Needs New Glasses</div>
-            <div id="glasses-name" class="bootleg-name">Enhancing…</div>
-            <div id="glasses-value" class="bootleg-value">—</div>
-            <div id="glasses-description" class="bootleg-description">Most changes in rank throughout the battle.</div>
-          </article>
-
-          <article class="bootleg-award orange">
-            <span class="bootleg-ribbon">PARTICIPATION</span>
-            <div class="bootleg-avatar-frame">
-              <img id="lvp-avatar" class="bootleg-avatar" src="assets/c0ld-kitsune-logo.gif" alt="LVP Roblox avatar" />
-            </div>
-            <div class="bootleg-title">LVP</div>
-            <div id="lvp-name" class="bootleg-name">Auditing…</div>
-            <div id="lvp-value" class="bootleg-value">—</div>
-            <div id="lvp-description" class="bootleg-description">Most observed time holding last place.</div>
-          </article>
-        </div>
-
-        <div class="bootleg-footer" aria-hidden="true">
-          <span class="bootleg-badge visitor-badge">VISITOR #00067</span>
-        </div>
-      </div>
-    </section>
-
   </main>
 
   <script src="assets/protected-access.js"></script>
@@ -973,12 +413,7 @@
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
     const CLAN_NAME = "c0ld";
     const HISTORY_ROW_LIMIT = 10000;
-    const HISTORY_FALLBACK_HOURS = 100000;
     const REFRESH_MS = 60 * 1000;
-    const WRAPPED_REFRESH_MS = 5 * 60 * 1000;
-    const DEFAULT_AVATAR = "assets/c0ld-kitsune-logo.gif";
-    const AWARD_CACHE_KEY = "c0ld.home-awards.v1";
-    const AWARD_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
     const els = {
       errorBanner: document.getElementById("error-banner"),
@@ -995,45 +430,11 @@
       battleName: document.getElementById("battle-name"),
       clanRank: document.getElementById("clan-rank"),
       clanPoints: document.getElementById("clan-points"),
-      rosterCount: document.getElementById("roster-count"),
-      mvpAvatar: document.getElementById("mvp-avatar"),
-      mvpName: document.getElementById("mvp-name"),
-      mvpValue: document.getElementById("mvp-value"),
-      mvpDescription: document.getElementById("mvp-description"),
-      pointsAvatar: document.getElementById("points-avatar"),
-      pointsName: document.getElementById("points-name"),
-      pointsValue: document.getElementById("points-value"),
-      pointsDescription: document.getElementById("points-description"),
-      sleeperAvatar: document.getElementById("sleeper-avatar"),
-      sleeperName: document.getElementById("sleeper-name"),
-      sleeperValue: document.getElementById("sleeper-value"),
-      sleeperDescription: document.getElementById("sleeper-description"),
-      downtimeAvatar: document.getElementById("downtime-avatar"),
-      downtimeName: document.getElementById("downtime-name"),
-      downtimeValue: document.getElementById("downtime-value"),
-      downtimeDescription: document.getElementById("downtime-description"),
-      glassesAvatar: document.getElementById("glasses-avatar"),
-      glassesName: document.getElementById("glasses-name"),
-      glassesValue: document.getElementById("glasses-value"),
-      glassesDescription: document.getElementById("glasses-description"),
-      lvpAvatar: document.getElementById("lvp-avatar"),
-      lvpName: document.getElementById("lvp-name"),
-      lvpValue: document.getElementById("lvp-value"),
-      lvpDescription: document.getElementById("lvp-description"),
-      wrappedBattle: document.getElementById("wrapped-battle"),
-      wrappedSnapshot: document.getElementById("wrapped-snapshot"),
-      wrappedPlacements: document.getElementById("wrapped-placements"),
-      wrappedRival: document.getElementById("wrapped-rival"),
-      wrappedRivalNote: document.getElementById("wrapped-rival-note"),
-      wrappedFacts: document.getElementById("wrapped-facts"),
-      wrappedDuckPlay: document.getElementById("wrapped-duck-play"),
-      wrappedDuckStage: document.getElementById("wrapped-duck-stage"),
-      wrappedDuckFrame: document.getElementById("wrapped-duck-frame")
+      rosterCount: document.getElementById("roster-count")
     };
 
     let countdownEndsAt = null;
     let loading = false;
-    let historyCache = { battle: "", rows: [] };
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, character => ({
@@ -1089,104 +490,6 @@
         .replace(/(\D)(20\d{2})$/, "$1 $2")
         .replace(/\s+/g, " ")
         .trim();
-    }
-
-    function wrappedPlayerName(row) {
-      return row?.username || row?.display_name || (row?.user_id ? `user_${row.user_id}` : "Unknown player");
-    }
-
-    function wrappedRank(row) {
-      return finite(row?.global_rank);
-    }
-
-    function wrappedPoints(row) {
-      return finite(row?.global_points ?? row?.points ?? row?.member_points) || 0;
-    }
-
-    function wrappedClan(row) {
-      return String(row?.clan || row?.source_clan || row?.clan_name || "").trim().toLowerCase();
-    }
-
-    function wrappedMemberList(rows) {
-      if (!rows.length) return '<span class="wrapped-members">No c0ld members in this band.</span>';
-      return `<span class="wrapped-members">${rows.map(row => `<span class="wrapped-member">${escapeHtml(wrappedPlayerName(row))} #${Math.trunc(wrappedRank(row))}</span>`).join(" ")}</span>`;
-    }
-
-    function renderWrapped(leaderboard, globalCurrent) {
-      const leaderboardRows = Array.isArray(leaderboard?.rows) ? leaderboard.rows : [];
-      const currentRows = Array.isArray(globalCurrent?.rows) ? globalCurrent.rows : [];
-      const c0ldRows = currentRows
-        .filter(row => row?.found !== false && wrappedRank(row) !== null && wrappedRank(row) <= 1000)
-        .sort((a, b) => wrappedRank(a) - wrappedRank(b));
-      const un0Rows = leaderboardRows
-        .filter(row => wrappedClan(row) === "un0" && wrappedRank(row) !== null && wrappedRank(row) <= 1000)
-        .sort((a, b) => wrappedRank(a) - wrappedRank(b));
-      const battleName = leaderboard?.run?.event_name || leaderboard?.run?.battle_display_name || leaderboard?.run?.battle_key || globalCurrent?.event_name || globalCurrent?.battle_display_name || "Current Battle";
-      const snapshotAt = leaderboard?.snapshot_at || globalCurrent?.snapshot_at;
-      const bands = [
-        { label: "Top 100", min: 1, max: 100 },
-        { label: "101-500", min: 101, max: 500 },
-        { label: "501-1,000", min: 501, max: 1000 }
-      ];
-
-      els.wrappedBattle.textContent = prettifyBattle(battleName);
-      els.wrappedSnapshot.textContent = snapshotAt ? `Global snapshot · ${relativeTime(snapshotAt)}` : "Latest global snapshot";
-      els.wrappedPlacements.className = "";
-      els.wrappedPlacements.innerHTML = bands.map(band => {
-        const members = c0ldRows.filter(row => wrappedRank(row) >= band.min && wrappedRank(row) <= band.max);
-        const count = `${members.length} member${members.length === 1 ? "" : "s"}`;
-        return `<div class="wrapped-tier"><div class="wrapped-tier-name">${band.label}</div><div class="wrapped-tier-count">${count}</div><div>${wrappedMemberList(members)}</div></div>`;
-      }).join("");
-
-      const tiers = [100, 500, 1000];
-      els.wrappedRival.innerHTML = `<div class="rival-row header"><span>Placement</span><span class="rival-number">c0ld</span><span class="rival-number">UN0</span></div>${tiers.map(limit => `<div class="rival-row"><span>Top ${limit.toLocaleString()}</span><span class="rival-number">${c0ldRows.filter(row => wrappedRank(row) <= limit).length}</span><span class="rival-number">${un0Rows.filter(row => wrappedRank(row) <= limit).length}</span></div>`).join("")}`;
-
-      if (un0Rows.length) {
-        const crossover = c0ldRows.map(row => ({
-          row,
-          behind: un0Rows.filter(opponent => wrappedRank(opponent) > wrappedRank(row)).length
-        })).filter(item => item.behind > 0);
-        const leader = crossover[0];
-        els.wrappedRivalNote.innerHTML = leader
-          ? `<strong>${crossover.length} c0ld member${crossover.length === 1 ? "" : "s"}</strong> rank ahead of at least one UN0 player. ${escapeHtml(wrappedPlayerName(leader.row))} at #${Math.trunc(wrappedRank(leader.row))} leads ${leader.behind} of UN0’s ${un0Rows.length} listed members.`
-          : "No c0ld member currently ranks ahead of an UN0 member in the Top 1,000.";
-      } else {
-        els.wrappedRivalNote.textContent = "UN0 is not represented in this global snapshot.";
-      }
-
-      const best = c0ldRows[0] || null;
-      const combinedPoints = c0ldRows.reduce((sum, row) => sum + wrappedPoints(row), 0);
-      const rosterSize = currentRows.length;
-      const top100Cutoff = leaderboardRows.filter(row => wrappedRank(row) !== null && wrappedRank(row) <= 100).at(-1) || null;
-      const nextTop100 = c0ldRows.find(row => wrappedRank(row) > 100) || null;
-      const gap = top100Cutoff && nextTop100 ? Math.max(0, wrappedPoints(top100Cutoff) - wrappedPoints(nextTop100) + 1) : null;
-      const facts = [
-        ["Best c0ld placement", best ? `${wrappedPlayerName(best)} · #${Math.trunc(wrappedRank(best))}` : "No ranked member"],
-        ["c0ld in the Top 1,000", `${c0ldRows.length} of ${rosterSize || "—"} members`],
-        ["Combined Top 1,000 points", formatNumber(combinedPoints)],
-        ["Next Top 100 push", gap !== null && nextTop100 ? `${wrappedPlayerName(nextTop100)} · ${formatNumber(gap)} pts away` : "All visible c0ld members are Top 100"]
-      ];
-      els.wrappedFacts.innerHTML = facts.map(([label, value]) => `<div class="fact-row"><span class="fact-label">${escapeHtml(label)}</span><span class="fact-value">${escapeHtml(value)}</span></div>`).join("");
-    }
-
-    async function loadWrapped() {
-      try {
-        const [leaderboard, globalCurrent] = await Promise.all([
-          fetchJson(`${API_BASE}/api/global/leaderboard?limit=1000&gains=false`),
-          fetchJson(`${API_BASE}/api/global/current?clan=${CLAN_NAME}`)
-        ]);
-        renderWrapped(leaderboard, globalCurrent);
-      } catch (error) {
-        els.wrappedPlacements.className = "wrapped-loading";
-        els.wrappedPlacements.textContent = `Wrapped data is temporarily unavailable: ${error.message || error}`;
-      }
-    }
-
-    function playWrappedDuckRace() {
-      els.wrappedDuckStage.hidden = false;
-      els.wrappedDuckFrame.src = `duck-recap.html?embed=1&mode=clans&battle=current&autoplay=1&replay=${Date.now()}`;
-      els.wrappedDuckPlay.textContent = "Replay Top Clan Race";
-      els.wrappedDuckPlay.setAttribute("aria-expanded", "true");
     }
 
     function eventAt(event) {
@@ -1274,26 +577,6 @@
 
     function playerKey(row) {
       return String(row?.user_id || row?.username || "").toLowerCase();
-    }
-
-    function robloxHeadshotUrl(userId) {
-      const id = finite(userId);
-      return id === null
-        ? ""
-        : `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(Math.trunc(id))}&width=150&height=150&format=png`;
-    }
-
-    function setAwardAvatar(image, player) {
-      if (!image) return;
-      const username = player?.username || "recognized player";
-      image.alt = `${username} Roblox avatar`;
-      image.dataset.fallbackApplied = "false";
-      image.onerror = () => {
-        if (image.dataset.fallbackApplied === "true") return;
-        image.dataset.fallbackApplied = "true";
-        image.src = DEFAULT_AVATAR;
-      };
-      image.src = player?.avatar_url || robloxHeadshotUrl(player?.user_id) || DEFAULT_AVATAR;
     }
 
     function rankMap(snapshot) {
@@ -1797,7 +1080,6 @@
 
         renderActivity(detail, announcement);
         renderRankActivity([], currentRows);
-        renderCurrentAwardPreview(currentRows);
 
         els.lastRestart.textContent = latestRestart ? relativeTime(latestRestart.detected_at) : "None logged";
         els.lastRestartDetail.textContent = latestRestart ? formatDate(latestRestart.detected_at) : "No confirmed restart yet";
@@ -1817,21 +1099,8 @@
         els.rosterCount.textContent = String(detail.summary?.current_members ?? currentRows.length ?? "—");
         updateCountdown();
 
-        const [awardSummary, recentHistory] = await Promise.all([
-          fetchJson(`${API_BASE}/api/home/awards?clan=${CLAN_NAME}&battle=${encodeURIComponent(battle)}`, {}),
-          fetchRecentBattleHistory(battle)
-        ]);
+        const recentHistory = await fetchRecentBattleHistory(battle);
         renderRankActivity(groupSnapshots(recentHistory.rows), currentRows);
-
-        if (renderAwardSummary(awardSummary)) {
-          saveAwardDisplayCache(battle);
-        } else {
-          const history = await fetchBattleHistory(battle);
-          const snapshots = groupSnapshots(history.rows);
-          renderAwards(snapshots, currentRows);
-          renderBootlegAwards(snapshots, currentRows);
-          saveAwardDisplayCache(battle);
-        }
 
       } catch (error) {
         els.errorBanner.textContent = `Some live dashboard data could not be loaded: ${error.message || error}`;
@@ -1847,13 +1116,9 @@
         title: "WIP Access Required",
         status: "Checking Discord WIP access..."
       });
-      restoreAwardDisplayCache();
-      els.wrappedDuckPlay.addEventListener("click", playWrappedDuckRace);
       load();
-      loadWrapped();
       window.setInterval(updateCountdown, 1000);
       window.setInterval(load, REFRESH_MS);
-      window.setInterval(loadWrapped, WRAPPED_REFRESH_MS);
     }
 
     initProtectedPage().catch(error => {

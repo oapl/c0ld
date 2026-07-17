@@ -282,6 +282,7 @@
               `).join("")}
             </select>
             <button id="reward-race-refresh" type="button">Refresh Chart</button>
+            <button id="reward-chart-export" type="button">Export PNG</button>
           </div>
         </div>
       </div>
@@ -316,6 +317,7 @@
     });
 
     panel.querySelector("#reward-race-refresh")?.addEventListener("click", () => loadRewardRaceData(true));
+    panel.querySelector("#reward-chart-export")?.addEventListener("click", exportVisibleChartPng);
   }
 
   function normalizeCurrentRow(row) {
@@ -681,6 +683,53 @@
     canvas.addEventListener("touchend", hideTooltip);
   }
 
+  function chartExportFilename(prefix) {
+    const battle = String(currentData?.display_name || currentData?.battle || "current")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "current";
+    return `${prefix}-${battle}.png`;
+  }
+
+  function downloadCanvasPng(canvas, filename) {
+    if (!canvas) return;
+    const save = blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    if (canvas.toBlob) {
+      canvas.toBlob(save, "image/png");
+      return;
+    }
+
+    fetch(canvas.toDataURL("image/png"))
+      .then(response => response.blob())
+      .then(save)
+      .catch(error => console.warn("Chart export failed", error));
+  }
+
+  function exportLineChartPng() {
+    const canvas = document.getElementById("reward-race-chart");
+    if (!canvas?._rewardRaceChart) drawRewardRaceChart();
+    downloadCanvasPng(canvas, chartExportFilename("c0ld-clan-line-chart"));
+  }
+
+  function exportVisibleChartPng() {
+    if (window.C0LD_DUCK_RACE?.visible && typeof window.C0LD_DUCK_RACE.exportPng === "function") {
+      window.C0LD_DUCK_RACE.exportPng();
+      return;
+    }
+    exportLineChartPng();
+  }
+
   function scheduleInitialLoad() {
     if (!isClansPage()) return;
     ensurePanel();
@@ -713,4 +762,9 @@
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  window.C0LD_REWARD_RACE_CHART = {
+    draw: drawRewardRaceChart,
+    exportPng: exportLineChartPng
+  };
 })();

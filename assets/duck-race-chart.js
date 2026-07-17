@@ -25,6 +25,10 @@
         background: rgba(248, 81, 73, .12);
       }
 
+      #duck-recap-link[hidden] {
+        display: none !important;
+      }
+
       .duck-race-section {
         overflow: hidden;
         padding: 14px 16px 16px;
@@ -227,6 +231,23 @@
     return document.getElementById("battle-select")?.value || "current";
   }
 
+  function exportFilename(prefix) {
+    const battle = String(state.lastBattle || selectedBattle() || "current")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "current";
+    return `${prefix}-${battle}.png`;
+  }
+
+  function clanColor(name, index) {
+    const key = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (key === "c0ld") return "#ff9b96";
+    if (key === "wmsy") return "#74d99f";
+    if (key === "nong") return "#f6ad55";
+    const colors = ["#58a6ff", "#d2a8ff", "#79c0ff", "#ffa657", "#a5d6ff", "#ff7b72", "#3fb950", "#f2cc60", "#db61a2", "#56d4dd"];
+    return colors[index % colors.length];
+  }
+
   function iconUrl(row) {
     if (row.icon_url) return row.icon_url;
     if (row.icon_id) return `https://ps99.biggamesapi.io/image/${encodeURIComponent(row.icon_id)}`;
@@ -267,6 +288,29 @@
       }
     }
     return panel;
+  }
+
+  function ensureDuckRecapLink() {
+    let link = document.getElementById("duck-recap-link");
+    if (link) return link;
+
+    const controls = document.querySelector("#reward-threshold-section .reward-threshold-metrics");
+    const lineButton = document.getElementById("reward-threshold-refresh");
+    if (!controls || !lineButton) return null;
+
+    link = document.createElement("button");
+    link.id = "duck-recap-link";
+    link.type = "button";
+    link.textContent = "Duck Recap";
+    link.hidden = true;
+    link.addEventListener("click", () => {
+      const battle = selectedBattle();
+      const query = battle && battle !== "current" ? `?mode=clans&battle=${encodeURIComponent(battle)}` : "?mode=clans";
+      window.location.href = `duck-recap.html${query}`;
+    });
+
+    lineButton.insertAdjacentElement("afterend", link);
+    return link;
   }
 
   function raceUrl(forceFresh) {
@@ -368,13 +412,15 @@
     const panel = ensurePanel();
     const rewardBody = document.querySelector("#reward-threshold-section .reward-threshold-body");
     const button = document.getElementById("reward-threshold-refresh");
+    const recapLink = ensureDuckRecapLink();
 
     panel.hidden = !visible;
     if (rewardBody) rewardBody.hidden = visible;
     if (button) {
       button.setAttribute("aria-pressed", String(visible));
-      button.textContent = visible ? "Line Chart" : "Merc Mode";
+      button.textContent = visible ? "Line View" : "Merc Mode";
     }
+    if (recapLink) recapLink.hidden = !visible;
 
     if (visible) {
       loadRace(true);
@@ -389,6 +435,7 @@
   function init() {
     css();
     ensurePanel();
+    ensureDuckRecapLink();
 
     const button = document.getElementById("reward-threshold-refresh");
     if (button) {
@@ -407,6 +454,167 @@
       }
     });
   }
+
+  function drawExportDuck(ctx, row, index, x, y, scale) {
+    const clan = row.clan_name || "Unknown";
+    const accent = clanColor(clan, index);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "#030303";
+    ctx.fillStyle = "#fff200";
+    ctx.beginPath();
+    ctx.ellipse(0, 30, 55, 38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(35, -2, 32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ff2d20";
+    ctx.beginPath();
+    ctx.moveTo(63, 0);
+    ctx.quadraticCurveTo(92, -2, 78, 18);
+    ctx.quadraticCurveTo(70, 30, 54, 24);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#030303";
+    ctx.beginPath();
+    ctx.arc(46, -12, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.fillRect(-23, 20, 28, 28);
+    ctx.strokeRect(-23, 20, 28, 28);
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = "700 18px Arial";
+    ctx.textAlign = "center";
+    const name = `#${row.rank || index + 1} ${clan}`;
+    const labelWidth = Math.min(190, Math.max(112, ctx.measureText(name).width + 22));
+    ctx.fillStyle = "rgba(13,17,23,.86)";
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x - labelWidth / 2, y - 74, labelWidth, 44, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#e6edf3";
+    ctx.fillText(name, x, y - 55, labelWidth - 12);
+    ctx.font = "13px Arial";
+    ctx.fillStyle = "#8b949e";
+    const next = state.rows[index + 1];
+    const points = Number(row.points || 0);
+    const lead = next ? points - Number(next.points || 0) : null;
+    ctx.fillText(`${formatNumber(points)}${lead !== null ? ` - +${formatNumber(lead)}` : ""}`, x, y - 38, labelWidth - 12);
+    ctx.restore();
+  }
+
+  function renderDuckExportCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const ctx = canvas.getContext("2d");
+    const rows = state.rows.length ? state.rows : [];
+
+    ctx.fillStyle = "#0d1117";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#161b22";
+    ctx.fillRect(28, 28, canvas.width - 56, canvas.height - 56);
+    ctx.strokeStyle = "#30363d";
+    ctx.strokeRect(28.5, 28.5, canvas.width - 57, canvas.height - 57);
+
+    ctx.fillStyle = "#e6edf3";
+    ctx.font = "700 30px Arial";
+    ctx.fillText("c0ld Clan Duck Chart", 52, 76);
+    ctx.fillStyle = "#8b949e";
+    ctx.font = "15px Arial";
+    ctx.fillText(`${selectedBattle()} - latest top 10`, 52, 102);
+
+    const trackX = 52;
+    const trackY = 130;
+    const trackW = canvas.width - 104;
+    const trackH = canvas.height - 178;
+
+    const water = ctx.createLinearGradient(0, trackY, 0, trackY + trackH);
+    water.addColorStop(0, "#142434");
+    water.addColorStop(.23, "#092237");
+    water.addColorStop(1, "#0a314a");
+    ctx.fillStyle = water;
+    ctx.fillRect(trackX, trackY, trackW, trackH);
+
+    ctx.fillStyle = "#3d7f33";
+    ctx.fillRect(trackX, trackY, trackW, 58);
+    ctx.fillStyle = "#5fbd4e";
+    [140, 205, 282].forEach((cx, i) => {
+      ctx.beginPath();
+      ctx.arc(trackX + cx, trackY + 28 + (i % 2) * 6, 22 + i * 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.fillStyle = "#7b4f26";
+    ctx.fillRect(trackX, trackY + 56, trackW, 4);
+
+    for (let x = trackX; x < trackX + trackW; x += 36) {
+      ctx.fillStyle = x / 36 % 2 < 1 ? "rgba(107,205,255,.14)" : "rgba(107,205,255,.04)";
+      ctx.fillRect(x, trackY + 60, 18, trackH - 60);
+    }
+
+    const finishX = trackX + trackW - 58;
+    for (let y = trackY + 60; y < trackY + trackH; y += 20) {
+      ctx.fillStyle = (Math.floor((y - trackY) / 20) % 2) ? "#111" : "#f5f5f5";
+      ctx.fillRect(finishX, y, 20, 20);
+      ctx.fillStyle = (Math.floor((y - trackY) / 20) % 2) ? "#f5f5f5" : "#111";
+      ctx.fillRect(finishX + 20, y, 20, 20);
+    }
+
+    if (!rows.length) {
+      ctx.fillStyle = "#8b949e";
+      ctx.font = "18px Arial";
+      ctx.fillText("No duck rows loaded yet.", trackX + 28, trackY + 96);
+      return canvas;
+    }
+
+    const points = rows.map(row => Number(row.points || 0));
+    const minPoints = Math.min(...points);
+    const maxPoints = Math.max(...points);
+    const range = maxPoints - minPoints;
+    rows.forEach((row, index) => {
+      const progress = range > 0 ? (Number(row.points || 0) - minPoints) / range : 1 - index * .08;
+      const x = trackX + 92 + Math.max(0, Math.min(1, progress)) * (trackW - 180);
+      const y = trackY + 206 + (index % 4) * 82 + Math.floor(index / 4) * 24;
+      drawExportDuck(ctx, row, index, x, y, rows.length > 7 ? .78 : .9);
+    });
+
+    return canvas;
+  }
+
+  async function exportDuckPng() {
+    if (!state.rows.length && !state.loading) await loadRace(true);
+    const canvas = renderDuckExportCanvas();
+    const save = blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = exportFilename("c0ld-duck-chart");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    if (canvas.toBlob) canvas.toBlob(save, "image/png");
+    else fetch(canvas.toDataURL("image/png")).then(response => response.blob()).then(save);
+  }
+
+  window.C0LD_DUCK_RACE = {
+    get visible() {
+      return state.visible;
+    },
+    exportPng: exportDuckPng
+  };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });

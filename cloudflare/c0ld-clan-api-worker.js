@@ -21,6 +21,8 @@ const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
 const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
+const ROBLOX_RELEASE_STATE_TABLE = "c0ld_roblox_release_state";
+const ROBLOX_RELEASE_EVENTS_TABLE = "c0ld_roblox_release_events";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -60,6 +62,11 @@ const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
 const DEFAULT_PS99_VERSION_SCHEDULE_MINUTES = 5;
 const DEFAULT_PS99_VERSION_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PS99_VERSION_HISTORY_LIMIT = 100;
+const DEFAULT_ROBLOX_RELEASE_BINARY_TYPE = "WindowsPlayer";
+const DEFAULT_ROBLOX_RELEASE_CHANNEL = "live";
+const DEFAULT_ROBLOX_RELEASE_SCHEDULE_MINUTES = 5;
+const DEFAULT_ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_ROBLOX_RELEASE_HISTORY_LIMIT = 100;
 const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 10;
 const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
 const DEFAULT_PS99_RESTART_PAGE_COUNT = 5;
@@ -130,6 +137,7 @@ export default {
           global_rank_config: globalRankRuntimeConfig(env),
           clan_activity_config: clanActivityRuntimeConfig(env),
           ps99_version_config: ps99VersionRuntimeConfig(env),
+          roblox_release_config: robloxReleaseRuntimeConfig(env),
           ps99_restart_config: ps99RestartRuntimeConfig(env),
           ps99_alert_config: ps99AlertRuntimeConfig(env)
         });
@@ -177,6 +185,8 @@ export default {
         response = await handleClanActivityFeed(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/versions") {
         response = await handlePs99Versions(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/roblox/versions") {
+        response = await handleRobloxReleasedVersions(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
         response = await handlePs99Restarts(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/ccu") {
@@ -199,6 +209,11 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/ps99/versions/ingest") {
         requireAdmin(request, env);
         response = await handlePs99VersionIngest(env, "manual", {
+          force: isForceRequest(url)
+        });
+      } else if (request.method === "POST" && url.pathname === "/api/roblox/versions/ingest") {
+        requireAdmin(request, env);
+        response = await handleRobloxReleasedVersionIngest(env, "manual", {
           force: isForceRequest(url)
         });
       } else if (request.method === "POST" && url.pathname === "/api/ps99/restarts/ingest") {
@@ -324,6 +339,15 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
       jobs.push({
         label: "ps99-versions",
         run: () => handlePs99VersionIngest(env, "schedule", { force })
+      });
+    }
+  }
+
+  if (String(env.INGEST_ROBLOX_RELEASE_VERSION_HISTORY || "false").toLowerCase() === "true") {
+    if (force || shouldRunRobloxReleaseSchedule(env, scheduledAt)) {
+      jobs.push({
+        label: "roblox-release-version",
+        run: () => handleRobloxReleasedVersionIngest(env, "schedule", { force })
       });
     }
   }
@@ -4535,6 +4559,171 @@ async function handlePs99VersionIngest(env, source, options = {}) {
     webhook_alert: webhookAlert,
     scan_errors: scanErrors.slice(0, 25)
   }, 202);
+}
+
+async function handleRobloxReleasedVersions(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || DEFAULT_ROBLOX_RELEASE_HISTORY_LIMIT), 1, 500);
+  const channel = stringOrNull(url.searchParams.get("channel")) || robloxReleaseChannel(env);
+  const binaryType = stringOrNull(url.searchParams.get("binary_type") || url.searchParams.get("binary")) || robloxReleaseBinaryType(env);
+  const stateParams = {
+    select: "channel,binary_type,current_version,client_version_upload,bootstrapper_version,next_client_version,next_client_version_upload,last_checked_at,updated_at",
+    order: "channel.asc,binary_type.asc",
+    limit: "100"
+  };
+  if (channel) stateParams.channel = `eq.${channel}`;
+  if (binaryType) stateParams.binary_type = `eq.${binaryType}`;
+
+  const eventParams = {
+    select: "event_id,channel,binary_type,previous_version,current_version,previous_client_version_upload,current_client_version_upload,detected_at,source,created_at",
+    order: "detected_at.desc,id.desc",
+    limit: String(limit)
+  };
+  if (channel) eventParams.channel = `eq.${channel}`;
+  if (binaryType) eventParams.binary_type = `eq.${binaryType}`;
+
+  const [states, events] = await Promise.all([
+    supabaseSelect(env, ROBLOX_RELEASE_STATE_TABLE, stateParams),
+    supabaseSelect(env, ROBLOX_RELEASE_EVENTS_TABLE, eventParams)
+  ]);
+  const newestState = [...states].sort((a, b) => isoToMs(b.last_checked_at || b.updated_at) - isoToMs(a.last_checked_at || a.updated_at))[0] || null;
+  const newestEvent = events[0] || null;
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    channel,
+    binary_type: binaryType,
+    current_version: newestState?.current_version || newestEvent?.current_version || null,
+    client_version_upload: newestState?.client_version_upload || newestEvent?.current_client_version_upload || null,
+    newest_detected_at: newestEvent?.detected_at || newestState?.last_checked_at || null,
+    states: states.map(normalizeRobloxReleaseStateOutput),
+    events: events.map(normalizeRobloxReleaseEventOutput)
+  }, env, publicCacheSeconds(env, "ROBLOX_RELEASE_VERSION_HISTORY"));
+}
+
+async function handleRobloxReleasedVersionIngest(env, source, options = {}) {
+  requireSupabase(env);
+
+  const fetchedAt = new Date().toISOString();
+  const channel = robloxReleaseChannel(env);
+  const binaryType = robloxReleaseBinaryType(env);
+  const existing = (await supabaseSelect(env, ROBLOX_RELEASE_STATE_TABLE, {
+    select: "channel,binary_type,current_version,client_version_upload,bootstrapper_version,next_client_version,next_client_version_upload,last_checked_at,raw_version",
+    channel: `eq.${channel}`,
+    binary_type: `eq.${binaryType}`,
+    limit: "1"
+  }))[0] || null;
+
+  const latest = await fetchRobloxReleasedVersion(env, binaryType, channel);
+  const currentVersion = stringOrNull(latest.version);
+  const clientVersionUpload = stringOrNull(latest.clientVersionUpload);
+  const previousVersion = stringOrNull(existing?.current_version);
+  const previousUpload = stringOrNull(existing?.client_version_upload);
+  const changed = currentVersion !== previousVersion || clientVersionUpload !== previousUpload;
+
+  const stateRow = {
+    channel,
+    binary_type: binaryType,
+    current_version: currentVersion,
+    client_version_upload: clientVersionUpload,
+    bootstrapper_version: stringOrNull(latest.bootstrapperVersion),
+    next_client_version: stringOrNull(latest.nextClientVersion),
+    next_client_version_upload: stringOrNull(latest.nextClientVersionUpload),
+    last_checked_at: fetchedAt,
+    raw_version: latest.rawVersion || {},
+    updated_at: fetchedAt
+  };
+
+  await supabaseUpsert(env, ROBLOX_RELEASE_STATE_TABLE, [stateRow], "channel,binary_type");
+
+  let eventInserted = false;
+  if (changed && (currentVersion || clientVersionUpload)) {
+    const eventKey = `${currentVersion || "unknown"}:${clientVersionUpload || "unknown"}`.replace(/[^a-zA-Z0-9_.:-]/g, "_");
+    await supabaseUpsert(env, ROBLOX_RELEASE_EVENTS_TABLE, [{
+      event_id: `roblox:${channel}:${binaryType}:${eventKey}`,
+      channel,
+      binary_type: binaryType,
+      previous_version: previousVersion,
+      current_version: currentVersion,
+      previous_client_version_upload: previousUpload,
+      current_client_version_upload: clientVersionUpload,
+      detected_at: fetchedAt,
+      source,
+      raw_version: latest.rawVersion || {}
+    }], "event_id");
+    eventInserted = true;
+  }
+
+  return json({
+    ok: true,
+    source,
+    channel,
+    binary_type: binaryType,
+    fetched_at: fetchedAt,
+    current_version: currentVersion,
+    client_version_upload: clientVersionUpload,
+    version_event_inserted: eventInserted,
+    previous_version: previousVersion,
+    previous_client_version_upload: previousUpload
+  }, 202);
+}
+
+async function fetchRobloxReleasedVersion(env, binaryType, channel) {
+  const primary = new URL(`https://clientsettings.roblox.com/v2/client-version/${encodeURIComponent(binaryType)}/channel/${encodeURIComponent(channel)}`);
+  const fallback = new URL(`https://clientsettings.roblox.com/v2/client-version/${encodeURIComponent(binaryType)}`);
+  let payload;
+  try {
+    payload = await fetchJsonWithRetry(primary, "Roblox released client version", {
+      attempts: robloxReleaseFetchAttempts(env),
+      baseDelayMs: 1000
+    });
+  } catch (err) {
+    payload = await fetchJsonWithRetry(fallback, "Roblox released client version fallback", {
+      attempts: robloxReleaseFetchAttempts(env),
+      baseDelayMs: 1000
+    });
+  }
+
+  return {
+    version: firstDefined(payload.version, payload.clientVersion, payload.client_version),
+    clientVersionUpload: firstDefined(payload.clientVersionUpload, payload.client_version_upload, payload.clientVersionUploadUrl),
+    bootstrapperVersion: firstDefined(payload.bootstrapperVersion, payload.bootstrapper_version),
+    nextClientVersion: firstDefined(payload.nextClientVersion, payload.next_client_version),
+    nextClientVersionUpload: firstDefined(payload.nextClientVersionUpload, payload.next_client_version_upload),
+    rawVersion: payload || {}
+  };
+}
+
+function normalizeRobloxReleaseStateOutput(row) {
+  return {
+    channel: row.channel || null,
+    binary_type: row.binary_type || null,
+    current_version: row.current_version || null,
+    client_version_upload: row.client_version_upload || null,
+    bootstrapper_version: row.bootstrapper_version || null,
+    next_client_version: row.next_client_version || null,
+    next_client_version_upload: row.next_client_version_upload || null,
+    last_checked_at: row.last_checked_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function normalizeRobloxReleaseEventOutput(row) {
+  return {
+    event_id: row.event_id || null,
+    channel: row.channel || null,
+    binary_type: row.binary_type || null,
+    previous_version: row.previous_version || null,
+    current_version: row.current_version || null,
+    previous_client_version_upload: row.previous_client_version_upload || null,
+    current_client_version_upload: row.current_client_version_upload || null,
+    detected_at: row.detected_at || null,
+    source: row.source || null,
+    created_at: row.created_at || null
+  };
 }
 
 async function fetchPs99WatchedPlaces(env, fetchedAt) {
@@ -10339,6 +10528,17 @@ function ps99VersionRuntimeConfig(env) {
   };
 }
 
+function robloxReleaseRuntimeConfig(env) {
+  return {
+    ingest_roblox_release_version_history: String(env.INGEST_ROBLOX_RELEASE_VERSION_HISTORY || "false").toLowerCase() === "true",
+    binary_type: robloxReleaseBinaryType(env),
+    channel: robloxReleaseChannel(env),
+    schedule_minutes: robloxReleaseScheduleMinutes(env),
+    schedule_offset_minutes: robloxReleaseScheduleOffsetMinutes(env),
+    source: "clientsettings.roblox.com/v2/client-version"
+  };
+}
+
 function ps99RestartRuntimeConfig(env) {
   return {
     ingest_ps99_restarts: ps99RestartEnabled(env),
@@ -10419,6 +10619,48 @@ function ps99UniverseId(env) {
 
 function ps99RootPlaceId(env) {
   return Math.round(toNumber(env.PS99_ROOT_PLACE_ID) || DEFAULT_PS99_ROOT_PLACE_ID);
+}
+
+function robloxReleaseBinaryType(env) {
+  return stringOrNull(env.ROBLOX_RELEASE_BINARY_TYPE) || DEFAULT_ROBLOX_RELEASE_BINARY_TYPE;
+}
+
+function robloxReleaseChannel(env) {
+  return stringOrNull(env.ROBLOX_RELEASE_CHANNEL) || DEFAULT_ROBLOX_RELEASE_CHANNEL;
+}
+
+function robloxReleaseFetchAttempts(env) {
+  return clamp(Number(env.ROBLOX_RELEASE_FETCH_ATTEMPTS || 3), 1, 6);
+}
+
+function robloxReleaseScheduleMinutes(env) {
+  return clamp(
+    Number(env.ROBLOX_RELEASE_SCHEDULE_MINUTES || DEFAULT_ROBLOX_RELEASE_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function robloxReleaseScheduleOffsetMinutes(env) {
+  const interval = robloxReleaseScheduleMinutes(env);
+  const offsetValue = env.ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES === undefined || env.ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES === ""
+    ? DEFAULT_ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES
+    : env.ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES;
+
+  return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function shouldRunRobloxReleaseSchedule(env, scheduledAt = null) {
+  const interval = robloxReleaseScheduleMinutes(env);
+  const offset = robloxReleaseScheduleOffsetMinutes(env);
+  const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
+  const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minuteInInterval = minuteOfDay % interval;
+  const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
+
+  return minutesUntilOffset < 5;
 }
 
 function ps99VersionScheduleMinutes(env) {
