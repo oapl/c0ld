@@ -176,6 +176,16 @@
     const subcategoryOf = row => String(row?.item_category || row?.raw?.category || row?.raw?.collection || "");
     const nameOf = row => row?.display_name || row?.item_id || row?.item_key || "Unknown item";
     const searchable = row => `${nameOf(row)} ${classOf(row)} ${subcategoryOf(row)} ${row?.variant || ""}`.toLowerCase();
+    const normalizedClass = row => classOf(row).trim().toLowerCase();
+    const supportsVariant = row => ["pet","pets","hoverboard","hoverboards"].includes(normalizedClass(row));
+    const variantLabel = row => {
+      if(!supportsVariant(row)) return "";
+      const variant=String(row?.variant || "Normal").trim() || "Normal";
+      if(["hoverboard","hoverboards"].includes(normalizedClass(row))) return /shiny/i.test(variant) ? "Shiny" : "Normal";
+      return variant;
+    };
+    const categoryOrder = category => ["pet","pets"].includes(String(category || "").trim().toLowerCase()) ? 0 : 1;
+    const compareCategories = (a,b) => categoryOrder(a)-categoryOrder(b) || String(a).localeCompare(String(b));
 
     function setNotice(text,type="warn"){ const el=$("notice"); el.className=`notice ${type}`; el.innerHTML=text; }
     async function fetchJson(path){
@@ -252,11 +262,11 @@
     }
     function renderGainGroups(rows){
       const groups=new Map(); for(const row of rows){ const key=classOf(row); if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(row); }
-      return [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([category,items])=>`<div class="gain-group"><div class="gain-group-head"><h3 class="gain-group-title">${esc(category)}</h3><span class="gain-group-count">${fmt(items.length)} acquired type${items.length===1?"":"s"}</span></div><div class="grid">${items.sort((a,b)=>Number(b.delta)-Number(a.delta) || nameOf(a).localeCompare(nameOf(b))).map(renderGainCard).join("")}</div></div>`).join("");
+      return [...groups.entries()].sort((a,b)=>state.category==="all"?compareCategories(a[0],b[0]):a[0].localeCompare(b[0])).map(([category,items])=>`<div class="gain-group"><div class="gain-group-head"><h3 class="gain-group-title">${esc(category)}</h3><span class="gain-group-count">${fmt(items.length)} acquired type${items.length===1?"":"s"}</span></div><div class="grid">${items.sort((a,b)=>Number(b.delta)-Number(a.delta) || nameOf(a).localeCompare(nameOf(b))).map(renderGainCard).join("")}</div></div>`).join("");
     }
     function renderGainCard(row){
-      const sub=subcategoryOf(row);
-      return `<article class="card gain-card"><div class="gain-top"><div class="card-title" title="${esc(nameOf(row))}">${esc(nameOf(row))}</div><span class="class-tag">${esc(row.variant || "Normal")}</span></div><div class="gain-amount" title="+${fmt(row.delta)}">+${compact(row.delta)}</div><div class="gain-detail">Now ${fmt(row.after)}${sub?` · ${esc(sub)}`:""}</div></article>`;
+      const sub=subcategoryOf(row), variant=variantLabel(row);
+      return `<article class="card gain-card"><div class="gain-top"><div class="card-title" title="${esc(nameOf(row))}">${esc(nameOf(row))}</div>${variant?`<span class="class-tag">${esc(variant)}</span>`:""}</div><div class="gain-amount" title="+${fmt(row.delta)}">+${compact(row.delta)}</div><div class="gain-detail">Total: ${fmt(row.after)}${sub?` · ${esc(sub)}`:""}</div></article>`;
     }
     function renderHistory(){
       const windows=(state.hourly?.rows || []).slice().reverse(), container=$("historyList");
@@ -266,10 +276,10 @@
     function renderInventory(){
       const container=$("inventoryBody");
       if(!state.inventory){ container.innerHTML='<div class="loading-panel">Loading the complete inventory snapshot…</div>'; return; }
-      const rows=filteredRows().sort((a,b)=>classOf(a).localeCompare(classOf(b)) || nameOf(a).localeCompare(nameOf(b))), visible=rows.slice(0,state.inventoryLimit);
+      const rows=filteredRows().sort((a,b)=>(state.category==="all"?compareCategories(classOf(a),classOf(b)):classOf(a).localeCompare(classOf(b))) || nameOf(a).localeCompare(nameOf(b))), visible=rows.slice(0,state.inventoryLimit);
       $("inventoryNote").textContent=`${fmt(rows.length)} matching stacks · ${fmt(state.inventory.length)} total`;
       if(!rows.length){ container.innerHTML='<div class="empty">No inventory items matched this filter.</div>'; return; }
-      container.innerHTML=`<div class="inventory-wrap"><table class="inventory-table"><thead><tr><th>Item</th><th>Class</th><th>Count</th><th>RAP</th></tr></thead><tbody>${visible.map(row=>`<tr><td><div class="inventory-name">${esc(nameOf(row))}</div><div class="inventory-sub">${esc(row.variant || "Normal")}${subcategoryOf(row)?` · ${esc(subcategoryOf(row))}`:""}</div></td><td>${esc(classOf(row))}</td><td>${fmt(row.count)}</td><td>${fmt(row.rap)}</td></tr>`).join("")}</tbody></table></div>${visible.length<rows.length?`<button id="loadMoreBtn" class="load-more" type="button">Show ${fmt(Math.min(250,rows.length-visible.length))} more</button>`:""}`;
+      container.innerHTML=`<div class="inventory-wrap"><table class="inventory-table"><thead><tr><th>Item</th><th>Class</th><th>Count</th><th>RAP</th></tr></thead><tbody>${visible.map(row=>{const details=[variantLabel(row),subcategoryOf(row)].filter(Boolean);return `<tr><td><div class="inventory-name">${esc(nameOf(row))}</div>${details.length?`<div class="inventory-sub">${details.map(esc).join(" · ")}</div>`:""}</td><td>${esc(classOf(row))}</td><td>${fmt(row.count)}</td><td>${fmt(row.rap)}</td></tr>`;}).join("")}</tbody></table></div>${visible.length<rows.length?`<button id="loadMoreBtn" class="load-more" type="button">Show ${fmt(Math.min(250,rows.length-visible.length))} more</button>`:""}`;
       $("loadMoreBtn")?.addEventListener("click",()=>{ state.inventoryLimit+=250; renderInventory(); });
     }
 

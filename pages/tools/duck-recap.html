@@ -41,8 +41,8 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .duck-track::before{content:"";position:absolute;left:0;right:0;top:0;height:72px;background:radial-gradient(circle at 10% 50%,#5fbd4e 0 20px,transparent 21px),radial-gradient(circle at 16% 38%,#5fbd4e 0 27px,transparent 28px),linear-gradient(#52a245,#3d7f33);border-bottom:4px solid #7b4f26}
 .duck-track::after{content:"";position:absolute;top:72px;right:54px;bottom:0;width:20px;background:conic-gradient(#f5f5f5 25%,#111 0 50%,#f5f5f5 0 75%,#111 0);background-size:20px 20px;border-left:1px solid rgba(255,255,255,.35);border-right:1px solid rgba(255,255,255,.35);opacity:.95}
 .duck-waterline{position:absolute;left:0;right:0;height:16px;background:repeating-linear-gradient(90deg,rgba(107,205,255,.18) 0 18px,rgba(107,205,255,.04) 18px 36px);opacity:.75}
-.duck-racer{--duck-left:6%;--duck-top:70%;--duck-size:118px;position:absolute;left:var(--duck-left);top:var(--duck-top);width:var(--duck-size);height:calc(var(--duck-size)*.9);transform:translate(-50%,-50%);z-index:1;will-change:left,top}
-.duck-image{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 0 rgba(0,0,0,.65))}
+.duck-racer{--duck-left:6%;--duck-top:70%;--duck-size:118px;position:absolute;left:var(--duck-left);top:var(--duck-top);width:var(--duck-size);height:calc(var(--duck-size)*.9);transform:translate3d(-50%,-50%,0);z-index:1;will-change:left,top;contain:layout style}
+.duck-image{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 0 rgba(0,0,0,.65));transform-origin:50% 70%;animation:duck-paddle .62s ease-in-out infinite alternate}
 .duck-logo{position:absolute;left:30%;top:56%;width:25%;height:25%;border-radius:6px;object-fit:cover;background:#0d1117;border:1px solid rgba(0,0,0,.6)}
 .duck-label{position:absolute;left:50%;top:-48px;transform:translateX(-50%);min-width:132px;max-width:190px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:rgba(13,17,23,.82);box-shadow:0 2px 8px rgba(0,0,0,.28);text-align:center}
 .duck-track.compact-labels .duck-label{opacity:0;transform:translateX(-50%) translateY(4px);transition:opacity .12s ease,transform .12s ease;pointer-events:none}
@@ -50,10 +50,18 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .duck-track.compact-labels .duck-racer:hover .duck-label{opacity:1;transform:translateX(-50%) translateY(0)}
 .duck-name{font-weight:800;line-height:1.15}
 .duck-stats{color:var(--muted);font-size:12px;line-height:1.3;margin-top:2px}
+.race-hud{position:absolute;z-index:120;left:18px;right:92px;top:14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:8px 11px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:rgba(7,14,23,.84);box-shadow:0 5px 18px rgba(0,0,0,.3);font-size:12px;pointer-events:none}
+.race-hud strong{color:#fff}.race-hud-center{text-align:center;color:#9edcff;font-weight:800}.race-hud-right{text-align:right;color:var(--muted)}
+@keyframes duck-paddle{from{transform:translateY(-2px) rotate(-1.5deg)}to{transform:translateY(3px) rotate(1.5deg)}}
 .good{color:var(--good);font-weight:800}.bad{color:var(--bad);font-weight:800}
 .message{padding:24px;color:var(--muted)}
+body.embed header,body.embed .hero,body.embed .cards{display:none}
+body.embed main{max-width:none;padding:0}
+body.embed .section{border:0;border-radius:0}
+body.embed .section-header{padding:12px 16px}
+body.embed .duck-track{height:560px}
 @media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.duck-track{height:520px}.duck-label{min-width:118px;max-width:150px;font-size:12px}.duck-stats{font-size:11px}}
-@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}}
+@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.race-hud{right:76px;grid-template-columns:1fr auto}.race-hud-right{display:none}body.embed .duck-track{height:500px}}
 </style>
 </head>
 <body>
@@ -118,7 +126,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 <script>
 const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const DUCK_IMAGE_URL="assets/duck-race-duck.png";
-const REPLAY_DURATION_MS=10000;
+const REPLAY_DURATION_MS=18000;
 let battles=[];
 let replayFrame=0;
 
@@ -132,7 +140,7 @@ function clanPoints(row){return asNumber(firstValue(row.points,row.total_points,
 function duckImage(){return '<img class="duck-image" src="'+DUCK_IMAGE_URL+'" alt="">'}
 function icon(row){if(row.icon_url)return row.icon_url;if(row.icon_id)return "https://ps99.biggamesapi.io/image/"+encodeURIComponent(row.icon_id);return row.avatar_url||""}
 async function getJson(url){const res=await fetch(url,{cache:"default"});if(!res.ok)throw new Error("HTTP "+res.status+" from "+url);return res.json()}
-function battleHours(battle){const found=battles.find(row=>row.battle===battle);const start=found?.battle_start_iso||found?.first_snapshot;const startTime=new Date(start||0).getTime();if(!Number.isFinite(startTime)||!startTime)return 100000;return Math.ceil((Date.now()-startTime)/(60*60*1000))+12}
+function battleHours(battle,metadata=null){const found=metadata||battles.find(row=>row.battle===battle);const start=found?.battle_start_iso||found?.battle_started_at||found?.first_snapshot;const startTime=new Date(start||0).getTime();if(!Number.isFinite(startTime)||!startTime)return 100000;return Math.ceil((Date.now()-startTime)/(60*60*1000))+12}
 function setStatus(text){document.getElementById("status").textContent=text}
 
 async function loadBattles(){
@@ -183,9 +191,15 @@ function addTimelinePoint(list,point){
   return dedupeTimeline(list);
 }
 
-function pointAt(timeline,time){
+function pointAt(timeline,time,baselineTime=null){
   if(!timeline.length)return {t:time,points:0,rank:0};
-  if(time<=timeline[0].t)return timeline[0];
+  if(time<timeline[0].t){
+    const baseline=Number.isFinite(baselineTime)?baselineTime:timeline[0].t;
+    const span=Math.max(1,timeline[0].t-baseline);
+    const pct=clamp01((time-baseline)/span);
+    return {t:time,points:timeline[0].points*pct,rank:pct>0.5?timeline[0].rank:0};
+  }
+  if(time===timeline[0].t)return timeline[0];
   const last=timeline[timeline.length-1];
   if(time>=last.t)return last;
   let low=0;
@@ -205,25 +219,29 @@ function pointAt(timeline,time){
   };
 }
 
-function rowCountFor(count){if(count<=10)return 1;if(count<=24)return 2;if(count<=45)return 3;if(count<=60)return 4;return 5}
-function duckSizeFor(count){if(count<=10)return 132;if(count<=24)return 106;if(count<=45)return 86;if(count<=60)return 74;return 64}
+function rowCountFor(count){if(count<=10)return Math.min(5,count);if(count<=24)return 4;if(count<=45)return 5;if(count<=60)return 6;return 7}
+function duckSizeFor(count){if(count<=10)return 104;if(count<=24)return 92;if(count<=45)return 78;if(count<=60)return 68;return 58}
 function rowTopFor(index,count){
   const rows=rowCountFor(count);
   if(rows===1)return 70;
-  const perRow=Math.ceil(count/rows);
-  const row=Math.min(rows-1,Math.floor(index/perRow));
-  const start=rows===2?55:rows===3?44:rows===4?36:31;
-  const end=84;
+  const row=index%rows;
+  const start=rows===2?55:rows===3?44:rows===4?37:rows===5?32:28;
+  const end=86;
   return start+((end-start)/(rows-1))*row;
 }
-function raceLeftFor(place,count){
-  if(count<=1)return 48;
-  const left=8;
-  const right=88;
-  return left+((count-place)/(count-1))*(right-left);
+function clamp01(value){return Math.max(0,Math.min(1,value))}
+function smoothstep(value){const t=clamp01(value);return t*t*(3-2*t)}
+function raceLeftFor(racer,point,place,count,timelineProgress){
+  const movementStart=asNumber(racer.motionStartPoints);
+  const gain=racer.endPoints-movementStart;
+  const scoreProgress=gain>0?clamp01((point.points-movementStart)/gain):clamp01(timelineProgress);
+  const endPlace=Math.max(1,asNumber(racer.endRank)||place);
+  const placeSpread=count<=1?0:((endPlace-1)/(count-1))*(count<=10?36:30);
+  const finish=91-placeSpread;
+  return 7+(finish-7)*smoothstep(scoreProgress);
 }
 function replayScaleText(start,end){
-  const minutesPerSecond=((end-start)/REPLAY_DURATION_MS)/60000;
+  const minutesPerSecond=((end-start)/60000)/(REPLAY_DURATION_MS/1000);
   if(!Number.isFinite(minutesPerSecond)||minutesPerSecond<=0)return "";
   if(minutesPerSecond>=60)return "1s = "+(minutesPerSecond/60).toFixed(1).replace(/\.0$/,"")+"h";
   return "1s = "+minutesPerSecond.toFixed(0)+"m";
@@ -233,7 +251,7 @@ async function buildMemberRecap(battle){
   const battleParam=battle==="current"?"":"&battle="+encodeURIComponent(battle);
   const current=await getJson(API+"/api/current?clan=c0ld"+battleParam);
   const effectiveBattle=battle==="current"?(current.battle||current.battle_key||"current"):battle;
-  const hours=battleHours(effectiveBattle);
+  const hours=battleHours(effectiveBattle,current);
   const history=await getJson(API+"/api/history?clan=c0ld&battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&limit=50000&order=asc");
   const timelines=timelineByKey(history.rows||[],row=>String(row.user_id||""),row=>({
     t:pointTime(row),
@@ -266,8 +284,8 @@ async function buildClanRecap(battle){
   const battleParam=battle==="current"?"":"?battle="+encodeURIComponent(battle);
   const current=await getJson(API+"/api/clans/current"+battleParam);
   const effectiveBattle=battle==="current"?(current.battle||current.battle_key||"current"):battle;
-  const hours=battleHours(effectiveBattle);
-  const history=await getJson(API+"/api/clans/history?battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&rank_min=1&rank_max=10&limit=50000&order=asc");
+  const hours=battleHours(effectiveBattle,current);
+  const history=await getJson(API+"/api/clans/history?battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&rank_min=1&rank_max=10&limit=10000&order=asc");
   const timelines=timelineByKey(history.rows||[],row=>String(row.clan_name||"").toLowerCase(),row=>({
     t:pointTime(row),
     points:clanPoints(row),
@@ -315,31 +333,45 @@ function prepareRacers(racers){
 
 function paintReplayFrame(state,elapsed){
   const progress=Math.max(0,Math.min(1,elapsed/REPLAY_DURATION_MS));
+  if(state.lastPaint!==undefined&&elapsed-state.lastPaint<32&&progress<1)return false;
+  state.lastPaint=elapsed;
   const replayTime=state.startTime+(state.endTime-state.startTime)*progress;
-  const live=state.racers.map((racer,index)=>({racer,index,point:pointAt(racer.timeline,replayTime)}));
+  const live=state.racers.map((racer,index)=>({racer,index,point:pointAt(racer.timeline,replayTime,state.startTime)}));
   live.sort((a,b)=>b.point.points-a.point.points||a.racer.endRank-b.racer.endRank||a.index-b.index);
+  const updateLabels=!state.lastLabelUpdate||performance.now()-state.lastLabelUpdate>180||progress>=1;
   live.forEach((item,placeIndex)=>{
     const place=placeIndex+1;
-    const el=document.getElementById("duck-racer-"+item.index);
+    const refs=state.elements[item.index];
+    const el=refs?.el;
     if(!el)return;
     const gain=item.point.points-item.racer.startPoints;
-    el.style.setProperty("--duck-left",raceLeftFor(place,state.racers.length).toFixed(2)+"%");
-    const name=el.querySelector("[data-race-name]");
-    const stats=el.querySelector("[data-race-stats]");
-    const rank=el.querySelector("[data-race-rank]");
-    if(name)name.textContent="#"+place+" "+item.racer.label;
-    if(stats)stats.textContent=shortNum(item.point.points)+" | "+(gain>=0?"+":"")+shortNum(gain);
-    if(rank)rank.textContent="Rank "+(item.point.rank||"-")+" -> "+(item.racer.endRank||"-");
+    el.style.setProperty("--duck-left",raceLeftFor(item.racer,item.point,place,state.racers.length,progress).toFixed(3)+"%");
+    if(updateLabels){
+      if(refs.name)refs.name.textContent="#"+place+" "+item.racer.label;
+      if(refs.stats)refs.stats.textContent=shortNum(item.point.points)+" | "+(gain>=0?"+":"")+shortNum(gain);
+      if(refs.rank)refs.rank.textContent="Rank "+(item.point.rank||"-")+" -> "+(item.racer.endRank||"-");
+    }
   });
-  if(!state.lastMetaUpdate||performance.now()-state.lastMetaUpdate>180||progress>=1){
-    state.lastMetaUpdate=performance.now();
+  if(updateLabels){
+    state.lastLabelUpdate=performance.now();
     document.getElementById("race-meta").textContent=state.battle+" - "+Math.round(progress*100)+"% - "+fmtDate(replayTime)+" - "+state.scaleText;
+    const leader=live[0];
+    const leaderText=leader?leader.racer.label+" · "+shortNum(leader.point.points):"Waiting for racers";
+    const leaderEl=document.getElementById("race-leader");
+    const progressEl=document.getElementById("race-progress");
+    if(leaderEl)leaderEl.textContent=(progress>=1?"Winner: ":"Leader: ")+leaderText;
+    if(progressEl)progressEl.textContent=Math.round(progress*100)+"%";
   }
   return progress>=1;
 }
 
 function startReplay(state){
   cancelAnimationFrame(replayFrame);
+  state.racers.forEach(racer=>{racer.motionStartPoints=pointAt(racer.timeline,state.startTime,state.startTime).points});
+  state.elements=state.racers.map((_,index)=>{
+    const el=document.getElementById("duck-racer-"+index);
+    return {el,name:el?.querySelector("[data-race-name]"),stats:el?.querySelector("[data-race-stats]"),rank:el?.querySelector("[data-race-rank]")};
+  });
   const start=performance.now();
   const tick=now=>{
     const done=paintReplayFrame(state,now-start);
@@ -355,7 +387,8 @@ function renderRecap(payload){
   document.getElementById("race-title").textContent=payload.title;
   document.getElementById("race-meta").textContent=payload.battle+" - "+(payload.historyRows?payload.historyRows.toLocaleString("en-US")+" history rows":"No history rows");
   document.getElementById("racer-count").textContent=racers.length.toLocaleString("en-US");
-  document.getElementById("best-gain").textContent=racers[0]?shortNum(racers[0].gain):"-";
+  const bestGain=racers.slice().sort((a,b)=>b.gain-a.gain)[0];
+  document.getElementById("best-gain").textContent=bestGain?shortNum(bestGain.gain):"-";
   const bestRank=racers.slice().sort((a,b)=>b.rankMove-a.rankMove)[0];
   document.getElementById("best-rank").textContent=bestRank&&bestRank.rankMove?("+"+bestRank.rankMove):"-";
   document.getElementById("latest-data").textContent=fmtDate(payload.latest);
@@ -379,10 +412,10 @@ function renderRecap(payload){
   const duckSize=duckSizeFor(racers.length);
   track.className="duck-track"+(racers.length>24?" compact-labels":"");
   const waterLines=Array.from({length:rows},(_,index)=>{
-    const top=rowTopFor(index*Math.ceil(racers.length/rows),racers.length)+7;
+    const top=rowTopFor(index,racers.length)+7;
     return '<div class="duck-waterline" style="top:'+top.toFixed(1)+'%"></div>';
   }).join("");
-  track.innerHTML=waterLines+racers.map((row,index)=>{
+  track.innerHTML='<div class="race-hud"><strong id="race-leader">Race starting…</strong><span id="race-progress" class="race-hud-center">0%</span><span class="race-hud-right">18 second replay</span></div>'+waterLines+racers.map((row,index)=>{
     const rankClass=row.rankMove>0?"good":row.rankMove<0?"bad":"";
     return '<div id="duck-racer-'+index+'" class="duck-racer" style="--duck-size:'+duckSize+'px;--duck-top:'+rowTopFor(index,racers.length).toFixed(1)+'%">'+duckImage()+(row.icon_url?'<img class="duck-logo" src="'+esc(row.icon_url)+'" alt="">':'')+'<div class="duck-label"><div class="duck-name" data-race-name>#'+(index+1)+' '+esc(row.label)+'</div><div class="duck-stats" data-race-stats>'+esc(shortNum(row.startPoints))+' | +0</div><div class="duck-stats '+rankClass+'" data-race-rank>Rank '+esc(row.startRank||"-")+' -> '+esc(row.endRank||"-")+'</div></div></div>';
   }).join("");
@@ -411,8 +444,23 @@ async function runRecap(){
   }
 }
 
+const recapParams=new URLSearchParams(location.search);
+const recapAutoplay=recapParams.get("autoplay")==="1";
+const recapRequestedBattle=recapParams.get("battle");
+if(recapParams.get("embed")==="1")document.body.classList.add("embed");
+if(["members","clans"].includes(recapParams.get("mode")))document.getElementById("mode-select").value=recapParams.get("mode");
 document.getElementById("run-btn").addEventListener("click",runRecap);
-loadBattles().then(()=>setStatus("Pick a recap type and battle, then start the race.")).catch(error=>setStatus("Battle list failed: "+error.message));
+if(recapAutoplay&&(recapRequestedBattle==="current"||!recapRequestedBattle)){
+  document.getElementById("race-meta").textContent="Loading battle snapshots…";
+  document.getElementById("duck-track").innerHTML='<div class="message">Preparing the ducks…</div>';
+  runRecap();
+}else{
+  loadBattles().then(()=>{
+    if(recapRequestedBattle&&[...document.getElementById("battle-select").options].some(option=>option.value===recapRequestedBattle))document.getElementById("battle-select").value=recapRequestedBattle;
+    setStatus("Pick a recap type and battle, then start the race.");
+    if(recapAutoplay)runRecap();
+  }).catch(error=>setStatus("Battle list failed: "+error.message));
+}
 </script>
 </body>
 </html>
