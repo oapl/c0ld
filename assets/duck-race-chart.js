@@ -54,7 +54,8 @@
       }
 
       @media (max-width: 700px) {
-        .reward-threshold-metrics .duck-view-button {
+        #reward-threshold-refresh.duck-view-button,
+        #duck-recap-view.duck-view-button {
           width: auto;
           flex: 1 1 0;
         }
