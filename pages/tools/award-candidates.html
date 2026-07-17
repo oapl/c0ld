@@ -137,6 +137,7 @@ const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const CLAN="c0ld";
 const HISTORY_LIMIT=50000;
 const MAX_INTERVAL_MS=12*60*1000;
+const PROFILE_FETCH_CONCURRENCY=6;
 const FALLBACK_AVATAR="assets/c0ld-kitsune-logo.gif";
 let battles=[];
 let playerById=new Map();
@@ -164,6 +165,7 @@ function rowTime(row){const time=new Date(row?.fetched_at||row?.snapshot_at||row
 function pointsFor(row){return finite(row?.total_points??row?.points??row?.clan_points??row?.global_points)??0}
 function rankFor(row){return finite(row?.rank)}
 function playerKey(row){const id=row?.user_id??row?.roblox_user_id;if(id!==null&&id!==undefined&&id!=="")return "id:"+String(id);const name=String(row?.username||row?.display_name||"").trim().toLowerCase();return name?"name:"+name:""}
+function norm(value){return String(value??"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"")}
 function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
 function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
 function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
@@ -185,11 +187,50 @@ async function fetchJson(url,fallback){
   }
 }
 
+async function mapLimit(items,limit,worker){
+  const output=new Array(items.length);
+  let index=0;
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(index<items.length){
+      const current=index++;
+      output[current]=await worker(items[current],current);
+    }
+  }));
+  return output;
+}
+
 function profileFor(row){
   const id=row?.user_id??row?.roblox_user_id;
   if(id!==null&&id!==undefined&&playerById.has(String(id)))return playerById.get(String(id));
   const name=String(row?.username||row?.display_name||"").trim().toLowerCase();
   return name?playerByName.get(name)||null:null;
+}
+
+async function loadProfileDetail(stat){
+  const profile=stat.profile||{};
+  const keys=[
+    profile.profile_key,
+    stat.user_id,
+    playerName(stat)
+  ].map(value=>String(value||"").trim()).filter(Boolean);
+
+  for(const key of [...new Set(keys)]){
+    const detail=await fetchJson("Data/players/"+encodeURIComponent(key)+".json",null);
+    if(detail)return detail;
+  }
+
+  return null;
+}
+
+async function loadImportedHistory(userId){
+  if(!userId)return [];
+  const sources=["cw_bot","big_bot"];
+  const payloads=await Promise.all(sources.map(source=>
+    fetchJson(API+"/api/external-history?user_id="+encodeURIComponent(userId)+"&source="+source+"&limit=300",null)
+  ));
+  return payloads
+    .filter(payload=>payload?.ok)
+    .flatMap(payload=>Array.isArray(payload.rows)?payload.rows:[]);
 }
 
 async function loadPlayers(){
@@ -420,6 +461,97 @@ function computeStats(snapshots){
   }).filter(stat=>stat.snapshotCount>0);
 }
 
+function battleKeyOf(row){
+  return norm(row?.battle||row?.battle_key||row?.display_name||row?.battle_name||row?.label);
+}
+
+function battleEndTime(row){
+  return new Date(row?.battle_last_snapshot||row?.last_seen||row?.final_snapshot_at||row?.created_at||0).getTime();
+}
+
+function historyRank(row){
+  return finite(row?.ending_rank??row?.end_rank??row?.last_rank??row?.final_rank??row?.clan_rank??row?.member_rank??row?.rank);
+}
+
+function historyPoints(row){
+  return finite(row?.ending_points??row?.final_points??row?.max_points??row?.latest_points??row?.total_points??row?.points);
+}
+
+function summarizeHistory(detail,imports,currentBattleKey){
+  const currentKey=norm(currentBattleKey);
+  const battles=(Array.isArray(detail?.battles)?detail.battles:[])
+    .filter(row=>battleKeyOf(row)!==currentKey)
+    .sort((a,b)=>battleEndTime(a)-battleEndTime(b));
+  const c0ldBattles=battles.filter(row=>{
+    const clanName=String(row.clan_name||row.source_clan||CLAN).trim();
+    return !clanName||norm(clanName)===norm(CLAN);
+  });
+  const imported=(Array.isArray(imports)?imports:[])
+    .filter(row=>battleKeyOf(row)!==currentKey);
+  const importedClans=[...new Set(imported.map(row=>String(row.clan_name||"").trim()).filter(Boolean))];
+  const ranks=c0ldBattles.map(historyRank).filter(Number.isFinite);
+  const points=c0ldBattles.map(historyPoints).filter(Number.isFinite);
+  const globalRanks=imported
+    .map(row=>finite(row.global_rank??(row.source==="cw_bot"?row.final_rank:null)))
+    .filter(Number.isFinite);
+  const allFirstTimes=[
+    ...c0ldBattles.map(row=>new Date(row.first_seen||row.battle_first_snapshot||0).getTime()),
+    ...imported.map(row=>new Date(row.final_snapshot_at||row.created_at||0).getTime())
+  ].filter(Number.isFinite);
+  const allLastTimes=[
+    ...c0ldBattles.map(row=>battleEndTime(row)),
+    ...imported.map(row=>new Date(row.final_snapshot_at||row.created_at||0).getTime())
+  ].filter(Number.isFinite);
+  const tenureDays=allFirstTimes.length&&allLastTimes.length
+    ? Math.max(0,(Math.max(...allLastTimes)-Math.min(...allFirstTimes))/86400000)
+    : 0;
+
+  return {
+    c0ldBattleCount:c0ldBattles.length,
+    importedBattleCount:imported.length,
+    importedClanCount:importedClans.length,
+    importedClans,
+    tenureDays,
+    priorAvgRank:ranks.length?ranks.reduce((sum,value)=>sum+value,0)/ranks.length:null,
+    priorBestRank:ranks.length?Math.min(...ranks):null,
+    priorWorstRank:ranks.length?Math.max(...ranks):null,
+    priorAvgPoints:points.length?points.reduce((sum,value)=>sum+value,0)/points.length:null,
+    priorBestPoints:points.length?Math.max(...points):null,
+    priorBestGlobalRank:globalRanks.length?Math.min(...globalRanks):null,
+    priorAvgGlobalRank:globalRanks.length?globalRanks.reduce((sum,value)=>sum+value,0)/globalRanks.length:null,
+    firstC0ldWar:c0ldBattles.length===0
+  };
+}
+
+async function hydrateHistory(stats,currentBattleKey){
+  await mapLimit(stats,PROFILE_FETCH_CONCURRENCY,async stat=>{
+    const [detail,imports]=await Promise.all([
+      loadProfileDetail(stat),
+      loadImportedHistory(stat.user_id)
+    ]);
+    stat.history=summarizeHistory(detail,imports,currentBattleKey);
+  });
+  return stats;
+}
+
+function historyOf(stat){
+  return stat.history||{
+    c0ldBattleCount:0,
+    importedBattleCount:0,
+    importedClanCount:0,
+    importedClans:[],
+    tenureDays:0,
+    priorAvgRank:null,
+    priorBestRank:null,
+    priorWorstRank:null,
+    priorAvgPoints:null,
+    priorBestPoints:null,
+    priorBestGlobalRank:null,
+    priorAvgGlobalRank:null,
+    firstC0ldWar:true
+  };
+}
+
 function playerName(stat){return stat.username||("user_"+(stat.user_id||"unknown"))}
 function avatarFor(stat){return stat.avatar_url||FALLBACK_AVATAR}
 function profileHref(stat){return "player-lookup.html?q="+encodeURIComponent(stat.user_id||playerName(stat))}
@@ -438,28 +570,52 @@ function awardDefinitions(stats){
 
   const mvp=sortTop(players.map(stat=>({
     ...stat,
-    score:100*((stat.finalPoints/maxPoints)*0.62+(stat.timeAtFirst/maxFirst)*0.23+rankScore(stat,totalPlayers)*0.15)
+    score:100*(
+      (stat.finalPoints/maxPoints)*0.55+
+      (stat.timeAtFirst/maxFirst)*0.2+
+      rankScore(stat,totalPlayers)*0.15+
+      clamp((historyOf(stat).c0ldBattleCount||0)/4,0,1)*0.06+
+      (historyOf(stat).priorAvgRank&&stat.finalRank?clamp((historyOf(stat).priorAvgRank-stat.finalRank)/Math.max(1,historyOf(stat).priorAvgRank),0,1):0)*0.04
+    )
   })));
 
   const improved=sortTop(players
     .filter(stat=>stat.rankMove>0||stat.totalGain>0)
     .map(stat=>({
       ...stat,
-      score:(Math.max(0,stat.rankMove)*12)+((stat.totalGain/maxGain)*35)+(stat.startRank?((Math.max(0,stat.rankMove)/stat.startRank)*35):0)+(rankScore(stat,totalPlayers)*18)
+      score:
+        (Math.max(0,stat.rankMove)*10)+
+        ((stat.totalGain/maxGain)*30)+
+        (stat.startRank?((Math.max(0,stat.rankMove)/stat.startRank)*30):0)+
+        (rankScore(stat,totalPlayers)*14)+
+        (historyOf(stat).priorAvgRank&&stat.finalRank?Math.max(0,historyOf(stat).priorAvgRank-stat.finalRank)*8:0)+
+        (historyOf(stat).priorAvgPoints?clamp((stat.finalPoints-historyOf(stat).priorAvgPoints)/Math.max(1,historyOf(stat).priorAvgPoints),0,3)*10:0)
     })));
 
-  let rookies=players.filter(stat=>stat.rookie);
+  let rookies=players.filter(stat=>historyOf(stat).firstC0ldWar);
   if(!rookies.length)rookies=players.map(stat=>({...stat,rookieFallback:true}));
   const rookie=sortTop(rookies.map(stat=>({
     ...stat,
-    score:100*((stat.finalPoints/maxPoints)*0.7+rankScore(stat,totalPlayers)*0.3)
+    score:100*(
+      (stat.finalPoints/maxPoints)*0.52+
+      rankScore(stat,totalPlayers)*0.22+
+      (historyOf(stat).firstC0ldWar?0.18:0)+
+      (historyOf(stat).importedBattleCount?clamp(1-(historyOf(stat).importedBattleCount/12),0,1)*0.04:0.04)+
+      (stat.timeAtFirst/maxFirst)*0.04
+    )
   })));
 
   const throwers=sortTop(players
     .filter(stat=>stat.downtimeMs>0||stat.rankLoss>0||stat.timeAtLast>0)
     .map(stat=>({
       ...stat,
-      score:((stat.downtimeMs/maxDowntime)*45)+(clamp(stat.downtimePct,0,100)*0.25)+((stat.rankLoss/maxRankLoss)*20)+((stat.timeAtLast/maxLast)*10)
+      score:
+        ((stat.downtimeMs/maxDowntime)*38)+
+        (clamp(stat.downtimePct,0,100)*0.22)+
+        ((stat.rankLoss/maxRankLoss)*18)+
+        ((stat.timeAtLast/maxLast)*9)+
+        (historyOf(stat).priorAvgRank&&stat.finalRank?Math.max(0,stat.finalRank-historyOf(stat).priorAvgRank)*5:0)+
+        (historyOf(stat).priorAvgPoints?clamp((historyOf(stat).priorAvgPoints-stat.finalPoints)/Math.max(1,historyOf(stat).priorAvgPoints),0,2)*8:0)
     })));
 
   return [
@@ -472,7 +628,8 @@ function awardDefinitions(stats){
         {text:rankLabel(stat.finalRank),tone:"good"},
         {text:shortNum(stat.finalPoints)+" pts"},
         {text:fmtDuration(stat.timeAtFirst)+" at #1"},
-        {text:"+"+shortNum(stat.totalGain)}
+        {text:"+"+shortNum(stat.totalGain)},
+        {text:historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount?"good":"warn"}
       ]
     },
     {
@@ -484,7 +641,7 @@ function awardDefinitions(stats){
         {text:rankLabel(stat.startRank)+" &rarr; "+rankLabel(stat.finalRank),tone:stat.rankMove>0?"good":""},
         {text:(stat.rankMove>0?"+":"")+stat.rankMove+" ranks",tone:stat.rankMove>0?"good":"warn"},
         {text:"+"+shortNum(stat.totalGain)+" pts"},
-        {text:stat.snapshotCount+" snapshots"}
+        {text:historyOf(stat).priorAvgRank?"prior avg "+rankLabel(historyOf(stat).priorAvgRank):"no prior c0ld",tone:historyOf(stat).priorAvgRank?"good":"warn"}
       ]
     },
     {
@@ -493,10 +650,11 @@ function awardDefinitions(stats){
       weight:"rookie signal + output",
       items:rookie,
       metrics:stat=>[
-        {text:stat.rookieFallback?"no rookie match":((stat.archivedBattles??0)+" archived battle"+((stat.archivedBattles??0)===1?"":"s")),tone:stat.rookieFallback?"warn":"good"},
+        {text:stat.rookieFallback?"no rookie match":"first c0ld war",tone:stat.rookieFallback?"warn":"good"},
         {text:rankLabel(stat.finalRank)},
         {text:shortNum(stat.finalPoints)+" pts"},
-        {text:"+"+shortNum(stat.totalGain)}
+        {text:historyOf(stat).importedBattleCount?historyOf(stat).importedBattleCount+" outside histories":"no outside history"},
+        {text:historyOf(stat).priorBestGlobalRank?"best G "+rankLabel(historyOf(stat).priorBestGlobalRank):"G history -"}
       ]
     },
     {
@@ -508,7 +666,7 @@ function awardDefinitions(stats){
         {text:fmtDuration(stat.downtimeMs)+" idle",tone:"bad"},
         {text:stat.downtimePct.toFixed(0)+"% no-gain",tone:stat.downtimePct>35?"bad":"warn"},
         {text:stat.rankLoss?("lost "+stat.rankLoss+" ranks"):"no rank loss"},
-        {text:fmtDuration(stat.timeAtLast)+" last"}
+        {text:historyOf(stat).priorAvgRank?"prior avg "+rankLabel(historyOf(stat).priorAvgRank):"no prior c0ld"}
       ]
     }
   ];
@@ -596,6 +754,8 @@ async function loadCandidates(){
     const snapshots=buildSnapshots(mergedRows);
     const stats=computeStats(snapshots);
     if(!snapshots.length||!stats.length)throw new Error("No battle snapshots were found for "+effectiveBattle+".");
+    setStatus("Loading player history for "+stats.length.toLocaleString("en-US")+" candidates.");
+    await hydrateHistory(stats,effectiveBattle);
     renderSummary(effectiveBattle,current,snapshots,stats);
     renderAwards(awardDefinitions(stats));
     renderCustom(stats);

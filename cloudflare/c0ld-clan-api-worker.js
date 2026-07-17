@@ -37,7 +37,7 @@ const DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT = 500;
 const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
-const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 29;
+const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
@@ -53,6 +53,7 @@ const DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const DEFAULT_CLAN_ACTIVITY_CONCURRENCY = 8;
 const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 25;
+const DEFAULT_BATTLE_FINAL_PULL_GRACE_MINUTES = 0;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 const DEFAULT_PS99_UNIVERSE_ID = 3317771874;
 const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
@@ -117,6 +118,15 @@ export default {
           active_battle_ended_at: activeBattleMeta?.endedAt || null,
           ingest_open: gate.allowed,
           ingest_skip_reason: gate.allowed ? null : gate.reason,
+          battle_data_cutoff: {
+            source: "active_battle_ended_at",
+            final_pull_grace_minutes: battleFinalPullGraceMinutes(env),
+            cutoff_at: gate.battle_cutoff_at || activeBattleMeta?.endedAt || null,
+            hard_stop_at: gate.hard_stop_at || null,
+            bundle_guard: true,
+            global_rank_guard: true,
+            scheduled_timestamp_snapshots: true
+          },
           global_rank_config: globalRankRuntimeConfig(env),
           clan_activity_config: clanActivityRuntimeConfig(env),
           ps99_version_config: ps99VersionRuntimeConfig(env),
@@ -127,8 +137,6 @@ export default {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/home/awards") {
         response = await handleHomeAwards(request, env);
-      } else if (request.method === "GET" && url.pathname === "/api/avatar") {
-        response = await handleRobloxAvatar(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/history") {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/battles") {
@@ -238,15 +246,49 @@ function isPs99RestartCron(value) {
 }
 
 async function runScheduledIngests(env, force = false, scheduledAt = null, options = {}) {
+  const runOptions = normalizeIngestRunOptions({ scheduledAt });
+  if (!force) {
+    const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+    const configuredBattleKey = activeBattleMeta?.battleKey || battleKey(env);
+    const scheduleBattleMeta = mergeBattleMeta(
+      extractBattleMeta({}, configuredBattleKey, env, {
+        allowEnvDisplayName: false,
+        allowEnvTiming: true
+      }),
+      activeBattleMeta,
+      configuredBattleKey,
+      { allowMismatch: true }
+    );
+    const scheduleGate = battleIngestGate({
+      activeBattleMeta,
+      battleMeta: scheduleBattleMeta,
+      battleKey: configuredBattleKey,
+      env,
+      force,
+      scheduledAt: runOptions.scheduledAt,
+      now: runOptions.now
+    });
+
+    if (!scheduleGate.allowed) {
+      return [scheduledBattleDataSkippedResult(scheduleGate, runOptions.fetchedAt)];
+    }
+
+    runOptions.activeBattleMeta = activeBattleMeta;
+  }
+
+  const jobRunOptions = {
+    scheduledAt: runOptions.scheduledAt,
+    activeBattleMeta: runOptions.activeBattleMeta || null
+  };
   const jobs = clanNames(env).map(clan => ({
     label: `members:${clan}`,
-    run: () => handleIngest(env, "schedule", clan, force)
+    run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
   }));
 
   if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
     jobs.push({
       label: "clans",
-      run: () => handleClansIngest(env, "schedule", force)
+      run: () => handleClansIngest(env, "schedule", force, jobRunOptions)
     });
   }
 
@@ -257,7 +299,7 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
     if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env, scheduledAt)) {
       jobs.push({
         label: "global-ranks",
-        run: () => handleGlobalRankIngest(env, "schedule", globalClan, force)
+        run: () => handleGlobalRankIngest(env, "schedule", globalClan, force, jobRunOptions)
       });
     }
   }
@@ -268,7 +310,8 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
         label: "clan-activity",
         run: () => handleClanActivityIngest(env, "schedule", {
           force,
-          bypassRecentGuard: options.bypassActivityRecentGuard === true
+          bypassRecentGuard: options.bypassActivityRecentGuard === true,
+          ...jobRunOptions
         })
       });
     }
@@ -341,6 +384,62 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
   return results;
 }
 
+function normalizeIngestRunOptions(options = {}) {
+  const scheduledAt = options?.scheduledAt instanceof Date && !Number.isNaN(options.scheduledAt.getTime())
+    ? options.scheduledAt
+    : null;
+  const fetchedAtDate = options?.fetchedAt instanceof Date && !Number.isNaN(options.fetchedAt.getTime())
+    ? options.fetchedAt
+    : scheduledAt || new Date();
+  const now = options?.now instanceof Date && !Number.isNaN(options.now.getTime())
+    ? options.now
+    : new Date();
+
+  return {
+    ...options,
+    scheduledAt,
+    fetchedAt: fetchedAtDate.toISOString(),
+    now
+  };
+}
+
+function scheduledBattleDataSkippedResult(gate, fetchedAt) {
+  return {
+    label: "battle-data",
+    ok: true,
+    status: 202,
+    skipped: true,
+    reason: gate.reason,
+    battle_key: gate.battle_key || null,
+    rows_inserted: 0,
+    status_text: null,
+    shard_count: null,
+    shard_concurrency: null,
+    clans_per_shard_run: null,
+    clan_scan_limit: null,
+    scanned_count: null,
+    scanned_clan_count: null,
+    processed_clans: null,
+    next_clan_offset: null,
+    candidate_player_count: null,
+    total_global_players: null,
+    clans_fetched: null,
+    clan_activity_concurrency: null,
+    roster_rows_inserted: null,
+    events_inserted: null,
+    summary_rows_inserted: null,
+    ps99_places_checked: null,
+    ps99_events_inserted: null,
+    ps99_newest_version: null,
+    webhook_alert: null,
+    scan_error_count: null,
+    message: gate.message || "Battle data scheduled pulls skipped without queuing member, clans, global-rank, or activity jobs.",
+    fetched_at: fetchedAt,
+    battle_cutoff_at: gate.battle_cutoff_at || null,
+    hard_stop_at: gate.hard_stop_at || null
+  };
+}
+
 async function responseJson(response) {
   try {
     return await response.clone().json();
@@ -349,19 +448,22 @@ async function responseJson(response) {
   }
 }
 
-async function handleIngest(env, source, requestedClan, force = false) {
+async function handleIngest(env, source, requestedClan, force = false, options = {}) {
   requireSupabase(env);
 
-  const fetchedAt = new Date().toISOString();
+  const runOptions = normalizeIngestRunOptions(options);
+  const fetchedAt = runOptions.fetchedAt;
   const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
   const configuredBattleKey = battleKey(env);
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const activeGate = battleIngestGate({
     activeBattleMeta,
     battleMeta: activeBattleMeta,
     battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!activeGate.allowed) {
@@ -416,7 +518,9 @@ async function handleIngest(env, source, requestedClan, force = false) {
     battleMeta,
     battleKey: resolvedBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!ingestGate.allowed) {
@@ -1521,7 +1625,7 @@ async function handleExternalHistory(request, env) {
   }
 
   const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
-    select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
+    select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,clan_rank,total_clan_members,global_rank,total_global_players,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
     source: `eq.${source}`,
     user_id: `eq.${userId}`,
     status: status === "all" ? undefined : `eq.${status || "approved"}`,
@@ -1649,11 +1753,15 @@ async function handleCwBotHistoryImport(request, env) {
       continue;
     }
 
-    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.rank);
-    const totalRanked = toNumber(parsedRow.total_ranked ?? parsedRow.total);
+    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.global_rank ?? parsedRow.g_rank ?? parsedRow.rank);
+    const totalRanked = toNumber(parsedRow.total_ranked ?? parsedRow.total_global_players ?? parsedRow.total);
+    const clanRank = toNumber(parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.final_clan_rank);
+    const totalClanMembers = toNumber(parsedRow.total_clan_members ?? parsedRow.total_members);
+    const globalRank = toNumber(parsedRow.global_rank ?? parsedRow.g_rank ?? parsedRow.final_global_rank ?? parsedRow.final_rank ?? parsedRow.rank);
+    const totalGlobalPlayers = toNumber(parsedRow.total_global_players ?? parsedRow.global_total ?? parsedRow.total_ranked ?? parsedRow.total);
     const finalPoints = parseCwBotNumber(parsedRow.final_points ?? parsedRow.points);
 
-    if (finalRank === null && finalPoints === null) {
+    if (finalRank === null && clanRank === null && globalRank === null && finalPoints === null) {
       skipped.push({ reason: "missing_rank_and_points", battle_name: battleName, battle_key: battleKeyValue });
       continue;
     }
@@ -1667,6 +1775,10 @@ async function handleCwBotHistoryImport(request, env) {
       clan_name: stringOrNull(parsedRow.clan_name || parsedRow.clan),
       final_rank: finalRank,
       total_ranked: totalRanked,
+      clan_rank: clanRank,
+      total_clan_members: totalClanMembers,
+      global_rank: globalRank,
+      total_global_players: totalGlobalPlayers,
       final_points: finalPoints,
       final_snapshot_at: safeIso(parsedRow.final_snapshot_at || parsedRow.date) || safeIso(message.timestamp) || importedAt,
       status: importStatus,
@@ -1802,10 +1914,13 @@ async function handleBigBotHistoryImport(request, env) {
       continue;
     }
 
-    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.rank);
+    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.rank);
+    const clanRank = toNumber(parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.final_rank ?? parsedRow.rank);
+    const globalRank = toNumber(parsedRow.global_rank ?? parsedRow.g_rank ?? parsedRow.final_global_rank);
+    const totalGlobalPlayers = toNumber(parsedRow.total_global_players ?? parsedRow.global_total);
     const finalPoints = parseCwBotNumber(parsedRow.final_points ?? parsedRow.points);
 
-    if (finalRank === null && finalPoints === null) {
+    if (finalRank === null && clanRank === null && globalRank === null && finalPoints === null) {
       skipped.push({ reason: "missing_rank_and_points", battle_name: battleName, battle_key: battleKeyValue });
       continue;
     }
@@ -1819,6 +1934,10 @@ async function handleBigBotHistoryImport(request, env) {
       clan_name: stringOrNull(parsedRow.clan_name || parsedRow.clan || parsed.current_clan),
       final_rank: finalRank,
       total_ranked: null,
+      clan_rank: clanRank,
+      total_clan_members: null,
+      global_rank: globalRank,
+      total_global_players: totalGlobalPlayers,
       final_points: finalPoints,
       final_snapshot_at: safeIso(message.edited_timestamp || message.timestamp) || importedAt,
       status: importStatus,
@@ -2102,19 +2221,20 @@ async function countTiedBeforeSourceClanMembers(env, runKey, row) {
   });
 }
 
-async function handleGlobalRankIngest(env, source, requestedClan, force = false) {
+async function handleGlobalRankIngest(env, source, requestedClan, force = false, options = {}) {
   if (globalRankShardCount(env) > 1) {
-    return handleGlobalRankShardedIngest(env, source, requestedClan, force);
+    return handleGlobalRankShardedIngest(env, source, requestedClan, force, options);
   }
 
-  return handleGlobalRankLinearIngest(env, source, requestedClan, force);
+  return handleGlobalRankLinearIngest(env, source, requestedClan, force, options);
 }
 
-async function handleGlobalRankLinearIngest(env, source, requestedClan, force = false) {
+async function handleGlobalRankLinearIngest(env, source, requestedClan, force = false, options = {}) {
   requireSupabase(env);
 
+  const runOptions = normalizeIngestRunOptions(options);
   const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
-  const fetchedAt = new Date().toISOString();
+  const fetchedAt = runOptions.fetchedAt;
   const clanScanLimit = globalRankClanScanLimit(env);
   const pageSize = globalRankClanPageSize(env);
   const clansPerRun = globalRankClansPerRun(env);
@@ -2126,9 +2246,37 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
 
   const latest = latestMetaFromRows(currentRows);
   const configuredBattleKey = latest?.battle_key || battleKey(env);
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
+  const battleMeta = mergeBattleMeta({
+    displayName: battleDisplayName,
+    startedAt: latest?.battle_started_at || null,
+    endedAt: latest?.battle_ended_at || null
+  }, activeBattleMeta, latest?.battle_key, { allowMismatch: true });
+  const ingestGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey: latest?.battle_key || configuredBattleKey,
+    env,
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
+  });
+
+  if (!ingestGate.allowed) {
+    return skippedIngestResponse({
+      scope: "global-ranks",
+      source,
+      clan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey: latest?.battle_key || configuredBattleKey,
+      battleMeta,
+      gate: ingestGate
+    });
+  }
+
   const existingRunningRun = await findRunningGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
   const runningRun = force ? null : existingRunningRun;
   const runKey = runningRun?.run_key || `${clan}:global:${latest?.battle_key || "battle"}:${fetchedAt}`;
@@ -2215,6 +2363,15 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
 
   try {
     while (processedClans < clansPerRun && nextClanOffset < clanScanLimit) {
+      assertBattleIngestStillOpen({
+        activeBattleMeta,
+        battleMeta,
+        battleKey: latest?.battle_key || configuredBattleKey,
+        env,
+        force,
+        scheduledAt: runOptions.scheduledAt
+      });
+
       const pageNumber = Math.floor(nextClanOffset / pageSize) + 1;
       const pageIndex = nextClanOffset % pageSize;
       const pageRows = await fetchClanLeaderboardPage(env, {
@@ -2229,6 +2386,14 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
 
       for (let index = pageIndex; index < pageRows.length && processedClans < clansPerRun; index += 1) {
         if (nextClanOffset >= clanScanLimit) break;
+        assertBattleIngestStillOpen({
+          activeBattleMeta,
+          battleMeta,
+          battleKey: latest?.battle_key || configuredBattleKey,
+          env,
+          force,
+          scheduledAt: runOptions.scheduledAt
+        });
 
         const clanRow = pageRows[index];
         const candidateRows = await collectGlobalRankCandidatesForClan(env, {
@@ -2431,11 +2596,12 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
   }
 }
 
-async function handleGlobalRankShardedIngest(env, source, requestedClan, force = false) {
+async function handleGlobalRankShardedIngest(env, source, requestedClan, force = false, options = {}) {
   requireSupabase(env);
 
+  const runOptions = normalizeIngestRunOptions(options);
   const clan = String(requestedClan || clanName(env)).trim() || clanName(env);
-  const fetchedAt = new Date().toISOString();
+  const fetchedAt = runOptions.fetchedAt;
   const clanScanLimit = globalRankClanScanLimit(env);
   const pageSize = globalRankClanPageSize(env);
   const shardCount = globalRankShardCount(env);
@@ -2449,9 +2615,37 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
 
   const latest = latestMetaFromRows(currentRows);
   const configuredBattleKey = latest?.battle_key || battleKey(env);
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
+  const battleMeta = mergeBattleMeta({
+    displayName: battleDisplayName,
+    startedAt: latest?.battle_started_at || null,
+    endedAt: latest?.battle_ended_at || null
+  }, activeBattleMeta, latest?.battle_key, { allowMismatch: true });
+  const ingestGate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey: latest?.battle_key || configuredBattleKey,
+    env,
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
+  });
+
+  if (!ingestGate.allowed) {
+    return skippedIngestResponse({
+      scope: "global-ranks",
+      source,
+      clan,
+      fetchedAt,
+      configuredBattleKey,
+      resolvedBattleKey: latest?.battle_key || configuredBattleKey,
+      battleMeta,
+      gate: ingestGate
+    });
+  }
+
   const existingRunningRun = await findResumableGlobalRankRun(env, clan, latest?.battle_key).catch(() => null);
   const existingShards = existingRunningRun?.run_key
     ? await fetchGlobalRankShards(env, existingRunningRun.run_key).catch(() => [])
@@ -2569,7 +2763,15 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
       configuredBattleKey,
       activeBattleKey: activeBattleMeta?.battleKey || "",
       fetchedAt,
-      leaderboardPageCache
+      leaderboardPageCache,
+      ingestGateContext: {
+        activeBattleMeta,
+        battleMeta,
+        battleKey: latest?.battle_key || configuredBattleKey,
+        env,
+        force,
+        scheduledAt: runOptions.scheduledAt
+      }
     }));
 
     processedClans = shardResults.reduce((total, result) => total + (toNumber(result.processed_clans) || 0), 0);
@@ -2842,19 +3044,22 @@ async function handleBattles(request, env) {
   }, env);
 }
 
-async function handleClansIngest(env, source, force = false) {
+async function handleClansIngest(env, source, force = false, options = {}) {
   requireSupabase(env);
 
-  const fetchedAt = new Date().toISOString();
+  const runOptions = normalizeIngestRunOptions(options);
+  const fetchedAt = runOptions.fetchedAt;
   const trackedClan = clanName(env);
   const configuredBattleKey = battleKey(env);
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const activeGate = battleIngestGate({
     activeBattleMeta,
     battleMeta: activeBattleMeta,
     battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!activeGate.allowed) {
@@ -2887,7 +3092,9 @@ async function handleClansIngest(env, source, force = false) {
     battleMeta,
     battleKey: resolvedBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!ingestGate.allowed) {
@@ -3571,16 +3778,19 @@ async function handleClanActivityIngest(env, source, options = {}) {
 
   const force = typeof options === "boolean" ? options : options.force === true;
   const bypassRecentGuard = typeof options === "object" && options.bypassRecentGuard === true;
-  const fetchedAt = new Date().toISOString();
+  const runOptions = normalizeIngestRunOptions(typeof options === "object" ? options : {});
+  const fetchedAt = runOptions.fetchedAt;
   const configuredBattleKey = battleKey(env);
   const trackedClan = clanName(env);
-  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const activeGate = battleIngestGate({
     activeBattleMeta,
     battleMeta: activeBattleMeta,
     battleKey: activeBattleMeta?.battleKey || configuredBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!activeGate.allowed) {
@@ -3618,7 +3828,9 @@ async function handleClanActivityIngest(env, source, options = {}) {
     battleMeta,
     battleKey: resolvedBattleKey,
     env,
-    force
+    force,
+    scheduledAt: runOptions.scheduledAt,
+    now: runOptions.now
   });
 
   if (!ingestGate.allowed) {
@@ -3670,6 +3882,15 @@ async function handleClanActivityIngest(env, source, options = {}) {
     }
 
     try {
+      assertBattleIngestStillOpen({
+        activeBattleMeta,
+        battleMeta,
+        battleKey: resolvedBattleKey,
+        env,
+        force,
+        scheduledAt: runOptions.scheduledAt
+      });
+
       const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
       const data = api.data || {};
       const battles = data.Battles || data.battles || {};
@@ -3772,6 +3993,8 @@ async function handleClanActivityIngest(env, source, options = {}) {
         raw_clan: clanRow.raw_clan || {}
       });
     } catch (err) {
+      if (err?.battleIngestClosed) throw err;
+
       scanErrors.push({
         clan_name: clanRow.clan_name,
         rank: clanRow.rank,
@@ -6802,7 +7025,8 @@ async function processGlobalRankShard(env, {
   configuredBattleKey,
   activeBattleKey,
   fetchedAt,
-  leaderboardPageCache = null
+  leaderboardPageCache = null,
+  ingestGateContext = null
 }) {
   const shardIndex = toNumber(shard.shard_index) || 0;
   const startOffset = toNumber(shard.start_offset) || 0;
@@ -6827,6 +7051,8 @@ async function processGlobalRankShard(env, {
 
   try {
     while (processedClans < clansPerShardRun && nextOffset < endOffset) {
+      if (ingestGateContext) assertBattleIngestStillOpen(ingestGateContext);
+
       const pageNumber = Math.floor(nextOffset / pageSize) + 1;
       const pageIndex = nextOffset % pageSize;
       const pageRows = await fetchClanLeaderboardPage(env, {
@@ -6842,6 +7068,7 @@ async function processGlobalRankShard(env, {
 
       for (let index = pageIndex; index < pageRows.length && processedClans < clansPerShardRun; index += 1) {
         if (nextOffset >= endOffset) break;
+        if (ingestGateContext) assertBattleIngestStillOpen(ingestGateContext);
 
         const clanRow = pageRows[index];
         const candidateRows = await collectGlobalRankCandidatesForClan(env, {
@@ -7710,36 +7937,6 @@ function displayUsername(row, usernameMap) {
   return existing || (id ? `user_${id}` : "");
 }
 
-async function handleRobloxAvatar(request, env) {
-  const url = new URL(request.url);
-  const userId = String(url.searchParams.get("user_id") || "").trim();
-  if (!/^\d+$/.test(userId)) {
-    return json({ ok: false, message: "A numeric user_id is required" }, 400);
-  }
-
-  const avatarMap = await resolveRobloxAvatarHeadshots([userId], env);
-  const avatarUrl = avatarMap.get(userId);
-  if (!avatarUrl) {
-    return json({ ok: false, message: "Avatar unavailable" }, 404);
-  }
-
-  const upstream = await fetch(avatarUrl, {
-    headers: {
-      Accept: "image/avif,image/webp,image/png,image/*,*/*;q=0.8",
-      "User-Agent": "c0ld-Clan-API-Worker"
-    }
-  });
-  if (!upstream.ok || !upstream.body) {
-    return json({ ok: false, message: "Avatar image unavailable" }, 502);
-  }
-
-  const headers = new Headers();
-  headers.set("Content-Type", upstream.headers.get("Content-Type") || "image/png");
-  headers.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
-  headers.set("X-Content-Type-Options", "nosniff");
-  return new Response(upstream.body, { status: 200, headers });
-}
-
 async function resolveRobloxAvatarHeadshots(userIds, env) {
   const shouldLookup = String(env.ROBLOX_AVATAR_LOOKUPS || "true").toLowerCase() !== "false";
   const result = new Map();
@@ -8401,7 +8598,7 @@ async function ocrCwBotHistoryImage(env, imageUrl, context = {}) {
   const prompt = [
     "Read this CW_Bot PS99 player history image.",
     "Return only JSON with this shape:",
-    "{\"player_name\":string|null,\"player_id\":string|null,\"rows\":[{\"battle_name\":string,\"clan_name\":string|null,\"final_rank\":number|null,\"total_ranked\":number|null,\"final_points\":number|null}]}",
+    "{\"player_name\":string|null,\"player_id\":string|null,\"rows\":[{\"battle_name\":string,\"clan_name\":string|null,\"clan_rank\":number|null,\"total_clan_members\":number|null,\"global_rank\":number|null,\"total_global_players\":number|null,\"final_rank\":number|null,\"total_ranked\":number|null,\"final_points\":number|null}]}",
     "Use null for unreadable values. Convert k/m/b/t point suffixes to full numbers.",
     context.userId ? `Expected Roblox user ID: ${context.userId}.` : "",
     context.username ? `Expected username: ${context.username}.` : ""
@@ -8477,6 +8674,8 @@ function parseCwBotHistoryText(text) {
       clan_name: clanName,
       final_rank: rankInfo.rank,
       total_ranked: rankInfo.total,
+      global_rank: rankInfo.rank,
+      total_global_players: rankInfo.total,
       final_points: points
     });
   }
@@ -8572,11 +8771,20 @@ function parseCwBotJsonRows(raw) {
   const rows = sourceRows.map(row => ({
     battle_name: row.battle_name || row.battle || row.name || row.title || row.event,
     clan_name: row.clan_name || row.clan || row.guild,
-    final_rank: toNumber(row.final_rank ?? row.rank),
-    total_ranked: toNumber(row.total_ranked ?? row.total ?? row.total_players),
+    final_rank: toNumber(row.final_rank ?? row.global_rank ?? row.g_rank ?? row.rank),
+    total_ranked: toNumber(row.total_ranked ?? row.total_global_players ?? row.total ?? row.total_players),
+    clan_rank: toNumber(row.clan_rank ?? row.member_rank ?? row.final_clan_rank),
+    total_clan_members: toNumber(row.total_clan_members ?? row.total_members),
+    global_rank: toNumber(row.global_rank ?? row.g_rank ?? row.final_global_rank ?? row.final_rank ?? row.rank),
+    total_global_players: toNumber(row.total_global_players ?? row.global_total ?? row.total_ranked ?? row.total ?? row.total_players),
     final_points: parseCwBotNumber(row.final_points ?? row.points),
     final_snapshot_at: row.final_snapshot_at || row.date || null
-  })).filter(row => cleanExternalBattleName(row.battle_name) && (row.final_rank !== null || row.final_points !== null));
+  })).filter(row => cleanExternalBattleName(row.battle_name) && (
+    row.final_rank !== null ||
+    row.clan_rank !== null ||
+    row.global_rank !== null ||
+    row.final_points !== null
+  ));
 
   return {
     player_name: parsed.player_name || parsed.username || parsed.name || null,
@@ -8743,6 +8951,10 @@ function normalizeExternalHistoryOutput(row) {
     clan_name: row.clan_name || null,
     final_rank: toNumber(row.final_rank),
     total_ranked: toNumber(row.total_ranked),
+    clan_rank: toNumber(row.clan_rank),
+    total_clan_members: toNumber(row.total_clan_members),
+    global_rank: toNumber(row.global_rank),
+    total_global_players: toNumber(row.total_global_players),
     final_points: toNumber(row.final_points),
     final_snapshot_at: row.final_snapshot_at || null,
     status: row.status || null,
@@ -9002,7 +9214,15 @@ function isTruthyParam(url, name) {
   );
 }
 
-function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force = false }) {
+function battleIngestGate({
+  activeBattleMeta,
+  battleMeta,
+  battleKey,
+  env,
+  force = false,
+  scheduledAt = null,
+  now = null
+}) {
   if (force) {
     return { allowed: true, reason: "forced" };
   }
@@ -9015,10 +9235,48 @@ function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force 
   const startedAt = meta.startedAt || activeBattleMeta?.startedAt || null;
   const endedAt = meta.endedAt || activeBattleMeta?.endedAt || null;
   const startMs = isoToMs(startedAt);
-  const endMs = isoToMs(endedAt);
-  const now = Date.now();
+  const cutoff = effectiveBattleIngestCutoff(env, endedAt);
+  const endMs = cutoff.ms;
+  const nowMs = now instanceof Date && !Number.isNaN(now.getTime())
+    ? now.getTime()
+    : Date.now();
+  const scheduledMs = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt.getTime()
+    : null;
+  const graceMinutes = battleFinalPullGraceMinutes(env);
+  const hardStopMs = Number.isFinite(endMs)
+    ? endMs + graceMinutes * 60 * 1000
+    : NaN;
 
-  if (Number.isFinite(endMs) && endMs <= now) {
+  if (Number.isFinite(endMs) && scheduledMs !== null && scheduledMs > endMs) {
+    return {
+      allowed: false,
+      reason: "battle_final_pull_passed",
+      message: "Scheduled battle data pull is after the configured final pull time; ingest skipped without writing snapshot rows.",
+      battle_key: battleKey || activeBattleMeta?.battleKey || null,
+      battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
+      battle_started_at: startedAt,
+      battle_ended_at: endedAt,
+      battle_cutoff_at: cutoff.iso,
+      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
+    };
+  }
+
+  if (Number.isFinite(hardStopMs) && nowMs >= hardStopMs) {
+    return {
+      allowed: false,
+      reason: "battle_final_pull_hard_stop",
+      message: "Battle data pull hard stop has passed; ingest skipped without writing snapshot rows.",
+      battle_key: battleKey || activeBattleMeta?.battleKey || null,
+      battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
+      battle_started_at: startedAt,
+      battle_ended_at: endedAt,
+      battle_cutoff_at: cutoff.iso,
+      hard_stop_at: new Date(hardStopMs).toISOString()
+    };
+  }
+
+  if (Number.isFinite(endMs) && scheduledMs === null && nowMs > endMs) {
     return {
       allowed: false,
       reason: "battle_ended",
@@ -9026,11 +9284,13 @@ function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force 
       battle_key: battleKey || activeBattleMeta?.battleKey || null,
       battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
       battle_started_at: startedAt,
-      battle_ended_at: endedAt
+      battle_ended_at: endedAt,
+      battle_cutoff_at: cutoff.iso,
+      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
     };
   }
 
-  if (Number.isFinite(startMs) && startMs > now) {
+  if (Number.isFinite(startMs) && startMs > nowMs) {
     return {
       allowed: false,
       reason: "battle_not_started",
@@ -9048,8 +9308,57 @@ function battleIngestGate({ activeBattleMeta, battleMeta, battleKey, env, force 
     battle_key: battleKey || activeBattleMeta?.battleKey || null,
     battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
     battle_started_at: startedAt,
-    battle_ended_at: endedAt
+    battle_ended_at: endedAt,
+    battle_cutoff_at: cutoff.iso,
+    hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
   };
+}
+
+function assertBattleIngestStillOpen({
+  activeBattleMeta,
+  battleMeta,
+  battleKey,
+  env,
+  force = false,
+  scheduledAt = null
+}) {
+  const gate = battleIngestGate({
+    activeBattleMeta,
+    battleMeta,
+    battleKey,
+    env,
+    force,
+    scheduledAt,
+    now: new Date()
+  });
+
+  if (!gate.allowed) {
+    const err = httpError(409, gate.message || "Battle data pull cutoff has passed.");
+    err.battleIngestClosed = true;
+    err.reason = gate.reason;
+    err.battle_cutoff_at = gate.battle_cutoff_at || null;
+    err.hard_stop_at = gate.hard_stop_at || null;
+    throw err;
+  }
+
+  return gate;
+}
+
+function effectiveBattleIngestCutoff(env, endedAt) {
+  const baseMs = isoToMs(endedAt);
+
+  return {
+    ms: baseMs,
+    iso: Number.isFinite(baseMs) ? new Date(baseMs).toISOString() : null
+  };
+}
+
+function battleFinalPullGraceMinutes(env) {
+  return clamp(
+    Number(env.BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES || DEFAULT_BATTLE_FINAL_PULL_GRACE_MINUTES),
+    0,
+    60
+  );
 }
 
 function skippedIngestResponse({
@@ -9079,6 +9388,8 @@ function skippedIngestResponse({
     latest_snapshot_at: gate.latest_snapshot_at || null,
     min_snapshot_interval_minutes: gate.min_snapshot_interval_minutes || null,
     next_allowed_at: gate.next_allowed_at || null,
+    battle_cutoff_at: gate.battle_cutoff_at || null,
+    hard_stop_at: gate.hard_stop_at || null,
     fetched_at: fetchedAt,
     rows_inserted: 0
   });

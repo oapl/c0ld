@@ -981,16 +981,20 @@ function normalizeExternalClanSummaryRows(rows){
     .map(row=>{
       const source=String(row.source||"cw_bot").toLowerCase();
       const isCwBot=source==="cw_bot";
+      const clanRank=finite(row.clan_rank??(!isCwBot?row.final_rank:null));
+      const totalClanMembers=finite(row.total_clan_members??(!isCwBot?row.total_ranked:null));
+      const globalRank=finite(row.global_rank??(isCwBot?row.final_rank:null));
+      const totalGlobalPlayers=finite(row.total_global_players??(isCwBot?row.total_ranked:null));
       return{
         type:"clan",
         source,
         battle:row.battle||row.battle_key||null,
         label:row.battle_name||row.label||row.battle_key||"Clan Battle",
         clan_name:row.clan_name||null,
-        final_rank:isCwBot?null:finite(row.final_rank),
-        total_ranked:isCwBot?null:finite(row.total_ranked),
-        global_rank:isCwBot?finite(row.final_rank):finite(row.global_rank),
-        total_global_players:isCwBot?finite(row.total_ranked):finite(row.total_global_players),
+        final_rank:clanRank,
+        total_ranked:totalClanMembers,
+        global_rank:globalRank,
+        total_global_players:totalGlobalPlayers,
         final_points:finite(row.final_points),
         first_snapshot_at:row.final_snapshot_at||row.created_at||null,
         final_snapshot_at:row.final_snapshot_at||row.created_at||null,

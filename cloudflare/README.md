@@ -138,6 +138,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `AUTO_DETECT_BATTLE` | `true`; lets the Worker pick the active/latest API battle automatically. Set to `false` only when you want to force `CURRENT_BATTLE_NAME`. |
 | `ACTIVE_BATTLE_LOOKUP` | Optional. Defaults to `true`; reads Big Games' active battle metadata for display/start/end times. |
 | `SKIP_ENDED_BATTLE_INGEST` | Optional. Defaults to `true`; cron and normal manual ingests skip without writing snapshot rows when the active battle is ended or not started. |
+| `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES` | Optional. Defaults to `0`; blocks scheduled battle-data pulls as soon as the API battle end time has passed. |
 | `CURRENT_BATTLE_DISPLAY_NAME` | Optional override. If blank, the Worker uses the API battle name or prettifies the battle key. |
 | `CURRENT_BATTLE_END_ISO` | Optional override. If blank, the Worker reads the API end timestamp when present. |
 | `SITE_ORIGINS` | `https://oapl.github.io,https://c0ld-clan.com,https://www.c0ld-clan.com` |
@@ -156,7 +157,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
 | `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
-| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `29`. Offset inside the schedule interval. With `GLOBAL_RANK_SCHEDULE_MINUTES=30` and the recommended shifted five-minute cron, fresh scans start at `:29` and `:59`, one minute before each half-hour boundary. |
+| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Offset inside the schedule interval; keep `0` with the top-of-five-minute cron when you want all battle-data pulls aligned on `:00`, `:05`, `:10`, and so on. |
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; fallback maximum clan detail pulls per Worker invocation when no per-shard value is set. |
@@ -219,6 +220,8 @@ Battle start/end values from the Big Games API can be ISO strings, Unix seconds,
 
 When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanently. The Worker checks active battle metadata before writing; ended/not-started battles return `skipped: true` and `rows_inserted: 0`. For deliberate backfills, add `?force=1` to a protected manual ingest URL.
 
+The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff.
+
 ### Secrets
 
 | Secret | Purpose |
@@ -239,12 +242,12 @@ The Wrangler example includes:
 
 ```toml
 [triggers]
-crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *", "* * * * *"]
+crons = ["*/5 * * * *", "* * * * *"]
 ```
 
 The five-minute grid continues the existing clan, activity, global-rank, and PS99 version jobs. The every-minute trigger is routed only to the lightweight PS99 restart detector. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
 
-Do not reduce the Cloudflare cron itself to only two runs per hour. The Worker uses `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=29` to start fresh scans at `:29` and `:59`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans.
+Do not reduce the Cloudflare cron itself to only two runs per hour. If you set `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=0`, fresh scans start at `:00` and `:30`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans, and the battle-data cutoff guard prevents the `10:05` tick from queuing late battle pulls.
 
 ## Manual test
 

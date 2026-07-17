@@ -3,7 +3,7 @@ main = "c0ld-clan-api-worker.js"
 compatibility_date = "2026-06-16"
 
 [triggers]
-crons = ["4,9,14,19,24,29,34,39,44,49,54,59 * * * *", "* * * * *"]
+crons = ["*/5 * * * *", "* * * * *"]
 
 [vars]
 CLAN_NAME = "c0ld"
@@ -11,6 +11,7 @@ CURRENT_BATTLE_NAME = "auto"
 AUTO_DETECT_BATTLE = "true"
 ACTIVE_BATTLE_LOOKUP = "true"
 SKIP_ENDED_BATTLE_INGEST = "true"
+BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES = "0"
 # Optional overrides. Leave blank to use API metadata when present.
 CURRENT_BATTLE_DISPLAY_NAME = ""
 CURRENT_BATTLE_END_ISO = ""
@@ -37,7 +38,7 @@ CLAN_BATTLES_SCAN_LIMIT = "20000"
 # player found inside the configured clan scan limit.
 INGEST_GLOBAL_RANKS = "false"
 GLOBAL_RANK_SCHEDULE_MINUTES = "30"
-GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = "29"
+GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = "0"
 GLOBAL_RANK_CLAN_SCAN_LIMIT = "500"
 GLOBAL_RANK_CLAN_PAGE_SIZE = "100"
 GLOBAL_RANK_CLANS_PER_RUN = "50"

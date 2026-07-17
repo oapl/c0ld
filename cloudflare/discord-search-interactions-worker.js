@@ -615,15 +615,19 @@ function staticClanHistoryRows(profile, defaultClan = null) {
 function externalClanHistoryRows(rows, source) {
   return (Array.isArray(rows) ? rows : []).map(row => {
     const isCwBot = source === "cw_bot";
+    const clanRank = finiteHistoryNumber(row.clan_rank ?? (!isCwBot ? row.final_rank : null));
+    const totalClanMembers = finiteHistoryNumber(row.total_clan_members ?? (!isCwBot ? row.total_ranked : null));
+    const globalRank = finiteHistoryNumber(row.global_rank ?? (isCwBot ? row.final_rank : null));
+    const totalGlobalPlayers = finiteHistoryNumber(row.total_global_players ?? (isCwBot ? row.total_ranked : null));
     return {
       key: historyRecordKey(row.battle_key || row.battle_name),
       name: historyRecordName(row.battle_name || row.battle_key),
       source,
       clan_name: row.clan_name || null,
-      rank: isCwBot ? null : finiteHistoryNumber(row.final_rank),
-      total_ranked: isCwBot ? null : finiteHistoryNumber(row.total_ranked),
-      global_rank: isCwBot ? finiteHistoryNumber(row.final_rank) : null,
-      total_global_players: isCwBot ? finiteHistoryNumber(row.total_ranked) : null,
+      rank: clanRank,
+      total_ranked: totalClanMembers,
+      global_rank: globalRank,
+      total_global_players: totalGlobalPlayers,
       points: finiteHistoryNumber(row.final_points)
     };
   }).filter(row => row.key && (row.rank !== null || row.global_rank !== null || row.points !== null));
