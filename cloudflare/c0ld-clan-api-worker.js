@@ -246,14 +246,25 @@ export default {
 
   async scheduled(event, env, ctx) {
     const scheduledAt = event?.scheduledTime ? new Date(event.scheduledTime) : null;
+    const standaloneJobs = [];
+
+    if (ps99RestartEnabled(env)) {
+      standaloneJobs.push(runScheduledStandaloneJob("ps99-restarts", () => handlePs99RestartIngest(env, "schedule")));
+    }
+
     if (isPs99RestartCron(event?.cron)) {
-      if (ps99RestartEnabled(env)) {
-        ctx.waitUntil(handlePs99RestartIngest(env, "schedule"));
+      if (String(env.INGEST_PS99_VERSION_HISTORY || "false").toLowerCase() === "true" && shouldRunPs99VersionSchedule(env, scheduledAt)) {
+        standaloneJobs.push(runScheduledStandaloneJob("ps99-versions", () => handlePs99VersionIngest(env, "schedule", { force: false })));
       }
+      if (String(env.INGEST_ROBLOX_RELEASE_VERSION_HISTORY || "false").toLowerCase() === "true" && shouldRunRobloxReleaseSchedule(env, scheduledAt)) {
+        standaloneJobs.push(runScheduledStandaloneJob("roblox-release-version", () => handleRobloxReleasedVersionIngest(env, "schedule", { force: false })));
+      }
+      if (standaloneJobs.length) ctx.waitUntil(Promise.allSettled(standaloneJobs));
       return;
     }
 
-    ctx.waitUntil(runScheduledIngests(env, false, scheduledAt));
+    const mainJobs = runScheduledIngests(env, false, scheduledAt);
+    ctx.waitUntil(standaloneJobs.length ? Promise.allSettled([...standaloneJobs, mainJobs]) : mainJobs);
   }
 };
 
@@ -262,8 +273,46 @@ function isPs99RestartCron(value) {
   return PS99_RESTART_CRONS.has(cron);
 }
 
+async function runScheduledStandaloneJob(label, run) {
+  try {
+    const response = await run();
+    const payload = await responseJson(response);
+    const result = {
+      label,
+      ok: response.ok,
+      status: response.status,
+      skipped: Boolean(payload?.skipped),
+      reason: payload?.reason || null,
+      ps99_places_checked: payload?.places_checked ?? null,
+      ps99_events_inserted: payload?.version_events_inserted ?? null,
+      ps99_newest_version: payload?.newest_version ?? null,
+      restart_detected: payload?.restart_detected ?? null,
+      restart_suppressed: payload?.restart_suppressed ?? null,
+      checked_at: payload?.checked_at || null,
+      webhook_alert: payload?.webhook_alert || null,
+      message: payload?.message || null
+    };
+    console.log("scheduled standalone result", JSON.stringify(result));
+    return result;
+  } catch (err) {
+    const result = {
+      label,
+      ok: false,
+      status: err?.status || 500,
+      skipped: false,
+      reason: "error",
+      message: err?.message || String(err)
+    };
+    console.error("scheduled standalone failed", JSON.stringify(result));
+    return result;
+  }
+}
+
 async function runScheduledIngests(env, force = false, scheduledAt = null, options = {}) {
   const runOptions = normalizeIngestRunOptions({ scheduledAt });
+  const results = [];
+  let runBattleDataJobs = true;
+
   if (!force) {
     const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
     const configuredBattleKey = activeBattleMeta?.battleKey || battleKey(env);
@@ -287,50 +336,55 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
     });
 
     if (!scheduleGate.allowed) {
-      return [scheduledBattleDataSkippedResult(scheduleGate, runOptions.fetchedAt)];
+      runBattleDataJobs = false;
+      results.push(scheduledBattleDataSkippedResult(scheduleGate, runOptions.fetchedAt));
+    } else {
+      runOptions.activeBattleMeta = activeBattleMeta;
     }
-
-    runOptions.activeBattleMeta = activeBattleMeta;
   }
 
   const jobRunOptions = {
     scheduledAt: runOptions.scheduledAt,
     activeBattleMeta: runOptions.activeBattleMeta || null
   };
-  const jobs = clanNames(env).map(clan => ({
-    label: `members:${clan}`,
-    run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
-  }));
+  const jobs = [];
 
-  if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
-    jobs.push({
-      label: "clans",
-      run: () => handleClansIngest(env, "schedule", force, jobRunOptions)
-    });
-  }
+  if (runBattleDataJobs) {
+    jobs.push(...clanNames(env).map(clan => ({
+      label: `members:${clan}`,
+      run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
+    })));
 
-  if (String(env.INGEST_GLOBAL_RANKS || "false").toLowerCase() === "true") {
-    const globalClan = clanName(env);
-    const hasRunningGlobalScan = await hasRunningGlobalRankRun(env, globalClan).catch(() => false);
-
-    if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env, scheduledAt)) {
+    if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
       jobs.push({
-        label: "global-ranks",
-        run: () => handleGlobalRankIngest(env, "schedule", globalClan, force, jobRunOptions)
+        label: "clans",
+        run: () => handleClansIngest(env, "schedule", force, jobRunOptions)
       });
     }
-  }
 
-  if (String(env.INGEST_CLAN_ACTIVITY || "false").toLowerCase() === "true") {
-    if (force || shouldRunClanActivitySchedule(env, scheduledAt)) {
-      jobs.push({
-        label: "clan-activity",
-        run: () => handleClanActivityIngest(env, "schedule", {
-          force,
-          bypassRecentGuard: options.bypassActivityRecentGuard === true,
-          ...jobRunOptions
-        })
-      });
+    if (String(env.INGEST_GLOBAL_RANKS || "false").toLowerCase() === "true") {
+      const globalClan = clanName(env);
+      const hasRunningGlobalScan = await hasRunningGlobalRankRun(env, globalClan).catch(() => false);
+
+      if (force || hasRunningGlobalScan || shouldRunGlobalRankSchedule(env, scheduledAt)) {
+        jobs.push({
+          label: "global-ranks",
+          run: () => handleGlobalRankIngest(env, "schedule", globalClan, force, jobRunOptions)
+        });
+      }
+    }
+
+    if (String(env.INGEST_CLAN_ACTIVITY || "false").toLowerCase() === "true") {
+      if (force || shouldRunClanActivitySchedule(env, scheduledAt)) {
+        jobs.push({
+          label: "clan-activity",
+          run: () => handleClanActivityIngest(env, "schedule", {
+            force,
+            bypassRecentGuard: options.bypassActivityRecentGuard === true,
+            ...jobRunOptions
+          })
+        });
+      }
     }
   }
 
@@ -351,8 +405,6 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
       });
     }
   }
-
-  const results = [];
 
   for (const job of jobs) {
     try {

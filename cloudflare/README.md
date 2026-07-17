@@ -209,7 +209,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
 | `CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES` | Optional. Defaults to `25`; skips activity ingests when the latest roster snapshot for the same battle is newer than this. Use `bypass_recent=1` on a protected manual URL only when you intentionally want to override it. |
 | `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
-| `INGEST_PS99_VERSION_HISTORY` | Optional. Defaults to `false`. Set to `true` after running migration `021` to catalog PS99 place version changes. |
+| `INGEST_PS99_VERSION_HISTORY` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `021` so PS99 place version checks continue outside clan battles. |
 | `PS99_UNIVERSE_ID` | Optional. Defaults to `3317771874`. |
 | `PS99_ROOT_PLACE_ID` | Optional. Defaults to `8737899170`. |
 | `PS99_REFRESH_PLACE_LIST` | Optional. Defaults to `true`; lets the Worker refresh the watched PS99 place list from Roblox before checking versions. |
@@ -223,7 +223,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `ROBLOX_RELEASE_SCHEDULE_MINUTES` | Optional. Defaults to `5`; controls how often scheduled Roblox release checks run. |
 | `ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the Roblox release schedule interval. |
 | `ROBLOX_RELEASE_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/roblox/versions`. |
-| `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. Set to `true` after running migration `022` to monitor coordinated PS99 public-server turnover. |
+| `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `022` so PS99 restart detection keeps running every minute. |
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
 | `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
 | `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `10`; persistent high-occupancy public-server IDs used as the reference sample. |
@@ -253,7 +253,7 @@ Battle start/end values from the Big Games API can be ISO strings, Unix seconds,
 
 When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanently. The Worker checks active battle metadata before writing; ended/not-started battles return `skipped: true` and `rows_inserted: 0`. For deliberate backfills, add `?force=1` to a protected manual ingest URL.
 
-The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff.
+The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff. PS99 version scans, PS99 restart detection, and Roblox released-version checks are not battle data and continue after the battle gate closes.
 
 ### Secrets
 
@@ -278,7 +278,7 @@ The Wrangler example includes:
 crons = ["*/5 * * * *", "* * * * *"]
 ```
 
-The five-minute grid continues the existing clan, activity, global-rank, and PS99 version jobs. The every-minute trigger is routed only to the lightweight PS99 restart detector. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
+The five-minute grid continues the existing clan, activity, global-rank, PS99 version, and Roblox released-version jobs. The every-minute trigger always runs the lightweight PS99 restart detector and can also keep PS99/Roblox version checks alive on their configured schedules if the five-minute trigger is accidentally removed. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
 
 Do not reduce the Cloudflare cron itself to only two runs per hour. If you set `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=0`, fresh scans start at `:00` and `:30`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans, and the battle-data cutoff guard prevents the `10:05` tick from queuing late battle pulls.
 
