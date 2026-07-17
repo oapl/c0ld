@@ -5,6 +5,8 @@ const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
+const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
+const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 
 export default {
   async fetch(request, env) {
@@ -14,7 +16,14 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/inventory/health") {
-        response = json({ ok: true, service: "ps99-inventory-detector", timezone: timeZone(env) });
+        response = json({
+          ok: true,
+          service: "ps99-inventory-detector",
+          timezone: timeZone(env),
+          min_fetch_interval_minutes: inventoryMinFetchIntervalMinutes(env),
+          skip_duplicate_source: envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true),
+          supabase_configured: !!(supabaseUrl(env) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY))
+        });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -39,9 +48,11 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      const now = new Date();
       for (const user of configuredUsers(env)) {
-        await ingestInventory(env, user, "schedule", isMountainMidnight(new Date(), env));
-        if (shouldPostHourly(new Date(), env)) await postHourlyDiffIfNeeded(env, user);
+        if (!await inventoryScanIsDue(env, user, now)) continue;
+        const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
+        if (!result.skipped && shouldPostHourly(now, env)) await postHourlyDiffIfNeeded(env, user);
       }
     })());
   }
@@ -52,7 +63,7 @@ async function handleIngest(request, env, source) {
   const url = new URL(request.url);
   const user = requestUser(url);
   const isBoundary = parseBool(url.searchParams.get("boundary")) ?? isMountainMidnight(new Date(), env);
-  const result = await ingestInventory(env, user, source, isBoundary);
+  const result = await ingestInventory(env, user, source, isBoundary, { force: parseBool(url.searchParams.get("force")) === true });
   if (parseBool(url.searchParams.get("post_hourly"))) {
     result.discord = await postHourlyDiffIfNeeded(env, user, { force: true });
   }
@@ -71,10 +82,11 @@ async function handleLatest(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim();
-  const snapshot = await getLatestSnapshot(env, userId);
+  const snapshot = await getLatestSnapshot(env, userId, { includeRaw: true });
   if (!snapshot) return json({ ok: false, message: "No inventory snapshots found." }, 404);
-  const items = await getSnapshotItems(env, snapshot.id);
-  return cacheJson({ ok: true, snapshot, items }, env);
+  const includeItems = parseBool(url.searchParams.get("include_items")) !== false;
+  const items = includeItems ? await getSnapshotItems(env, snapshot.id) : undefined;
+  return cacheJson({ ok: true, snapshot: lightSnapshot(snapshot), source: inventorySourceMeta(snapshot.raw), ...(includeItems ? { items } : {}) }, env);
 }
 
 async function handleDiff(request, env) {
@@ -128,7 +140,7 @@ async function handleHourlySeries(request, env) {
   return cacheJson({ ok: true, user_id: userId, hours, rows }, env);
 }
 
-async function ingestInventory(env, user, source, isBoundary) {
+async function ingestInventory(env, user, source, isBoundary, options = {}) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const localDay = localDateString(new Date(fetchedAt), env);
@@ -137,6 +149,24 @@ async function ingestInventory(env, user, source, isBoundary) {
 
   const raw = await fetchPublicInventory(username || userId);
   const rawItems = extractInventoryItems(raw);
+  const sourceMeta = inventorySourceMeta(raw);
+  if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
+    throw httpError(502, "Big Games returned an empty inventory; snapshot was rejected to prevent a false inventory wipe.");
+  }
+
+  if (!options.force && envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true) && sourceMeta.fetched_at) {
+    const latest = await getLatestSnapshot(env, userId, { includeRaw: true });
+    const previousSource = inventorySourceMeta(latest?.raw);
+    if (previousSource.fetched_at && previousSource.fetched_at === sourceMeta.fetched_at) {
+      return {
+        skipped: true,
+        reason: "Big Games inventory source has not changed since the previous snapshot.",
+        source: sourceMeta,
+        snapshot: lightSnapshot(latest)
+      };
+    }
+  }
+
   const snapshotRows = await supabaseInsert(env, SNAPSHOT_TABLE, [{
     roblox_user_id: Number(userId),
     roblox_username: username,
@@ -146,7 +176,7 @@ async function ingestInventory(env, user, source, isBoundary) {
     is_boundary: !!isBoundary,
     boundary_label: isBoundary ? `midnight_${timeZone(env)}` : null,
     item_count: rawItems.length,
-    raw
+    raw: inventorySnapshotMeta(raw)
   }], "representation");
 
   const snapshot = snapshotRows[0];
@@ -156,7 +186,7 @@ async function ingestInventory(env, user, source, isBoundary) {
     if (chunk.length) await supabaseInsert(env, ITEM_TABLE, chunk, "minimal");
   }
 
-  return { snapshot: lightSnapshot(snapshot), raw_item_count: rawItems.length, item_count: itemRows.length };
+  return { skipped: false, snapshot: lightSnapshot(snapshot), source: sourceMeta, raw_item_count: rawItems.length, item_count: itemRows.length };
 }
 
 async function postHourlyDiffIfNeeded(env, user, options = {}) {
@@ -361,6 +391,41 @@ function extractInventoryItems(raw) {
   return findBestItemArray(raw);
 }
 
+function inventorySourceMeta(raw) {
+  if (!raw || typeof raw !== "object") return { fetched_at: null, is_stale: null, available: null };
+  if (raw.source_fetched_at || raw.source_is_stale !== undefined || raw.inventory_available !== undefined) {
+    return {
+      fetched_at: raw.source_fetched_at || null,
+      is_stale: raw.source_is_stale ?? null,
+      available: raw.inventory_available ?? null
+    };
+  }
+  const data = raw.data || raw;
+  const view = data?.views?.inventory || data?.inventory || null;
+  return {
+    fetched_at: view?.fetchedAt || view?.fetched_at || null,
+    is_stale: view?.isStale ?? view?.is_stale ?? null,
+    available: view?.available ?? null
+  };
+}
+
+function inventorySnapshotMeta(raw) {
+  const data = raw?.data || raw || {};
+  const account = data?.account || {};
+  const source = inventorySourceMeta(raw);
+  return {
+    provider: "big_games_player_api",
+    source_fetched_at: source.fetched_at,
+    source_is_stale: source.is_stale,
+    inventory_available: source.available,
+    account: {
+      roblox_user_id: account.robloxUserId || account.roblox_user_id || null,
+      username: account.username || null,
+      display_name: account.displayName || account.display_name || null
+    }
+  };
+}
+
 function findBestItemArray(obj, path = "") {
   let best = { score: 0, arr: [] };
   walk(obj, path);
@@ -404,11 +469,27 @@ function itemCount(item) { const n = Number(item.count ?? item.amount ?? item.qu
 function itemRap(item) { for (const v of [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap]) { const n = Number(v); if (Number.isFinite(n) && n > 0) return n; } return 0; }
 function getVariant(item) { const raw = JSON.stringify(item).toLowerCase(); const parts = []; if (raw.includes("rainbow")) parts.push("Rainbow"); else if (raw.includes("golden") || raw.includes('"pt":1')) parts.push("Golden"); if (raw.includes("shiny") || raw.includes('"sh":true')) parts.push("Shiny"); return parts.join(" ") || "Normal"; }
 
-async function getUserSnapshots(env, userId, limit = 500) { return supabaseSelect(env, SNAPSHOT_TABLE, { roblox_user_id: `eq.${userId}`, order: "captured_at.desc", limit: String(limit) }); }
-async function getLatestSnapshot(env, userId) { const rows = await getUserSnapshots(env, userId, 1); return rows[0] || null; }
+async function getUserSnapshots(env, userId, limit = 500) {
+  return supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: SNAPSHOT_PUBLIC_SELECT,
+    roblox_user_id: `eq.${userId}`,
+    order: "captured_at.desc",
+    limit: String(limit)
+  });
+}
+async function getLatestSnapshot(env, userId, options = {}) {
+  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: options.includeRaw ? `${SNAPSHOT_PUBLIC_SELECT},raw` : SNAPSHOT_PUBLIC_SELECT,
+    roblox_user_id: `eq.${userId}`,
+    order: "captured_at.desc",
+    limit: "1"
+  });
+  return rows[0] || null;
+}
 async function getSnapshotItems(env, snapshotId) { return supabaseSelect(env, ITEM_TABLE, { snapshot_id: `eq.${snapshotId}`, limit: "10000" }); }
-async function supabaseSelect(env, table, params) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { headers: supabaseHeaders(env) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, `Supabase select failed: ${text}`); return text ? JSON.parse(text) : []; }
-async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, `Supabase insert failed: ${text}`); return text ? JSON.parse(text) : []; }
+async function supabaseSelect(env, table, params) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { headers: supabaseHeaders(env) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("select", text)); return text ? JSON.parse(text) : []; }
+async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("insert", text)); return text ? JSON.parse(text) : []; }
+function supabaseFailureMessage(operation, text) { const detail = String(text || "").trim(); if (/error\s*code:\s*1016/i.test(detail)) return `Supabase ${operation} failed because SUPABASE_URL does not resolve (Cloudflare 1016). Update the Worker variable to the current Supabase Data API project URL.`; return `Supabase ${operation} failed: ${detail}`; }
 function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY; return { apikey: key, authorization: `Bearer ${key}` }; }
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }
 function requireSupabase(env) { if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) throw httpError(500, "Missing Supabase environment variables."); }
@@ -416,6 +497,8 @@ function requireAdmin(request, env) { const expected = env.INGEST_ADMIN_TOKEN; i
 function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
+function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
+async function inventoryScanIsDue(env, user, now = new Date()) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; return now.getTime() - new Date(latest.captured_at).getTime() >= inventoryMinFetchIntervalMinutes(env) * 60000; }
 function localDateString(date, env) { return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone(env), year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
 function localHourMinute(date, env) { const parts = new Intl.DateTimeFormat("en-US", { timeZone: timeZone(env), hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date); return { hour: Number(parts.find(p => p.type === "hour")?.value || 0), minute: Number(parts.find(p => p.type === "minute")?.value || 0) }; }
 function isMountainMidnight(date, env) { const { hour, minute } = localHourMinute(date, env); return hour === 0 && minute <= 10; }
@@ -427,6 +510,7 @@ function closestSnapshotAtOrBefore(sortedAsc, targetDate) { let best = null; for
 function lightSnapshot(s) { if (!s) return null; return { id: s.id, roblox_user_id: s.roblox_user_id, roblox_username: s.roblox_username, captured_at: s.captured_at, local_day: s.local_day, is_boundary: s.is_boundary, item_count: s.item_count, source: s.source }; }
 function chunks(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
 function parseBool(v) { if (v === null || v === undefined || v === "") return null; return ["1", "true", "yes", "y"].includes(String(v).toLowerCase()); }
+function envBool(value, fallback = false) { const parsed = parseBool(value); return parsed === null ? fallback : parsed; }
 function fmtNumber(n) { return Number(n || 0).toLocaleString("en-US"); }
 function formatDiscordTime(iso) { return new Date(iso).toLocaleString("en-US", { timeZone: DEFAULT_TIME_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
 function httpError(status, message) { const err = new Error(message); err.status = status; return err; }

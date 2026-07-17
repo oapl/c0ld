@@ -1163,7 +1163,7 @@ function addGlobalLeaderboardProjectionFields(rows) {
     .map((row, index) => ({ row, index }))
     .filter(item => {
       const rank = toNumber(item.row.global_rank);
-      return rank !== null && rank >= 1 && rank <= 100;
+      return rank !== null && rank >= 1;
     });
 
   if (!topRows.length) return rows;
@@ -1316,6 +1316,16 @@ function parseGlobalCandidateRaw(value) {
   }
 }
 
+function globalCandidateJoinIso(value) {
+  const raw = parseGlobalCandidateRaw(value?.raw_candidate ?? value);
+  const rawMember = parseJsonObject(raw.member) || {};
+  return memberJoinIso({
+    join_time: firstDefined(raw.join_time, raw.joinTime),
+    joined_at: firstDefined(raw.joined_at, raw.joinedAt),
+    raw_member: rawMember
+  });
+}
+
 async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
   if (!run?.run_key || !Array.isArray(rows) || !rows.length) return rows;
 
@@ -1363,6 +1373,12 @@ async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
       found: true,
       fetched_at: run.finished_at || run.updated_at || match.fetched_at || row.fetched_at || null,
       run_key: run.run_key,
+      raw_global: {
+        source_clan: match.source_clan,
+        source_clan_rank: match.source_clan_rank,
+        source_clan_points: match.source_clan_points,
+        candidate: match.raw_candidate || {}
+      },
       updated_at: run.updated_at || row.updated_at || match.updated_at || null
     };
   });
@@ -1380,7 +1396,7 @@ async function handleGlobalSearch(request, env) {
   }
 
   const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
-    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,updated_at",
+    select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,raw_global,updated_at",
     clan_name: `eq.${clan}`,
     order: "clan_rank.asc",
     limit: "1000"
@@ -6535,6 +6551,7 @@ async function collectGlobalRankCandidatesForClan(env, {
       raw_candidate: {
         member_rank: row.member_rank,
         member_points: points,
+        join_time: memberJoinIso(row),
         source_clan_leaderboard_rank: toNumber(clanRow.rank),
         source_clan_leaderboard_points: toNumber(clanRow.points) || 0,
         clan: clanRow.raw_clan || {},
@@ -9228,6 +9245,7 @@ function normalizeGlobalCurrentOutput(row) {
     clan_points: toNumber(row.clan_points) || 0,
     member_rank: toNumber(row.clan_rank),
     member_points: toNumber(row.clan_points) || 0,
+    join_time: globalCandidateJoinIso(rawGlobal.candidate),
     source_clan: row.clan_name,
     source_clan_rank: sourceClanRank,
     source_clan_points: sourceClanPoints,
@@ -9268,6 +9286,7 @@ function normalizeGlobalCandidateSearchOutput(row, {
     clan_points: toNumber(row.points) || 0,
     member_rank: toNumber(memberRank),
     member_points: toNumber(row.points) || 0,
+    join_time: globalCandidateJoinIso(row.raw_candidate),
     source_clan_rank: toNumber(row.source_clan_rank),
     source_clan_points: toNumber(row.source_clan_points) || 0,
     source_clan_leaderboard_rank: toNumber(row.source_clan_rank),

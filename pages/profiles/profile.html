@@ -31,9 +31,29 @@
     .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:14px}
     .card{padding:16px;min-height:82px}
     .value{font-size:21px;font-weight:700;overflow-wrap:anywhere}
-    .reward-strip{margin:0 0 24px;color:var(--text);font-size:14px}
-    .reward-strip .muted{color:var(--muted)}
-    .reward-divider{color:var(--muted);padding:0 8px}
+    .battle-detail-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.85fr);gap:16px;align-items:start}
+    .battle-detail-grid>.battle-card:only-child{grid-column:1/-1}
+    .reward-card{border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
+    .reward-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:16px;border-bottom:1px solid var(--border)}
+    .reward-card-title{margin:2px 0 0;font-size:20px}
+    .reward-total{flex:0 0 auto;border:1px solid rgba(126,231,135,.35);border-radius:999px;background:rgba(46,160,67,.14);color:#7ee787;padding:6px 10px;font-size:12px;font-weight:700;white-space:nowrap}
+    .reward-rank-context{padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px;line-height:1.4}
+    .reward-items{display:grid;padding:6px 14px}
+    .reward-item{display:grid;grid-template-columns:46px minmax(0,1fr);gap:10px;align-items:center;min-height:62px;padding:9px 2px;border-top:1px solid rgba(139,148,158,.22);opacity:.56}
+    .reward-item:first-child{border-top:0}
+    .reward-item.eligible{opacity:1}
+    .reward-item.unknown{opacity:.78}
+    .reward-icon{width:46px;height:46px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);object-fit:contain}
+    .reward-item-copy{min-width:0}
+    .reward-item-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+    .reward-item-title{min-width:0;font-size:13px;font-weight:700;line-height:1.25}
+    .reward-status{flex:0 0 auto;border-radius:999px;background:#21262d;color:var(--muted);padding:3px 6px;font-size:9px;font-weight:700;line-height:1.2;text-transform:uppercase;white-space:nowrap}
+    .reward-item.eligible .reward-status{background:rgba(46,160,67,.16);color:#7ee787}
+    .reward-item.unknown .reward-status{background:rgba(210,153,34,.14);color:#f2cc60}
+    .reward-item-meta{margin-top:4px;color:var(--muted);font-size:11px;line-height:1.35}
+    .reward-empty{padding:24px 16px;color:var(--muted);font-size:12px;line-height:1.5}
+    .reward-empty strong{display:block;margin-bottom:5px;color:var(--text);font-size:14px}
+    .reward-note{padding:11px 16px 14px;border-top:1px solid var(--border);color:var(--muted);font-size:11px;line-height:1.45}
     .section-title-row{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:24px 0 14px}
     .section-title{margin:0;font-size:24px}
     .history-shell{margin-top:24px}
@@ -95,6 +115,7 @@
     .modal-status.error-text{color:#ffb4ad}
     .modal-status.success-text{color:#7ee787}
     @media(max-width:1000px){
+      .battle-detail-grid{grid-template-columns:1fr}
       .history-grid{grid-template-columns:1fr}
       .history-column+.history-column{border-left:0;border-top:1px solid var(--border)}
     }
@@ -158,6 +179,7 @@
   <div class="empty">Loading player profile...</div>
 </main>
 
+<script src="assets/ps99-version-chart-markers.js"></script>
 <script>
 const CLANS={
   c0ld:{key:"c0ld",label:"c0ld",mascot:"assets/c0ld-kitsune-logo.gif",switchTarget:"WMSY",color:"#ff9b96"},
@@ -174,8 +196,16 @@ const BIG_BOT_IMPORT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/exte
 const CLANS_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
 const LEAGUE_PROFILE="https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/profile";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
-const PLAYER_REWARD_RANKS=[3,100,1000,1050,1150,6150,30000];
-const CLAN_REWARD_RANKS=[1,3,10,50,250,500];
+const REWARD_ITEM_CATALOG={
+  "Gargantuan Storm Wolf":{name:"Gargantuan Storm Wolf",category:"Pet",icon_id:"94993144229478"},
+  "Titanic Lunar Deer":{name:"Titanic Lunar Deer",category:"Pet",icon_id:"95100001711029",golden_icon_id:"104177631778430"},
+  "Huge Lunar Fox":{name:"Huge Lunar Fox",category:"Pet",icon_id:"124053652407994"},
+  "Clan Gift 2":{name:"Clan Gift #2",category:"Gift",icon_id:"126839917322650"}
+};
+const REWARD_RULE_OVERRIDES={
+  "lunarbattle2026|lunar|1|30":{name:"Lunar Hoverboard",category:"Hoverboard",icon_id:"135130713894669"},
+  "lunarbattle2026|lunar|1|50":{name:"Lunar Booth",category:"Booth",icon_id:"79728819130337"}
+};
 const EMBEDDED_HISTORY_BATTLE_LIMIT=24;
 const FULL_HISTORY_BATTLE_LIMIT=60;
 const HISTORY_FETCH_CONCURRENCY=5;
@@ -189,6 +219,7 @@ const DEFAULT_AVATAR="data:image/svg+xml;utf8,"+encodeURIComponent(`
 `);
 
 let activeInfo=null;
+let activeInfoLoaded=false;
 let profile=null;
 let battleIndex=0;
 let activeHistoryTab="clan";
@@ -1372,42 +1403,243 @@ function currentClanDisplay(){
   return currentClanDisplayFor(profile);
 }
 
-function rewardLabel(rank,tiers){
-  const value=finite(rank);
-  if(value===null)return"—";
+function rewardRowsForBattle(battle){
+  const candidates=[
+    battle?.placement_rewards,
+    battle?.PlacementRewards,
+    battle?.rewards?.PlacementRewards,
+    battle?.configData?.PlacementRewards
+  ];
+  const direct=candidates.find(Array.isArray);
+  if(direct)return direct;
 
-  const tier=tiers.find(item=>value<=item);
-  return tier?`Top ${fmt(tier)}`:"None";
+  if(!isActiveBattle(battle))return[];
+  const activeRewards=activeInfo?.data?.configData?.PlacementRewards;
+  return Array.isArray(activeRewards)?activeRewards:[];
 }
 
-function rewardRangeLabel(rank,tiers){
-  const value=finite(rank);
-  if(value===null)return"—";
+function rewardRuleNumber(rule,...keys){
+  for(const key of keys){
+    const value=finite(rule?.[key]);
+    if(value!==null)return value;
+  }
+  return null;
+}
 
-  for(let index=0;index<tiers.length;index++){
-    const upper=tiers[index];
-    if(value>upper)continue;
+function rewardRawId(rule){
+  return String(
+    rule?.Item?._data?.id??
+    rule?.item?._data?.id??
+    rule?.item_id??
+    rule?.id??
+    "Reward"
+  ).trim()||"Reward";
+}
 
-    const lower=index?tiers[index-1]+1:1;
-    return lower===1?`Top ${fmt(upper)}`:`Top ${fmt(lower)}-${fmt(upper)}`;
+function rewardCatalogEntry(id){
+  return Object.entries(REWARD_ITEM_CATALOG)
+    .find(([key])=>normalize(key)===normalize(id))?.[1]||null;
+}
+
+function inferredRewardCategory(id,rule){
+  const explicit=String(
+    rule?.category??
+    rule?.Item?.category??
+    rule?.Item?._class??
+    rule?.Item?.ClassName??
+    ""
+  ).trim();
+  if(explicit)return explicit.replace(/s$/i,"");
+  if(/gargantuan|titanic|huge|pet/i.test(id))return"Pet";
+  if(/hoverboard/i.test(id))return"Hoverboard";
+  if(/booth/i.test(id))return"Booth";
+  if(/gift|lootbox/i.test(id))return"Gift";
+  if(/bag/i.test(id))return"Bag";
+  return"Reward";
+}
+
+function rewardImageUrl(value){
+  const raw=String(value||"").trim();
+  if(!raw)return"";
+  if(/^https?:\/\//i.test(raw)||raw.startsWith("data:"))return raw;
+  const match=raw.match(/(?:rbxassetid:\/\/)?(\d+)/i);
+  return match?`https://ps99.biggamesapi.io/image/${encodeURIComponent(match[1])}`:"";
+}
+
+function rewardItemDetails(rule,battle){
+  const id=rewardRawId(rule);
+  const best=rewardRuleNumber(rule,"Best","best","best_rank");
+  const worst=rewardRuleNumber(rule,"Worst","worst","worst_rank");
+  const battleKey=normalize(battle?.battle||battle?.display_name||(isActiveBattle(battle)?activeTitle():""));
+  const override=REWARD_RULE_OVERRIDES[`${battleKey}|${normalize(id)}|${best??""}|${worst??""}`]||null;
+  const catalog=rewardCatalogEntry(id);
+  const base=override||catalog||{};
+  const variant=rewardRuleNumber(rule?.Item?._data||rule?.item?._data||rule,"pt","pet_type");
+  const variantPrefix=variant===2?"Rainbow ":variant===1?"Golden ":"";
+  const rawName=String(base.name||rule?.display_name||id).trim();
+  const name=variantPrefix&& !rawName.toLowerCase().startsWith(variantPrefix.toLowerCase())
+    ?variantPrefix+rawName
+    :rawName;
+  const embeddedIcon=
+    rule?.icon_url??
+    rule?.Item?.icon_url??
+    rule?.Item?._data?.icon??
+    rule?.Item?._data?.thumbnail??
+    "";
+  const catalogIcon=variant===1&&base.golden_icon_id?base.golden_icon_id:base.icon_id;
+
+  return{
+    id,
+    name,
+    category:String(base.category||inferredRewardCategory(id,rule)),
+    icon_url:rewardImageUrl(embeddedIcon||catalogIcon)
+  };
+}
+
+function rewardRangeText(best,worst,label){
+  if(best===null&&worst===null)return label;
+  if(best!==null&&worst!==null&&best===worst)return`${label} #${fmt(best)}`;
+  if(best===1&&worst!==null)return`${label} Top ${fmt(worst)}`;
+  if(best!==null&&worst!==null)return`${label} #${fmt(best)}–${fmt(worst)}`;
+  if(best!==null)return`${label} #${fmt(best)}+`;
+  return`${label} through #${fmt(worst)}`;
+}
+
+function rewardRuleTarget(rule){
+  const best=rewardRuleNumber(rule,"Best","best","best_rank");
+  const worst=rewardRuleNumber(rule,"Worst","worst","worst_rank");
+  const bestContributor=rewardRuleNumber(rule,"BestContributor","best_contributor");
+  const worstContributor=rewardRuleNumber(rule,"WorstContributor","worst_contributor");
+  const parts=[rewardRangeText(best,worst,"Clan")];
+  if(bestContributor!==null||worstContributor!==null){
+    parts.push(rewardRangeText(bestContributor,worstContributor,"Contributors"));
+  }else{
+    parts.push("All clan members");
+  }
+  return parts.join(" · ");
+}
+
+function rewardRankContext(battle){
+  const active=isActiveBattle(battle);
+  const clanRank=finite(
+    battle?.source_clan_leaderboard_rank??
+    battle?.clan_leaderboard_rank??
+    battle?.clan_final_rank??
+    (active?(profile.source_clan_leaderboard_rank??profile.source_clan_rank):null)
+  );
+  const contributorRank=finite(
+    battle?.ending_rank??
+    battle?.end_rank??
+    battle?.last_rank??
+    (active?(profile.member_rank??profile.clan_rank??profile.latest_rank):null)
+  );
+  return{clanRank,contributorRank};
+}
+
+function rewardRangeEligibility(rank,best,worst){
+  if(best===null&&worst===null)return true;
+  if(rank===null)return null;
+  if(best!==null&&rank<best)return false;
+  if(worst!==null&&rank>worst)return false;
+  return true;
+}
+
+function rewardRuleEligibility(rule,ranks){
+  const clanResult=rewardRangeEligibility(
+    ranks.clanRank,
+    rewardRuleNumber(rule,"Best","best","best_rank"),
+    rewardRuleNumber(rule,"Worst","worst","worst_rank")
+  );
+  const contributorResult=rewardRangeEligibility(
+    ranks.contributorRank,
+    rewardRuleNumber(rule,"BestContributor","best_contributor"),
+    rewardRuleNumber(rule,"WorstContributor","worst_contributor")
+  );
+  if(clanResult===false||contributorResult===false)return false;
+  if(clanResult===null||contributorResult===null)return null;
+  return true;
+}
+
+function rewardBattleFinished(battle){
+  const end=eventRange(battle).end;
+  const time=end?new Date(end).getTime():NaN;
+  return Number.isFinite(time)&&time<=Date.now();
+}
+
+function renderRewardCard(battle){
+  const rules=rewardRowsForBattle(battle);
+  if(!rules.length){
+    const loading=!activeInfoLoaded&&battleIndex===0;
+    return`
+      <aside class="reward-card" aria-label="Battle rewards">
+        <div class="reward-card-head">
+          <div>
+            <div class="label">Selected Battle</div>
+            <h3 class="reward-card-title">Reward Eligibility</h3>
+          </div>
+          <div class="reward-total">—</div>
+        </div>
+        <div class="reward-empty">
+          <strong>${loading?"Loading reward details…":"Itemized rewards unavailable"}</strong>
+          ${loading
+            ?"Reading the current battle reward schedule from Big Games."
+            :"The reward schedule was not captured for this archived battle. Eligibility is intentionally not estimated."}
+        </div>
+      </aside>
+    `;
   }
 
-  return"None";
-}
-
-function renderRewardLine(){
-  const globalRank=finite(profile.global_rank);
-  const clanLeaderboardRank=finite(profile.source_clan_leaderboard_rank??profile.source_clan_rank);
-
-  if(globalRank===null&&clanLeaderboardRank===null)return"";
+  const ranks=rewardRankContext(battle);
+  const finished=rewardBattleFinished(battle);
+  const rows=rules.map(rule=>({
+    rule,
+    item:rewardItemDetails(rule,battle),
+    eligible:rewardRuleEligibility(rule,ranks)
+  }));
+  const eligibleCount=rows.filter(row=>row.eligible===true).length;
+  const unknownCount=rows.filter(row=>row.eligible===null).length;
+  const totalLabel=unknownCount===rows.length?"Eligibility pending":`${eligibleCount} / ${rows.length} ${finished?"earned":"eligible"}`;
+  const context=[
+    ranks.clanRank!==null?`Clan placement #${fmt(ranks.clanRank)}`:"Clan placement unavailable",
+    rows.some(row=>rewardRuleNumber(row.rule,"BestContributor","best_contributor")!==null||rewardRuleNumber(row.rule,"WorstContributor","worst_contributor")!==null)
+      ?ranks.contributorRank!==null?`Contributor #${fmt(ranks.contributorRank)}`:"Contributor rank unavailable"
+      :null
+  ].filter(Boolean).join(" · ");
 
   return`
-    <section class="reward-strip">
-      <span class="muted">Rewards:</span>
-      Global ${escapeHtml(rewardLabel(globalRank,PLAYER_REWARD_RANKS))}
-      <span class="reward-divider">•</span>
-      Clan ${escapeHtml(rewardRangeLabel(clanLeaderboardRank,CLAN_REWARD_RANKS))}
-    </section>
+    <aside class="reward-card" aria-label="Battle rewards">
+      <div class="reward-card-head">
+        <div>
+          <div class="label">Selected Battle</div>
+          <h3 class="reward-card-title">Reward Eligibility</h3>
+        </div>
+        <div class="reward-total">${escapeHtml(totalLabel)}</div>
+      </div>
+      <div class="reward-rank-context">${escapeHtml(context)}</div>
+      <div class="reward-items">
+        ${rows.map(({rule,item,eligible})=>{
+          const state=eligible===true?"eligible":eligible===null?"unknown":"";
+          const status=eligible===true?(finished?"Earned":"Eligible now"):eligible===null?"Check ranks":"Not eligible";
+          return`
+            <article class="reward-item ${state}">
+              ${item.icon_url?`<img class="reward-icon" src="${escapeHtml(item.icon_url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`:`<span class="reward-icon" aria-hidden="true"></span>`}
+              <div class="reward-item-copy">
+                <div class="reward-item-title-row">
+                  <div class="reward-item-title">${escapeHtml(item.name)}</div>
+                  <span class="reward-status">${escapeHtml(status)}</span>
+                </div>
+                <div class="reward-item-meta">${escapeHtml(item.category)} · ${escapeHtml(rewardRuleTarget(rule))}</div>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      <div class="reward-note">
+        ${finished
+          ?"Eligibility is calculated from the stored final placement available for this battle."
+          :"Eligibility follows the current clan and contributor positions. Rewards are finalized when the battle closes."}
+      </div>
+    </aside>
   `;
 }
 
@@ -1725,8 +1957,6 @@ function render(){
       ${renderProfileCards()}
     </section>
 
-    ${renderRewardLine()}
-
     ${chartBattles.length?renderBattleChartSection(chartBattles):""}
 
     ${hasHistory?renderHistoryGrid():`<section class="empty">No history found.</section>`}
@@ -1792,9 +2022,11 @@ function renderBattle(){
   const endRank=battle.ending_rank??battle.end_rank??battle.last_rank??null;
   const activity=activitySummary(battle);
   const isGlobalBattle=battle.source==="global";
+  const rewardCard=renderRewardCard(battle);
 
   detail.innerHTML=`
-    <article class="battle-card">
+    <div class="battle-detail-grid">
+      <article class="battle-card">
       <div class="battle-head">
         <h2 class="battle-title">${escapeHtml(battle.display_name||battle.battle||"Unknown Battle")}</h2>
         <div class="dates">${fmtDate(range.start)} → ${fmtDate(range.end)}</div>
@@ -1840,7 +2072,9 @@ function renderBattle(){
           <div class="tip" id="tip"></div>
         </div>
       `:""}
-    </article>
+      </article>
+      ${rewardCard}
+    </div>
   `;
 
   document.getElementById("toggle-points")?.addEventListener("change",event=>{
@@ -1995,6 +2229,14 @@ function drawChart(){
     ctx.fillText(grid.type==="rank"?`#${Math.round(value)}`:fmtShort(value),8,yy+4);
   }
 
+  const updateMarkers=window.Ps99VersionMarkers?.draw(ctx,{
+    minT,
+    maxT,
+    top:padTop,
+    bottom:padTop+height,
+    x
+  })||[];
+
   drawLine(ctx,pointSeries,x,yp,clan().color);
   drawLine(ctx,rankSeries,x,yr,"#f2cc60");
   drawActivityStrip(ctx,strip,x,stripY);
@@ -2009,7 +2251,7 @@ function drawChart(){
   const endLabel=new Date(maxT).toLocaleDateString(undefined,{month:"short",day:"numeric"});
   ctx.fillText(endLabel,rect.width-padRight-ctx.measureText(endLabel).width,rect.height-12);
 
-  chartCache={all,strip,x,yp,yr,stripY,rect};
+  chartCache={all,strip,x,yp,yr,stripY,rect,padTop,padBottom,updateMarkers};
 
   bindTooltip(canvas,tooltip);
 }
@@ -2056,6 +2298,24 @@ function bindTooltip(canvas,tooltip){
 
     const rect=canvas.getBoundingClientRect();
     const mx=event.clientX-rect.left;
+    const update=window.Ps99VersionMarkers?.nearest(chartCache.updateMarkers,mx);
+
+    if(update){
+      drawChart();
+      const fresh=chartCache;
+      const marker=window.Ps99VersionMarkers.nearest(fresh.updateMarkers,mx);
+      window.Ps99VersionMarkers.highlight(
+        canvas.getContext("2d"),
+        marker,
+        fresh.padTop,
+        fresh.rect.height-fresh.padBottom
+      );
+      tooltip.innerHTML=window.Ps99VersionMarkers.tooltipHtml(marker,fmtDateTime);
+      tooltip.style.display="block";
+      tooltip.style.left=Math.max(8,event.clientX-rect.left+14)+"px";
+      tooltip.style.top=Math.max(8,event.clientY-rect.top+14)+"px";
+      return;
+    }
 
     let nearest=chartCache.all[0];
     let distance=Math.abs(chartCache.x(nearest)-mx);
@@ -2099,6 +2359,9 @@ function bindTooltip(canvas,tooltip){
 
 async function main(){
   setupChrome();
+  window.Ps99VersionMarkers?.load().then(()=>{
+    if(document.getElementById("chart"))drawChart();
+  });
 
   const id=profileId();
   const app=document.getElementById("app");
@@ -2111,6 +2374,7 @@ async function main(){
   try{
     optionalJson(ACTIVE_BATTLE).then(info=>{
       activeInfo=info;
+      activeInfoLoaded=true;
       if(profile&&document.getElementById("battle-chart-detail")){
         renderBattle();
         notifyEmbedHeight();

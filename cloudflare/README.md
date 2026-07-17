@@ -425,12 +425,23 @@ Required Worker variables:
 | `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
-| `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders all `/history` sections together in one c0ld-styled PNG. Set to `false` for the text-only response. |
+| `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
+
+Recommended Worker service bindings:
+
+| Binding | Target Worker | Purpose |
+|---|---|---|
+| `CLAN_API_WORKER` | `c0ld-clan-api-worker` | Reads clan/global history without a same-account Worker HTTP hop. |
+| `LEAGUE_API_WORKER` | `yamo-league-api-worker` | Reads League History reliably. This prevents Cloudflare `1042` failures that can occur when one Worker calls another through its public `workers.dev` URL. |
+
+The Discord Worker still retains `CLAN_API_BASE` and `LEAGUE_API_BASE` as public
+fallbacks. In the Cloudflare dashboard, add `LEAGUE_API_WORKER` as a **Service
+binding**, not as a plaintext variable or secret.
 
 Required Worker secrets:
 
@@ -529,11 +540,14 @@ Player history is available with:
 /history username:Cinnamowopal
 ```
 
-The response contains one generated c0ld history card with Clan History, League
-History, and Leaderboard History stacked together. It includes every available
-record without dates, pagination, or section buttons. First-party site data
-always takes priority over bot imports. Set `HISTORY_IMAGE_RESPONSES=false` to
-use the text-only fallback.
+The response includes Clan History, League History, and Leaderboard History
+buttons. Each button generates one complete category image with every available
+record and no pagination. Clan History uses a two-column clan-battle record,
+including top performance by lowest global rank, the average of the five most
+recent completed ranked clan-battle results, total clans, current-clan tenure
+calculated from the API join date, and a segmented field-outranked tape for each
+ranked result. First-party site data always takes priority over bot imports.
+Set `HISTORY_IMAGE_RESPONSES=false` to use the text-only fallback.
 
 The plain-text PS99 version command is:
 
@@ -582,6 +596,10 @@ The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
 
+League profile snapshot reads are paginated internally in 1,000-row batches, so
+the requested profile limit is honored instead of silently stopping at
+Supabase's default 1,000-row response cap.
+
 League profile summaries can display an update/theme name when `LEAGUE_RUN_LABEL`
 is set, such as `Tap Heroes`, or when `LEAGUE_RUN_LABELS_JSON` maps a period key
 to a label. Exact keys look like `active:yamo:2026-07-11`; date-cohort wildcard
@@ -622,6 +640,31 @@ then run:
 Use the Supabase **Session pooler** connection strings from each project's
 Connect panel. After the copy finishes, point `yamo-league-api-worker` at the
 c0ld Supabase project, deploy it, and re-enable the cron.
+
+## PS99 hourly inventory gains
+
+`inventory-detector-worker.js` stores normalized Big Games inventory snapshots
+and powers `Cinnamowopal.html`. Apply `supabase/inventory-detector.sql`, deploy
+the Worker using `wrangler-inventory-detector.toml.example`, and add the
+`SUPABASE_SERVICE_KEY` secret. The example cron runs at minute 17 of every hour,
+using 24 inventory reads per day. The 55-minute minimum interval also protects
+against an accidentally retained five-minute cron trigger.
+
+The tracker rejects empty upstream inventories and skips repeated Big Games
+source timestamps, preventing a stale response from looking like a complete
+inventory loss or a new hourly sample. New snapshot rows retain only compact
+source metadata; normalized item stacks remain in the item table for diffs.
+
+If the public page reports `Supabase select failed: error code: 1016`, the
+Worker's `SUPABASE_URL` hostname is invalid or no longer exists. Replace it with
+the exact current project URL from Supabase **Project Settings > Data API**.
+This value is a normal Worker variable; `SUPABASE_SERVICE_KEY` remains a secret.
+
+The official Big Games player endpoint exposes the most recently collected
+inventory and its `fetchedAt` timestamp. It does not expose the signed-in
+account page's refresh action through the public response, so this Worker reads
+the latest public inventory on schedule rather than automating a private login
+session.
 
 ## WMSY hourly Discord board
 

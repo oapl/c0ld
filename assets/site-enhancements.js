@@ -354,6 +354,14 @@
       ctx.fillText(grid.type === "rank" ? `#${Math.round(value)}` : fmtShortNum(value), 8, yy + 4);
     }
 
+    const updateMarkers = window.Ps99VersionMarkers?.draw(ctx, {
+      minT,
+      maxT,
+      top: padTop,
+      bottom: padTop + height,
+      x
+    }) || [];
+
     drawSeries(ctx, pointsSeries, x, yPoints, viewedPlayerColor());
     drawSeries(ctx, rankSeries, x, yRank, COLORS.rank);
 
@@ -365,7 +373,7 @@
     const lastWidth = ctx.measureText(lastLabel).width;
     ctx.fillText(lastLabel, rect.width - padRight - lastWidth, rect.height - 12);
 
-    canvas._siteChart = { series, x, yPoints, yRank, padTop, padBottom, rect, battle, showPoints: chartState.points, showRank: chartState.rank };
+    canvas._siteChart = { series, x, yPoints, yRank, padTop, padBottom, rect, battle, updateMarkers, showPoints: chartState.points, showRank: chartState.rank };
     window.setTimeout(() => { selfDrawing = false; }, 0);
   }
 
@@ -382,6 +390,25 @@
       if (!chart || !chart.series?.length || !tooltip) return;
       const rect = canvas.getBoundingClientRect();
       const mx = ev.clientX - rect.left;
+      const update = window.Ps99VersionMarkers?.nearest(chart.updateMarkers, mx);
+
+      if (update) {
+        drawProfileChart(canvas, tooltip, chart.battle);
+        const fresh = canvas._siteChart;
+        const marker = window.Ps99VersionMarkers.nearest(fresh.updateMarkers, mx);
+        window.Ps99VersionMarkers.highlight(
+          canvas.getContext("2d"),
+          marker,
+          fresh.padTop,
+          fresh.rect.height - fresh.padBottom
+        );
+        tooltip.innerHTML = window.Ps99VersionMarkers.tooltipHtml(marker, fmtDateTime);
+        tooltip.style.display = "block";
+        tooltip.style.left = `${Math.max(8, ev.clientX - rect.left + 14)}px`;
+        tooltip.style.top = `${Math.max(8, ev.clientY - rect.top + 14)}px`;
+        return;
+      }
+
       let nearest = chart.series[0];
       let nearestDist = Math.abs(chart.x(nearest) - mx);
 
@@ -593,6 +620,9 @@
   }
 
   window.addEventListener("pageshow", applyAll);
+  window.addEventListener("ps99-version-markers-loaded", () => {
+    window.setTimeout(redrawProfileChart, 0);
+  });
 
   const observer = new MutationObserver(() => {
     if (selfDrawing) return;

@@ -797,14 +797,13 @@ async function handleProfile(request, env) {
   const params = {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     user_id: `eq.${userId}`,
-    order: "fetched_at.desc,rank.asc",
-    limit: String(limit)
+    order: "fetched_at.desc,snapshot_id.desc,rank.asc"
   };
 
   if (rawRun && String(rawRun).toLowerCase() !== "all") params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
-  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  const rows = await fetchLeagueProfileRows(env, params, limit);
   const summaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(rows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
@@ -819,6 +818,24 @@ async function handleProfile(request, env) {
     rows_scanned: rows.length,
     rows: summaries
   }, env);
+}
+
+async function fetchLeagueProfileRows(env, params, limit) {
+  const rows = [];
+  const pageSize = 1000;
+
+  for (let offset = 0; offset < limit; offset += pageSize) {
+    const requested = Math.min(pageSize, limit - offset);
+    const page = await supabaseSelect(env, SNAPSHOT_TABLE, {
+      ...params,
+      limit: String(requested),
+      offset: String(offset)
+    });
+    rows.push(...page);
+    if (page.length < requested) break;
+  }
+
+  return rows;
 }
 
 function summarizeLeagueProfileRows(rows, env) {

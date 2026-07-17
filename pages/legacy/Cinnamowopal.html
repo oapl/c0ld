@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cinnamowopal Inventory Detector</title>
+  <title>Cinnamowopal Inventory Gains</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root { --bg:#0d1117; --panel:#161b22; --panel-2:#0d1117; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --link:#ff9b96; --hover:#1f2630; --danger:#f85149; --danger-bg:rgba(248,81,73,.12); --success:#3fb950; --success-bg:rgba(63,185,80,.12); --warning:#d29922; --warning-bg:rgba(210,153,34,.13); }
@@ -28,7 +28,7 @@
     .section-title { margin:0; font-size:18px; }
     .section-note { color:var(--muted); font-size:12px; }
     .section-body { padding:16px; }
-    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px auto auto; gap:12px; align-items:end; }
+    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px auto; gap:12px; align-items:end; }
     label { display:block; color:var(--muted); font-size:12px; font-weight:bold; margin:0 0 6px; }
     input, select { width:100%; border:1px solid var(--border); border-radius:6px; background:var(--panel-2); color:var(--text); padding:11px 12px; font-size:14px; outline:none; transition:background .15s ease,border-color .15s ease; }
     input:focus, select:focus { border-color:var(--link); background:var(--hover); }
@@ -40,7 +40,7 @@
     .notice.error { border-color:var(--danger); background:var(--danger-bg); color:#ffb4ad; }
     .notice.good { border-color:var(--success); background:var(--success-bg); color:#b6f5c2; }
     .notice.warn { border-color:var(--warning); background:var(--warning-bg); color:#f5d78e; }
-    .stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
     .stat { border:1px solid var(--border); background:var(--panel); border-radius:10px; padding:14px; }
     .stat .k { color:var(--muted); font-size:12px; font-weight:bold; margin-bottom:7px; }
     .stat .v { font-size:20px; font-weight:bold; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
@@ -98,10 +98,9 @@
   <main>
     <div class="page-head">
       <div>
-        <h1>Cinnamowopal Inventory Detector</h1>
-        <div class="subtitle">Shows current live inventory difference from roughly one hour ago, plus hourly growth buckets from the stored Supabase snapshots. The Worker should collect every 5 minutes.</div>
+        <h1>Cinnamowopal Inventory Gains</h1>
+        <div class="subtitle">Hourly Big Games inventory snapshots, reduced to what was gained during each collection window. The Worker collects once per hour and this page checks for new results every five minutes.</div>
       </div>
-      <button id="rawToggle" type="button">Show raw JSON</button>
     </div>
 
     <div id="notice" class="notice warn">Loading hourly inventory diff from the Worker...</div>
@@ -112,32 +111,23 @@
         <div><label for="search">Filter shown item changes</label><input id="search" placeholder="Huge, Titanic, Fruit, Gift, Diamonds, etc."></div>
         <div><label for="hours">Hourly buckets</label><select id="hours"><option value="6">Last 6 hours</option><option value="12">Last 12 hours</option><option value="24" selected>Last 24 hours</option><option value="48">Last 48 hours</option><option value="72">Last 72 hours</option></select></div>
         <button id="refreshBtn" class="primary" type="button">Refresh</button>
-        <button id="postBtn" type="button">Post hourly now</button>
       </div>
     </section>
 
     <section class="stats">
       <div class="stat"><div class="k">Window</div><div class="v" id="statWindow">—</div></div>
       <div class="stat"><div class="k">Gained Rows</div><div class="v" id="statGained">0</div></div>
-      <div class="stat"><div class="k">Lost Rows</div><div class="v" id="statLost">0</div></div>
-      <div class="stat"><div class="k">Start Snapshot</div><div class="v" id="statStart">—</div></div>
-      <div class="stat"><div class="k">Current Snapshot</div><div class="v" id="statEnd">—</div></div>
+      <div class="stat"><div class="k">Last Collected</div><div class="v" id="statEnd">—</div></div>
+      <div class="stat"><div class="k">Big Games Source</div><div class="v" id="statSource">—</div></div>
     </section>
 
-    <pre id="rawBox" class="hidden"></pre>
-
     <section class="section">
-      <div class="section-header"><h2 class="section-title">Live Last-Hour Gains</h2><div class="section-note" id="liveNote">Closest stored snapshot about 1 hour ago → current latest snapshot.</div></div>
+      <div class="section-header"><h2 class="section-title">Latest Hourly Gains</h2><div class="section-note" id="liveNote">Previous hourly snapshot → current hourly snapshot.</div></div>
       <div class="section-body"><div class="grid" id="gainedGrid"><div class="empty">No data loaded yet.</div></div></div>
     </section>
 
     <section class="section">
-      <div class="section-header"><h2 class="section-title">Live Last-Hour Losses / Decreases</h2><div class="section-note">Shown separately so gains stay easy to read.</div></div>
-      <div class="section-body"><div class="grid" id="lostGrid"><div class="empty">No losses loaded yet.</div></div></div>
-    </section>
-
-    <section class="section">
-      <div class="section-header"><h2 class="section-title">Hourly Growth Buckets</h2><div class="section-note">Each row compares the closest snapshot before that hour to the closest snapshot before the next hour.</div></div>
+      <div class="section-header"><h2 class="section-title">Hourly Gain History</h2><div class="section-note">Only additions and count increases are displayed.</div></div>
       <div class="section-body"><div id="hourlyTable" class="empty">No hourly buckets loaded yet.</div></div>
     </section>
   </main>
@@ -147,6 +137,7 @@
     const USER_ID = "109818";
     let liveDiff = null;
     let hourlyData = null;
+    let latestData = null;
 
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -163,63 +154,58 @@
       if (!res.ok || json.ok === false) throw new Error(json.message || text.slice(0,260));
       return json;
     }
-    function displayRaw(){ $("rawBox").textContent = JSON.stringify({ liveDiff, hourlyData }, null, 2); }
-
     async function refreshAll(){
       const btn=$("refreshBtn"); btn.disabled=true; btn.textContent="Refreshing...";
       try{
         const hours=$("hours").value;
-        const [diff, hourly] = await Promise.all([
+        const results = await Promise.allSettled([
           fetchJson(`/api/inventory/diff?user_id=${USER_ID}&mode=hour`),
-          fetchJson(`/api/inventory/hourly?user_id=${USER_ID}&hours=${hours}`)
+          fetchJson(`/api/inventory/hourly?user_id=${USER_ID}&hours=${hours}`),
+          fetchJson(`/api/inventory/latest?user_id=${USER_ID}&include_items=0`)
         ]);
-        liveDiff=diff; hourlyData=hourly; displayRaw(); renderLive(); renderHourly(); setNotice("Loaded inventory detector data from Worker.","good");
-      }catch(e){ setNotice("Could not load inventory detector data: "+esc(e.message||String(e)),"error"); }
+        if(results[0].status === "fulfilled") liveDiff=results[0].value;
+        if(results[1].status === "fulfilled") hourlyData=results[1].value;
+        if(results[2].status === "fulfilled") latestData=results[2].value;
+        renderLive(); renderHourly(); renderLatest();
+        const errors=results.filter(result=>result.status === "rejected").map(result=>result.reason?.message||String(result.reason));
+        if(latestData && !liveDiff) setNotice("The first inventory snapshot is stored. The gains view will appear after the next hourly collection.","warn");
+        else if(errors.length) setNotice("Some inventory data could not be loaded: "+esc(errors[0]),"warn");
+        else setNotice("Loaded the latest hourly inventory gains.","good");
+      }catch(e){ setNotice("Could not load inventory gain data: "+esc(e.message||String(e)),"error"); }
       finally{ btn.disabled=false; btn.textContent="Refresh"; }
-    }
-
-    async function postHourlyNow(){
-      const token = prompt("Paste INGEST_ADMIN_TOKEN to post this hourly diff to Discord now:");
-      if(!token) return;
-      const btn=$("postBtn"); btn.disabled=true; btn.textContent="Posting...";
-      try{
-        const result = await fetchJson(`/api/inventory/post-hourly?user_id=${USER_ID}&username=Cinnamowopal&force=1`, { method:"POST", headers:{ Authorization:"Bearer "+token } });
-        setNotice("Discord post request completed: "+esc(JSON.stringify(result)),"good");
-      }catch(e){ setNotice("Discord post failed: "+esc(e.message||String(e)),"error"); }
-      finally{ btn.disabled=false; btn.textContent="Post hourly now"; }
     }
 
     function applySearch(rows){ const q=$("search").value.trim().toLowerCase(); return q ? rows.filter(row=>rawText(row).includes(q)) : rows; }
     function renderLive(){
       if(!liveDiff || !liveDiff.ok) return;
       const gained=applySearch(liveDiff.gained || []);
-      const lost=applySearch(liveDiff.lost || []);
       $("statWindow").textContent = `${shortDate(liveDiff.start?.captured_at)} → ${shortDate(liveDiff.end?.captured_at)}`;
       $("statGained").textContent = fmt((liveDiff.gained || []).length);
-      $("statLost").textContent = fmt((liveDiff.lost || []).length);
-      $("statStart").textContent = shortDate(liveDiff.start?.captured_at);
       $("statEnd").textContent = shortDate(liveDiff.end?.captured_at);
       $("liveNote").textContent = `${liveDiff.mode || "last_hour"}: ${shortDate(liveDiff.start?.captured_at)} → ${shortDate(liveDiff.end?.captured_at)}`;
-      renderCards("gainedGrid", gained, true);
-      renderCards("lostGrid", lost, false);
+      renderCards("gainedGrid", gained);
     }
-    function renderCards(id, rows, positive){
+    function renderLatest(){
+      if(!latestData?.snapshot) return;
+      $("statEnd").textContent=shortDate(latestData.snapshot.captured_at);
+      $("statSource").textContent=shortDate(latestData.source?.fetched_at);
+    }
+    function renderCards(id, rows){
       const el=$(id);
-      if(!rows.length){ el.innerHTML='<div class="empty">No matching item changes.</div>'; return; }
-      el.innerHTML = rows.map(row=>`<article class="card"><div class="card-title" title="${esc(row.display_name||row.item_id||row.item_key)}">${esc(row.display_name||row.item_id||row.item_key)}</div><div class="delta ${positive?'':'negative'}">${row.delta>0?'+':''}${fmt(row.delta)}</div><div class="meta"><span>Before<b>${fmt(row.before)}</b></span><span>After<b>${fmt(row.after)}</b></span><span>Class<b>${esc(row.item_class||'—')}</b></span><span>Variant<b>${esc(row.variant||'—')}</b></span></div></article>`).join("");
+      if(!rows.length){ el.innerHTML='<div class="empty">No gains matched this hourly window.</div>'; return; }
+      el.innerHTML = rows.map(row=>`<article class="card"><div class="card-title" title="${esc(row.display_name||row.item_id||row.item_key)}">${esc(row.display_name||row.item_id||row.item_key)}</div><div class="delta">+${fmt(row.delta)}</div><div class="meta"><span>Before<b>${fmt(row.before)}</b></span><span>After<b>${fmt(row.after)}</b></span><span>Class<b>${esc(row.item_class||'—')}</b></span><span>Variant<b>${esc(row.variant||'—')}</b></span></div></article>`).join("");
     }
     function renderHourly(){
       const el=$("hourlyTable");
       const rows=(hourlyData?.rows||[]).slice().reverse();
       if(!rows.length){ el.innerHTML='<div class="empty">Not enough snapshots for hourly buckets yet.</div>'; return; }
-      el.innerHTML = `<table><thead><tr><th>Hour ending</th><th>Gained rows</th><th>Lost rows</th><th>Top gains</th></tr></thead><tbody>${rows.map(row=>{const gains=(row.top_gained||[]).slice(0,5).map(x=>`+${fmt(x.delta)} ${esc(x.display_name||x.item_id||x.item_key)}`).join('<br>')||'—';return `<tr><td>${shortDate(row.period_end)}</td><td>${fmt(row.totals?.gained||0)}</td><td>${fmt(row.totals?.lost||0)}</td><td>${gains}</td></tr>`}).join("")}</tbody></table>`;
+      el.innerHTML = `<table><thead><tr><th>Hour ending</th><th>Gained rows</th><th>Top gains</th></tr></thead><tbody>${rows.map(row=>{const gains=(row.top_gained||[]).slice(0,8).map(x=>`+${fmt(x.delta)} ${esc(x.display_name||x.item_id||x.item_key)}`).join('<br>')||'—';return `<tr><td>${shortDate(row.period_end)}</td><td>${fmt(row.totals?.gained||0)}</td><td>${gains}</td></tr>`}).join("")}</tbody></table>`;
     }
     $("refreshBtn").addEventListener("click", refreshAll);
-    $("postBtn").addEventListener("click", postHourlyNow);
     $("hours").addEventListener("change", refreshAll);
     $("search").addEventListener("input", ()=>{ renderLive(); });
-    $("rawToggle").addEventListener("click",()=>{ $("rawBox").classList.toggle("hidden"); $("rawToggle").textContent=$("rawBox").classList.contains("hidden")?"Show raw JSON":"Hide raw JSON"; });
     refreshAll();
+    setInterval(refreshAll, 5 * 60 * 1000);
   </script>
 </body>
 </html>

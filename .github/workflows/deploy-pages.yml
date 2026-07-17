@@ -69,6 +69,7 @@ jobs:
           from pathlib import Path
 
           script_tags = [
+              '  <script src="assets/ps99-version-chart-markers.js"></script>\n',
               '  <script src="assets/clan-switcher.js"></script>\n',
               '  <script src="assets/header-logo-lock.js"></script>\n',
               '  <script src="assets/site-announcement.js"></script>\n',

@@ -32,6 +32,10 @@ PS99_UPDATE_NUMBER = ""
 binding = "CLAN_API_WORKER"
 service = "c0ld-clan-api-worker"
 
+[[services]]
+binding = "LEAGUE_API_WORKER"
+service = "yamo-league-api-worker"
+
 # Set these with `wrangler secret put ...` or in Cloudflare Worker settings:
 # DISCORD_PUBLIC_KEY
 # DISCORD_BOT_TOKEN

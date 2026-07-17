@@ -408,7 +408,9 @@ async function loadHistoryCommandData(query, env) {
       source: "site",
       clan_name: latest.clan_name || scanClan,
       rank: finiteHistoryNumber(latest.rank),
-      points: finiteHistoryNumber(latest.total_points ?? latest.points)
+      points: finiteHistoryNumber(latest.total_points ?? latest.points),
+      battle_end_iso: battle.battle_end_iso || null,
+      is_active: battle.is_active === true
     };
     })).filter(Boolean);
 
@@ -434,12 +436,15 @@ async function loadHistoryCommandData(query, env) {
     leaderboardRows,
     normalizeLeaderboardHistoryRows(staticProfile?.leaderboard_summaries)
   );
-  const avatarUrl = subject.avatarUrl || absoluteProfileAssetUrl(staticProfile?.avatar_url, env);
+  const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
+    || absoluteProfileAssetUrl(staticProfile?.avatar_url, env);
 
   return {
     user_id: subject.userId,
     username: globalPayload?.row ? displayName(globalPayload.row) : staticProfile?.username || subject.username || `user_${subject.userId}`,
     avatar_url: avatarUrl || null,
+    current_clan: globalPayload?.row?.source_clan || globalPayload?.row?.clan_name || null,
+    clan_join_time: globalPayload?.row?.join_time || null,
     clan: [...clanMap.values()],
     league: leagueRows,
     league_unavailable: leagueHistory === null && leagueRows.length === 0,
@@ -448,9 +453,13 @@ async function loadHistoryCommandData(query, env) {
 }
 
 function summarizeTrackedClanHistory(rows, battleRows) {
-  const battleNames = new Map((Array.isArray(battleRows) ? battleRows : []).map(row => [
+  const battles = new Map((Array.isArray(battleRows) ? battleRows : []).map(row => [
     historyRecordKey(row.battle || row.battle_key),
-    row.display_name || row.battle_display_name || row.battle || row.battle_key
+    {
+      name: row.display_name || row.battle_display_name || row.battle || row.battle_key,
+      battle_end_iso: row.battle_end_iso || null,
+      is_active: row.is_active === true
+    }
   ]));
   const latestByBattle = new Map();
 
@@ -464,18 +473,21 @@ function summarizeTrackedClanHistory(rows, battleRows) {
   }
 
   const orderedKeys = [
-    ...battleNames.keys(),
-    ...[...latestByBattle.keys()].filter(key => !battleNames.has(key))
+    ...battles.keys(),
+    ...[...latestByBattle.keys()].filter(key => !battles.has(key))
   ];
   return orderedKeys.flatMap(key => {
     const row = latestByBattle.get(key);
+    const battle = battles.get(key) || {};
     return row ? [{
       key,
-      name: historyRecordName(battleNames.get(key) || row.battle_key),
+      name: historyRecordName(battle.name || row.battle_key),
       source: "site",
       clan_name: row.clan_name || null,
       rank: finiteHistoryNumber(row.rank),
-      points: finiteHistoryNumber(row.total_points ?? row.points)
+      points: finiteHistoryNumber(row.total_points ?? row.points),
+      battle_end_iso: battle.battle_end_iso || null,
+      is_active: battle.is_active === true
     }] : [];
   });
 }
@@ -522,14 +534,55 @@ async function fetchClanHistoryJson(env, path, params = {}) {
 }
 
 async function fetchLeagueHistoryJson(userId, env) {
-  const base = String(env.LEAGUE_API_BASE || "https://yamo-league-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
-  const url = new URL("/api/leagues/profile", base);
-  url.searchParams.set("user_id", String(userId));
-  url.searchParams.set("limit", "2000");
-  url.searchParams.set("summary_limit", "100");
-  const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "c0ld-Discord-History-Worker" } });
-  const payload = await res.json().catch(() => ({}));
-  return res.ok && payload.ok !== false ? payload : null;
+  const defaultBase = "https://yamo-league-api-worker.opal-dde.workers.dev";
+  const bases = [...new Set([String(env.LEAGUE_API_BASE || "").trim(), defaultBase].filter(Boolean))];
+  const limits = [2000, 500];
+  const binding = env.LEAGUE_API_WORKER;
+  const targets = [];
+  if (binding && typeof binding.fetch === "function") {
+    targets.push({ type: "binding", base: defaultBase });
+  }
+  targets.push(...bases.map(base => ({ type: "public", base })));
+  let emptyPayload = null;
+
+  for (const target of targets) {
+    for (const limit of limits) {
+      let url;
+      try {
+        url = new URL("/api/leagues/profile", String(target.base || "").replace(/\/$/, ""));
+      } catch {
+        continue;
+      }
+      url.searchParams.set("user_id", String(userId));
+      url.searchParams.set("limit", String(limit));
+      url.searchParams.set("summary_limit", "100");
+      const headers = { Accept: "application/json", "User-Agent": "c0ld-Discord-History-Worker" };
+      const res = await (target.type === "binding"
+        ? binding.fetch(new Request(url.toString(), { headers }))
+        : fetch(url, {
+            headers,
+            cf: { cacheTtl: 0, cacheEverything: false }
+          })
+      ).catch(() => null);
+      if (!res) continue;
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload.ok === false) continue;
+      const normalized = {
+        ...payload,
+        rows: leagueHistoryPayloadRows(payload)
+      };
+      if (normalized.rows.length) return normalized;
+      emptyPayload ||= normalized;
+    }
+  }
+  return emptyPayload;
+}
+
+function leagueHistoryPayloadRows(payload) {
+  if (Array.isArray(payload?.rows)) return payload.rows;
+  if (Array.isArray(payload?.league_summaries)) return payload.league_summaries;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
 }
 
 async function fetchStaticHistoryProfile(userId, env) {
@@ -607,14 +660,21 @@ function summarizeGlobalHistory(payload) {
 }
 
 function normalizeLeagueHistoryRows(rows) {
-  return (Array.isArray(rows) ? rows : []).map(row => ({
-    key: historyRecordKey(row.league_period_key || row.label_key || row.run_label || row.event_name),
-    name: historyRecordName(row.run_label || row.event_name || row.league_period_key || "League"),
-    league_name: row.league_name || null,
-    league_rank: finiteHistoryNumber(row.league_rank ?? row.final_league_rank ?? row.rank),
-    player_rank: finiteHistoryNumber(row.player_league_rank ?? row.member_rank ?? row.final_rank),
-    points: finiteHistoryNumber(row.final_points)
-  })).filter(row => row.key && (row.league_rank !== null || row.player_rank !== null || row.points !== null));
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    const fallbackPeriod = [
+      row.league_run_key,
+      row.league_name,
+      row.period_start_at || row.first_snapshot_at
+    ].filter(Boolean).join(":");
+    return {
+      key: historyRecordKey(row.league_period_key || row.label_key || row.run_label || row.event_name || fallbackPeriod),
+      name: historyRecordName(row.run_label || row.event_name || row.label || row.league_period_key || row.league_name || "League"),
+      league_name: row.league_name || null,
+      league_rank: finiteHistoryNumber(row.league_rank ?? row.final_league_rank ?? row.rank),
+      player_rank: finiteHistoryNumber(row.player_league_rank ?? row.member_rank ?? row.final_rank ?? row.best_rank),
+      points: finiteHistoryNumber(row.final_points ?? row.points ?? row.highest_points)
+    };
+  }).filter(row => row.key && (row.league_rank !== null || row.player_rank !== null || row.points !== null));
 }
 
 function normalizeLeaderboardHistoryRows(rows) {
@@ -724,33 +784,38 @@ function absoluteProfileAssetUrl(value, env) {
 }
 
 async function renderHistoryMessage(history, options) {
-  const fallbackEmbeds = HISTORY_VIEWS.map(view => {
-    const rows = Array.isArray(history[view]) ? history[view] : [];
-    const description = rows.length
-      ? rows.map((row, index) => formatHistoryLine(row, view, index + 1)).join("\n")
-      : view === "league" && history.league_unavailable
-        ? "League history is temporarily unavailable. Try `/history` again shortly."
-        : `No ${HISTORY_VIEW_LABELS[view].toLowerCase()} has been recorded for this player.`;
-    return {
-      title: HISTORY_VIEW_LABELS[view],
-      color: view === "league" ? 0xf2cc60 : view === "leaderboard" ? 0x58a6ff : 0xff6b6b,
-      description
-    };
+  const view = HISTORY_VIEWS.includes(options.view) ? options.view : "clan";
+  const rows = Array.isArray(history[view]) ? history[view] : [];
+  const description = rows.length
+    ? rows.map((row, index) => formatHistoryLine(row, view, index + 1)).join("\n")
+    : view === "league" && history.league_unavailable
+      ? "League history is temporarily unavailable. Try this section again shortly."
+      : `No ${HISTORY_VIEW_LABELS[view].toLowerCase()} has been recorded for this player.`;
+  const fallbackEmbed = {
+    title: `${truncateHistoryText(history.username, 80)} — ${HISTORY_VIEW_LABELS[view]}`,
+    color: view === "league" ? 0xf2cc60 : view === "leaderboard" ? 0x58a6ff : 0xff6b6b,
+    description: truncateHistoryText(description, 4000)
+  };
+  if (history.avatar_url) fallbackEmbed.thumbnail = { url: history.avatar_url };
+  const components = historyComponents({
+    ownerId: options.ownerId,
+    targetId: String(history.user_id),
+    view,
+    page: 0,
+    totalPages: 1
   });
-  fallbackEmbeds[0].title = `${truncateHistoryText(history.username, 80)} — ${fallbackEmbeds[0].title}`;
-  if (history.avatar_url) fallbackEmbeds[0].thumbnail = { url: history.avatar_url };
 
   if (options.imageEnabled !== false) {
     try {
-      const filename = `c0ld-history-${history.user_id}.png`;
-      const bytes = await renderHistoryCardPng(history);
+      const filename = `c0ld-history-${history.user_id}-${view}.png`;
+      const bytes = await renderHistoryCardPng(history, view);
       return {
         content: null,
         embeds: [{
           color: 0xff6469,
           image: { url: `attachment://${filename}` }
         }],
-        components: [],
+        components,
         allowed_mentions: { parse: [] },
         _file: { filename, contentType: "image/png", bytes }
       };
@@ -761,9 +826,9 @@ async function renderHistoryMessage(history, options) {
 
   return {
     content: null,
-    embeds: fallbackEmbeds,
+    embeds: [fallbackEmbed],
     attachments: [],
-    components: [],
+    components,
     allowed_mentions: { parse: [] }
   };
 }
@@ -875,23 +940,28 @@ const HISTORY_FONT_GLYPH_COUNT = 95;
 const HISTORY_FONT_ATLASES = {"regular":{"data":"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","advances":[9,9,13,19,17,26,26,7,10,10,13,22,7,13,7,12,17,17,17,17,17,17,17,17,17,17,7,7,22,22,22,14,31,21,18,20,22,16,16,22,23,9,11,19,15,29,24,24,18,24,19,17,17,22,20,30,19,18,18,10,12,10,22,13,9,16,19,15,19,17,10,19,18,8,8,16,8,28,18,19,19,19,11,14,11,18,15,23,15,15,14,10,8,10,22]},"bold":{"data":"eNrtXXdgFEUX30uHFEJoAanSBYEPERAsWGmifipFBaRYQBDErqiADUQ/EKRYAEE6iiJNQHpXWjAgoYca0knvN9/Om90r4XbmHdnkEpjfH3LnvbxtszPv9+YVRZGQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC40bGVTJA3QUJCQkJCQkJCQkJCQkJCsnIJCQkJCQkJCQkJCQmJGwEbCSFt5G3AsfKv5E2QkJCQkJCQkCjD8Fqg2r6LzNaaoColPsV1zm2o9o1maesw71RmfsrrHrj2u//OONZTMVcSf/TifUYSEjcHK+9L36O/MZI+quAsRYkiZD9CehQh29V/fiJkomBymHfGSkjO8cV9+G+z7/C9qZlHxwVrX+tmELLNYiRce9yuhLyUg1814qp8SL2iD9B3qnwkIbn/4csMVDX+hr/5bxBiDbzhRn6tfPUuPCOSCnt9+6Wcy1tHoK7fb6aqUijVesKWmOzM6GW9ROvCfz7deikrN37np7ciH32sevhovsw8YsdDQo3hIzdHZ+dc3jKYIzOWOCOcq/H2KYdTci6veVl8Pzt+F5WacfL7djedsdj1u0PJeSmHZ9yJ/pOKPWftO5eZceHAd/0q8uROwwN6h6vrNf05Zl7aPK6R+Nhtx2w9nZqXenzVe/WFOguSz+6a3Ksc5uhENOk5SX4qPs/6w5Yfjc3Lit0/96UaXJ2z9G816bd0jKQIdan0FZGUg06fg/RzTkulqEfX71Id2//pYvCaMsn/6l+D6Ld1nHlxwJJ/E3JiDk55xCI+esHVU8tfCRWebKVBy46hdVrTzq8bXU+gscmH6y9k5KefXjOqibHQp6QwHjWUXU1/7qt9aU+/HHEp96sze2pLv+a6fDe/pT9d0r50hsMPZF+epJ832yUrJ8Og0EZvOxAd4PLoO+hPSeU1I4Ouc8RoMplQ+NqXGN+oWUxineCm71dlZuJejCtM45v42fF5Qn43a6b1XiKcDW9kVu41HT15mn3toVdVwfxmpkpKVi5R6tH2h8iUz8xj5b8k7fuqvueuBlaobeazcpWOT1H/OSLgZ/4OZIbrWgzezoSOhLHvfxCS3dhIeFiWpjLvffNYOV06PxIJ/a4KjUSrVA25MzfeC/IZtZT9BEI9YrVHdAbxkrSg9oiIlbffbRtJEXzS08MmmPMu1nsiZOWr3GDlPm9napJbTWLlftOtmtSlh/nHDlmuW9/TvG+qedvnmH4jrVO9UH9RdXK2/e6nz6hlPPS0YYdj5RT5UwW2y73b7cJzcTpJ4vjAEmflt/9cYJeOKfWs/F3+SuM+K7fznjlcVn4xBMXKA96/arub++/DPaPUlwU+xY9SbbIHOuF05k3kvSJVllptkkdKlpU/AzQ82GmO/MOlZC84oka1v4Qvc9iXz+nnDx1EX4dfte2DTfTzXtfui24g+CL7Mp5+XquUHCsfrMqkBRcPK/eljsV7TJtrfyGkoOvNysonEI+xcuZS6m+qpGTlEqUdH9AFCZEHjWXlK+juyVMeu5yuxstakVj5EXA3l88nhONMVyy/Oyxb3CVkripw8qT6n/nw9dlC66oTejsoHWoWK6fCp/2FZmIWIRn1MPp8d/e21CJklVJt0gc31AviR/n2xwKhR/NsTyihoUC22pRcgmDlcx2e+oVqPMmnHSQxtLxiIoKV78Kzcj87g3eHlVfl+fbsYjncowcewrC9GxEBDrfyY8wf9E0H2aRjERdgVyzZ0L/4jaa2KZrtEvIjT9bysZW4z8oJibq9hFn58FxH6SulnZU3BHftBot5rNwWZuabxGXlZAaGlVfd6+S6GY587m/wzjR8n6NowUikzunGGmuedZArYVYeBE/wSf3rPoct8MKuA3iFHmdf2Kx3kn1ZTz93dFyLT9D/k1KBfr4f7pKR5XbI7n0LiKef26NZ+cIis/LyyQKDpgis/GXwRZg22fqqZu3VRqbO32WGldeGOTEr8tzYkr/2YCqZd5upkpKVexCWdh8fbCxvgwB3w2z3iXms/GeqL6Oqp66nEz38ctNZeYBqx7ZQlA6q9cVzug+AbYQEcuSvfP4SUreAkLfBPZ1HN8vDVOZ31HA7NopaNDN6j8ugyi3msHLv46pwL7EcXYxXYBR2ISTyqVQya0IGOXFDvSHP0dn+Fr5MlRTg44dhn20DV7T1HH1fGcPKc7Sdu5kCVp50MCKFcdjK4iv6miBY+TE8K4dXnmQcjkxzh5Vv4YiCH8q6fhaYy+d8OZLfga5/j8M/PZWbCI6sPEu842QBs/rosNpgwnRbzXHh+MRiyD6wngvr/jysBfLwggcXOj15PCsnV2qVKCv/ptDRSzkrt2yFaae6gjtP1F2qq/2PboTPyq0dxKw87FShxzmcd/S06POaTySX4weudKaQztd4OuP27j3FlFpbGqrcrDN8D7By5Tf622zdi2E1DGBXlEj7AK5sdXw2lDukOU2Sj9s9tHvopx+MTpNtwN9NPw7kr12FWXleGz4rH9+gQXXRoJuiyh3GvRgNGixzh5X7X4CTfNq02ZZ6nqMq3JSsfDj4R6t75trb7cVmi+MlJSv3GMZR06KJvA8I2/9AQ4QglpVb2tIJcZSnrgcCWeabzsrbEpLtCxPULp7YX6rOxb60BnvlN2N5S8gQQhJVfaHq6tpZgWhB3cpxYYfQS/pC/TCSfqhuDisfpMoeRwS+VqWugLYIhT84rNgtb6Q3hAaS/yyQmUav+tdyyj3AUO7iia6w3SXhm7mhVxXFrwNkjl7lLQ09ZtDyAL6jQKvY09ImH8PKYfoMYOCPk2ch2vhFmgXcgZft4BOgYxB3V0bRdn+eUpRydNYhXYwF69FryVCN4z45NHvAclOx8rTp3Rq0ZESyi1Cc5mFkDbUH+T9At8ZclwGg8Ub5O9X/nEBxw1C2NTbMWPQDNuAvf/9qv2Ezz4pY+aKaNRt0fCOC/c1egSQgWHieumQI9x6xN4gcHff4PV36Tz5W6lk5bAjq26dFZ+Wp1Ah928EwOMdh5boXmcPKLWtYrsS8YQPGHmF0ux3/PL1abwC5z43Ni7U2nWMiGT3sILj2sFn8nYfWLBb+iSqW0IemZ3JYeQgMofuA7bPhFFB0Vg6z52Vt4gKv/hoOhyXr7V5L3Q1Zz0V4IDgaYvy17KbkKkan6XXcFox+wMbPORdP0b1A5AmbhSTQTamiDsh3Y5Y7rFx9+DFfqROYb+mdv8sMK4dxN6IMXbtk5aUW1KqQrFwIuiXWCSOIr/Y2hFJTT13P7fSxf286K3+ZSf1IyDSOlHcBhH2yzmgV7+BIfqnFCqqmcT+2wT9D4bLyPuqHx+iHyorSk25SFZGVUyvpVYzgbFVwKUJu2NxtF+jlZxxdPfWOG+gF+Q8RvyH+dJ86vZKibUNPNoWVf6QdtC4YQZjouW1U8BWRlO9hgmHldIcpBHOD/Gh0YaI7M20Atfa5pXguEs391Ya3G6ZoGfJjFf3O3+fRoRL0ljkdETd3x0j5z2clKbY42v+GoHZ8vJO7qHGyysNc5vbPpxxiIlV7B4YbKt6p/NyJlrCzl/cWy5fxenIchkVahuTytiPd3AVGSTYFd1XWi7oTquMvpZuV3wI529+acu1UMpM6w7TF0E8dHUm7eKxcy7jisPI+ILYHwh283ocvu0TnGUADw8huw/NkOvcynSyrfo9Ip89Jbh40ZGHHBLEvt0wW3akmqGeEZuXB4Mhtzb7Q/WDyvIHKJ8D7CR+pC5z+3VT6BRKY3ir0ysGi8ZJiiRBQKnCQ5laHMECnknGGKPcvPCFvMwj0FuwWipusvLy6Jr0TlmocnCFZOR6znKo7SlYuIVl5MYNmj4WZy8o7IKf3YkED+ti/NpeVHygUvPWgkWAI/bUxpl/5VM3yUG9/b8X/OCGXOAzovJbFtZjuUKj/tqKHCS4SK+9Ig51Rz/0uumrjEhJa0nzl39CT2N2EJJT+F2QWP6oR0J3orgsI1YgSsPK4ZxIQrNwGKIiNCVeYp+0w8zFa2wTjs/Jg+thRp/cMz5J0iffoX3Cr/x/XregqxvWD7WZsC0V/KSZ4cKCEjUk0KbM9mxzq6YWW/hZTj6+iSrJyO6hE5sW9aUmLw9asWzcAnHuuMiPKp9E03Eeo2q9wjO8cf8sWHFH53dxl0P2JfXOwRFg51MPOu99tnZ5i5VDEJKq8aayc0HgKwvo40D3WNf8YsnLqh2HVSY1ZuQX+/Iy+sE2Cx3mv6DyhdNk5o9O0gEvxTAUnnZ1EOhcRXh7WF/TXQ+j3zWRWzt4O5uHwoW6WHKM46dAC2+OhmT20fvpB+mWCK/8ZhK6d8IJN9UjOkux7XvNrLibI/RmYb9Lqm0KgaQB9diXzWfm7hFwNoeFBccFKaUXZYuVPSFYuIVl5CYF6XAPMZeWtjP3XxY9b+AFw18IvIEBQX9sn25mUWw0JtCUT9i4QrFylRjFejHTcCflqPF/kq/Soo2vN1WfH2wjWlWKIyeg52xJjGOlaCM3jSdpEQpZhS2GXCVZeMQNRkeYTokce+NINvnxeEb35W4cHK26xcqh000AsF0jJUbYor7yFOpo3zBWy8jq8EtROWEcjMN1ZuaqmCmsV0Aaxp6hOuj9UwEmwgcTaKjZ2wEvpf+lk+i5cD7FnjmXsu9fNcRI+Mc20enN0vokagLyllkjMUx/PKnWXZwHCm9j+2X5C4r0N3CyP+NGndEHUeWqWzSFyxnAWrQXH/AxzMc4sch2UK/AtKVYO5JqMc1+nh1g55ATntjbHIwGSPewxDzRe4pWThqwcUqyhk6cxK2eR4TZzPvCqcRyRw3kO4xa/d6nza5FOGPVTjXR+iK/eXBysvK89UQOC41cZ6oTdgd4K23pIo4+ggJoif9ISjoW9eNUgfqULWMFcP9MIiKD3rU4Xru2Iy2cp64PNIdC+MXiq7QYrD0kEG7BSKqpikrmoPmjuoaS85IgpIu7BGJ+l76bY7PMLRW09Q0euPJeel7R/vCh8zXfIpticCz81QbDyltOOpmZfXDmQG+X/qN3uzUYY08O2xGVHz6zZnMrvFF2799C9VzOOfFKhpBm0TXI0cSq1aILO7msuZxz7JFRRvAdtjc05M6Om4XN/bnNc9ulpNQRq64zdfDk7/dzKV4MxY+l5evfntRaMkKHqkaO/rSkaIUxn7R8v5r4luviw19ddzM66uGcGf8z3JaiqwMAl7EILuBl60NtxNHz0p6a6tR7XuTSIfupm20SDye+amlH3WG01UOrm8kpoWI47LD/UqLLWNbyiCEcKKarUlV08rHyv4iGEEeJOezCUqRQRQeO9IyMizhCSExHxO5+hkO/2i1n5vawhyTfq+u7TLFfQFNwLalzToZIP5Vnvoetx0Tx4x/FLHGVwvyLkmsaqJq2/ygwXIPf5ygQrp+GNKUECIajYwzp4gSErrATqDisHKzBRdE99ajx9CEN+gqJUS76ZmJXTlzg/tSD9zKJH+cnaXtT8W+A9ZEdi1olJqJIwkAnNn0qa01jib/2VFucEIbobbPtEdYAaGktCc4a48ojza0P3pFIquTNK6kxjJc9mmzLmWDnA6FdQ8/KHoihminLpqj5fthscvyNVK4T0lusaCJRQpPqxGn73iBlf1d50uy3WONgdgmQzQjEX48wimUXYtqRY+QtwnhXc1+kZVh52xUXkctHuUpXL+v4rzckpCI82ZOU95usttYxZ+ZvA9+xun9nG3fYcznMSd+fapc7DAp0NqLlGDBtbPcx87T+Ee4aVh1ATrAA8i5A10s9Q55d6+ArNEdzcXbdWabjjtfYDRPdvIML8s3JxMBuMwUTcqKiRgLAq8QSauhZO4qqBuMHKxxGSRcP7PlffZ1OrlIkxNN9WDm8UwgYIWaft9HzIlR1l6wUoMMHra0VaM4aJWHnAD3pbjGONzWLljU4wyaTnMKy84jat0UZVD7HyxrDdNsk8nYFaVdPIymFb2afYRgaSWiJjDLekV8A3ttGU3E949ArrtaKV3LekgTZCkgZgWPmtFxCNS3qm6GfZp8RZ+RD7SHuErxgSfb6zLTGXdW7jYvX4HgSo+TWPX/R2pD2wq1Ie/3be1Kw8QNhZ5XrQTjXTLbBp/SdX7mHtrk8RajygzsRHqdUz0rJLVc6v8e2/g6ndyBoF0dDOU0X3XSC7eQ7Vh7AAnaJpvJj6ri8OwSkuC6zccpK3y6IDCrI1h4+7UHfWDVbuuwVBuy7qvYcmiCyc+TDLiFn5A/YpZDM3f6EZtMbVFtiUTuILqpyByHB5npoMGVCCfQUvlOVbm7PyfXvWpUtAPAMLdhdgGCfU1iUa/8hSoCOh4p0BujgH3FzlmVZTmBEW82aQ8NhQ2D5SJNeVbY4/SeeQQKVWLOukRJNTnr1GtlIus+T7Em61C6fa5gWrahsL/sgJROeyyBCrcezka8h76QYz/cnN83RGibNyIKSbLGay8mpT9LCcx8HAuWDIyp+sTIsFJofzWPlS+suyQl6PLMF5VrrC3de+Hp3twQ792/BOeWl2as68Vp5g5cpKGxenzv/sEL5jkZqdtG/khyH5zAlbn7gsEeOvt3vLqMU/U5g45x8hgkK22r2C7udXqphFoGsX2PzZ5rHySilaI7xKacgaQ+bBsVT9E2IbwF5l5jmOEfKTXSffBA+PsXXlEHAu/+12nZeqm8PKa+i9O0gGhpWv1aV/8gwrt4BVvdvXPJ3z9CuavU7/tNG15Gz99008h9luxwXmPfxYegozQjIwrPxnROOSTjbXgQdYOVgr+eDyn2zcVZKiQp7u7oXMKkJzcGic4fhrRUPhJo3SKs0cNB4hFdJtu0LQwuIZJCsXpVhnY4cdnpXf5klWrljRPTDdwCuskdN8l8/QEeO1275LVB2j0SUmOMfyirBEV9sN+vTJAsdm0qLCRboe6B+HJM93iXpL6wj6Rr0Mr3WPYU+iLLByyqWswv6KsEFeBz7+yd2WcZ+V+8C8mF4HxcqXCZspDKbmoR+ClTv2QD/I22GGqNdMG0GqLbyiMag79KDWVCnjZS7v+C/sSoyuWWVEtrF9DuhMf4/H7JW3ppZiWmXsEGm5FPI9C1Y+KBxJaCYZMgqKCZDEMRX5TiPwShwS7vJNYauQaonl1tBMx/qsePPrLr1wlKyH0VUszgfFTNc9zXGdgAv/f9fBypVkW9BZUVk5QVQ4/NN2ntMEVLs0sPIddNQl3uLW/RRJ3gJz/fsKy8R+hU0rLln5U0o/jR8bs/IthSo9MJd1IOc8vWo9dRR2Dg2DMN3VmRgRkciWTk4idJs0/SGuae4BVt5Pr0VXm/CrYAbRNzLNS/FKBK/aPhZz3sugLWEvTNtAalnSLIBEajZ1Fl/8u4KGcO4SaHBJ/IqSxCudqC4J9XRzLL9pCbPy9N9GvzDiF6tWA0hgAxASc5DtNMYY2/4s0JrEHTxhFZjgq5hvPOKqESW0YTr9ff/IwXML+AX3Wi1YACvx1gUL5qDGPEnVj75TeO1nWf+6nFCPsPJXwCKoaaJOYj0Rp08lp6LZv3WMrl2z2RoI3Nkk81AUeKetD4jH0j/MELvgzX3f1EkEMUISsO1EoU/O+hGD35l2kN+JsMOCBXB7Vi5YMNosVs6GPByX1gnN4ET602yevHJa+0kohVQ+32ALDebOK+WV5dQZxVsTvrPdH3oeyZz97c8WAC7DUiAwQ8tTXajpBs/Kq9GmWx7jUZnu1p5CrggT2XN/UiD5oh5rtFvA5apNPp2TvKmnUkOdlHdZ/F/fn5YZOcblntcbeWBWgNaVKpX2uehOGpxLUMdOElK2Oj1uu2J4UmWBldN37U+hVIy9Zd1aVGkUNCuvBpFQ1ucUFCsnF0bxk/rbZKmzTAsFwcpfyrt8IvKM5gX9iCPYT1tkVoA9LaYAEDF5WrSlH/iJvijs49ZV945yokbxHNEhZzJ24vLKe0dlHngQOUDu0gyhr+sj/DtoJqkoXk+wGLjUL6pxpKDixDpxRaN1hFxUlOACzQIezqpF1nLZwhIWL2onwQl0RrFdQs50NBQ8iE8qKsQiYc4bUlKsPMJ2nmWBlYP9lVrPVFZeE8qIRShKgLqK5VfjsPKnNWdLDw4rP2xP+bNzU9f+3UL3c7rhaV6nzoJfuQmcbfR9ZZIrDrMznZVXoE0dk701fxhvqt/N0qPuZP3Jabx7tj/8E+vKY3eFXdItolP9XLv2v8SjpE0uJl/GHVZO9//zamAk0UrDMwhZwD5WTlNNphI1GN58LdjmB9UKJ/JsgMw+iuI/ie/qCIddzYM01yj8K244BzQgIpP8FeXlPD7nqk9/X0nT4mgMWX5F0Y3HVHtjR/9aZSav5GNYecI9Wg0TXrBE8bHymtRSL+hsps6Y/yjKx4ye91aUHgUuO9WCZGInRXm6gJ+w0hzY42SVwdXZJXg/QWf2syo3YC9zV/4zmqpy06F5KFa+sKFfgzvEl56IfD2w1d7wrLyPvsTVE4VdgHOrI/SivMr+hjqhk30Muf6bUDDnbd55tiCa9y2IBqdME17XA/TNSBPdgE7cNiTXx8q9VLs7pwruKfXYnpa6gb3xiwQtpZBI1Nt4molD8HbRiErhXmDVyRovT8FFiP9G83wr/s3+5rALr+E4oBvdlR6wI7u3gvIUfbBBRboe6vI+hpT1ood9zNTb6SZD8RzqFfD7ATuSYuZ0/ROVn4dl5R2Bl1gHiuRW7o2IZx7A5bwE9OoXtSoWYlbuB7w56EXYrrzCIdEs3nu2r5bikyHqEAum5zsCoRr/stQ8sKiH8STvyNAJeVyR8zquB7BFf3KkmBiHtHECIli21VxQPtdYwoca3isRVoNKjPexRQi6zL3DwhHbuPLu1bXqcXWv848OrCdm69bdLCYu604uK8dVxy/EIjNtfvCSYOV075HFQpUFVr4Y5pCd3uaycgjAbQipDpsVPiuvS6P3zgcbs/K/iXN84INwn3zF9/Nn4xF9fTqTRIZL4LgkTKBokVh5JNf1S7dsVvMD2BXlM7bHQ3tYrNWKFnWE1uSuur4N1i5IGMJdRYt0EvdjDAIT5ESgiazc64wqO8ZUVj5VXTFv1z5PcC8XySxUbjtBaDUl2BZCryOEcKIwIXn1BKaYPJiKrKPQF3zO9T7rFkQXUGHwA5aVQzLVAfg4CcPKX1Z01+8gT7DyVYjanm7qpHU2fGNttRxWumzrmmBzNa/SI5Nc4xN7j8jq1HFHavGPPhY+7uFWF4IRApVDlP9hWPkuRM0HcGlOqughVg4dYy4qCgt94G2m3KGFpc8h5BfWKWm4czqUA2pTrZdomYBd/IpOO7QXqbdDf0tj1Ixz6agpNCW2/IffDvi6WDkke66qh5EcztaDDSrX9Y7m9tVE4wIiwsotWFIK2V+CaGIlWEshiMeEfT8Beb7qKLEeozbQD9d6tyCelhaNKAfhqmuDTmMrBSvcF/4AVjiTnzBROlj5Tk2XuakTdB8iWlxTPsreUXw3KrIAycpHwtbE1adQ51p7fC5xuflpn8D26wacmJXbnHvEtn67BmR2xkBC9X5EORrq4CIFgs0Rr73UPn2nmqUjTfyxduLJ3gl1MMm5trQw3A6PsPJlAcWk/LZoPitvRD0XmCJVZyBh+lE95ex7Riso92rl0l4bST9BwmqKv5jxPQxhWRFGCzjk3/xyHay8rqiX1sJwQFVzWDnkAi7Es/LNfTS8Yhorr0cwRTyYzhcR8clus/JWzFBczAxHLitnXpup5Q1ZOYQNLbZ/h053ycJnFMvzwhXW+TxOZ0xLIeEcpkXd5ItsRhwrX+7Y0rEjf6urP3NbBWSK6gCBD+IbqPar8tNg6rR813IVGpNfSwwT9TgBYYDQVGJnc1xAF5g8cdycm03MyEVM2xZ3lHoQIYMXHtYzIp4X2gAsEAqSugxzEn/XCZ8Q6+2Drh2fc/3hbIG9bAYrX2vP622PYeVAMiEZeIQHWDnE+P3pZarOujY/Q18brR5tfO0f8PtFbSL2ui+b+MXiE+xBMR/YVjHDNY45Qe7CsPLHEZe+mHnlV/byFcuaz8pZOZjbmU/zPO95WmLZ2qEaiq/GQeueH43b7uqrR4ag+VEfrW3JUsNKpg7w20MQZapA5XZf1GzjBiuvfN5e/YqL+jnataeNbfs9shaTCLQM5ANmTrONC5Hys8K/2EpW70PkY8Acrho+Uf7NYDrzXkJITqDLJfM9B+8ZvcDLgUW7pk9wqzBDuiCu7sZl5QEJtk5BXOyxl3iDJCxhRB6Olf+PhXDfij3dQYIy5FCQYuMKFfQFzVyxAtPw7qSgtw4koLMSwDNYTCsXjQii1hvohIznaonC0iC+//160fT+gf45qCqLxcHKyZWPaxSD6tZzsgR75a14rZ0LuUJ2K0p3vR6L+kxPK+A0jr9mGTtSaLr7L4Lxsfe5Fc+qS/B3n5UD78wLNoNvavydG8FFy3WQ89S34BMQEFBHyMqLoQY7BBieQN4lyOfLu9NUVq7Qymd7aN/s/CoiVu5NF7mC9oas/Gvb/WT41vjVB51JR47s3zD1ae5AcalzE+/abwWnUIz4BfUexIpVfWkKK5/jWHW2O7+OIISwR7Jibs/ylJajs83egCxtW+Yvmgnf0CA5FSpPLQF3gGi/q1YuEfRmZYD9IMzGtjsEukoOsht22WDlfZIc5s4XRDZAmsPCbNgRD2KNWmIODvkdHexz0ka+pB1vmMHKI7QIYf3ows5oNhL5mgdYeaJgt+F6dEJxlRU2g+k1l25Tu86X+EFksBLf6TCdDOEePZN9HMAdS4cLPSMRK6+LuPS6erJhTC9PsPIurBUJ9EXjdyCilY5PK3TCbLYCJrx/CLEaJAh67WPXJOoKB70d/1L8U12W3CwEMJD3iPg2ZeXnq+KmGzdYudIiA8fKJxCSMfThRfrcsM2MaZGOu/ZmzrOPRESoy3VSRESEelUXIiLEzdC3kglQ4hLBe6er4+I+2u+FkinahvRul+O4raNRYhjViQfdEPsXK2xFLpt4BDWn6EdIMnwwox5LsbDyAZhW0Iq2hwBeYv88VMY+ipW/Bxf0jR/6dH3AyWXc2umFwlG3XyOUQnX1Tsa/32H3zX6GYOUf8ZcXh/vJkjmoO7MAk65xLz9Jq7hwFytxk7eko7l6ffvsYv7KiZy88mDVnM7EhDZugOD+lprfgu6ZxylKaJKLZaxl4TGyDMH4/HJ5BUhZ5QFUBU4nFukFtVJ3mMI3MZK9nOJ4wz3Byp9A5fdqOuulC+OJ3WfldNuuoKtmr/FZudKSTnZ7s41Y+WPEyZ4qn2S8t48+zx7OaZNM52iuzvIwjDZgzMt4UVVkPCv/3DHL8W3B5a2hv9emHSOzggSWhSrykN6fnEZJJ/ekNty1klDPNbVakpAcKvpzFtrKdSCbaS+CpLhFoBchOx+UCVbeBfLIzq77/kcUK9f2I94oFAHijBPaZqAYJ+1tRhrzOddx50n+TTNYucPRG5V+Vg4Oq+Xm6vSxsfJOGFb+Ap+VH3NosjuPGG/rujOWHJ5RAwwrRxmftdfoTfZERdyKg5V7x8Kk/Yg9XtUIz1KRSkNpNBrNCplULt+Yo3lr9e+FMxOtI2CtSdel7DCBKBhCCbVEGh+nuefRuM68brDyZtRxkNNYLLiXBXDcz9ocxjUqrXPtMpa0EUfIIxhxlZVDaxlxP7H2BRC0PhPyxGDj7RqP9T67d0vlXX8RftQLEkOYXY5CZTe6qLmF0l/tjd77eQg56KILyQcdcd2VMKy8PX05815043S9YG+1ormsPFrgU/ajroC/4eNPiAh2qAknKs5At7ey2S7ul8KqOQ7GXVaoBwZJq2VQtYUcGMANZHcrPiR8zGVWg31smCnnOBWcwt4q68h8MrBLHB0nnWusJeTCNYNlYuExkhkkZnzl4A70NroY4OxpGLvSiZ2BA4cMLjFWHgavz+lQD7Jy2Pr9EXtFI4V5w+6zcrCn12tB0QJWbus44pqVBwGLi9K9BhCrmt+waOcZCDTzeJCTzvp8nW0LhNHEjupEfl0cK38KQutZkrjlAHEdZe7o/SWDjovLkcMr8a0uB1PKNJfhNH5RLNMUKhzFi3I+UazcG1Io0xsi7qNbBPoeatbWN1mpJy2GizRoqDOKlRewYszfcbtU7HYsUcDFfnvQcQ8+54LoviYBOrzNYOUH7UfvXvpZeXi8MHTfw6x8m8Mmx05+5VXQGYwYSwfsz7IrhpX74IZ9kwknWTV9kbmCZeVNiS0i/E8BK4do4pygyeIKaZXpQtB1ObXp6ebD3zTM6xMD2Xf0pU304t1CXdNDZxsU93AE7FUXIBpdVFiNblrjBiuni/oUTFz8FS0F3H/IX1nxC+uV2rn2HLwR9VUDQLAx9WRFnZX3xhSi941U1/eKEJ8ClUJVgtOtsAxkFc3UvjQ6BBF8vkW9IHgjy+Nk78DwqBuSlbd1CCESe/YSqKk4Q2B/ucHKdyNWDWdA+Z80xVRW/qio2hukk1lpYEwgXedSfMV36ojooEvtHt0d/O1/G/7LdREXLxrPzWOFJD6vaQor77CY9T+PeSvIpDPsxrLJPtAaz76snUTqXYUFLdCr5lI0Qw6vKLQDkwIKQu7imnUkWavB6df/EwyL9GYne8qnxFg5I2XkcEOPsfLbs1DTh67Ti4VTPG4mK2e2NSF5lRGsPOAkj5WzdFmyDZpT+IwjnIRH/HkynTtqOOicL9IJ4y/OkJoO6q9Pb5B1ucIUVl4NpoQlMHoh6IlHPEPp+75M3PAXGCyhe/+Qew+d0v512ZAF6HtCiBIUx69p7wYrH0PQC5J7BJrWDpl4Y7Dycla96tZ7KFbOCj+FpfGcmqyJWQQmA2ipvYLHH3zORfNFoe4r8mliWDn0cGVupVWln5X7wM5p5m2ll5VPJDaqVxd2aEL4R+9rH0uGoeTL7PmGK0xk5SruOymopm835+4Wa2NLKmVbIUkiVg4lFDofQUxOtFboRwk0pNKSqN7PUcZGS3OIAKP/iRfFytLKcUtpVWbBjm2Fk/aSfIgl5gTqruNZefk8XpGg4sZb59LWNzRXZTV1TQ1VlL569UJjLEmdeZ8vZeXVIzAkYbT2Ao1n8eT1XO1KsoJ479FQkpbfaHn4a1WSXK5lEa6ojmNYvADUkZ/ideOw8pdOpu/CdciaZ9sFFgFSgH7yUx6h5lWKeH8TwcrvhJ4L4To40+NtK56g87V3vwR0WS1xtbf5r9Giht7PXhWmWvYEol1TKbcUUfH3LSozQ3R6MOZ30E3LkfzqxerTHEZnzYof0huf08Sc534d79N04FO8HHA3WHk2q0w2TFxErm9UBuqayqUQEuWt+P4G/GCwD7jhydFrW55A4GuWvr1JE7HIaiHj6wymf5LhEGWhr+oc99UrA99aGC+q674wPLxuuzePMXLYSSDJYA4rr8qqyectHfzIw31/KllWPmrJm4MmQveOTGE1W5vOJjBS4sOF91OcVG9j5W9rBVgVBCtX7uey8hBG2lNnD3tB20uJr1XUZxR8orDO2FtEOqtCvdbvjFS+S0590LGCEtSWpdKJ+kPgWLnyKyg79tHAN7ZxbpGDZ5PupGQK6sX46h0nWNLXHu3bNc7Ahll6TiQEtOa3Kjor7wDdrnbYFqTwULMINO3iES+2F8sCK6+qr8BNknCsPFad36pCkbZ0Q9cz5GaRrdTxfet07pOEspPkVS/F5yNBN+rH4ZCsYnX9xYGmsHJ29NfUo39AygArZ3kjh/1LLSu/k5XzVC3/evvsZNr46HH362MpNYRrWZFR6jN6j5jFylewKDgowX+fQBacRQvEbMIHJrAffJWgn4mIlUMtpylWRKgkjTbfypoY0+lZnXUTXJ+KD40psLacKWq2pq+B9G0/x78qC2yvbkARKe981iTHTFZeH1OOrrjwrMiMvw48xlrSTROXz6PJKun7EklsLsZxRNdOsHm7gZ1jmcOKMDkjlJmKqfv2XbHb9PkR/2b+UpRLisW7SmfwX95iZeWXMZ1d3AOECcRj4gQqZ6H7wj/JbM6jVoxZh2PlY5xZHOfVa65OIOcPHWUGWwHqHRWz8r3q5UQcZO0HYrk5Ll6QVZF9COyQNEFQxVpRS1425qHuUuzCGWzjjtcYbiyxnt0fxfaqPzTnuV/XqAv/Mo3PylktBRuaClh51EBEQMzdVj1GA+P/o13nn1qw7ru2ihLw+spNc552cYTvnWrFwB54bhiH9VxYt27LeTZCjVu8KN2tTmNZwModMQQnaQ4rV9pl4dqdFQMr/8B2zK+EsnadzLRai7ufV1CsvLbVXqhKyMqV2TxWrjRLc76deQ8X/Rldo/MBsU7wBVrbG7JymDj1+BFRTwMkK7892+k0c7h0aqAmJVzTNzA5LTdO6zR+7bYKRH1eoo0xAi4hGhwhWHmFs4VfzRVmEeiQNFQ52bLAyn1gEd7yxeIsXLU3Gu/+T67otV/DJM/vPyswwSuwdyP+gFZ/39hs84pkLep/+GzGXisJMoWVV0jVjq4VvCvtrBy6X5FvSi0r1xx7aQePwZSc3Qw9lox1VkxnycL6MzKDlWeTneMGDYF9CaFHeQqbvo6sESndxPYuIrWujV1EZPs8IoQcys7nMHo4gu4+GMZujWUVdWpkYmjcUXaKgrZY0NuG/LEAMFp4SwlB7WvjWXlL0xtUuQHW5SPQVJ2fsdV9v7DTHLByG2YhRh5jMd7/qlZB5AXX2W8PZDoqTRsRhV3BeVjI2QRz4Yl62zOsPBxXG9YtfEwIstr/Ozgfvu1+avgDMZMhWPlP7rByO0ahThfFym3U5C6+sqYJdm+RoImbJZX1Qxahc47DJS1UuKzchpkmPffrHHVhY5N4rNwNZJOIXiifKtvXbI2QLH9OpSXCqk+Kn/MWT2AWpylPIQa9nlcY5qn062Ll6T2RkiaxcqXDRY+z8oPiCAm7Th/mthpuIitXICw+rxKOlVe8wt0Ibu10P5MfMuMZOesk0VXFOv1gV/2QN4+V6zOYsI4wkpUrgwoc1Q7iylZk1rTQvtDPVZsSH2Hfvi0s9ZxDfcVh8Ll/UVn5c6TYWDmkwu68IVg5K00FfaZxrFyPfSBHOf7isCiUHaBoVb0BEQLO1cyx3685rNzh6DsJv01pqWDl2sZxj1LLykOPOjyjgmfQYymCs4QMtSk8bB4rt2EswuYnRNhWR9H3uehMu1XIyvUuWV1FSr2Zt2qyonU7Mcoab013efIaaYVTzgi2ctgMa63LFXrIcTUQXj69pah2u3hW3sqTrBziaQ976ujv5dmd45+KDOuBemNgdYzEcRJ92/5jU5o7u45SdaMJrJzugqGqNzPO19Azt5MmNecGm6sTLJnYcmJBL7o7MB6p1Xe2/ogWYzxCCFa+Es3Km9ml4nrhTtcdVv5PM6EbTrcarnQRSEItqUwE47zvlG3Ij/NGsfKUYRZznvv1j7rgtyeYMkQ3P4oUpMUicXvlyu3UCptVTSAFNcAdmoWs5vSxc2J81hn8O3vbKgfhSTiuXbCooVLCrFypMs3RB3qwZ4mz8jWIGgoOOlvlcbMjr4eVv2qn2WJWrhWuNwzPDp+Tbzv+L/XNeUaOOmlgXGWxTlYO3sD4H+6g7ORDwsNjWbnSw+4+OCsyGFn/6Azh2tGOOJZALJ/rksuHgqvkDAuF8YNynVdCisjK+xYjK2+FKjJeJlh5+Bl2c5Z2w7HyHlp0zj7uzBz2G5KVK+9pxv+GuwWcS2n+r01nSjlzWLkyWouJWnMnP4SnlLByVpcjvkZpZeVKhaW2Z3T+AeHRH9PG0i5uaONobYRsvMd0Vp7/qUUoPB3JylnVOtVia7dAyMpZlUMS4y1Uyu4nrd1lgWJ/BS7XDv8juq8zNAnRKzM4VfSu6S/RTcvKldei0zY09NjRa4z4/UwGIckbRwvro1VJJORvnaDUmHY2N3GdgTXu3XXW4eS8+MjlL4CFZOmzMT7r/G/dinKefrHGm2DOmIzoL11cGFMcxx5yJn3HHRijis4zddBqO35/PC3j5NwHUMIIVr4azcqVjl9tv5SVf/XEkv7lkCcrZuVNPlx3Jr0g5fjcx8QzreL/8oZLufHbRgn5IXS8PYByc/RZcjo998rm0YJGw9Vf/ePE1ezojcOrmPXci2fUFQ+eicrY0w4neh8dc1nz+jWp5FOxQbsXfjrtSgiSuPbYv4PdUFCDz/hy43aOF8+4LUZvPJuan372z0/ai7l2QeLxFSNuFbJI81m5Oi2/MP9obG5W3D9L32qK1GkGK7939cWc1OOzH0QtcQ46P4XrP+RnHiuvls9KA+JYOatGykmarv/2xuiMjOhtHzQ37xmBzpzYbYxYHKoo1snSLQ3mklYfrolKycuJ++u7xxBWKJqVK/7PLzp5NS/x2Nw+QrWD+F0I7aYA2+LUC+PCnqS1ikuDtr+T6smlmJVDfryoIl0Z6Vce9sXx7KQd/VkZETEr92k672JO3IaBIkd1uxmRyfnpx5f2EjGPVj9GZyduH2RpI2QK3j0XnUrLTzn284shCEKBa43bem50dsK2AZaHBAm5xcHK6T6o1YKRtOlsCiF5G71KKytXV83//R2fl3pqcV9fxNFvm38p98ravoJ70GrO2eyknS96tTGLlXf+31/ns3Jjto1Dlet+bktSQc7FyWLBPpuSck5PrqEgWPkogiDPFNDsIhd8n78Y99v4AjzdsFhA7lO+IBoRrKZnzWTlNLQwxFxW3pYfvXLjYyuZUOrPkVKPfxBzGJRAfNRDJ7nSkwvxOkQ9XokbECvLhPnnNmrtdFoY8uWDlijjqMp2JvdVkLeiVMFdAt2fukyCTFYq4TlMoK/l6yV6SO8CYb/RGxdu1ksHtEHs8EogEEiL2SYHmKmSFgP5j7ms/BmiNfqSrLz0IjgOlzw7GpXzVUygg7OZh47dwIoo9CBxA8KTo644YXlsl2TlEjcSGrNEwT3B8laUZVYekIhoCChZeZlBA4jpbV6ix6TVrMh+ycolKy9pjCTo9uJY0B3B9eEIQTQrb0TLO34mWXkpB/VPn/ATSVVX59fcFh46xWq034Cn7s8kWgjbokjcbPDoqCtm3NL3m6Ubd21d/eO43rXkk5Yo87ibJTXuCJS3opSxclEzOCd8RRMReAJa/xnJyksz+k1mRLz7Rfeevhnw/Z1fsUSycsnKiwcd6FZ5dm1TdfaH2e5j81g59Km3tpBPq7TjN61ZkvBpvuepM+zuqr6shIQcdRISEhI3CCsXohhYuVM+Txf50IqOIYRc/GPJalbkMK0Ew80qJRyEoBnrbZKVS1ZegrgjIYLVNvnUXL1ei8UlB9xi5SuEnYMlSgVC1PGUdydfpp/6LH+VG8YSEhISEhISNwgrP+WIe+RDM4WV23tKdi3BA1fWDjr5Zr3zkpV7Bm30ToC+Zmvuseh4+ufmsfLlKZE/3CWfl4SEhISEhITETYUqDQDVzdNYl2kMlfe2bLDy7Y1L8sAaK5/vc7PeecnKPcrKN3qs3Ci+2puEhISEhISEhISExE2AsJErT6UXpF3Y/Fnrkj2wyspzLy3vevPeecnKPcfKr27u5+WxE5CsXEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQqJY8H+pqErQ","advances":[9,10,16,19,18,28,27,9,12,12,15,23,9,13,9,14,18,18,18,18,18,18,18,18,18,18,9,9,23,23,23,14,31,23,21,20,24,17,17,23,25,10,14,21,16,31,25,24,20,24,21,18,19,23,21,32,21,19,19,12,14,12,23,13,10,17,20,15,20,17,12,20,19,9,9,18,9,29,19,20,20,20,13,14,12,19,17,26,18,17,15,12,10,12,23]}};
 let historyFontPromise = null;
 
-async function renderHistoryCardPng(history) {
-  const fonts = await loadHistoryFonts();
-  const sections = HISTORY_VIEWS.map(view => ({
-    view,
-    rows: Array.isArray(history[view]) ? history[view] : []
-  }));
-  const width = 800;
-  const rowHeight = 62;
+async function renderHistoryCardPng(history, view) {
+  const [fonts, avatar] = await Promise.all([
+    loadHistoryFonts(),
+    loadHistoryAvatar(history.avatar_url).catch(() => null)
+  ]);
+  const selectedView = HISTORY_VIEWS.includes(view) ? view : "clan";
+  const rows = Array.isArray(history[selectedView]) ? history[selectedView] : [];
+  if (selectedView === "clan") return renderClanBattleLedgerPng(history, rows, fonts, avatar);
+  const width = 760;
+  const margin = 22;
+  const gap = 14;
+  const contentWidth = width - margin * 2;
+  const columns = selectedView === "clan" || rows.length > 12 ? 2 : 1;
+  const columnWidth = columns === 2 ? Math.floor((contentWidth - gap) / 2) : contentWidth;
+  const rowHeight = 64;
   const headerHeight = 144;
   const sectionHeaderHeight = 48;
   const sectionGap = 18;
   const footerHeight = 58;
-  const height = headerHeight + sections.reduce(
-    (sum, section) => sum + sectionHeaderHeight + Math.max(1, section.rows.length) * rowHeight + sectionGap,
-    0
-  ) + footerHeight;
-  const canvas = new HistoryPixelCanvas(width, height, [11, 16, 23, 255]);
+  const gridRows = Math.max(1, Math.ceil(rows.length / columns));
+  const height = Math.max(410, headerHeight + sectionHeaderHeight + gridRows * rowHeight + sectionGap + footerHeight);
+  const canvas = new HistoryPixelCanvas(width, height, [11, 16, 23, 255], 2);
   const color = {
     panel: [22, 29, 39, 255],
     panelAlt: [17, 24, 33, 255],
@@ -901,78 +971,415 @@ async function renderHistoryCardPng(history) {
     muted: [176, 188, 204, 255],
     red: [255, 100, 105, 255],
     blue: [88, 166, 255, 255],
-    gold: [242, 204, 96, 255]
+    gold: [242, 204, 96, 255],
+    green: [104, 218, 159, 255],
+    greenDark: [27, 66, 49, 255],
+    goldDark: [67, 57, 28, 255],
+    blueDark: [29, 53, 78, 255]
   };
+  const accent = selectedView === "league" ? color.gold : selectedView === "leaderboard" ? color.blue : color.red;
 
-  canvas.fillRect(0, 0, width, 6, color.red);
-  canvas.fillRect(0, 6, 230, 2, color.gold);
-  canvas.fillRect(230, 6, 300, 2, color.red);
-  canvas.fillRect(530, 6, width - 530, 2, color.blue);
-  canvas.fillRect(24, 26, width - 48, 96, color.header);
-  canvas.fillRect(24, 26, 6, 96, color.red);
-  canvas.fillRect(47, 47, 54, 54, color.red);
-  canvas.drawFontText(fonts.bold, "C", 64, 54, 27, [12, 17, 24, 255], 30);
-  canvas.drawFontText(fonts.bold, "Clan Battle History", 122, 36, 18, color.red, 460);
-  canvas.drawFontText(fonts.bold, `${historyCardText(history.username, 36)}'s History`, 122, 61, 29, color.white, 620);
-  const totalRecords = sections.reduce((sum, section) => sum + section.rows.length, 0);
-  canvas.drawFontText(fonts.regular, `${totalRecords} recorded result${totalRecords === 1 ? "" : "s"} across clan, league, and global leaderboards`, 123, 96, 13, color.muted, 620);
+  canvas.fillRect(0, 0, width, 6, accent);
+  canvas.fillRect(0, 6, 220, 2, color.gold);
+  canvas.fillRect(220, 6, 290, 2, color.red);
+  canvas.fillRect(510, 6, width - 510, 2, color.blue);
+  canvas.fillRect(margin, 26, contentWidth, 96, color.header);
+  canvas.fillRect(margin, 26, 6, 96, accent);
+  canvas.fillRect(43, 45, 58, 58, accent);
+  if (avatar) canvas.drawImageCover(avatar, 47, 49, 50, 50, true);
+  else canvas.drawFontText(fonts.bold, "C", 62, 55, 27, [12, 17, 24, 255], 30);
+  canvas.drawFontText(fonts.bold, "PS99 Player History", 119, 35, 17, accent, 360);
+  canvas.drawFontText(fonts.bold, `${historyCardText(history.username, 25)}'s ${HISTORY_VIEW_LABELS[selectedView]}`, 119, 59, 25, color.white, 390);
+  canvas.drawFontText(fonts.regular, `${rows.length} recorded result${rows.length === 1 ? "" : "s"}`, 120, 96, 13, color.muted, 200);
+  const highlight = historyViewHighlight(rows, selectedView);
+  canvas.fillRect(520, 43, 194, 63, color.panelAlt);
+  canvas.drawFontText(fonts.bold, highlight.label, 536, 50, 12, color.muted, 160);
+  canvas.drawFontText(fonts.bold, highlight.value, 536, 70, selectedView === "league" ? 13 : 18, highlight.tone === "gold" ? color.gold : highlight.tone === "blue" ? color.blue : color.green, 165);
 
   let cursorY = headerHeight;
-  for (const section of sections) {
-    const accent = section.view === "league" ? color.gold : section.view === "leaderboard" ? color.blue : color.red;
-    canvas.fillRect(24, cursorY, width - 48, sectionHeaderHeight, color.header);
-    canvas.fillRect(24, cursorY, 5, sectionHeaderHeight, accent);
-    canvas.drawFontText(fonts.bold, HISTORY_VIEW_LABELS[section.view], 44, cursorY + 8, 22, color.white, 310);
-    canvas.drawFontText(
+  drawHistorySectionHeader(canvas, fonts, HISTORY_VIEW_LABELS[selectedView], rows.length, margin, cursorY, contentWidth, accent, color);
+  cursorY += sectionHeaderHeight;
+  const visible = rows.length ? rows : [null];
+  visible.forEach((row, index) => {
+    const column = index % columns;
+    const gridRow = Math.floor(index / columns);
+    const x = margin + column * (columnWidth + gap);
+    const y = cursorY + gridRow * rowHeight;
+    canvas.fillRect(x, y, columnWidth, rowHeight, gridRow % 2 ? color.panel : color.panelAlt);
+    if (row) drawCombinedHistoryRow(canvas, fonts, row, selectedView, x, y, columnWidth, color, accent);
+    else canvas.drawFontText(
       fonts.regular,
-      `${section.rows.length} record${section.rows.length === 1 ? "" : "s"}`,
-      640,
-      cursorY + 12,
-      13,
+      selectedView === "league" && history.league_unavailable
+        ? "League data temporarily unavailable."
+        : `No ${HISTORY_VIEW_LABELS[selectedView].toLowerCase()} recorded.`,
+      x + 18,
+      y + 18,
+      15,
       color.muted,
-      125
+      columnWidth - 36
     );
-    cursorY += sectionHeaderHeight;
-
-    const visibleRows = section.rows.length ? section.rows : [null];
-    visibleRows.forEach((row, index) => {
-      canvas.fillRect(24, cursorY, width - 48, rowHeight, index % 2 ? color.panel : color.panelAlt);
-      if (row) drawCombinedHistoryRow(canvas, fonts, row, section.view, cursorY, color, accent);
-      else canvas.drawFontText(
-        fonts.regular,
-        section.view === "league" && history.league_unavailable
-          ? "League data is temporarily unavailable."
-          : `No ${HISTORY_VIEW_LABELS[section.view].toLowerCase()} recorded.`,
-        45,
-        cursorY + 14,
-        16,
-        color.muted,
-        700
-      );
-      canvas.fillRect(42, cursorY + rowHeight - 1, width - 84, 1, color.line);
-      cursorY += rowHeight;
-    });
-    cursorY += sectionGap;
+    canvas.fillRect(x + 16, y + rowHeight - 1, columnWidth - 32, 1, color.line);
+  });
+  if (columns === 2) {
+    const separatorX = margin + columnWidth + Math.floor(gap / 2);
+    canvas.fillRect(separatorX, cursorY + 8, 1, gridRows * rowHeight - 16, color.line);
   }
 
-  canvas.fillRect(24, height - footerHeight + 8, width - 48, 1, color.line);
-  canvas.drawFontText(fonts.regular, "c0ld-clan.com  |  Verified archive data", 43, height - 35, 13, color.muted, 500);
-  canvas.drawFontText(fonts.bold, "PS99", 704, height - 36, 14, color.red, 60);
+  canvas.fillRect(margin, height - footerHeight + 8, contentWidth, 1, color.line);
+  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 41, height - 35, 13, color.muted, 470);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
-function drawCombinedHistoryRow(canvas, fonts, row, view, y, color, accent) {
-  canvas.drawFontText(fonts.bold, historyCardText(row.name, 54), 45, y + 3, 20, color.white, 700);
+async function renderClanBattleLedgerPng(history, rows, fonts, avatar) {
+  const width = 800;
+  const margin = 24;
+  const gap = 16;
+  const contentWidth = width - margin * 2;
+  const columns = rows.length > 10 ? 2 : 1;
+  const columnWidth = columns === 2 ? Math.floor((contentWidth - gap) / 2) : contentWidth;
+  const firstColumnCount = columns === 2 ? Math.ceil(rows.length / 2) : rows.length;
+  const gridRows = Math.max(1, firstColumnCount);
+  const rowHeight = 68;
+  const headerTop = 24;
+  const headerHeight = 96;
+  const careerTop = 132;
+  const careerHeight = 58;
+  const rangeTop = 208;
+  const rangeHeight = 30;
+  const rowTop = rangeTop + rangeHeight;
+  const footerHeight = 58;
+  const height = Math.max(500, rowTop + gridRows * rowHeight + footerHeight);
+  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 2);
+  const color = {
+    panel: [22, 29, 39, 255],
+    panelAlt: [17, 24, 33, 255],
+    header: [25, 33, 44, 255],
+    inset: [13, 19, 27, 255],
+    line: [48, 60, 75, 255],
+    white: [239, 245, 252, 255],
+    muted: [176, 188, 204, 255],
+    quiet: [113, 127, 145, 255],
+    track: [35, 43, 54, 255],
+    red: [255, 100, 105, 255],
+    blue: [88, 166, 255, 255],
+    gold: [242, 204, 96, 255],
+    green: [104, 218, 159, 255]
+  };
+  const metrics = historyCareerMetrics(rows, history);
+
+  canvas.fillRect(0, 0, width, 6, color.red);
+  canvas.fillRect(margin, headerTop, contentWidth, headerHeight, color.header);
+  canvas.fillRect(margin, headerTop, 5, headerHeight, color.red);
+  canvas.fillRect(42, 41, 68, 68, color.red);
+  if (avatar) canvas.drawImageCover(avatar, 46, 45, 60, 60, true);
+  else canvas.drawFontText(fonts.bold, "C", 62, 51, 31, color.inset, 35);
+
+  canvas.drawFontText(fonts.bold, historyCardText(history.username, 27), 128, 42, 29, color.white, 410);
+  canvas.drawFontText(
+    fonts.regular,
+    `PLAYER ID ${historyCardText(history.user_id || "-", 20)}`,
+    129,
+    84,
+    12,
+    color.muted,
+    270
+  );
+  canvas.fillRect(600, 40, 1, 64, color.line);
+  canvas.drawFontText(fonts.bold, fullNumber(rows.length), 625, 42, 30, color.white, 70);
+  canvas.drawFontText(fonts.bold, "RECORDED", 691, 48, 11, color.muted, 72);
+  canvas.drawFontText(fonts.bold, "RESULTS", 691, 66, 11, color.muted, 72);
+  canvas.drawFontText(fonts.regular, `${metrics.ranked.length} WITH GLOBAL RANK`, 625, 89, 10, color.quiet, 138);
+
+  canvas.fillRect(margin, careerTop, contentWidth, careerHeight, color.panelAlt);
+  drawHistoryMetric(canvas, fonts, "TOP PERFORMANCE", historyBestMetric(metrics.best), margin + 16, careerTop + 8, 180, historyPerformanceTone(metrics.best?.percent, color), color);
+  canvas.fillRect(margin + 198, careerTop + 10, 1, careerHeight - 20, color.line);
+  drawHistoryMetric(canvas, fonts, "RECENT CB AVG", metrics.recentAverage === null ? "-" : historyTopLabel(metrics.recentAverage), margin + 216, careerTop + 8, 136, color.white, color);
+  canvas.fillRect(margin + 366, careerTop + 10, 1, careerHeight - 20, color.line);
+  drawHistoryMetric(canvas, fonts, "TOTAL CLANS", fullNumber(metrics.clans.length), margin + 384, careerTop + 8, 112, color.white, color);
+  canvas.fillRect(margin + 510, careerTop + 10, 1, careerHeight - 20, color.line);
+  drawHistoryMetric(canvas, fonts, "CURRENT CLAN TENURE", historyCurrentClanTenure(metrics), margin + 528, careerTop + 8, 208, color.white, color);
+
+  const columnRows = columns === 2
+    ? [rows.slice(0, firstColumnCount), rows.slice(firstColumnCount)]
+    : [rows];
+  columnRows.forEach((entries, column) => {
+    const x = margin + column * (columnWidth + gap);
+    const start = column === 0 ? 1 : firstColumnCount + 1;
+    const end = start + entries.length - 1;
+    const rangeLabel = entries.length ? `RECORDS ${historyTwoDigit(start)}-${historyTwoDigit(end)}` : "RECORDS";
+    canvas.drawFontText(fonts.bold, rangeLabel, x + 12, rangeTop + 5, 11, color.quiet, 150);
+    canvas.drawFontText(fonts.regular, "FIELD OUTRANKED", x + columnWidth - 116, rangeTop + 7, 9, color.quiet, 104);
+    canvas.fillRect(x, rangeTop + rangeHeight - 1, columnWidth, 1, color.line);
+
+    if (!entries.length) {
+      canvas.drawFontText(fonts.regular, "No clan battle records.", x + 18, rowTop + 18, 15, color.muted, columnWidth - 36);
+      return;
+    }
+
+    entries.forEach((row, localIndex) => {
+      const globalIndex = column === 0 ? localIndex : firstColumnCount + localIndex;
+      const previous = globalIndex > 0 ? rows[globalIndex - 1] : null;
+      const next = globalIndex + 1 < rows.length ? rows[globalIndex + 1] : null;
+      drawClanLedgerRow(
+        canvas,
+        fonts,
+        row,
+        globalIndex,
+        x,
+        rowTop + localIndex * rowHeight,
+        columnWidth,
+        rowHeight,
+        historySameClan(previous, row),
+        historySameClan(row, next),
+        color
+      );
+    });
+  });
+
+  if (columns === 2) {
+    const separatorX = margin + columnWidth + Math.floor(gap / 2);
+    canvas.fillRect(separatorX, rangeTop + 4, 1, gridRows * rowHeight + rangeHeight - 8, color.line);
+  }
+  canvas.fillRect(margin, height - footerHeight + 8, contentWidth, 1, color.line);
+  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", margin + 16, height - 35, 13, color.muted, 300);
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function drawHistoryMetric(canvas, fonts, label, value, x, y, width, valueColor, color) {
+  canvas.drawFontText(fonts.bold, label, x, y, 10, color.quiet, width);
+  canvas.drawFontText(fonts.bold, historyCardText(value, 40), x, y + 20, 14, valueColor, width);
+}
+
+function drawClanLedgerRow(canvas, fonts, row, index, x, y, width, height, joinsPrevious, joinsNext, color) {
+  canvas.fillRect(x, y, width, height, index % 2 ? color.panel : color.panelAlt);
+  canvas.fillRect(x + 16, y + height - 1, width - 32, 1, color.line);
+
+  const centerY = y + Math.floor(height / 2);
+  const railX = x + 8;
+  canvas.fillRect(railX, joinsPrevious ? y : y + 10, 2, centerY - (joinsPrevious ? y : y + 10), color.line);
+  canvas.fillRect(railX, centerY, 2, (joinsNext ? y + height : y + height - 10) - centerY, color.line);
+  const startsStint = !joinsPrevious;
+  canvas.fillRect(railX - (startsStint ? 2 : 1), centerY - (startsStint ? 2 : 1), startsStint ? 6 : 4, startsStint ? 6 : 4, startsStint ? color.red : color.quiet);
+
+  canvas.drawFontText(fonts.regular, historyTwoDigit(index + 1), x + 19, y + 7, 9, color.quiet, 20);
+  const clan = historyCardText(String(row.clan_name || "-").toUpperCase(), 8);
+  canvas.drawFontText(fonts.bold, clan, x + 42, y + 22, 11, color.white, 43);
+  canvas.fillRect(x + 93, y + 9, 1, height - 18, color.line);
+  canvas.drawFontText(fonts.bold, historyCardText(row.name, 46), x + 106, y + 5, 15, color.white, width - 120);
+
+  const percent = historyRowPercent(row);
+  const performanceLabel = percent === null ? null : historyTopLabel(percent);
+  const performanceWidth = 76;
+  const rankDetail = historyLedgerRank(row.global_rank, row.total_global_players);
+  const pointsDetail = historyLedgerPoints(row.points);
+  const details = [];
+  if (pointsDetail !== "-") details.push(`${pointsDetail} PTS`);
+  if (rankDetail !== "-") details.push(rankDetail);
+  const detail = details.length ? details.join("  |  ") : "NO RESULT RECORDED";
+  canvas.drawFontText(fonts.regular, historyCardText(detail, 80), x + 106, y + 32, 11, color.muted, width - 106 - performanceWidth - 8);
+  if (performanceLabel) {
+    const tone = historyPerformanceTone(percent, color);
+    canvas.drawFontText(fonts.bold, performanceLabel, x + width - performanceWidth, y + 32, 11, tone, performanceWidth - 10);
+    drawHistoryFieldTape(canvas, x + 106, y + 56, width - 120, percent, tone, color);
+  }
+}
+
+function drawHistoryFieldTape(canvas, x, y, width, percent, tone, color) {
+  const segmentCount = 20;
+  const gap = 2;
+  const segmentWidth = (width - gap * (segmentCount - 1)) / segmentCount;
+  const outranked = Math.max(0, Math.min(100, 100 - percent));
+  const illuminated = outranked / 100 * segmentCount;
+  for (let segment = 0; segment < segmentCount; segment++) {
+    const segmentX = x + segment * (segmentWidth + gap);
+    canvas.fillRect(segmentX, y, segmentWidth, 3, color.track);
+    const fraction = Math.max(0, Math.min(1, illuminated - segment));
+    if (fraction > 0) canvas.fillRect(segmentX, y, segmentWidth * fraction, 3, tone);
+  }
+}
+
+function historyCareerMetrics(rows, history = {}) {
+  const ranked = (rows || []).map(row => {
+    const rank = positiveInteger(row.global_rank);
+    const total = positiveInteger(row.total_global_players);
+    return rank && total ? { row, rank, total, percent: rank / total * 100 } : null;
+  }).filter(Boolean);
+  const recentRanked = ranked.filter(entry => !historyBattleIsActive(entry.row)).slice(0, 5);
+  const recentAverage = recentRanked.length
+    ? recentRanked.reduce((sum, entry) => sum + entry.percent, 0) / recentRanked.length
+    : null;
+  const best = ranked.reduce((current, entry) => {
+    if (!current) return entry;
+    if (entry.rank !== current.rank) return entry.rank < current.rank ? entry : current;
+    return entry.percent < current.percent ? entry : current;
+  }, null);
+  const clans = [];
+  const seen = new Set();
+  const currentClanValue = history.current_clan || history.currentClan || null;
+  const currentClan = historyCardText(String(currentClanValue || "").toUpperCase(), 12);
+  if (currentClan && currentClan !== "UNKNOWN") {
+    seen.add(currentClan);
+    clans.push(currentClan);
+  }
+  for (const row of rows || []) {
+    const clan = historyCardText(String(row.clan_name || "").toUpperCase(), 12);
+    if (!clan || clan === "UNKNOWN" || seen.has(clan)) continue;
+    seen.add(clan);
+    clans.push(clan);
+  }
+  return {
+    ranked,
+    recentRanked,
+    recentAverage,
+    best,
+    clans,
+    currentClan: currentClan && currentClan !== "UNKNOWN" ? currentClan : null,
+    clanJoinTime: history.clan_join_time || history.clanJoinTime || null
+  };
+}
+
+function historyBestMetric(best) {
+  return best ? `#${fullNumber(best.rank)} / ${historyTopLabel(best.percent)}` : "-";
+}
+
+function historyCurrentClanTenure(metrics, nowMs = Date.now()) {
+  if (!metrics.currentClan) return "-";
+  const joinMs = Date.parse(String(metrics.clanJoinTime || ""));
+  if (!Number.isFinite(joinMs) || joinMs > nowMs) return `${metrics.currentClan} / UNKNOWN`;
+  const days = Math.floor((nowMs - joinMs) / 86400000);
+  if (days < 1) return `${metrics.currentClan} / <1 DAY`;
+  return `${metrics.currentClan} / ${fullNumber(days)} DAY${days === 1 ? "" : "S"}`;
+}
+
+function historyBattleIsActive(row, nowMs = Date.now()) {
+  if (row?.is_active === true || String(row?.is_active || "").toLowerCase() === "true") return true;
+  const endMs = Date.parse(String(row?.battle_end_iso || row?.battle_ended_at || ""));
+  return Number.isFinite(endMs) && endMs > nowMs;
+}
+
+function historyTwoDigit(value) {
+  return String(Math.max(0, Number(value) || 0)).padStart(2, "0");
+}
+
+function historySameClan(left, right) {
+  if (!left || !right) return false;
+  return String(left.clan_name || "").trim().toUpperCase() === String(right.clan_name || "").trim().toUpperCase();
+}
+
+function historyRowPercent(row) {
+  const rank = positiveInteger(row?.global_rank);
+  const total = positiveInteger(row?.total_global_players);
+  return rank && total ? rank / total * 100 : null;
+}
+
+function historyPerformanceTone(percent, color) {
+  if (!Number.isFinite(percent)) return color.quiet || color.muted;
+  if (percent <= 1) return color.gold;
+  if (percent <= 5) return color.green;
+  return color.blue;
+}
+
+function historyLedgerRank(value, total) {
+  const rankValue = positiveInteger(value);
+  if (!rankValue) return "-";
+  const totalValue = positiveInteger(total);
+  return `#${fullNumber(rankValue)}${totalValue ? ` / ${fullNumber(totalValue)}` : ""}`;
+}
+
+function historyLedgerPoints(value) {
+  return finiteHistoryNumber(value) === null ? "-" : shortNumber(value);
+}
+
+function drawHistorySectionHeader(canvas, fonts, label, count, x, y, width, accent, color) {
+  canvas.fillRect(x, y, width, 48, color.header);
+  canvas.fillRect(x, y, 5, 48, accent);
+  canvas.drawFontText(fonts.bold, label, x + 18, y + 8, 20, color.white, width - 125);
+  canvas.drawFontText(fonts.regular, `${count} record${count === 1 ? "" : "s"}`, x + width - 94, y + 12, 12, color.muted, 84);
+}
+
+function drawCombinedHistoryRow(canvas, fonts, row, view, x, y, width, color, accent) {
+  const performance = historyPerformanceBadge(row, view, color);
+  const badgeWidth = performance ? 94 : 0;
+  canvas.drawFontText(fonts.bold, historyCardText(row.name, 44), x + 17, y + 3, 18, color.white, width - 34 - badgeWidth);
+  if (performance) {
+    canvas.fillRect(x + width - 104, y + 7, 92, 22, performance.background);
+    canvas.drawFontText(fonts.bold, performance.label, x + width - 97, y + 10, 11, performance.foreground, 80);
+  }
   let details;
   if (view === "league") {
-    details = `League: ${row.league_name || "Unknown"}  |  League Rank: ${historyCardRank(row.league_rank)}  |  Player Rank: ${historyCardRank(row.player_rank)}  |  Points: ${historyCardPoints(row.points)}`;
+    details = `${row.league_name || "Unknown"}  |  League ${historyCardRank(row.league_rank)}  |  Player ${historyCardRank(row.player_rank)}  |  ${historyCardPoints(row.points)} pts`;
   } else if (view === "clan") {
-    details = `Clan: ${String(row.clan_name || "Unknown").toUpperCase()}  |  Global: ${historyCardRank(row.global_rank, row.total_global_players)}  |  Points: ${historyCardPoints(row.points)}`;
+    const clanName = historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 8);
+    canvas.fillRect(x + 17, y + 35, 3, 17, accent);
+    canvas.drawFontText(fonts.bold, clanName, x + 29, y + 33, 12, color.white, 54);
+    canvas.fillRect(x + 91, y + 35, 1, 17, color.line);
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPoints(row.points)} pts`;
+    canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 103, y + 33, 13, color.muted, width - 116);
+    return;
   } else {
-    details = `Global: ${historyCardRank(row.global_rank, row.total_global_players)}  |  Points: ${historyCardPoints(row.points)}`;
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPoints(row.points)} pts`;
   }
-  canvas.fillRect(45, y + 39, 5, 5, accent);
-  canvas.drawFontText(fonts.regular, historyCardText(details, 100), 59, y + 31, 15, color.muted, 690);
+  canvas.fillRect(x + 17, y + 42, 5, 5, accent);
+  canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 30, y + 33, 13, color.muted, width - 43);
+}
+
+function historyPerformanceBadge(row, view, color) {
+  if (view === "league") {
+    const playerRank = positiveInteger(row.player_rank);
+    return playerRank ? { label: `PLAYER #${fullNumber(playerRank)}`, foreground: color.gold, background: color.goldDark } : null;
+  }
+  const rankValue = positiveInteger(row.global_rank);
+  const totalValue = positiveInteger(row.total_global_players);
+  if (!rankValue || !totalValue) return null;
+  const percent = rankValue / totalValue * 100;
+  if (percent <= 1) return { label: historyTopLabel(percent), foreground: color.gold, background: color.goldDark };
+  if (percent <= 5) return { label: historyTopLabel(percent), foreground: color.green, background: color.greenDark };
+  return { label: historyTopLabel(percent), foreground: color.blue, background: color.blueDark };
+}
+
+function historyTopLabel(percent) {
+  if (!Number.isFinite(percent)) return "N/A";
+  const value = percent.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  return `TOP ${value}%`;
+}
+
+function historyViewHighlight(rows, view) {
+  if (view === "league") {
+    const best = (rows || []).reduce((current, row) => {
+      const playerRank = positiveInteger(row.player_rank);
+      if (!playerRank || (current && current.playerRank <= playerRank)) return current;
+      return { playerRank, leagueRank: positiveInteger(row.league_rank) };
+    }, null);
+    return best
+      ? { label: "BEST LEAGUE FINISH", value: `Player #${fullNumber(best.playerRank)}${best.leagueRank ? `  |  League #${fullNumber(best.leagueRank)}` : ""}`, tone: "gold" }
+      : { label: "LEAGUE PERFORMANCE", value: "No ranked result", tone: "gold" };
+  }
+  const best = bestGlobalPerformanceRows(rows);
+  return best
+    ? { label: "BEST GLOBAL FINISH", value: `${historyCardRank(best.rank)}  |  ${historyTopLabel(best.percent)}`, tone: best.percent <= 1 ? "gold" : "green" }
+    : { label: "GLOBAL PERFORMANCE", value: "No global rank", tone: "blue" };
+}
+
+function bestGlobalPerformanceRows(rows) {
+  return (rows || []).reduce((best, row) => {
+    const rank = positiveInteger(row.global_rank);
+    const total = positiveInteger(row.total_global_players);
+    if (!rank || !total) return best;
+    const percent = rank / total * 100;
+    return best && best.percent <= percent ? best : { rank, total, percent };
+  }, null);
+}
+
+function bestHistoryGlobalPerformance(history) {
+  const rows = [...(history.clan || []), ...(history.leaderboard || [])];
+  return rows.reduce((best, row) => {
+    const rank = positiveInteger(row.global_rank);
+    const total = positiveInteger(row.total_global_players);
+    if (!rank || !total) return best;
+    const percent = rank / total * 100;
+    if (best && best.percent <= percent) return best;
+    return { rank, total, percent, tone: percent <= 1 ? "gold" : "green" };
+  }, null);
 }
 
 function historyCardRank(value, total) {
@@ -1013,19 +1420,167 @@ function historyBase64Bytes(encoded) {
   return bytes;
 }
 
+async function loadHistoryAvatar(url) {
+  const value = String(url || "").trim();
+  if (!/^https?:\/\//i.test(value)) return null;
+  const response = await fetch(value, {
+    headers: { Accept: "image/png,image/*;q=0.8", "User-Agent": "c0ld-Discord-History-Worker" },
+    cf: { cacheTtl: 3600, cacheEverything: true }
+  });
+  if (!response.ok) return null;
+  return decodeHistoryPng(new Uint8Array(await response.arrayBuffer()));
+}
+
+async function decodeHistoryPng(bytes) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 33 || signature.some((byte, index) => bytes[index] !== byte)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  let palette = null;
+  let transparency = null;
+  const idat = [];
+
+  while (offset + 12 <= bytes.length) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > bytes.length) return null;
+    const data = bytes.subarray(dataStart, dataEnd);
+    if (type === "IHDR") {
+      width = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0);
+      height = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "PLTE") palette = data.slice();
+    else if (type === "tRNS") transparency = data.slice();
+    else if (type === "IDAT") idat.push(data.slice());
+    else if (type === "IEND") break;
+    offset = dataEnd + 4;
+  }
+
+  if (!width || !height || bitDepth !== 8 || interlace !== 0 || !idat.length) return null;
+  const channels = ({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 })[colorType];
+  if (!channels || (colorType === 3 && !palette)) return null;
+  const compressed = concatHistoryBytes(...idat);
+  const inflated = new Uint8Array(await new Response(
+    new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate"))
+  ).arrayBuffer());
+  const stride = width * channels;
+  if (inflated.length < (stride + 1) * height) return null;
+  const decoded = new Uint8Array(stride * height);
+  let sourceOffset = 0;
+
+  for (let y = 0; y < height; y++) {
+    const filter = inflated[sourceOffset++];
+    const rowOffset = y * stride;
+    const previousOffset = (y - 1) * stride;
+    for (let x = 0; x < stride; x++) {
+      const raw = inflated[sourceOffset++];
+      const left = x >= channels ? decoded[rowOffset + x - channels] : 0;
+      const up = y > 0 ? decoded[previousOffset + x] : 0;
+      const upLeft = y > 0 && x >= channels ? decoded[previousOffset + x - channels] : 0;
+      let value = raw;
+      if (filter === 1) value += left;
+      else if (filter === 2) value += up;
+      else if (filter === 3) value += Math.floor((left + up) / 2);
+      else if (filter === 4) value += historyPaeth(left, up, upLeft);
+      else if (filter !== 0) return null;
+      decoded[rowOffset + x] = value & 255;
+    }
+  }
+
+  const rgba = new Uint8Array(width * height * 4);
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const source = pixel * channels;
+    const target = pixel * 4;
+    if (colorType === 6) {
+      rgba.set(decoded.subarray(source, source + 4), target);
+    } else if (colorType === 2) {
+      rgba[target] = decoded[source];
+      rgba[target + 1] = decoded[source + 1];
+      rgba[target + 2] = decoded[source + 2];
+      rgba[target + 3] = 255;
+    } else if (colorType === 3) {
+      const index = decoded[source];
+      rgba[target] = palette[index * 3] || 0;
+      rgba[target + 1] = palette[index * 3 + 1] || 0;
+      rgba[target + 2] = palette[index * 3 + 2] || 0;
+      rgba[target + 3] = transparency?.[index] ?? 255;
+    } else {
+      const gray = decoded[source];
+      rgba[target] = gray;
+      rgba[target + 1] = gray;
+      rgba[target + 2] = gray;
+      rgba[target + 3] = colorType === 4 ? decoded[source + 1] : 255;
+    }
+  }
+  return { width, height, pixels: rgba };
+}
+
+function historyPaeth(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const upDistance = Math.abs(estimate - up);
+  const diagonalDistance = Math.abs(estimate - upLeft);
+  return leftDistance <= upDistance && leftDistance <= diagonalDistance ? left : upDistance <= diagonalDistance ? up : upLeft;
+}
+
+function historyBilinearAlpha(data, width, height, x, y, minX = 0, maxX = width - 1) {
+  const clampedX = Math.max(minX, Math.min(maxX, x));
+  const clampedY = Math.max(0, Math.min(height - 1, y));
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(maxX, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = clampedX - x0;
+  const ty = clampedY - y0;
+  const top = data[y0 * width + x0] * (1 - tx) + data[y0 * width + x1] * tx;
+  const bottom = data[y1 * width + x0] * (1 - tx) + data[y1 * width + x1] * tx;
+  return Math.round(top * (1 - ty) + bottom * ty);
+}
+
+function historyBilinearRgba(image, x, y) {
+  const clampedX = Math.max(0, Math.min(image.width - 1, x));
+  const clampedY = Math.max(0, Math.min(image.height - 1, y));
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(image.width - 1, x0 + 1);
+  const y1 = Math.min(image.height - 1, y0 + 1);
+  const tx = clampedX - x0;
+  const ty = clampedY - y0;
+  const result = [0, 0, 0, 0];
+  for (let channel = 0; channel < 4; channel++) {
+    const top = image.pixels[(y0 * image.width + x0) * 4 + channel] * (1 - tx)
+      + image.pixels[(y0 * image.width + x1) * 4 + channel] * tx;
+    const bottom = image.pixels[(y1 * image.width + x0) * 4 + channel] * (1 - tx)
+      + image.pixels[(y1 * image.width + x1) * 4 + channel] * tx;
+    result[channel] = Math.round(top * (1 - ty) + bottom * ty);
+  }
+  return result;
+}
+
 class HistoryPixelCanvas {
-  constructor(width, height, background) {
-    this.width = width;
-    this.height = height;
-    this.pixels = new Uint8Array(width * height * 4);
+  constructor(width, height, background, pixelRatio = 1) {
+    this.pixelRatio = Math.max(1, Math.trunc(pixelRatio) || 1);
+    this.width = width * this.pixelRatio;
+    this.height = height * this.pixelRatio;
+    this.pixels = new Uint8Array(this.width * this.height * 4);
     this.fillRect(0, 0, width, height, background);
   }
 
   fillRect(x, y, width, height, rgba) {
-    const left = Math.max(0, Math.trunc(x));
-    const top = Math.max(0, Math.trunc(y));
-    const right = Math.min(this.width, Math.trunc(x + width));
-    const bottom = Math.min(this.height, Math.trunc(y + height));
+    const ratio = this.pixelRatio;
+    const left = Math.max(0, Math.trunc(x * ratio));
+    const top = Math.max(0, Math.trunc(y * ratio));
+    const right = Math.min(this.width, Math.trunc((x + width) * ratio));
+    const bottom = Math.min(this.height, Math.trunc((y + height) * ratio));
     for (let py = top; py < bottom; py++) {
       let offset = (py * this.width + left) * 4;
       for (let px = left; px < right; px++) {
@@ -1037,7 +1592,49 @@ class HistoryPixelCanvas {
     }
   }
 
+  drawImageCover(image, x, y, width, height, circular = false) {
+    if (!image?.width || !image?.height || !image?.pixels) return;
+    const ratio = this.pixelRatio;
+    x *= ratio;
+    y *= ratio;
+    width *= ratio;
+    height *= ratio;
+    const targetRatio = width / height;
+    const sourceRatio = image.width / image.height;
+    const cropWidth = sourceRatio > targetRatio ? image.height * targetRatio : image.width;
+    const cropHeight = sourceRatio > targetRatio ? image.height : image.width / targetRatio;
+    const cropX = (image.width - cropWidth) / 2;
+    const cropY = (image.height - cropHeight) / 2;
+    const radius = Math.min(width, height) / 2;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        if (circular) {
+          const dx = px + 0.5 - centerX;
+          const dy = py + 0.5 - centerY;
+          if (dx * dx + dy * dy > radius * radius) continue;
+        }
+        const sourceX = cropX + (px + 0.5) / width * cropWidth - 0.5;
+        const sourceY = cropY + (py + 0.5) / height * cropHeight - 0.5;
+        const sample = historyBilinearRgba(image, sourceX, sourceY);
+        this.blendPixel(
+          Math.trunc(x + px),
+          Math.trunc(y + py),
+          sample,
+          255
+        );
+      }
+    }
+  }
+
   drawFontText(font, value, x, y, size, rgba, maxWidth = Infinity) {
+    const ratio = this.pixelRatio;
+    x *= ratio;
+    y *= ratio;
+    size *= ratio;
+    maxWidth = Number.isFinite(maxWidth) ? maxWidth * ratio : maxWidth;
     const text = this.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
     const scale = size / HISTORY_FONT_BASE_SIZE;
     let cursor = Number(x);
@@ -1085,10 +1682,10 @@ class HistoryPixelCanvas {
     const atlasWidth = HISTORY_FONT_CELL_WIDTH * HISTORY_FONT_GLYPH_COUNT;
     const sourceLeft = glyphIndex * HISTORY_FONT_CELL_WIDTH;
     for (let py = 0; py < outputHeight; py++) {
-      const sourceY = Math.min(HISTORY_FONT_CELL_HEIGHT - 1, Math.floor(py / scale));
+      const sourceY = (py + 0.5) / scale - 0.5;
       for (let px = 0; px < outputWidth; px++) {
-        const sourceX = Math.min(HISTORY_FONT_CELL_WIDTH - 1, Math.floor(px / scale));
-        const coverage = font.alpha[sourceY * atlasWidth + sourceLeft + sourceX];
+        const sourceX = (px + 0.5) / scale - 0.5;
+        const coverage = historyBilinearAlpha(font.alpha, atlasWidth, HISTORY_FONT_CELL_HEIGHT, sourceLeft + sourceX, sourceY, sourceLeft, sourceLeft + HISTORY_FONT_CELL_WIDTH - 1);
         if (coverage) this.blendPixel(Math.round(x + px), Math.round(y + py), rgba, coverage);
       }
     }

@@ -1,0 +1,25 @@
+name = "inventory-detector-worker"
+main = "inventory-detector-worker.js"
+compatibility_date = "2026-07-17"
+
+[vars]
+SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
+INVENTORY_USERS_JSON = '[{"user_id":"109818","username":"Cinnamowopal"}]'
+INVENTORY_TIME_ZONE = "America/Denver"
+INVENTORY_MIN_FETCH_INTERVAL_MINUTES = "55"
+INVENTORY_SKIP_DUPLICATE_SOURCE = "true"
+INVENTORY_REJECT_EMPTY = "true"
+PUBLIC_CACHE_SECONDS = "5"
+ALLOWED_ORIGIN = "https://c0ld-clan.com"
+
+# One collection per hour: 24 requests per day, below Big Games' displayed
+# 30-refresh daily allowance and well beyond the five-minute cooldown.
+[triggers]
+crons = ["17 * * * *"]
+
+# Required secrets:
+# wrangler secret put SUPABASE_SERVICE_KEY
+# wrangler secret put INGEST_ADMIN_TOKEN
+#
+# Optional:
+# wrangler secret put DISCORD_WEBHOOK_URL

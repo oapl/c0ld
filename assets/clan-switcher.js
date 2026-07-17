@@ -790,6 +790,14 @@
       ctx.fillText(gridValues.type === "rank" ? `#${Math.round(value)}` : fmtShortNum(value), 8, yy + 4);
     }
 
+    const updateMarkers = window.Ps99VersionMarkers?.draw(ctx, {
+      minT,
+      maxT,
+      top: padTop,
+      bottom: padTop + height,
+      x
+    }) || [];
+
     drawSeries(ctx, pointsSeries, x, yPoints, isWmsy() ? "#74d99f" : "#58a6ff");
     drawSeries(ctx, rankSeries, x, yRank, "#f6ad55");
 
@@ -812,6 +820,7 @@
       height,
       rect,
       battle,
+      updateMarkers,
       showPoints,
       showRank
     };
@@ -831,6 +840,25 @@
 
       const rect = canvas.getBoundingClientRect();
       const mx = ev.clientX - rect.left;
+      const update = window.Ps99VersionMarkers?.nearest(chart.updateMarkers, mx);
+
+      if (update) {
+        drawEnhancedProfileChart(canvas, tooltip, chart.battle);
+        const fresh = canvas._profileChart;
+        const marker = window.Ps99VersionMarkers.nearest(fresh.updateMarkers, mx);
+        window.Ps99VersionMarkers.highlight(
+          canvas.getContext("2d"),
+          marker,
+          fresh.padTop,
+          fresh.rect.height - fresh.padBottom
+        );
+        tooltip.innerHTML = window.Ps99VersionMarkers.tooltipHtml(marker, fmtDateTime);
+        tooltip.style.display = "block";
+        tooltip.style.left = `${Math.max(8, ev.clientX - rect.left + 14)}px`;
+        tooltip.style.top = `${Math.max(8, ev.clientY - rect.top + 14)}px`;
+        return;
+      }
+
       let nearest = chart.series[0];
       let nearestDist = Math.abs(chart.x(nearest) - mx);
 
@@ -1104,6 +1132,9 @@
   }
 
   window.addEventListener("pageshow", scheduleApply);
+  window.addEventListener("ps99-version-markers-loaded", () => {
+    window.setTimeout(redrawEnhancedProfileChart, 0);
+  });
 
   const observer = new MutationObserver(mutations => {
     if (wmsyRendering) return;
