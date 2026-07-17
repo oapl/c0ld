@@ -23,6 +23,7 @@ const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
+const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
@@ -152,6 +153,8 @@ export default {
         response = await handleExternalHistory(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/import") {
         response = await handleCwBotHistoryImport(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/external-history/bigbot/import") {
+        response = await handleBigBotHistoryImport(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
         response = await handleClanActivitySummary(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/status") {
@@ -1669,6 +1672,147 @@ async function handleCwBotHistoryImport(request, env) {
     ok: true,
     user_id: userId,
     source: "cw_bot",
+    discord_message_url: canonicalDiscordMessageUrl(messageRef),
+    parsed_count: parsed.rows.length,
+    status: importStatus,
+    imported_count: rows.length,
+    skipped_count: skipped.length,
+    rows: rows.map(normalizeExternalHistoryOutput),
+    skipped
+  });
+}
+
+async function handleBigBotHistoryImport(request, env) {
+  requireSupabase(env);
+
+  if (!historyImportFlag(env, "BIG_BOT_IMPORT_ENABLED", "CW_BOT_IMPORT_ENABLED")) {
+    throw httpError(403, "Big Bot imports are not enabled. Set BIG_BOT_IMPORT_ENABLED=true on the Worker.");
+  }
+
+  if (historyImportFlag(env, "BIG_BOT_IMPORT_REQUIRE_ADMIN", "CW_BOT_IMPORT_REQUIRE_ADMIN")) {
+    requireAdmin(request, env);
+  }
+
+  const body = await readJsonRequest(request);
+  const userId = toNumber(body.user_id || body.roblox_user_id);
+  const username = stringOrNull(body.username || body.display_name || body.query);
+  const messageUrl = String(body.message_url || body.discord_message_url || "").trim();
+
+  if (!userId) throw httpError(400, "Missing user_id.");
+  if (!messageUrl) throw httpError(400, "Missing message_url.");
+
+  const messageRef = parseDiscordMessageLink(messageUrl);
+  validateBigBotImportTarget(messageRef, env);
+
+  const message = await fetchDiscordMessage(env, messageRef.channelId, messageRef.messageId);
+  const expectedBotId = String(env.BIG_BOT_USER_ID || DEFAULT_BIG_BOT_USER_ID);
+  const authorId = String(message?.author?.id || "");
+
+  if (authorId !== expectedBotId) {
+    throw httpError(400, `Discord message author ${authorId || "unknown"} is not Big Bot (${expectedBotId}).`);
+  }
+
+  const messageText = discordMessageText(message);
+  const parsed = parseBigBotHistoryText(messageText);
+
+  if (!parsed.rows.length) {
+    return json({
+      ok: false,
+      message: "No Big Bot clan battle history rows could be parsed from that message.",
+      user_id: userId,
+      discord_message_url: canonicalDiscordMessageUrl(messageRef),
+      raw_text_preview: messageText.slice(0, 1000)
+    }, 422);
+  }
+
+  if (parsed.player_name && username && normalizeText(parsed.player_name) !== normalizeText(username)) {
+    throw httpError(400, `That Big Bot history belongs to ${parsed.player_name}, not ${username}.`);
+  }
+
+  const existingKeys = await externalHistoryBattleKeySet(env, userId, "big_bot");
+  const importedAt = new Date().toISOString();
+  const importStatus = historyImportFlag(env, "BIG_BOT_IMPORT_AUTO_APPROVE", "CW_BOT_IMPORT_AUTO_APPROVE")
+    ? "approved"
+    : "pending";
+  const rawFingerprintBase = await sha256Hex([
+    "big_bot",
+    userId,
+    messageRef.guildId,
+    messageRef.channelId,
+    messageRef.messageId,
+    messageText
+  ].join("\n"));
+  const rows = [];
+  const skipped = [];
+
+  for (const parsedRow of parsed.rows) {
+    const battleName = cleanExternalBattleName(parsedRow.battle_name || parsedRow.battle || parsedRow.label);
+    const battleKeyValue = externalBattleKey(battleName);
+
+    if (!battleName || !battleKeyValue) {
+      skipped.push({ reason: "missing_battle", row: parsedRow });
+      continue;
+    }
+
+    if (existingKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.rank);
+    const finalPoints = parseCwBotNumber(parsedRow.final_points ?? parsedRow.points);
+
+    if (finalRank === null && finalPoints === null) {
+      skipped.push({ reason: "missing_rank_and_points", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    rows.push({
+      source: "big_bot",
+      user_id: userId,
+      username: stringOrNull(parsed.player_name || username),
+      battle_key: battleKeyValue,
+      battle_name: battleName,
+      clan_name: stringOrNull(parsedRow.clan_name || parsedRow.clan || parsed.current_clan),
+      final_rank: finalRank,
+      total_ranked: null,
+      final_points: finalPoints,
+      final_snapshot_at: safeIso(message.edited_timestamp || message.timestamp) || importedAt,
+      status: importStatus,
+      is_manual_import: true,
+      import_batch_id: rawFingerprintBase,
+      imported_from: "discord_message_text",
+      discord_guild_id: messageRef.guildId,
+      discord_channel_id: messageRef.channelId,
+      discord_message_id: messageRef.messageId,
+      discord_message_url: canonicalDiscordMessageUrl(messageRef),
+      image_url: null,
+      raw_text: messageText.slice(0, 20000),
+      raw_payload: {
+        parser: "big_bot_text",
+        discord_author_id: authorId,
+        discord_message_id: messageRef.messageId,
+        page: parsed.page,
+        pages: parsed.pages,
+        parsed_row: parsedRow
+      },
+      raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
+      updated_at: importedAt
+    });
+    existingKeys.add(battleKeyValue);
+  }
+
+  if (rows.length) {
+    await supabaseUpsertChunked(env, EXTERNAL_PLAYER_HISTORY_TABLE, rows, "source,user_id,battle_key", 100);
+  }
+
+  return json({
+    ok: true,
+    user_id: userId,
+    source: "big_bot",
+    player_name: parsed.player_name || username || null,
+    page: parsed.page,
+    pages: parsed.pages,
     discord_message_url: canonicalDiscordMessageUrl(messageRef),
     parsed_count: parsed.rows.length,
     status: importStatus,
@@ -8046,7 +8190,7 @@ function parseDiscordMessageLink(value) {
   }
 
   if (match[1] === "@me") {
-    throw httpError(400, "CW_Bot imports must come from a server channel message, not a DM.");
+    throw httpError(400, "History imports must come from a server channel message, not a DM.");
   }
 
   return {
@@ -8064,6 +8208,19 @@ function csvSet(value) {
   return new Set(String(value || "").split(",").map(item => item.trim()).filter(Boolean));
 }
 
+function historyImportValue(env, name, fallbackName, defaultValue = "") {
+  const value = env?.[name];
+  if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+
+  const fallback = fallbackName ? env?.[fallbackName] : undefined;
+  if (fallback !== undefined && fallback !== null && String(fallback).trim() !== "") return fallback;
+  return defaultValue;
+}
+
+function historyImportFlag(env, name, fallbackName, defaultValue = "false") {
+  return String(historyImportValue(env, name, fallbackName, defaultValue)).toLowerCase() === "true";
+}
+
 function validateCwBotImportTarget(ref, env) {
   const guildIds = csvSet(env.CW_BOT_IMPORT_GUILD_IDS);
   const channelIds = csvSet(env.CW_BOT_IMPORT_CHANNEL_IDS);
@@ -8074,6 +8231,19 @@ function validateCwBotImportTarget(ref, env) {
 
   if (channelIds.size && !channelIds.has(String(ref.channelId))) {
     throw httpError(403, "That Discord channel is not allowed for CW_Bot imports.");
+  }
+}
+
+function validateBigBotImportTarget(ref, env) {
+  const guildIds = csvSet(historyImportValue(env, "BIG_BOT_IMPORT_GUILD_IDS", "CW_BOT_IMPORT_GUILD_IDS"));
+  const channelIds = csvSet(historyImportValue(env, "BIG_BOT_IMPORT_CHANNEL_IDS", "CW_BOT_IMPORT_CHANNEL_IDS"));
+
+  if (guildIds.size && !guildIds.has(String(ref.guildId))) {
+    throw httpError(403, "That Discord server is not allowed for Big Bot imports.");
+  }
+
+  if (channelIds.size && !channelIds.has(String(ref.channelId))) {
+    throw httpError(403, "That Discord channel is not allowed for Big Bot imports.");
   }
 }
 
@@ -8233,6 +8403,79 @@ function parseCwBotHistoryText(text) {
   }
 
   return { player_name: playerName, player_id: playerId, rows };
+}
+
+function parseBigBotHistoryText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { rows: [], page: null, pages: null };
+
+  const lines = raw
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(stripDiscordHistoryMarkdown)
+    .filter(Boolean);
+  const playerLine = lines.find(line => /['’]s\s+Battle\s+History\b/i.test(line)) || "";
+  const playerName = playerLine.match(/^(.+?)['’]s\s+Battle\s+History\b/i)?.[1]?.trim() || null;
+  const currentClan = lines
+    .map(line => line.match(/^Current\s+Clan\s*:\s*\[([^\]]+)\]/i)?.[1]?.trim())
+    .find(Boolean) || null;
+  const pageMatch = raw.match(/\(\s*Page\s+(\d+)\s+of\s+(\d+)\s*\)/i);
+  const page = pageMatch ? toNumber(pageMatch[1]) : 1;
+  const pages = pageMatch ? toNumber(pageMatch[2]) : 1;
+  const rows = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const battleMatch = lines[index].match(/^(.+?)\s*\|\s*\[([^\]]+)\]\s*\(\s*#\s*([\d,]+)\s*\)\s*$/i);
+    if (!battleMatch) continue;
+
+    const battleName = cleanExternalBattleName(battleMatch[1]);
+    const clanName = String(battleMatch[2] || "").trim() || currentClan;
+    const finalRank = toNumber(String(battleMatch[3] || "").replace(/,/g, ""));
+    let contributionText = "";
+
+    for (let next = index + 1; next < Math.min(lines.length, index + 4); next += 1) {
+      if (/^(.+?)\s*\|\s*\[([^\]]+)\]\s*\(\s*#\s*[\d,]+\s*\)\s*$/i.test(lines[next])) break;
+      const contributionMatch = lines[next].match(/^Contributions?\s*:\s*(.+)$/i);
+      if (contributionMatch) {
+        contributionText = contributionMatch[1].trim();
+        break;
+      }
+    }
+
+    const hasUnknownValue = /\?/.test(contributionText);
+    const hasRange = /\s[-–—]\s/.test(contributionText);
+    const contributionNumber = contributionText.match(/[\d,.]+\s*[kmbt]?/i)?.[0] || "";
+    const finalPoints = !hasUnknownValue && !hasRange
+      ? parseCwBotNumber(contributionNumber)
+      : null;
+
+    if (!battleName || (finalRank === null && finalPoints === null)) continue;
+
+    rows.push({
+      battle_name: battleName,
+      clan_name: clanName,
+      final_rank: finalRank,
+      total_ranked: null,
+      final_points: finalPoints,
+      contribution_text: contributionText || null
+    });
+  }
+
+  return {
+    player_name: playerName,
+    current_clan: currentClan,
+    page,
+    pages,
+    rows
+  };
+}
+
+function stripDiscordHistoryMarkdown(value) {
+  return String(value || "")
+    .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, " ")
+    .replace(/[*_~`>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parseCwBotJsonRows(raw) {
