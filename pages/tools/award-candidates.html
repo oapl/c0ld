@@ -760,9 +760,9 @@ function awardDefinitions(stats){
       weight:"points + lead time",
       items:mvp,
       metrics:stat=>[
-        {text:rankLabel(stat.finalRank),tone:"good"},
         {text:shortNum(stat.finalPoints)+" pts"},
         {text:fmtDuration(stat.timeAtFirst)+" at #1"},
+        {text:rankLabel(stat.finalRank),tone:"good"},
         {text:"+"+shortNum(stat.totalGain)},
         {text:historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount?"good":"warn"}
       ]
@@ -773,9 +773,11 @@ function awardDefinitions(stats){
       weight:"prior jump + recovery",
       items:improved,
       metrics:stat=>[
-        {text:historyOf(stat).previousC0ldRank?"prev "+rankLabel(historyOf(stat).previousC0ldRank)+" -> "+rankLabel(stat.finalRank):"no previous c0ld",tone:historyOf(stat).previousC0ldRank?"good":"warn"},
+        historyOf(stat).previousC0ldRank
+          ? {text:"prev "+rankLabel(historyOf(stat).previousC0ldRank)+" -> "+rankLabel(stat.finalRank),tone:"good"}
+          : {text:historyOf(stat).c0ldBattleCount?historyOf(stat).c0ldBattleCount+" prior c0ld":"no prior c0ld",tone:"warn"},
         {text:stat.worstRank?("war low "+rankLabel(stat.worstRank)+" -> "+rankLabel(stat.finalRank)):"no rank swing",tone:stat.worstRank&&stat.finalRank&&stat.worstRank>stat.finalRank?"good":"warn"},
-        {text:historyOf(stat).previousC0ldRank&&stat.finalRank?("+"+Math.max(0,historyOf(stat).previousC0ldRank-stat.finalRank)+" vs prev"):"current only"},
+        historyOf(stat).previousC0ldRank&&stat.finalRank?{text:"+"+Math.max(0,historyOf(stat).previousC0ldRank-stat.finalRank)+" vs prev"}:null,
         {text:"+"+shortNum(stat.totalGain)+" pts"}
       ]
     },
@@ -788,8 +790,7 @@ function awardDefinitions(stats){
         {text:historyOf(stat).firstC0ldWar?"first c0ld war":historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount<=1?"good":"warn"},
         {text:daysLabel(historyOf(stat).tenureDays),tone:historyOf(stat).tenureDays<=45?"good":"warn"},
         {text:rankLabel(stat.finalRank)},
-        {text:shortNum(stat.finalPoints)+" pts"},
-        {text:historyOf(stat).priorBestGlobalRank?"best G "+rankLabel(historyOf(stat).priorBestGlobalRank):"G history -"}
+        {text:shortNum(stat.finalPoints)+" pts"}
       ]
     },
     {
@@ -809,7 +810,7 @@ function awardDefinitions(stats){
 
 function renderCandidate(stat,index,metrics,maxScore){
   const width=clamp((stat.score/Math.max(1,maxScore))*100,4,100);
-  const chips=metrics(stat).map(chip=>'<span class="chip '+esc(chip.tone||"")+'">'+chip.text+'</span>').join("");
+  const chips=metrics(stat).filter(chip=>chip&&chip.text).map(chip=>'<span class="chip '+esc(chip.tone||"")+'">'+chip.text+'</span>').join("");
   return '<article class="candidate">'+
     '<div class="place">#'+(index+1)+'</div>'+
     '<img class="avatar" src="'+esc(avatarFor(stat))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'">'+
