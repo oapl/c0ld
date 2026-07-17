@@ -204,7 +204,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CW_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated allowlist of Discord channel IDs accepted for CW_Bot imports. |
 | `CW_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Defaults to `false`; when `true`, imports require `INGEST_ADMIN_TOKEN`. |
 | `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_external_player_history` until reviewed. |
-| `CW_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in either bot's imported history. Set to `false` to allow the CW_Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
+| `CW_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in CW_Bot imported history. Set to `false` to allow the CW_Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
 | `OPENAI_API_KEY` | Optional secret. Enables image OCR when the CW_Bot message is image-only. |
 | `CW_BOT_OCR_MODEL` | Optional. Model used for OCR. Defaults to `gpt-5.6`. |
 | `BIG_BOT_IMPORT_ENABLED` | Optional. Enables text-only Big Bot history imports. Falls back to `CW_BOT_IMPORT_ENABLED` when unset. |
@@ -213,7 +213,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `BIG_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated Big Bot channel allowlist. Falls back to `CW_BOT_IMPORT_CHANNEL_IDS`. |
 | `BIG_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Falls back to `CW_BOT_IMPORT_REQUIRE_ADMIN`. |
 | `BIG_BOT_IMPORT_AUTO_APPROVE` | Optional. Falls back to `CW_BOT_IMPORT_AUTO_APPROVE`. |
-| `BIG_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in either bot's imported history. Set to `false` to allow the Big Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
+| `BIG_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in Big Bot imported history. Set to `false` to allow the Big Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -268,7 +268,7 @@ Useful endpoints:
 | `/api/health` | Quick Worker health check. |
 | `/api/ingest` | Manual protected ingest. `POST` only. |
 | `/api/current` | Latest c0ld member leaderboard from Supabase. |
-| `/api/history?hours=24` | Recent raw snapshot rows from the canonical table. |
+| `/api/history?hours=24` | Recent raw snapshot rows from the canonical table. Add `user_id=123&all_battles=true` to fetch one player's rows across every battle in one request. |
 | `/api/clans/ingest` | Manual protected all-clans ingest. `POST` only. |
 | `/api/clans/current` | Latest all-clans leaderboard from Supabase. |
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
@@ -390,7 +390,7 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search`, `/version`, and `/rewards` Worker
+## Discord `/search`, `/history`, `/version`, and `/rewards` Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
@@ -420,8 +420,12 @@ Required Worker variables:
 | `GLOBAL_SCAN_CLAN` | Usually `c0ld`. Selects which global scan cache to read; it does not restrict results to c0ld members. |
 | `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
-| `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` replies visible only to the user. |
-| `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
+| `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` and `/history` replies visible only to the user. |
+| `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
+| `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
+| `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
+| `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
+| `HISTORY_PAGE_SIZE` | Optional `/history` rows per page. Defaults to `10` and accepts `5` through `15`. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
@@ -469,6 +473,10 @@ Invoke-RestMethod -Method Post `
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-rewards-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-history-command?guild_id=YOUR_GUILD_ID" `
+  -Headers @{ Authorization = "Bearer $token" }
 ```
 
 Use `guild_id` while testing because it usually appears immediately in that
@@ -514,6 +522,17 @@ The command users run is:
 ```text
 /search username:Cinnamowopal
 ```
+
+Player history is available with:
+
+```text
+/history username:Cinnamowopal
+```
+
+The response contains paginated text rows with no dates. Buttons switch between
+Clan History, League History, and Leaderboard History; page buttons appear only
+when the selected list is longer than `HISTORY_PAGE_SIZE`. First-party site data
+always takes priority over bot imports.
 
 The plain-text PS99 version command is:
 

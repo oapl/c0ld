@@ -4,6 +4,9 @@ compatibility_date = "2026-07-14"
 
 [vars]
 CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
+LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev"
+PROFILE_DATA_BASE = "https://c0ld-clan.com/Data/players"
+SITE_BASE_URL = "https://c0ld-clan.com"
 # Selects which global scan cache to read. This does not restrict search
 # results to c0ld members; the cache contains every player found during the
 # latest global clan scan.
@@ -12,9 +15,11 @@ DISCORD_EPHEMERAL_RESPONSES = "false"
 DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
 # Optional. Use this while testing so the command appears in one server quickly.
 DISCORD_GUILD_ID = ""
-# Optional. Comma-separated Discord role IDs allowed to use /search.
+# Optional. Comma-separated Discord role IDs allowed to use /search and /history.
 # Leave blank to allow everyone who can see the command.
 DISCORD_ALLOWED_ROLE_IDS = "1489032328855556096,1501632370082840576"
+# Optional number of history rows shown per Discord page (5-15).
+HISTORY_PAGE_SIZE = "10"
 # Optional. Comma-separated reward cutoff ranks used by /rewards.
 PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000"
 CLAN_REWARD_CUTOFF_RANKS = "1,3,10,30,50,250,500"

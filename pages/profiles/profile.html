@@ -947,22 +947,28 @@ async function loadLeagueProfile(userId){
 
 function normalizeExternalClanSummaryRows(rows){
   return(Array.isArray(rows)?rows:[])
-    .map(row=>({
-      type:"clan",
-      source:row.source||"cw_bot",
-      battle:row.battle||row.battle_key||null,
-      label:row.battle_name||row.label||row.battle_key||"Clan Battle",
-      clan_name:row.clan_name||null,
-      final_rank:finite(row.final_rank),
-      total_ranked:finite(row.total_ranked),
-      final_points:finite(row.final_points),
-      first_snapshot_at:row.final_snapshot_at||row.created_at||null,
-      final_snapshot_at:row.final_snapshot_at||row.created_at||null,
-      snapshot_count:1,
-      imported_from:row.imported_from||null,
-      discord_message_url:row.discord_message_url||null
-    }))
-    .filter(row=>row.final_rank!==null||row.final_points!==null);
+    .map(row=>{
+      const source=String(row.source||"cw_bot").toLowerCase();
+      const isCwBot=source==="cw_bot";
+      return{
+        type:"clan",
+        source,
+        battle:row.battle||row.battle_key||null,
+        label:row.battle_name||row.label||row.battle_key||"Clan Battle",
+        clan_name:row.clan_name||null,
+        final_rank:isCwBot?null:finite(row.final_rank),
+        total_ranked:isCwBot?null:finite(row.total_ranked),
+        global_rank:isCwBot?finite(row.final_rank):finite(row.global_rank),
+        total_global_players:isCwBot?finite(row.total_ranked):finite(row.total_global_players),
+        final_points:finite(row.final_points),
+        first_snapshot_at:row.final_snapshot_at||row.created_at||null,
+        final_snapshot_at:row.final_snapshot_at||row.created_at||null,
+        snapshot_count:1,
+        imported_from:row.imported_from||null,
+        discord_message_url:row.discord_message_url||null
+      };
+    })
+    .filter(row=>row.final_rank!==null||row.global_rank!==null||row.final_points!==null);
 }
 
 async function loadExternalHistory(userId){
@@ -1128,9 +1134,18 @@ function mergeClanPlacementRows(...lists){
       continue;
     }
 
-    if(clanPlacementPriority(row)>clanPlacementPriority(existing)){
-      map.set(key,row);
-    }
+    const rowWins=clanPlacementPriority(row)>clanPlacementPriority(existing);
+    const primary=rowWins?row:existing;
+    const secondary=rowWins?existing:row;
+    map.set(key,{
+      ...secondary,
+      ...primary,
+      final_rank:finite(primary.final_rank)??finite(secondary.final_rank),
+      total_ranked:finite(primary.total_ranked)??finite(secondary.total_ranked),
+      global_rank:finite(primary.global_rank)??finite(secondary.global_rank),
+      total_global_players:finite(primary.total_global_players)??finite(secondary.total_global_players),
+      final_points:finite(primary.final_points)??finite(secondary.final_points)
+    });
   }
 
   return[...map.values()];

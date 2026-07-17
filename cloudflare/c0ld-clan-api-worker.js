@@ -1588,7 +1588,7 @@ async function handleCwBotHistoryImport(request, env) {
   const preventOverwrite = historyImportFlag(env, "CW_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
   const [trackedKeys, existingKeys] = await Promise.all([
     trackedHistoryBattleKeySet(env, userId),
-    preventOverwrite ? externalHistoryBattleKeySet(env, userId) : Promise.resolve(new Set())
+    preventOverwrite ? externalHistoryBattleKeySet(env, userId, "cw_bot") : Promise.resolve(new Set())
   ]);
   const importedAt = new Date().toISOString();
   const importStatus = String(env.CW_BOT_IMPORT_AUTO_APPROVE || "false").toLowerCase() === "true"
@@ -1742,7 +1742,7 @@ async function handleBigBotHistoryImport(request, env) {
   const preventOverwrite = historyImportFlag(env, "BIG_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
   const [trackedKeys, existingKeys] = await Promise.all([
     trackedHistoryBattleKeySet(env, userId),
-    preventOverwrite ? externalHistoryBattleKeySet(env, userId) : Promise.resolve(new Set())
+    preventOverwrite ? externalHistoryBattleKeySet(env, userId, "big_bot") : Promise.resolve(new Set())
   ]);
   const importedAt = new Date().toISOString();
   const importStatus = historyImportFlag(env, "BIG_BOT_IMPORT_AUTO_APPROVE", "CW_BOT_IMPORT_AUTO_APPROVE")
@@ -2746,7 +2746,8 @@ async function handleHistory(request, env) {
 
   const url = new URL(request.url);
   const clan = url.searchParams.get("clan") || clanName(env);
-  const battle = url.searchParams.get("battle") || battleKey(env);
+  const allBattles = ["1", "true", "yes"].includes(String(url.searchParams.get("all_battles") || "").toLowerCase());
+  const battle = allBattles ? null : (url.searchParams.get("battle") || battleKey(env));
   const userId = url.searchParams.get("user_id");
   const hours = historyHours(url, env, 24);
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
@@ -2759,7 +2760,6 @@ async function handleHistory(request, env) {
   const params = {
     select: "snapshot_id,fetched_at,clan_name,battle_key,rank,user_id,username,total_points",
     clan_name: `eq.${clan}`,
-    battle_key: `eq.${battle}`,
     fetched_at: `gte.${afterIso}`,
     order: `fetched_at.${orderDir},rank.asc`,
     limit: String(limit),
@@ -2769,6 +2769,9 @@ async function handleHistory(request, env) {
   if (userId) {
     params.user_id = `eq.${userId}`;
   }
+  if (battle) {
+    params.battle_key = `eq.${battle}`;
+  }
 
   const rows = await supabaseSelectPaged(env, SNAPSHOT_TABLE, params, limit, 1000);
 
@@ -2776,6 +2779,7 @@ async function handleHistory(request, env) {
     generated_at: new Date().toISOString(),
     clan_name: clan,
     battle,
+    all_battles: allBattles,
     hours,
     limit,
     offset,
