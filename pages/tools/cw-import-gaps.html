@@ -51,7 +51,10 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 td.import-cell{min-width:320px}
 .player{display:flex;gap:10px;align-items:center;min-width:0}
 .avatar{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
+.player-name-wrap{display:flex;gap:7px;align-items:center;min-width:0}
 .name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.copy-name-button{flex:0 0 auto;min-width:auto;padding:4px 7px;border-radius:5px;font-size:11px;line-height:1;color:var(--muted)}
+.copy-name-button.copied{border-color:rgba(63,185,80,.5);color:var(--good)}
 .status{display:inline-flex;align-items:center;min-height:22px;padding:3px 8px;border:1px solid rgba(255,255,255,.09);border-radius:999px;background:rgba(13,17,23,.7);font-size:12px;color:var(--muted)}
 .status.missing{color:var(--bad)}
 .status.approved{color:var(--good)}
@@ -256,6 +259,17 @@ function statusText(row){
   return status.charAt(0).toUpperCase()+status.slice(1);
 }
 
+function playerCell(row){
+  const name=playerName(row);
+  return '<div class="player">'+
+    '<img class="avatar" src="'+esc(avatarFor(row))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'">'+
+    '<div class="player-name-wrap">'+
+      '<a class="name" href="'+esc(profileHref(row))+'">'+esc(name)+'</a>'+
+      '<button class="copy-name-button" type="button" data-username="'+esc(name)+'" title="Copy username">Copy</button>'+
+    '</div>'+
+  '</div>';
+}
+
 function linkCell(row){
   if(hasCwBotHistory(row)){
     const link=row.cw_bot_import?.discord_message_url;
@@ -310,13 +324,14 @@ function render(){
   els.tableWrap.innerHTML='<table><thead><tr><th>Rank</th><th>Player</th><th class="num">Points</th><th>CW_Bot</th><th>CW_Bot Message Link</th></tr></thead><tbody>'+
     rows.map(row=>'<tr class="'+(hasCwBotHistory(row)?'':'missing-row')+'">'+
       '<td class="rank">#'+esc(row.rank||"-")+'</td>'+
-      '<td><div class="player"><img class="avatar" src="'+esc(avatarFor(row))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="name" href="'+esc(profileHref(row))+'">'+esc(playerName(row))+'</a></div></td>'+
+      '<td>'+playerCell(row)+'</td>'+
       '<td class="num">'+esc(shortNum(row.total_points))+'</td>'+
       '<td><span class="status '+statusClass(row)+'">'+esc(statusText(row))+'</span></td>'+
       '<td class="import-cell">'+linkCell(row)+'</td>'+
     '</tr>').join("")+
   '</tbody></table>';
   attachLinkInputs();
+  attachCopyButtons();
 }
 
 function attachLinkInputs(){
@@ -325,6 +340,45 @@ function attachLinkInputs(){
     input.addEventListener("input",()=>{
       const row=rowsById.get(String(input.dataset.userId||""));
       if(row)setDraftLink(row,input.value);
+    });
+  });
+}
+
+async function copyText(text){
+  if(navigator.clipboard?.writeText){
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea=document.createElement("textarea");
+  textarea.value=text;
+  textarea.setAttribute("readonly","");
+  textarea.style.position="fixed";
+  textarea.style.left="-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied=document.execCommand("copy");
+  textarea.remove();
+  if(!copied)throw new Error("Copy failed.");
+}
+
+function attachCopyButtons(){
+  els.tableWrap.querySelectorAll(".copy-name-button").forEach(button=>{
+    button.addEventListener("click",async()=>{
+      const username=String(button.dataset.username||"").trim();
+      if(!username)return;
+      try{
+        await copyText(username);
+        button.textContent="Copied";
+        button.classList.add("copied");
+        setStatus("Copied "+username+".");
+        setTimeout(()=>{
+          if(!button.isConnected)return;
+          button.textContent="Copy";
+          button.classList.remove("copied");
+        },1200);
+      }catch(error){
+        setStatus("Copy failed for "+username+".");
+      }
     });
   });
 }

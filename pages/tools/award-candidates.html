@@ -238,6 +238,65 @@ async function loadImportedHistory(userId){
     .flatMap(payload=>Array.isArray(payload.rows)?payload.rows:[]);
 }
 
+function battleSortTime(row){
+  return timeValue(
+    row?.battle_end_iso,
+    row?.battle_ended_at,
+    row?.last_snapshot,
+    row?.latest_snapshot_at,
+    row?.battle_start_iso,
+    row?.battle_started_at,
+    row?.first_snapshot
+  )||0;
+}
+
+function priorBattleCandidates(currentBattleKey){
+  const currentKey=norm(currentBattleKey);
+  const currentBattle=battles.find(row=>[row.battle,row.battle_key,row.api_battle_key,row.display_name,row.battle_display_name].map(norm).includes(currentKey));
+  const currentStart=timeValue(currentBattle?.battle_start_iso,currentBattle?.battle_started_at,currentBattle?.first_snapshot,currentBattle?.last_snapshot)||Infinity;
+  return battles
+    .filter(row=>![row.battle,row.battle_key,row.api_battle_key,row.display_name,row.battle_display_name].map(norm).includes(currentKey))
+    .filter(row=>battleSortTime(row)<=currentStart)
+    .sort((a,b)=>battleSortTime(b)-battleSortTime(a))
+    .slice(0,10);
+}
+
+async function loadTrackedPriorHistory(userId,currentBattleKey){
+  if(!userId)return [];
+  for(const battle of priorBattleCandidates(currentBattleKey)){
+    const battleKey=battle.battle||battle.battle_key||battle.api_battle_key;
+    if(!battleKey)continue;
+    const url=new URL(API+"/api/history");
+    url.searchParams.set("clan",CLAN);
+    url.searchParams.set("user_id",String(userId));
+    url.searchParams.set("battle",battleKey);
+    url.searchParams.set("hours","10000");
+    url.searchParams.set("limit","50000");
+    const payload=await fetchJson(url.toString(),{rows:[]});
+    const rows=(Array.isArray(payload.rows)?payload.rows:[])
+      .filter(row=>finite(row.rank)!==null||pointsFor(row)>0)
+      .sort((a,b)=>(rowTime(a)||0)-(rowTime(b)||0));
+    if(!rows.length)continue;
+    const first=rows[0];
+    const last=rows[rows.length-1];
+    const rank=finite(last.rank);
+    const points=pointsFor(last);
+    if(rank===null&&points<=0)continue;
+    return [{
+      key:norm(battleKey),
+      label:battle.display_name||battle.battle_display_name||battleKey,
+      source:"tracked",
+      clanName:CLAN,
+      clanRank:rank,
+      globalRank:null,
+      points,
+      startAt:rowTime(first)||battleSortTime(battle)||null,
+      endAt:rowTime(last)||battleSortTime(battle)||null
+    }];
+  }
+  return [];
+}
+
 async function loadPlayers(){
   const rows=await fetchJson("Data/players.json",[]);
   playerById=new Map();
@@ -585,20 +644,32 @@ function mergeHistoryRecords(rows){
   return [...map.values()];
 }
 
-function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null){
+function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null,trackedPrior=[]){
   const currentKey=norm(currentBattleKey);
   const trackedRows=(Array.isArray(detail?.battles)?detail.battles:[])
     .filter(row=>battleKeyOf(row)!==currentKey)
     .filter(row=>isTrackedClanName(row.clan_name||row.source_clan||CLAN))
     .map(row=>normalizeHistoryRecord({...row,clan_name:row.clan_name||row.source_clan||CLAN},"profile"));
+  const trackedPriorRows=(Array.isArray(trackedPrior)?trackedPrior:[])
+    .filter(row=>row.key!==currentKey)
+    .map(row=>normalizeHistoryRecord({
+      ...row,
+      battle_key:row.key,
+      battle_name:row.label,
+      clan_name:row.clanName||row.clan_name||CLAN,
+      clan_rank:row.clanRank,
+      global_rank:row.globalRank,
+      final_points:row.points
+    },row.source||"tracked"));
   const imported=(Array.isArray(imports)?imports:[])
     .filter(row=>battleKeyOf(row)!==currentKey);
   const importedC0ldRows=imported
     .filter(importedRowIsTrackedClan)
     .map(row=>normalizeHistoryRecord(row,row.source||"import"));
-  const c0ldBattles=mergeHistoryRecords([...trackedRows,...importedC0ldRows])
+  const c0ldBattles=mergeHistoryRecords([...trackedRows,...trackedPriorRows,...importedC0ldRows])
     .sort((a,b)=>(a.endAt||0)-(b.endAt||0));
-  const latestPrior=[...c0ldBattles].reverse().find(row=>row.clanRank!==null||row.points!==null)||null;
+  const latestRankedPrior=[...c0ldBattles].reverse().find(row=>Number.isFinite(row.clanRank))||null;
+  const latestPointPrior=[...c0ldBattles].reverse().find(row=>Number.isFinite(row.points))||null;
   const importedClans=[...new Set(imported.map(row=>String(row.clan_name||"").trim()).filter(Boolean))];
   const ranks=c0ldBattles.map(row=>row.clanRank).filter(Number.isFinite);
   const points=c0ldBattles.map(row=>row.points).filter(Number.isFinite);
@@ -621,9 +692,9 @@ function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null){
     priorBestPoints:points.length?Math.max(...points):null,
     priorBestGlobalRank:globalRanks.length?Math.min(...globalRanks):null,
     priorAvgGlobalRank:globalRanks.length?globalRanks.reduce((sum,value)=>sum+value,0)/globalRanks.length:null,
-    previousC0ldBattle:latestPrior?.label||null,
-    previousC0ldRank:latestPrior?.clanRank??null,
-    previousC0ldPoints:latestPrior?.points??null,
+    previousC0ldBattle:latestRankedPrior?.label||latestPointPrior?.label||null,
+    previousC0ldRank:latestRankedPrior?.clanRank??null,
+    previousC0ldPoints:latestRankedPrior?.points??latestPointPrior?.points??null,
     joinedC0ldAt:joinedC0ldAt?new Date(joinedC0ldAt).toISOString():null,
     firstC0ldWar:c0ldBattles.length===0
   };
@@ -631,11 +702,12 @@ function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null){
 
 async function hydrateHistory(stats,currentBattleKey,referenceTime=null){
   await mapLimit(stats,PROFILE_FETCH_CONCURRENCY,async stat=>{
-    const [detail,imports]=await Promise.all([
+    const [detail,imports,trackedPrior]=await Promise.all([
       loadProfileDetail(stat),
-      loadImportedHistory(stat.user_id)
+      loadImportedHistory(stat.user_id),
+      loadTrackedPriorHistory(stat.user_id,currentBattleKey)
     ]);
-    stat.history=summarizeHistory(detail,imports,currentBattleKey,referenceTime);
+    stat.history=summarizeHistory(detail,imports,currentBattleKey,referenceTime,trackedPrior);
   });
   return stats;
 }
