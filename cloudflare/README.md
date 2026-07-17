@@ -206,6 +206,12 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_external_player_history` until reviewed. |
 | `OPENAI_API_KEY` | Optional secret. Enables image OCR when the CW_Bot message is image-only. |
 | `CW_BOT_OCR_MODEL` | Optional. Model used for OCR. Defaults to `gpt-5.6`. |
+| `BIG_BOT_IMPORT_ENABLED` | Optional. Enables text-only Big Bot history imports. Falls back to `CW_BOT_IMPORT_ENABLED` when unset. |
+| `BIG_BOT_USER_ID` | Optional. Defaults to `920446937986129960`, the official Big Bot Discord user/app ID. |
+| `BIG_BOT_IMPORT_GUILD_IDS` | Optional comma-separated Big Bot server allowlist. Falls back to `CW_BOT_IMPORT_GUILD_IDS`. |
+| `BIG_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated Big Bot channel allowlist. Falls back to `CW_BOT_IMPORT_CHANNEL_IDS`. |
+| `BIG_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Falls back to `CW_BOT_IMPORT_REQUIRE_ADMIN`. |
+| `BIG_BOT_IMPORT_AUTO_APPROVE` | Optional. Falls back to `CW_BOT_IMPORT_AUTO_APPROVE`. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
@@ -270,6 +276,7 @@ Useful endpoints:
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
 | `/api/external-history?user_id=123&source=cw_bot` | Approved external history rows for a player. Non-approved statuses require the admin token. |
 | `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
+| `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
