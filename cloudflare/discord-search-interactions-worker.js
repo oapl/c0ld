@@ -828,7 +828,6 @@ async function buildClanChartMessage(env) {
   return {
     content: null,
     embeds: [{
-      title: "Clan Chart - Line View",
       color: 0x58a6ff,
       image: { url: `attachment://${filename}` }
     }],
@@ -844,7 +843,6 @@ async function buildDuckChartMessage(env) {
   return {
     content: null,
     embeds: [{
-      title: "Duck Chart",
       color: 0xf2cc60,
       image: { url: `attachment://${filename}` }
     }],
@@ -892,8 +890,8 @@ async function loadClanChartData(env, options = {}) {
 async function renderClanLineChartPng(data) {
   const fonts = await loadHistoryFonts();
   const width = 1200;
-  const height = 675;
-  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 1);
+  const height = 370;
+  const canvas = new HistoryPixelCanvas(width, height, [13, 19, 27, 255], 1);
   const color = chartColors();
   const rows = chartCurrentRows(data.current)
     .filter(row => row.rank >= CHART_LINE_RANGE.min && row.rank <= CHART_LINE_RANGE.max)
@@ -901,21 +899,14 @@ async function renderClanLineChartPng(data) {
   const series = rows
     .map((row, index) => chartBuildHourlyGainSeries(row, data.history, index, data.current))
     .filter(item => item.points.length >= 1);
-  const title = `${data.current?.display_name || data.current?.battle || "Current Battle"} - Clan Line Chart`;
-  const subtitle = `${CHART_LINE_RANGE.label} actual hourly gains`;
-
-  chartPanel(canvas, 24, 24, width - 48, height - 48, color);
-  canvas.drawFontText(fonts.bold, title, 52, 48, 28, color.white, 760);
-  canvas.drawFontText(fonts.regular, subtitle, 54, 86, 15, color.muted, 760);
-  canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(data.current?.snapshot_at || data.current?.generated_at)}`, 930, 60, 13, color.muted, 220);
-
-  const plot = { x: 78, y: 132, w: 930, h: 392 };
-  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
-  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
-  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+  const padLeft = 66;
+  const padRight = 116;
+  const padTop = 18;
+  const padBottom = 34;
+  const plot = { x: padLeft, y: padTop, w: width - padLeft - padRight, h: height - padTop - padBottom };
 
   if (!series.length) {
-    canvas.drawFontText(fonts.regular, "Not enough actual hourly gain data is available for Ranks 1-4 yet.", plot.x + 28, plot.y + 38, 18, color.muted, plot.w - 56);
+    canvas.drawFontText(fonts.regular, "Not enough actual hourly gain data is available for this range yet.", 16, 28, 13, color.muted, width - 32);
     return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
   }
 
@@ -933,8 +924,8 @@ async function renderClanLineChartPng(data) {
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
     const value = yMax - (i / 4) * (yMax - yMin);
-    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
-    canvas.drawFontText(fonts.regular, shortNumber(value), 12, yy - 8, 12, color.muted, 58);
+    canvas.fillRect(plot.x, yy, plot.w, 1, color.line);
+    canvas.drawFontText(fonts.regular, shortNumber(value), 8, yy - 6, 12, color.muted, 52);
   }
 
   [...series]
@@ -949,22 +940,10 @@ async function renderClanLineChartPng(data) {
     canvas.drawFontText(fonts.bold, `#${item.rank} ${item.clan_name}`, Math.min(plot.x + plot.w - 130, xFor(last) + 8), yFor(last) - 8, 12, item.color, 122);
   });
 
-  canvas.drawFontText(fonts.regular, chartShortDate(minT), plot.x, plot.y + plot.h + 18, 12, color.muted, 120);
-  canvas.drawFontText(fonts.regular, chartShortDate(maxT), plot.x + plot.w - 120, plot.y + plot.h + 18, 12, color.muted, 120);
-
-  const legendX = 1030;
-  canvas.drawFontText(fonts.bold, CHART_LINE_RANGE.label, legendX, 132, 18, color.white, 130);
-  series.forEach((item, index) => {
-    const y = 164 + index * 58;
-    const latest = item.points[item.points.length - 1];
-    canvas.fillRect(legendX, y + 7, 20, 4, item.color);
-    canvas.drawFontText(fonts.bold, `#${item.rank}`, legendX + 28, y, 12, item.color, 36);
-    canvas.drawFontText(fonts.regular, item.clan_name, legendX + 64, y, 12, color.white, 88);
-    canvas.drawFontText(fonts.regular, `${shortNumber(latest.pointsGained)}/hr`, legendX + 64, y + 15, 10, color.muted, 88);
-    canvas.drawFontText(fonts.regular, shortNumber(item.current.points), legendX + 64, y + 30, 10, color.muted, 88);
-  });
-
-  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 52, height - 42, 13, color.muted, 300);
+  canvas.drawFontText(fonts.regular, chartTimeLabel(minT), plot.x, height - 19, 12, color.muted, 160);
+  const lastLabel = chartTimeLabel(maxT);
+  const lastLabelWidth = canvas.measureFontText(fonts.regular, lastLabel, 12);
+  canvas.drawFontText(fonts.regular, lastLabel, width - padRight - lastLabelWidth, height - 19, 12, color.muted, 180);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
@@ -1314,6 +1293,12 @@ function chartShortDate(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "-";
   return date.toLocaleDateString("en-US", { timeZone: "America/Guatemala", month: "short", day: "numeric" });
+}
+
+function chartTimeLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function chartFilenamePart(value) {
