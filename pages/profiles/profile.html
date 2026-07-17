@@ -42,19 +42,20 @@
     .history-tab:hover,.history-tab.active{border-color:var(--link);color:var(--link);background:#1f2630}
     .history-control-row{display:flex;justify-content:flex-end;margin:0 0 14px}
     .history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;align-items:stretch;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
-    .history-column{padding:14px;min-width:0}
+    .history-column{padding:12px;min-width:0}
     .history-column+.history-column{border-left:1px solid var(--border)}
     .history-column-title{margin:0;padding:0 0 11px;text-align:center;font-size:18px;border-bottom:1px solid var(--border)}
     .history-lines{display:grid}
-    .history-line{display:grid;grid-template-columns:minmax(120px,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid rgba(139,148,158,.22)}
+    .history-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:10px 0;border-top:1px solid rgba(139,148,158,.22)}
     .history-line:first-child{border-top:0}
-    .history-line-title{font-weight:700;text-align:left;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
-    .history-line-date{text-align:left;color:var(--muted);font-size:11px;line-height:1.25;margin-top:3px}
-    .history-line-data{display:flex;align-items:center;justify-content:flex-end;gap:0;min-width:0}
-    .history-line-chip{min-width:48px;padding:0 8px;text-align:center;border-left:1px solid rgba(139,148,158,.28)}
+    .history-line-main{min-width:0}
+    .history-line-title{font-weight:700;text-align:left;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .history-line-date{text-align:left;color:var(--muted);font-size:10px;line-height:1.25;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .history-line-data{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;gap:0;min-width:0}
+    .history-line-chip{min-width:0;padding:0 4px;text-align:center;border-left:1px solid rgba(139,148,158,.28)}
     .history-line-chip:first-child{border-left:0}
-    .history-line-chip .label{display:block;margin:0 0 1px;color:var(--muted);font-size:10px;line-height:1.1}
-    .history-line-value{display:block;font-size:13px;line-height:1.15;font-weight:700;overflow-wrap:anywhere}
+    .history-line-chip .label{display:block;margin:0 0 1px;color:var(--muted);font-size:9px;line-height:1.1;white-space:nowrap}
+    .history-line-value{display:block;font-size:12px;line-height:1.15;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
     .history-empty{border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center;color:var(--muted);font-size:13px}
     .summary-list{display:grid;grid-template-columns:1fr;gap:12px}
     .summary-card{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:16px}
@@ -1110,7 +1111,7 @@ function mergeClanPlacementRows(...lists){
     }
   }
 
-  return[...map.values()].sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
+  return[...map.values()];
 }
 
 function clanPlacementSummaries(){
@@ -1254,12 +1255,12 @@ function activitySummary(battle){
   };
 }
 
-function rankDisplay(value,total){
+function rankDisplay(value,total,compact=false){
   const rank=finite(value);
   if(rank===null)return"—";
 
   const totalValue=finite(total);
-  return`#${fmt(rank)}${totalValue!==null?` / ${fmt(totalValue)}`:""}`;
+  return`#${fmt(rank)}${totalValue!==null?`${compact?"/":" / "}${fmt(totalValue)}`:""}`;
 }
 
 function clanRankDisplay(){
@@ -1395,16 +1396,16 @@ function historyLineRows(row,type){
 
   if(type==="clan"){
     lines.push(["Clan",placementName(row,type)||"—"]);
-    lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked)]);
-    lines.push(["Pts",fmt(row.final_points)]);
+    lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked,true)]);
+    lines.push(["Pts",fmtShort(row.final_points)]);
   }else if(type==="league"){
     lines.push(["League",placementName(row,type)||"—"]);
-    lines.push(["Rank",rankDisplay(row.league_rank,row.total_leagues)]);
-    lines.push(["L Rank",rankDisplay(row.player_league_rank)]);
-    lines.push(["Pts",fmt(row.final_points)]);
+    lines.push(["Rank",rankDisplay(row.league_rank,row.total_leagues,true)]);
+    lines.push(["L Rank",rankDisplay(row.player_league_rank,null,true)]);
+    lines.push(["Pts",fmtShort(row.final_points)]);
   }else{
-    lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked)]);
-    lines.push(["Pts",fmt(row.final_points)]);
+    lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked,true)]);
+    lines.push(["Pts",fmtShort(row.final_points)]);
   }
 
   return lines;
