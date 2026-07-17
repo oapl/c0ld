@@ -425,7 +425,7 @@ Required Worker variables:
 | `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
-| `HISTORY_PAGE_SIZE` | Optional `/history` rows per page. Defaults to `10` and accepts `5` through `15`. |
+| `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders all `/history` sections together in one c0ld-styled PNG. Set to `false` for the text-only response. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
@@ -529,10 +529,11 @@ Player history is available with:
 /history username:Cinnamowopal
 ```
 
-The response contains paginated text rows with no dates. Buttons switch between
-Clan History, League History, and Leaderboard History; page buttons appear only
-when the selected list is longer than `HISTORY_PAGE_SIZE`. First-party site data
-always takes priority over bot imports.
+The response contains one generated c0ld history card with Clan History, League
+History, and Leaderboard History stacked together. It includes every available
+record without dates, pagination, or section buttons. First-party site data
+always takes priority over bot imports. Set `HISTORY_IMAGE_RESPONSES=false` to
+use the text-only fallback.
 
 The plain-text PS99 version command is:
 
@@ -563,6 +564,10 @@ clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
 
 `yamo-league-api-worker.js` powers the league pages, the Top 1000 leaderboard,
 and the c0ld league overlap page.
+
+Run `supabase/migrations/026_league_player_history_index.sql` in the Supabase SQL
+Editor so cross-run player history lookups do not time out as the snapshot
+archive grows.
 
 Useful endpoints:
 

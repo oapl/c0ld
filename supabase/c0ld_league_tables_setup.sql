@@ -107,6 +107,10 @@ create index if not exists ps99_league_snapshots_run_league_fetched_idx
 create index if not exists ps99_league_snapshots_run_user_fetched_idx
   on public.ps99_league_snapshots (league_run_key, league_name, user_id, fetched_at desc);
 
+-- Supports cross-run player history lookups used by profile pages and /history.
+create index if not exists ps99_league_snapshots_user_fetched_idx
+  on public.ps99_league_snapshots (user_id, fetched_at desc);
+
 create index if not exists ps99_league_snapshots_snapshot_rank_idx
   on public.ps99_league_snapshots (snapshot_id, rank asc);
 
