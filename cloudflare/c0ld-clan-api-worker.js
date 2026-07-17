@@ -127,6 +127,8 @@ export default {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/home/awards") {
         response = await handleHomeAwards(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/avatar") {
+        response = await handleRobloxAvatar(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/history") {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/battles") {
@@ -7706,6 +7708,36 @@ function displayUsername(row, usernameMap) {
   if (resolved && !isFallbackUsername(resolved, id)) return resolved;
   if (existing && !isFallbackUsername(existing, id)) return existing;
   return existing || (id ? `user_${id}` : "");
+}
+
+async function handleRobloxAvatar(request, env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("user_id") || "").trim();
+  if (!/^\d+$/.test(userId)) {
+    return json({ ok: false, message: "A numeric user_id is required" }, 400);
+  }
+
+  const avatarMap = await resolveRobloxAvatarHeadshots([userId], env);
+  const avatarUrl = avatarMap.get(userId);
+  if (!avatarUrl) {
+    return json({ ok: false, message: "Avatar unavailable" }, 404);
+  }
+
+  const upstream = await fetch(avatarUrl, {
+    headers: {
+      Accept: "image/avif,image/webp,image/png,image/*,*/*;q=0.8",
+      "User-Agent": "c0ld-Clan-API-Worker"
+    }
+  });
+  if (!upstream.ok || !upstream.body) {
+    return json({ ok: false, message: "Avatar image unavailable" }, 502);
+  }
+
+  const headers = new Headers();
+  headers.set("Content-Type", upstream.headers.get("Content-Type") || "image/png");
+  headers.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(upstream.body, { status: 200, headers });
 }
 
 async function resolveRobloxAvatarHeadshots(userIds, env) {

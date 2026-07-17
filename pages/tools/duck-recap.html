@@ -43,7 +43,9 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .duck-waterline{position:absolute;left:0;right:0;height:16px;background:repeating-linear-gradient(90deg,rgba(107,205,255,.18) 0 18px,rgba(107,205,255,.04) 18px 36px);opacity:.75}
 .duck-racer{--duck-left:6%;--duck-top:70%;--duck-size:118px;position:absolute;left:var(--duck-left);top:var(--duck-top);width:var(--duck-size);height:calc(var(--duck-size)*.9);transform:translate3d(-50%,-50%,0);z-index:1;will-change:left,top;contain:layout style}
 .duck-image{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 0 rgba(0,0,0,.65));transform-origin:50% 70%;animation:duck-paddle .62s ease-in-out infinite alternate}
-.duck-logo{position:absolute;left:30%;top:56%;width:25%;height:25%;border-radius:6px;object-fit:cover;background:#0d1117;border:1px solid rgba(0,0,0,.6)}
+.duck-logo-shell{position:absolute;left:27%;top:53%;width:32%;height:32%;overflow:hidden;border:1px solid rgba(0,0,0,.72);border-radius:6px;background:#0d1117;box-shadow:0 1px 3px rgba(0,0,0,.45)}
+.duck-logo{display:block;width:100%;height:100%;object-fit:cover;object-position:center;transform:scale(1.35)}
+.duck-logo-shell.member .duck-logo{object-position:center 28%;transform:scale(1.65)}
 .duck-label{position:absolute;left:50%;top:-48px;transform:translateX(-50%);min-width:132px;max-width:190px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:rgba(13,17,23,.82);box-shadow:0 2px 8px rgba(0,0,0,.28);text-align:center}
 .duck-track.compact-labels .duck-label{opacity:0;transform:translateX(-50%) translateY(4px);transition:opacity .12s ease,transform .12s ease;pointer-events:none}
 .duck-track.compact-labels .duck-racer:hover{z-index:100}
@@ -52,6 +54,13 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .duck-stats{color:var(--muted);font-size:12px;line-height:1.3;margin-top:2px}
 .race-hud{position:absolute;z-index:120;left:18px;right:92px;top:14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:8px 11px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:rgba(7,14,23,.84);box-shadow:0 5px 18px rgba(0,0,0,.3);font-size:12px;pointer-events:none}
 .race-hud strong{color:#fff}.race-hud-center{text-align:center;color:#9edcff;font-weight:800}.race-hud-right{text-align:right;color:var(--muted)}
+.finish-standings{position:absolute;z-index:140;left:50%;top:51%;width:min(760px,calc(100% - 38px));padding:15px 16px 16px;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:rgba(7,14,23,.94);box-shadow:0 16px 42px rgba(0,0,0,.55);opacity:0;transform:translate(-50%,-45%) scale(.97);transition:opacity .28s ease,transform .28s ease;pointer-events:none}
+.finish-standings.visible{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.finish-standings[hidden]{display:none}
+.finish-title{margin:0 0 10px;text-align:center;font-size:16px}
+.finish-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+.finish-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:32px;border-top:1px solid rgba(255,255,255,.1);font-size:13px}
+.finish-rank{color:#9edcff;font-weight:800}.finish-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.finish-points{color:var(--muted)}
 @keyframes duck-paddle{from{transform:translateY(-2px) rotate(-1.5deg)}to{transform:translateY(3px) rotate(1.5deg)}}
 .good{color:var(--good);font-weight:800}.bad{color:var(--bad);font-weight:800}
 .message{padding:24px;color:var(--muted)}
@@ -61,7 +70,7 @@ body.embed .section{border:0;border-radius:0}
 body.embed .section-header{padding:12px 16px}
 body.embed .duck-track{height:560px}
 @media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.duck-track{height:520px}.duck-label{min-width:118px;max-width:150px;font-size:12px}.duck-stats{font-size:11px}}
-@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.race-hud{right:76px;grid-template-columns:1fr auto}.race-hud-right{display:none}body.embed .duck-track{height:500px}}
+@media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.race-hud{right:76px;grid-template-columns:1fr auto}.race-hud-right{display:none}.finish-grid{grid-template-columns:1fr}.finish-standings{padding:12px 14px}.finish-row{min-height:28px}body.embed .duck-track{height:500px}}
 </style>
 </head>
 <body>
@@ -140,6 +149,11 @@ function clanPoints(row){return asNumber(firstValue(row.points,row.total_points,
 function duckImage(){return '<img class="duck-image" src="'+DUCK_IMAGE_URL+'" alt="">'}
 function icon(row){if(row.icon_url)return row.icon_url;if(row.icon_id)return "https://ps99.biggamesapi.io/image/"+encodeURIComponent(row.icon_id);return row.avatar_url||""}
 async function getJson(url){const res=await fetch(url,{cache:"default"});if(!res.ok)throw new Error("HTTP "+res.status+" from "+url);return res.json()}
+function avatarProxyUrl(userId){const id=String(userId||"").trim();return id?API+"/api/avatar?user_id="+encodeURIComponent(id):""}
+function avatarFallbackUrl(userId){
+  const id=String(userId||"").trim();
+  return id?"https://www.roblox.com/headshot-thumbnail/image?userId="+encodeURIComponent(id)+"&width=150&height=150&format=png":"";
+}
 function battleHours(battle,metadata=null){const found=metadata||battles.find(row=>row.battle===battle);const start=found?.battle_start_iso||found?.battle_started_at||found?.first_snapshot;const startTime=new Date(start||0).getTime();if(!Number.isFinite(startTime)||!startTime)return 100000;return Math.ceil((Date.now()-startTime)/(60*60*1000))+12}
 function setStatus(text){document.getElementById("status").textContent=text}
 
@@ -231,14 +245,19 @@ function rowTopFor(index,count){
 }
 function clamp01(value){return Math.max(0,Math.min(1,value))}
 function smoothstep(value){const t=clamp01(value);return t*t*(3-2*t)}
-function raceLeftFor(racer,point,place,count,timelineProgress){
-  const movementStart=asNumber(racer.motionStartPoints);
-  const gain=racer.endPoints-movementStart;
-  const scoreProgress=gain>0?clamp01((point.points-movementStart)/gain):clamp01(timelineProgress);
-  const endPlace=Math.max(1,asNumber(racer.endRank)||place);
-  const placeSpread=count<=1?0:((endPlace-1)/(count-1))*(count<=10?36:30);
-  const finish=91-placeSpread;
-  return 7+(finish-7)*smoothstep(scoreProgress);
+function raceLeftFor(point,place,count,timelineProgress,minPoints,maxPoints){
+  const raceProgress=smoothstep(clamp01(timelineProgress/.82));
+  const fieldPosition=maxPoints>minPoints
+    ?clamp01((point.points-minPoints)/(maxPoints-minPoints))
+    :(count<=1?1:(count-place)/(count-1));
+  const base=7+raceProgress*48;
+  const spread=5+raceProgress*31;
+  const raceLeft=base+fieldPosition*spread;
+  if(timelineProgress<=.82)return raceLeft;
+  const finishProgress=smoothstep((timelineProgress-.82)/.18);
+  const finishSpread=count<=1?0:((place-1)/(count-1))*15;
+  const finishLeft=116-finishSpread;
+  return raceLeft+(finishLeft-raceLeft)*finishProgress;
 }
 function replayScaleText(start,end){
   const minutesPerSecond=((end-start)/60000)/(REPLAY_DURATION_MS/1000);
@@ -249,7 +268,8 @@ function replayScaleText(start,end){
 
 async function buildMemberRecap(battle){
   const battleParam=battle==="current"?"":"&battle="+encodeURIComponent(battle);
-  const current=await getJson(API+"/api/current?clan=c0ld"+battleParam);
+  const current=await getJson(API+"/api/current?clan=c0ld&avatars=true&downtime=false"+battleParam);
+  const currentRows=current.rows||[];
   const effectiveBattle=battle==="current"?(current.battle||current.battle_key||"current"):battle;
   const hours=battleHours(effectiveBattle,current);
   const history=await getJson(API+"/api/history?clan=c0ld&battle="+encodeURIComponent(effectiveBattle)+"&hours="+hours+"&limit=50000&order=asc");
@@ -258,7 +278,7 @@ async function buildMemberRecap(battle){
     points:memberPoints(row),
     rank:asNumber(row.rank)
   }));
-  const racers=(current.rows||[]).map(row=>{
+  const racers=currentRows.map(row=>{
     const key=String(row.user_id||row.username);
     const timeline=[...(timelines.get(String(row.user_id||""))||[])];
     addTimelinePoint(timeline,{t:pointTime(row,current.snapshot_at),points:memberPoints(row),rank:asNumber(row.rank)});
@@ -267,7 +287,8 @@ async function buildMemberRecap(battle){
     return {
       key,
       label:row.username||("user_"+row.user_id),
-      icon_url:row.avatar_url,
+      icon_url:avatarProxyUrl(row.user_id)||row.avatar_url,
+      avatar_fallback:row.avatar_url||avatarFallbackUrl(row.user_id),
       startRank:asNumber(start?.rank)||asNumber(row.rank),
       endRank:asNumber(end?.rank)||asNumber(row.rank),
       startPoints:asNumber(start?.points),
@@ -277,7 +298,7 @@ async function buildMemberRecap(battle){
       note:"c0ld member"
     };
   });
-  return {title:"c0ld Recap",battle:current.display_name||current.battle_display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
+  return {mode:"members",title:"c0ld Recap",battle:current.display_name||current.battle_display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
 }
 
 async function buildClanRecap(battle){
@@ -310,7 +331,7 @@ async function buildClanRecap(battle){
       note:"top clan"
     };
   });
-  return {title:"Top Clans Recap",battle:current.display_name||current.battle_display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
+  return {mode:"clans",title:"Top Clans Recap",battle:current.display_name||current.battle_display_name||effectiveBattle,latest:current.snapshot_at,historyRows:(history.rows||[]).length,racers};
 }
 
 function prepareRacers(racers){
@@ -338,6 +359,9 @@ function paintReplayFrame(state,elapsed){
   const replayTime=state.startTime+(state.endTime-state.startTime)*progress;
   const live=state.racers.map((racer,index)=>({racer,index,point:pointAt(racer.timeline,replayTime,state.startTime)}));
   live.sort((a,b)=>b.point.points-a.point.points||a.racer.endRank-b.racer.endRank||a.index-b.index);
+  const livePoints=live.map(item=>item.point.points);
+  const minPoints=Math.min(...livePoints);
+  const maxPoints=Math.max(...livePoints);
   const updateLabels=!state.lastLabelUpdate||performance.now()-state.lastLabelUpdate>180||progress>=1;
   live.forEach((item,placeIndex)=>{
     const place=placeIndex+1;
@@ -345,11 +369,16 @@ function paintReplayFrame(state,elapsed){
     const el=refs?.el;
     if(!el)return;
     const gain=item.point.points-item.racer.startPoints;
-    el.style.setProperty("--duck-left",raceLeftFor(item.racer,item.point,place,state.racers.length,progress).toFixed(3)+"%");
-    if(updateLabels){
+    el.style.setProperty("--duck-left",raceLeftFor(item.point,place,state.racers.length,progress,minPoints,maxPoints).toFixed(3)+"%");
+    const placeChanged=refs.place!==place;
+    if(placeChanged){
+      refs.place=place;
       if(refs.name)refs.name.textContent="#"+place+" "+item.racer.label;
+      if(refs.rank)refs.rank.textContent="Current #"+place+" · Final #"+(item.racer.endRank||"-");
+    }
+    if(updateLabels){
       if(refs.stats)refs.stats.textContent=shortNum(item.point.points)+" | "+(gain>=0?"+":"")+shortNum(gain);
-      if(refs.rank)refs.rank.textContent="Rank "+(item.point.rank||"-")+" -> "+(item.racer.endRank||"-");
+      if(refs.rank)refs.rank.textContent="Current #"+place+" · Final #"+(item.racer.endRank||"-");
     }
   });
   if(updateLabels){
@@ -361,6 +390,14 @@ function paintReplayFrame(state,elapsed){
     const progressEl=document.getElementById("race-progress");
     if(leaderEl)leaderEl.textContent=(progress>=1?"Winner: ":"Leader: ")+leaderText;
     if(progressEl)progressEl.textContent=Math.round(progress*100)+"%";
+  }
+  if(progress>=1&&!state.standingsShown){
+    state.standingsShown=true;
+    const standings=document.getElementById("finish-standings");
+    if(standings){
+      standings.hidden=false;
+      requestAnimationFrame(()=>standings.classList.add("visible"));
+    }
   }
   return progress>=1;
 }
@@ -415,10 +452,17 @@ function renderRecap(payload){
     const top=rowTopFor(index,racers.length)+7;
     return '<div class="duck-waterline" style="top:'+top.toFixed(1)+'%"></div>';
   }).join("");
+  const logoType=payload.mode==="members"?"member":"clan";
+  const finalRows=racers.slice(0,10).map((row,index)=>'<div class="finish-row"><span class="finish-rank">#'+(index+1)+'</span><span class="finish-name">'+esc(row.label)+'</span><strong class="finish-points">'+esc(shortNum(row.endPoints))+'</strong></div>').join("");
   track.innerHTML='<div class="race-hud"><strong id="race-leader">Race starting…</strong><span id="race-progress" class="race-hud-center">0%</span><span class="race-hud-right">18 second replay</span></div>'+waterLines+racers.map((row,index)=>{
     const rankClass=row.rankMove>0?"good":row.rankMove<0?"bad":"";
-    return '<div id="duck-racer-'+index+'" class="duck-racer" style="--duck-size:'+duckSize+'px;--duck-top:'+rowTopFor(index,racers.length).toFixed(1)+'%">'+duckImage()+(row.icon_url?'<img class="duck-logo" src="'+esc(row.icon_url)+'" alt="">':'')+'<div class="duck-label"><div class="duck-name" data-race-name>#'+(index+1)+' '+esc(row.label)+'</div><div class="duck-stats" data-race-stats>'+esc(shortNum(row.startPoints))+' | +0</div><div class="duck-stats '+rankClass+'" data-race-rank>Rank '+esc(row.startRank||"-")+' -> '+esc(row.endRank||"-")+'</div></div></div>';
-  }).join("");
+    return '<div id="duck-racer-'+index+'" class="duck-racer" style="--duck-size:'+duckSize+'px;--duck-top:'+rowTopFor(index,racers.length).toFixed(1)+'%">'+duckImage()+(row.icon_url?'<span class="duck-logo-shell '+logoType+'"><img class="duck-logo" src="'+esc(row.icon_url)+'" data-fallback="'+esc(row.avatar_fallback||"")+'" alt=""></span>':'')+'<div class="duck-label"><div class="duck-name" data-race-name>#'+(index+1)+' '+esc(row.label)+'</div><div class="duck-stats" data-race-stats>'+esc(shortNum(row.startPoints))+' | +0</div><div class="duck-stats '+rankClass+'" data-race-rank>Current #'+(index+1)+' · Final #'+esc(row.endRank||"-")+'</div></div></div>';
+  }).join("")+'<div id="finish-standings" class="finish-standings" hidden><h3 class="finish-title">Final standings</h3><div class="finish-grid">'+finalRows+'</div></div>';
+  track.querySelectorAll(".duck-logo[data-fallback]").forEach(image=>image.addEventListener("error",()=>{
+    const fallback=image.dataset.fallback;
+    image.removeAttribute("data-fallback");
+    if(fallback&&image.src!==fallback)image.src=fallback;
+  },{once:true}));
   startReplay({
     racers,
     startTime:safeStart,
