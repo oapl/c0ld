@@ -124,8 +124,8 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 
   <section class="section">
     <div class="section-header">
-      <h2 class="section-title">Custom Award Ideas</h2>
-      <div id="custom-meta" class="subtle">Waiting for battle data.</div>
+      <h2 class="section-title">Participation Trophies</h2>
+      <div id="custom-meta" class="subtle"></div>
     </div>
     <div id="custom-grid" class="custom-grid">
       <div class="empty">No candidates loaded yet.</div>
@@ -138,6 +138,7 @@ const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const CLAN="c0ld";
 const HISTORY_LIMIT=50000;
 const MAX_INTERVAL_MS=12*60*1000;
+const FINAL_PUSH_MS=6*60*60*1000;
 const PROFILE_FETCH_CONCURRENCY=6;
 const FALLBACK_AVATAR="assets/c0ld-kitsune-logo.gif";
 let battles=[];
@@ -437,6 +438,7 @@ function rememberStat(stats,row){
       rankChanges:0,
       bestSegmentGain:0,
       lateGain:0,
+      finalPushGain:0,
       snapshotCount:0
     };
     stats.set(key,stat);
@@ -454,6 +456,7 @@ function computeStats(snapshots){
   const firstTime=snapshots[0].time;
   const lastTime=snapshots[snapshots.length-1].time;
   const lateStart=firstTime+((lastTime-firstTime)*0.8);
+  const finalPushStart=lastTime-FINAL_PUSH_MS;
   let previousRows=new Map();
 
   snapshots.forEach((snapshot,index)=>{
@@ -499,6 +502,7 @@ function computeStats(snapshots){
         if(gain===0)stat.downtimeMs+=interval;
         if(gain>stat.bestSegmentGain)stat.bestSegmentGain=gain;
         if(snapshot.time>=lateStart&&gain>0)stat.lateGain+=gain;
+        if(snapshot.time>=finalPushStart&&gain>0)stat.finalPushGain+=gain;
         if(rank!==null&&previousRow.rank!==null&&rank!==previousRow.rank)stat.rankChanges+=1;
       }
     }
@@ -884,10 +888,10 @@ function awardDefinitions(stats){
       items:improved,
       metrics:stat=>[
         stat.improvement?.previousRank
-          ? {text:"prev "+rankLabel(stat.improvement.previousRank)+" -> "+rankLabel(stat.finalRank),tone:"good"}
+          ? {text:"prev CB "+rankLabel(stat.improvement.previousRank)+" -> final "+rankLabel(stat.finalRank),tone:"good"}
           : {text:"no previous c0ld rank",tone:"warn"},
         {text:stat.worstRank?("war low "+rankLabel(stat.worstRank)+" -> "+rankLabel(stat.finalRank)):"no rank swing",tone:stat.improvement?.currentRecovery?"good":"warn"},
-        stat.improvement?.previousJump?{text:"+"+stat.improvement.previousJump+" vs prev",tone:"good"}:null,
+        stat.improvement?.previousJump?{text:"+"+stat.improvement.previousJump+" vs prev CB",tone:"good"}:null,
         !stat.improvement?.previousJump&&stat.improvement?.currentRecovery?{text:"+"+stat.improvement.currentRecovery+" in-war ranks",tone:"good"}:null,
         improvementPointChip(stat)
       ]
@@ -948,23 +952,23 @@ function renderAwards(defs){
 
 function customIdeas(stats){
   const players=stats.filter(stat=>stat.finalPoints>0);
-  const byPoints=[...players].sort((a,b)=>b.finalPoints-a.finalPoints)[0];
-  const byClutch=[...players].sort((a,b)=>b.lateGain-a.lateGain||b.finalPoints-a.finalPoints)[0];
+  const byLockedIn=[...players].sort((a,b)=>b.finalPushGain-a.finalPushGain||b.finalPoints-a.finalPoints)[0];
   const byChaos=[...players].sort((a,b)=>b.rankChanges-a.rankChanges||b.worstDrop-a.worstDrop)[0];
   const byMarathon=[...players].sort((a,b)=>b.uptimeMs-a.uptimeMs||b.finalPoints-a.finalPoints)[0];
   const byComeback=[...players].sort((a,b)=>(b.worstRank-b.finalRank)-(a.worstRank-a.finalRank)||b.totalGain-a.totalGain)[0];
+  const byConsistent=[...players].sort((a,b)=>b.downtimeMs-a.downtimeMs||b.downtimePct-a.downtimePct)[0];
   return [
-    {title:"Point Printer",stat:byPoints,metric:stat=>shortNum(stat.finalPoints)+" final points"},
-    {title:"Clutch Finisher",stat:byClutch,metric:stat=>"+"+shortNum(stat.lateGain)+" late points"},
-    {title:"Rank Chaos",stat:byChaos,metric:stat=>stat.rankChanges+" rank changes"},
-    {title:"Marathon Mode",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active"},
-    {title:"Comeback Arc",stat:byComeback,metric:stat=>rankLabel(stat.worstRank)+" worst, "+rankLabel(stat.finalRank)+" final"}
+    {title:"Locked TF In",stat:byLockedIn,metric:stat=>"+"+shortNum(stat.finalPushGain)+" pts in final 6h"},
+    {title:"Gotta Catch 'em All",stat:byChaos,metric:stat=>stat.rankChanges+" rank changes"},
+    {title:"Hates Touching Grass",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active"},
+    {title:"Underdog",stat:byComeback,metric:stat=>rankLabel(stat.worstRank)+" worst, "+rankLabel(stat.finalRank)+" final"},
+    {title:"Most Consistent 🧠",stat:byConsistent,metric:stat=>fmtDuration(stat.downtimeMs)+" without point gain"}
   ];
 }
 
 function renderCustom(stats){
   const ideas=customIdeas(stats);
-  els.customMeta.textContent=ideas.filter(idea=>idea.stat).length+" award ideas";
+  els.customMeta.textContent="";
   els.customGrid.innerHTML=ideas.map(idea=>{
     if(!idea.stat)return '<div class="custom-card"><div class="custom-title">'+esc(idea.title)+'</div><div class="custom-metric">No candidate.</div></div>';
     return '<div class="custom-card">'+
