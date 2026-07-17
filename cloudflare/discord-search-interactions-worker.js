@@ -907,7 +907,7 @@ async function renderClanLineChartPng(data) {
   canvas.drawFontText(fonts.regular, subtitle, 54, 86, 15, color.muted, 760);
   canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(data.current?.snapshot_at || data.current?.generated_at)}`, 930, 60, 13, color.muted, 220);
 
-  const plot = { x: 78, y: 132, w: 930, h: 392 };
+  const plot = { x: 76, y: 116, w: 968, h: 450 };
   canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
   canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
   canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
@@ -931,8 +931,11 @@ async function renderClanLineChartPng(data) {
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
     const value = yMax - (i / 4) * (yMax - yMin);
+    const label = shortNumber(value);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    const labelX = Math.max(34, plot.x - 14 - labelWidth);
     canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
-    canvas.drawFontText(fonts.regular, shortNumber(value), 12, yy - 8, 12, color.muted, 58);
+    chartDrawBackedText(canvas, fonts.regular, label, labelX, yy - 8, 12, color.muted, labelWidth + 2, color.panel);
   }
 
   [...series]
@@ -944,18 +947,28 @@ async function renderClanLineChartPng(data) {
     }
     const last = item.points[item.points.length - 1];
     chartFillCircle(canvas, xFor(last), yFor(last), item.isCutoffPair ? 5 : 4, item.color);
-    canvas.drawFontText(fonts.bold, `#${item.rank} ${item.clan_name}`, Math.min(plot.x + plot.w - 130, xFor(last) + 8), yFor(last) - 8, 12, item.color, 122);
+    chartDrawBackedText(
+      canvas,
+      fonts.bold,
+      `#${item.rank} ${item.clan_name}`,
+      Math.min(plot.x + plot.w - 130, xFor(last) + 8),
+      Math.max(plot.y + 8, Math.min(plot.y + plot.h - 18, yFor(last) - 8)),
+      12,
+      item.color,
+      122,
+      [13, 19, 27, 255]
+    );
   });
 
-  canvas.drawFontText(fonts.regular, chartTimeLabel(minT), plot.x, plot.y + plot.h + 18, 12, color.muted, 160);
+  chartDrawBackedText(canvas, fonts.regular, chartTimeLabel(minT), plot.x, plot.y + plot.h + 18, 12, color.muted, 160, color.panel);
   const lastLabel = chartTimeLabel(maxT);
   const lastLabelWidth = canvas.measureFontText(fonts.regular, lastLabel, 12);
-  canvas.drawFontText(fonts.regular, lastLabel, plot.x + plot.w - lastLabelWidth, plot.y + plot.h + 18, 12, color.muted, 180);
+  chartDrawBackedText(canvas, fonts.regular, lastLabel, plot.x + plot.w - lastLabelWidth, plot.y + plot.h + 18, 12, color.muted, 180, color.panel);
 
-  const legendX = 1030;
-  canvas.drawFontText(fonts.bold, CHART_LINE_RANGE.label, legendX, 132, 18, color.white, 130);
+  const legendX = 1062;
+  canvas.drawFontText(fonts.bold, CHART_LINE_RANGE.label, legendX, 126, 18, color.white, 110);
   series.forEach((item, index) => {
-    const y = 164 + index * 58;
+    const y = 158 + index * 58;
     const latest = item.points[item.points.length - 1];
     canvas.fillRect(legendX, y + 7, 20, 4, item.color);
     canvas.drawFontText(fonts.bold, `#${item.rank}`, legendX + 28, y, 12, item.color, 36);
@@ -1226,6 +1239,13 @@ function chartPanel(canvas, x, y, width, height, color) {
   canvas.fillRect(x, y, 1, height, color.line);
   canvas.fillRect(x + width - 1, y, 1, height, color.line);
   canvas.fillRect(x, y, 6, height, color.red);
+}
+
+function chartDrawBackedText(canvas, font, value, x, y, size, rgba, maxWidth, background) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
+  const textWidth = canvas.measureFontText(font, fitted, size);
+  canvas.fillRect(x - 4, y - 3, textWidth + 8, Math.ceil(size * 1.7), background);
+  canvas.drawFontText(font, fitted, x, y, size, rgba, maxWidth);
 }
 
 function chartDrawLine(canvas, x1, y1, x2, y2, rgba, width = 2) {
