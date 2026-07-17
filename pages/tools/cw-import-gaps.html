@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CW Import Gaps</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--bad:#f85149;--warn:#d29922;--blue:#58a6ff}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+a{color:var(--link);text-decoration:none}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}
+.logo-wrap{display:flex;justify-content:center;align-items:center;width:100%}
+.site-logo{display:block;width:76px;border-radius:10px;margin:0 auto}
+.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.menu a,.menu-btn,.lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel-2);color:var(--text);font-size:13px;line-height:1}
+.menu a.active,.lookup-summary.active{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
+.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:180px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--panel);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
+main{max-width:1240px;margin:0 auto;padding:22px 24px 32px}
+.hero,.card,.table-shell{background:var(--panel);border:1px solid var(--border);border-radius:8px}
+.hero{padding:18px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+h1{margin:0 0 5px;font-size:30px}
+.subtle{color:var(--muted);font-size:13px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+select,input,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+input{min-width:220px}
+button{cursor:pointer}
+button:hover,select:focus,input:focus{border-color:var(--link);background:var(--hover)}
+.segmented{display:inline-flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--panel-2)}
+.segmented button{border:0;border-radius:0;border-right:1px solid var(--border)}
+.segmented button:last-child{border-right:0}
+.segmented button.active{background:rgba(88,166,255,.16);color:#b9dcff}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
+.label{color:var(--muted);font-size:13px;margin-bottom:6px}
+.value{font-size:20px;font-weight:800;line-height:1.25}
+.table-shell{overflow:hidden}
+.table-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.table-title{font-size:18px;font-weight:800}
+.table-meta{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;border-bottom:1px solid rgba(48,54,61,.75);text-align:left;vertical-align:middle}
+th{color:var(--muted);font-size:12px;font-weight:700;background:rgba(13,17,23,.35)}
+td.rank{width:66px;color:var(--muted);font-weight:800}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.player{display:flex;gap:10px;align-items:center;min-width:0}
+.avatar{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
+.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status{display:inline-flex;align-items:center;min-height:22px;padding:3px 8px;border:1px solid rgba(255,255,255,.09);border-radius:999px;background:rgba(13,17,23,.7);font-size:12px;color:var(--muted)}
+.status.missing{color:var(--bad)}
+.status.approved{color:var(--good)}
+.status.pending{color:var(--warn)}
+.status.other{color:var(--blue)}
+tr.missing-row{background:rgba(248,81,73,.035)}
+.empty,.error{padding:24px;color:var(--muted)}
+.error{display:none;margin-bottom:18px;border:1px solid rgba(248,81,73,.45);border-radius:8px;background:rgba(248,81,73,.1);color:#ffb4ad}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.segmented{width:100%}.segmented button{flex:1}table{min-width:760px}.table-shell{overflow-x:auto}}
+@media(max-width:560px){main{padding:16px}.cards{grid-template-columns:1fr}.hero{align-items:stretch}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Clans Leaderboard</a>
+    <a href="global-leaderboard.html">Global Leaderboard</a>
+    <details class="lookup-menu">
+      <summary class="lookup-summary active">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+        <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+        <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+        <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
+        <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
+        <a class="menu-btn" href="award-candidates.html">Award Candidates</a>
+        <a class="menu-btn active" href="cw-import-gaps.html">CW Import Gaps</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div>
+      <h1>CW Import Gaps</h1>
+      <div id="status" class="subtle">Loading battle list.</div>
+    </div>
+    <div class="controls">
+      <select id="battle-select"></select>
+      <input id="search-input" placeholder="Filter player...">
+      <div class="segmented">
+        <button id="missing-btn" class="active" type="button">Missing</button>
+        <button id="all-btn" type="button">All</button>
+      </div>
+      <button id="copy-btn" type="button">Copy Missing</button>
+      <button id="refresh-btn" type="button">Refresh</button>
+    </div>
+  </section>
+
+  <div id="error" class="error"></div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Final Members</div><div class="value" id="members-card">-</div></div>
+    <div class="card"><div class="label">Missing CW_Bot</div><div class="value" id="missing-card">-</div></div>
+    <div class="card"><div class="label">Imported</div><div class="value" id="imported-card">-</div></div>
+    <div class="card"><div class="label">Final Snapshot</div><div class="value" id="snapshot-card">-</div></div>
+  </section>
+
+  <section class="table-shell">
+    <div class="table-head">
+      <div>
+        <div class="table-title" id="table-title">Missing CW_Bot Imports</div>
+        <div class="table-meta" id="table-meta">Waiting for battle data.</div>
+      </div>
+    </div>
+    <div id="table-wrap"><div class="empty">No rows loaded.</div></div>
+  </section>
+</main>
+
+<script>
+const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
+const CLAN="c0ld";
+const FALLBACK_AVATAR="assets/c0ld-kitsune-logo.gif";
+let battles=[];
+let playerById=new Map();
+let payload=null;
+let viewMode="missing";
+let loading=false;
+
+const els={
+  status:document.getElementById("status"),
+  error:document.getElementById("error"),
+  battleSelect:document.getElementById("battle-select"),
+  searchInput:document.getElementById("search-input"),
+  missingBtn:document.getElementById("missing-btn"),
+  allBtn:document.getElementById("all-btn"),
+  copyBtn:document.getElementById("copy-btn"),
+  refreshBtn:document.getElementById("refresh-btn"),
+  membersCard:document.getElementById("members-card"),
+  missingCard:document.getElementById("missing-card"),
+  importedCard:document.getElementById("imported-card"),
+  snapshotCard:document.getElementById("snapshot-card"),
+  tableTitle:document.getElementById("table-title"),
+  tableMeta:document.getElementById("table-meta"),
+  tableWrap:document.getElementById("table-wrap")
+};
+
+function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
+function finite(value){const number=Number(value);return Number.isFinite(number)?number:null}
+function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
+function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
+function setStatus(text){els.status.textContent=text}
+function showError(message){els.error.textContent=message;els.error.style.display=message?"block":"none"}
+
+async function fetchJson(url,fallback){
+  try{
+    const response=await fetch(url,{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const data=await response.json();
+    if(data&&data.ok===false)throw new Error(data.message||"API error");
+    return data;
+  }catch(error){
+    if(arguments.length>1)return fallback;
+    throw error;
+  }
+}
+
+async function loadPlayers(){
+  const rows=await fetchJson("Data/players.json",[]);
+  playerById=new Map();
+  for(const row of Array.isArray(rows)?rows:[]){
+    if(row.user_id!==null&&row.user_id!==undefined)playerById.set(String(row.user_id),row);
+  }
+}
+
+async function loadBattles(){
+  const data=await fetchJson(API+"/api/battles?clan="+encodeURIComponent(CLAN)+"&limit=100",{rows:[]});
+  battles=(Array.isArray(data.rows)?data.rows:[]).sort((a,b)=>new Date(b.last_snapshot||b.latest_snapshot_at||0)-new Date(a.last_snapshot||a.latest_snapshot_at||0));
+  els.battleSelect.innerHTML=battles.map(row=>{
+    const key=row.battle||row.battle_key;
+    const name=row.display_name||row.battle_display_name||key;
+    return '<option value="'+esc(key)+'">'+esc(name)+'</option>';
+  }).join("");
+  const requested=new URLSearchParams(location.search).get("battle");
+  if(requested&&[...els.battleSelect.options].some(option=>option.value===requested))els.battleSelect.value=requested;
+}
+
+function profileFor(row){
+  if(row?.user_id!==null&&row?.user_id!==undefined)return playerById.get(String(row.user_id))||null;
+  return null;
+}
+
+function avatarFor(row){
+  return profileFor(row)?.avatar_url||FALLBACK_AVATAR;
+}
+
+function playerName(row){
+  return profileFor(row)?.username||row.username||("user_"+(row.user_id||"unknown"));
+}
+
+function profileHref(row){
+  return "player-lookup.html?q="+encodeURIComponent(row.user_id||playerName(row));
+}
+
+function statusClass(row){
+  if(!row.has_cw_bot_import)return"missing";
+  const status=String(row.cw_bot_status||"").toLowerCase();
+  if(status==="approved")return"approved";
+  if(status==="pending")return"pending";
+  return"other";
+}
+
+function statusText(row){
+  if(!row.has_cw_bot_import)return"Missing";
+  const status=String(row.cw_bot_status||"imported").trim();
+  return status.charAt(0).toUpperCase()+status.slice(1);
+}
+
+function visibleRows(){
+  const query=String(els.searchInput.value||"").trim().toLowerCase();
+  const rows=Array.isArray(payload?.rows)?payload.rows:[];
+  return rows
+    .filter(row=>viewMode==="all"||!row.has_cw_bot_import)
+    .filter(row=>{
+      if(!query)return true;
+      return [playerName(row),row.username,row.user_id,row.rank].some(value=>String(value??"").toLowerCase().includes(query));
+    });
+}
+
+function render(){
+  const rows=visibleRows();
+  const totalRows=Array.isArray(payload?.rows)?payload.rows:[];
+  const missingRows=totalRows.filter(row=>!row.has_cw_bot_import);
+  const battleName=payload?.battle_display_name||payload?.battle_key||"-";
+  els.membersCard.textContent=(payload?.final_member_count??0).toLocaleString("en-US");
+  els.missingCard.textContent=(payload?.missing_count??missingRows.length).toLocaleString("en-US");
+  els.importedCard.textContent=(payload?.imported_count??0).toLocaleString("en-US");
+  els.snapshotCard.textContent=fmtDate(payload?.final_snapshot_at);
+  els.tableTitle.textContent=viewMode==="all"?"Final Members":"Missing CW_Bot Imports";
+  els.tableMeta.textContent=payload
+    ? battleName+" - "+rows.length.toLocaleString("en-US")+" shown"
+    : "Waiting for battle data.";
+  els.missingBtn.classList.toggle("active",viewMode==="missing");
+  els.allBtn.classList.toggle("active",viewMode==="all");
+
+  if(!payload){
+    els.tableWrap.innerHTML='<div class="empty">No rows loaded.</div>';
+    return;
+  }
+
+  if(!rows.length){
+    els.tableWrap.innerHTML='<div class="empty">No matching rows.</div>';
+    return;
+  }
+
+  els.tableWrap.innerHTML='<table><thead><tr><th>Rank</th><th>Player</th><th class="num">Points</th><th>CW_Bot</th></tr></thead><tbody>'+
+    rows.map(row=>'<tr class="'+(row.has_cw_bot_import?'':'missing-row')+'">'+
+      '<td class="rank">#'+esc(row.rank||"-")+'</td>'+
+      '<td><div class="player"><img class="avatar" src="'+esc(avatarFor(row))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="name" href="'+esc(profileHref(row))+'">'+esc(playerName(row))+'</a></div></td>'+
+      '<td class="num">'+esc(shortNum(row.total_points))+'</td>'+
+      '<td><span class="status '+statusClass(row)+'">'+esc(statusText(row))+'</span></td>'+
+    '</tr>').join("")+
+  '</tbody></table>';
+}
+
+async function loadGaps(){
+  if(loading)return;
+  loading=true;
+  showError("");
+  setStatus("Checking final roster against CW_Bot imports.");
+  els.refreshBtn.disabled=true;
+  try{
+    const battle=els.battleSelect.value||battles[0]?.battle||battles[0]?.battle_key;
+    if(!battle)throw new Error("No battle is available.");
+    const url=new URL(API+"/api/external-history/cwbot/missing");
+    url.searchParams.set("clan",CLAN);
+    url.searchParams.set("battle",battle);
+    url.searchParams.set("include_all","1");
+    payload=await fetchJson(url.toString());
+    render();
+    setStatus("Loaded "+payload.final_member_count.toLocaleString("en-US")+" final members; "+payload.missing_count.toLocaleString("en-US")+" missing CW_Bot imports.");
+    const nextUrl=new URL(location.href);
+    nextUrl.searchParams.set("battle",battle);
+    history.replaceState(null,"",nextUrl);
+  }catch(error){
+    console.error(error);
+    payload=null;
+    render();
+    showError(error.message||String(error));
+    setStatus("CW import gap check failed.");
+  }finally{
+    els.refreshBtn.disabled=false;
+    loading=false;
+  }
+}
+
+async function copyMissing(){
+  const rows=(Array.isArray(payload?.rows)?payload.rows:[]).filter(row=>!row.has_cw_bot_import);
+  const text=rows.map(row=>playerName(row)).join("\n");
+  if(!text){
+    setStatus("No missing CW_Bot imports to copy.");
+    return;
+  }
+  try{
+    await navigator.clipboard.writeText(text);
+    setStatus("Copied "+rows.length.toLocaleString("en-US")+" missing player names.");
+  }catch(error){
+    showError("Copy failed. Select the missing rows manually.");
+  }
+}
+
+els.refreshBtn.addEventListener("click",loadGaps);
+els.battleSelect.addEventListener("change",loadGaps);
+els.searchInput.addEventListener("input",render);
+els.missingBtn.addEventListener("click",()=>{viewMode="missing";render()});
+els.allBtn.addEventListener("click",()=>{viewMode="all";render()});
+els.copyBtn.addEventListener("click",copyMissing);
+
+Promise.all([loadPlayers(),loadBattles()])
+  .then(loadGaps)
+  .catch(error=>{
+    console.error(error);
+    showError(error.message||String(error));
+    setStatus("Page setup failed.");
+  });
+</script>
+</body>
+</html>

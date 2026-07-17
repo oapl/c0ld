@@ -159,6 +159,8 @@ export default {
         response = await handleRewardCutoffs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/external-history/cwbot/missing") {
+        response = await handleMissingCwBotImports(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history") {
         response = await handleExternalHistory(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/import") {
@@ -1643,6 +1645,84 @@ async function handleExternalHistory(request, env) {
     source,
     status,
     rows: rows.map(normalizeExternalHistoryOutput)
+  }, env, 30);
+}
+
+async function handleMissingCwBotImports(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const clan = String(url.searchParams.get("clan") || clanName(env)).trim() || clanName(env);
+  const requestedBattle = String(url.searchParams.get("battle") || battleKey(env)).trim();
+  const includeAllRows = isTruthyParam(url, "include_all");
+
+  if (!requestedBattle || normalizeText(requestedBattle) === "auto") {
+    throw httpError(400, "Missing battle. Pass ?battle=BattleKey.");
+  }
+
+  const [battleRun, rosterResult] = await Promise.all([
+    fetchBattleRun(env, clan, requestedBattle).catch(() => null),
+    fetchFinalClanRosterForBattle(env, clan, requestedBattle)
+  ]);
+  const roster = rosterResult.rows;
+  const battleKeys = new Set([
+    requestedBattle,
+    battleRun?.battle_key,
+    battleRun?.battle_display_name
+  ].map(externalBattleKey).filter(Boolean));
+  const userIds = roster.map(row => toNumber(row.user_id)).filter(Boolean);
+  const cwRows = await fetchCwBotRowsForUsers(env, userIds);
+  const cwRowsByUser = new Map();
+
+  for (const row of cwRows) {
+    const rowBattleKey = externalBattleKey(row.battle_key || row.battle_name);
+    if (!battleKeys.has(rowBattleKey)) continue;
+
+    const userId = toNumber(row.user_id);
+    if (!userId) continue;
+    if (!cwRowsByUser.has(userId)) cwRowsByUser.set(userId, []);
+    cwRowsByUser.get(userId).push(row);
+  }
+
+  const finalMembers = roster.map(row => {
+    const userId = toNumber(row.user_id);
+    const importRows = sortExternalHistoryRows(cwRowsByUser.get(userId) || []);
+    const bestImport = importRows[0] || null;
+
+    return {
+      user_id: userId,
+      username: row.username || null,
+      rank: toNumber(row.rank),
+      total_points: toNumber(row.total_points),
+      snapshot_id: row.snapshot_id || null,
+      fetched_at: row.fetched_at || null,
+      has_cw_bot_import: Boolean(bestImport),
+      cw_bot_status: bestImport?.status || null,
+      cw_bot_rows: importRows.length,
+      cw_bot_import: bestImport ? normalizeExternalHistoryOutput(bestImport) : null
+    };
+  }).sort((a, b) => (toNumber(a.rank) || Number.MAX_SAFE_INTEGER) - (toNumber(b.rank) || Number.MAX_SAFE_INTEGER));
+  const missingRows = finalMembers.filter(row => !row.has_cw_bot_import);
+  const statusCounts = finalMembers.reduce((counts, row) => {
+    const key = row.cw_bot_status || "missing";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    clan_name: clan,
+    battle_key: requestedBattle,
+    battle_display_name: battleRun?.battle_display_name || requestedBattle,
+    final_snapshot_id: rosterResult.snapshot_id || null,
+    final_snapshot_at: rosterResult.fetched_at || null,
+    final_snapshot_source: rosterResult.table || null,
+    final_member_count: finalMembers.length,
+    imported_count: finalMembers.length - missingRows.length,
+    missing_count: missingRows.length,
+    status_counts: statusCounts,
+    rows: includeAllRows ? finalMembers : missingRows
   }, env, 30);
 }
 
@@ -9075,6 +9155,116 @@ function externalHistoryBackfillPatch(existing, incoming) {
 
   patch.updated_at = incoming.updated_at || new Date().toISOString();
   return patch;
+}
+
+function postgrestNumberInFilter(values) {
+  const ids = [...new Set((values || [])
+    .map(value => toNumber(value))
+    .filter(value => value !== null)
+    .map(value => String(Math.trunc(value))))];
+
+  return `in.(${ids.join(",")})`;
+}
+
+async function fetchBattleRun(env, clan, battle) {
+  const rows = await supabaseSelect(env, BATTLE_RUNS_TABLE, {
+    select: "clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,first_seen_at,last_seen_at,latest_snapshot_id,latest_snapshot_at,is_active,updated_at",
+    clan_name: `eq.${clan}`,
+    battle_key: `eq.${battle}`,
+    limit: "1"
+  });
+
+  return rows[0] || null;
+}
+
+async function fetchLatestRosterMarkerFromTable(env, table, clan, battle) {
+  const rows = await supabaseSelect(env, table, {
+    select: "snapshot_id,fetched_at,clan_name,battle_key",
+    clan_name: `eq.${clan}`,
+    battle_key: `eq.${battle}`,
+    order: "fetched_at.desc,snapshot_id.desc",
+    limit: "1"
+  }).catch(err => {
+    if (table === SNAPSHOT_ARCHIVE_TABLE && String(err?.message || "").includes(table)) return [];
+    throw err;
+  });
+
+  return rows[0] ? { ...rows[0], table } : null;
+}
+
+async function fetchFinalClanRosterForBattle(env, clan, battle) {
+  const markers = (await Promise.all([
+    fetchLatestRosterMarkerFromTable(env, SNAPSHOT_TABLE, clan, battle),
+    fetchLatestRosterMarkerFromTable(env, SNAPSHOT_ARCHIVE_TABLE, clan, battle)
+  ])).filter(Boolean);
+  const marker = markers.sort((a, b) => isoToMs(b.fetched_at) - isoToMs(a.fetched_at))[0] || null;
+
+  if (!marker) {
+    throw httpError(404, `No final roster snapshot found for ${clan} / ${battle}.`);
+  }
+
+  const params = {
+    select: "snapshot_id,fetched_at,clan_name,battle_key,rank,user_id,username,total_points",
+    clan_name: `eq.${clan}`,
+    battle_key: `eq.${battle}`,
+    order: "rank.asc,user_id.asc",
+    limit: "1000"
+  };
+
+  if (marker.snapshot_id) {
+    params.snapshot_id = `eq.${marker.snapshot_id}`;
+  } else {
+    params.fetched_at = `eq.${marker.fetched_at}`;
+  }
+
+  const rows = await supabaseSelectPaged(env, marker.table, params, 1000, 1000);
+
+  return {
+    table: marker.table,
+    snapshot_id: marker.snapshot_id || null,
+    fetched_at: marker.fetched_at || null,
+    rows
+  };
+}
+
+async function fetchCwBotRowsForUsers(env, userIds) {
+  const ids = [...new Set((userIds || []).map(toNumber).filter(Boolean))];
+  const rows = [];
+
+  for (const chunk of chunkValues(ids, 200)) {
+    const chunkRows = await supabaseSelectPaged(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+      select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,clan_rank,total_clan_members,global_rank,total_global_players,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
+      source: "eq.cw_bot",
+      user_id: postgrestNumberInFilter(chunk),
+      status: "neq.rejected",
+      order: "final_snapshot_at.desc.nullslast,updated_at.desc.nullslast,created_at.desc",
+      limit: String(Math.min(5000, Math.max(1000, chunk.length * 50)))
+    }, Math.min(5000, Math.max(1000, chunk.length * 50)), 1000).catch(err => {
+      if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
+      throw err;
+    });
+    rows.push(...chunkRows);
+  }
+
+  return rows;
+}
+
+function externalHistoryStatusPriority(status) {
+  const key = String(status || "").toLowerCase();
+  if (key === "approved") return 4;
+  if (key === "pending") return 3;
+  if (key === "duplicate") return 2;
+  if (key === "ignored") return 1;
+  return 0;
+}
+
+function sortExternalHistoryRows(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const priority = externalHistoryStatusPriority(b.status) - externalHistoryStatusPriority(a.status);
+    if (priority) return priority;
+
+    return isoToMs(b.final_snapshot_at || b.updated_at || b.created_at) - isoToMs(a.final_snapshot_at || a.updated_at || a.created_at);
+  });
 }
 
 function normalizeExternalHistoryOutput(row) {
