@@ -59,13 +59,13 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
 .section-title{margin:0;font-size:18px}
 .custom-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
-.custom-card{padding:14px;border-right:1px solid var(--border);min-height:150px}
+.custom-card{padding:14px;border-right:1px solid var(--border);min-height:150px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .custom-card:last-child{border-right:0}
 .custom-title{font-size:14px;font-weight:800;margin-bottom:10px}
-.custom-player{display:flex;gap:9px;align-items:center;margin-bottom:10px}
+.custom-player{display:flex;gap:9px;align-items:center;justify-content:center;width:100%;max-width:100%;margin-bottom:10px}
 .custom-player img{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
-.custom-name{font-weight:800;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.custom-metric{color:var(--muted);font-size:12px;line-height:1.35}
+.custom-name{font-weight:800;font-size:13px;min-width:0;max-width:calc(100% - 43px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.custom-metric{color:var(--muted);font-size:12px;line-height:1.35;width:100%}
 .milestone-head,.milestone-row{display:grid;grid-template-columns:110px 96px minmax(0,1fr);gap:16px;align-items:start;padding:12px 16px;border-top:1px solid var(--border)}
 .milestone-head{padding-block:9px;background:var(--panel-2);color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
 .milestone-name{font-size:14px;font-weight:800}
@@ -125,7 +125,6 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
   </section>
 
   <section id="awards-grid" class="awards-grid">
-    <div class="award-card"><div class="message">Loading candidates.</div></div>
   </section>
 
   <section class="section">
@@ -134,17 +133,16 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
       <div id="custom-meta" class="subtle"></div>
     </div>
     <div id="custom-grid" class="custom-grid">
-      <div class="empty">No candidates loaded yet.</div>
     </div>
   </section>
 
   <section class="section">
     <div class="section-header">
       <h2 class="section-title">Milestones</h2>
-      <div id="milestones-meta" class="subtle">Loading global placements.</div>
+      <div id="milestones-meta" class="subtle"></div>
     </div>
-    <div class="milestone-head" aria-hidden="true"><span>Placement</span><span>c0ld</span><span>Members in this band</span></div>
-    <div id="milestones-list" class="message">Building c0ld’s Top 100, 101-500, and 501-1,000 report.</div>
+    <div class="milestone-head" aria-hidden="true"><span>Placement</span><span>c0ld</span><span>Members</span></div>
+    <div id="milestones-list"></div>
   </section>
 </main>
 
@@ -1046,9 +1044,9 @@ function renderMilestones(globalCurrent){
   }).join("");
 }
 async function loadMilestones(){
-  els.milestonesMeta.textContent="Loading global placements.";
-  els.milestonesList.className="message";
-  els.milestonesList.textContent="Building c0ld’s Top 100, 101-500, and 501-1,000 report.";
+  els.milestonesMeta.textContent="";
+  els.milestonesList.className="";
+  els.milestonesList.textContent="";
   try{
     const url=new URL(API+"/api/global/current");
     url.searchParams.set("clan",CLAN);
@@ -1075,7 +1073,11 @@ async function loadCandidates(){
   showError("");
   setStatus("Loading battle snapshots.");
   els.loadBtn.disabled=true;
-  els.awardsGrid.innerHTML='<div class="award-card"><div class="message">Loading candidates.</div></div>';
+  els.awardsGrid.innerHTML="";
+  els.customGrid.innerHTML="";
+  els.milestonesMeta.textContent="";
+  els.milestonesList.className="";
+  els.milestonesList.textContent="";
   try{
     const selected=els.battleSelect.value||"current";
     const current=await fetchCurrent(selected);
@@ -1100,10 +1102,10 @@ async function loadCandidates(){
     console.error(error);
     showError(error.message||String(error));
     setStatus("Candidate load failed.");
-    els.awardsGrid.innerHTML='<div class="award-card"><div class="empty">No candidates available.</div></div>';
-    els.customGrid.innerHTML='<div class="empty">No custom award ideas available.</div>';
+    els.awardsGrid.innerHTML="";
+    els.customGrid.innerHTML="";
     els.milestonesList.className="message";
-    els.milestonesList.textContent="Milestones unavailable until candidates load.";
+    els.milestonesList.textContent="";
   }finally{
     els.loadBtn.disabled=false;
     loading=false;
