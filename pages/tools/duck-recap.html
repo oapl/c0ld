@@ -247,14 +247,15 @@ function smoothstep(value){const t=clamp01(value);return t*t*(3-2*t)}
 function raceLeftFor(point,place,count,timelineProgress,minPoints,maxPoints,finalRank){
   const rankPosition=count<=1?1:(count-place)/(count-1);
   const pointPosition=maxPoints>minPoints?clamp01((point.points-minPoints)/(maxPoints-minPoints)):rankPosition;
-  const livePosition=pointPosition*.72+rankPosition*.28;
+  const livePosition=pointPosition*.88+rankPosition*.12;
   const finalPosition=count<=1?1:(count-Math.max(1,finalRank||place))/(count-1);
-  const finishBlend=smoothstep((timelineProgress-.74)/.20);
-  const fieldPosition=livePosition+(finalPosition-livePosition)*finishBlend;
-  const finishSpread=count<=10?15:30;
-  const baseLeft=7+94*clamp01(timelineProgress);
-  const fieldSpread=5+(finishSpread-5)*clamp01(timelineProgress);
-  return baseLeft+fieldPosition*fieldSpread;
+  const progress=clamp01(timelineProgress);
+  const liveBase=7+78*progress;
+  const liveSpread=7+(count<=10?32:42)*progress;
+  const liveLeft=liveBase+livePosition*liveSpread;
+  const finalLeft=105+finalPosition*(count<=10?18:34);
+  const finishBlend=smoothstep((progress-.72)/.24);
+  return liveLeft+(finalLeft-liveLeft)*finishBlend;
 }
 function replayScaleText(start,end){
   const minutesPerSecond=((end-start)/60000)/(REPLAY_DURATION_MS/1000);
@@ -362,8 +363,8 @@ function paintReplayFrame(state,elapsed){
   const desiredLeft=live.map((item,placeIndex)=>raceLeftFor(item.point,placeIndex+1,state.racers.length,progress,minPoints,maxPoints,item.racer.endRank));
   const resolvedLeft=new Array(live.length);
   const progressDelta=Math.max(0,progress-(state.motionProgress??progress));
-  const minimumAdvance=progressDelta*65;
-  const maximumAdvance=progressDelta*150;
+  const minimumAdvance=progressDelta*55;
+  const maximumAdvance=progressDelta*210;
   for(let placeIndex=0;placeIndex<live.length;placeIndex+=1){
     const refs=state.elements[live[placeIndex].index];
     if(!Number.isFinite(refs?.left)){
