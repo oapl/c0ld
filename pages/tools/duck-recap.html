@@ -46,12 +46,11 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .duck-logo-shell{position:absolute;left:27%;top:53%;width:32%;height:32%;overflow:hidden;border:1px solid rgba(0,0,0,.72);border-radius:6px;background:#0d1117;box-shadow:0 1px 3px rgba(0,0,0,.45)}
 .duck-logo{display:block;width:100%;height:100%;object-fit:cover;object-position:center;transform:scale(1.35)}
 .duck-logo-shell.member .duck-logo{object-position:center 28%;transform:scale(1.65)}
-.duck-label{position:absolute;left:50%;top:-48px;transform:translateX(-50%);min-width:132px;max-width:190px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:rgba(13,17,23,.82);box-shadow:0 2px 8px rgba(0,0,0,.28);text-align:center}
+.duck-label{position:absolute;left:50%;top:-30px;transform:translateX(-50%);min-width:132px;max-width:190px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:rgba(13,17,23,.82);box-shadow:0 2px 8px rgba(0,0,0,.28);text-align:center}
 .duck-track.compact-labels .duck-label{opacity:0;transform:translateX(-50%) translateY(4px);transition:opacity .12s ease,transform .12s ease;pointer-events:none}
 .duck-track.compact-labels .duck-racer:hover{z-index:100}
 .duck-track.compact-labels .duck-racer:hover .duck-label{opacity:1;transform:translateX(-50%) translateY(0)}
 .duck-name{font-weight:800;line-height:1.15}
-.duck-stats{color:var(--muted);font-size:12px;line-height:1.3;margin-top:2px}
 .race-hud{position:absolute;z-index:120;left:18px;right:92px;top:14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:8px 11px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:rgba(7,14,23,.84);box-shadow:0 5px 18px rgba(0,0,0,.3);font-size:12px;pointer-events:none}
 .race-hud strong{color:#fff}.race-hud-center{text-align:center;color:#9edcff;font-weight:800}.race-hud-right{text-align:right;color:var(--muted)}
 .finish-standings{position:absolute;z-index:140;left:50%;top:51%;width:min(760px,calc(100% - 38px));padding:15px 16px 16px;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:rgba(7,14,23,.94);box-shadow:0 16px 42px rgba(0,0,0,.55);opacity:0;transform:translate(-50%,-45%) scale(.97);transition:opacity .28s ease,transform .28s ease;pointer-events:none}
@@ -59,8 +58,8 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .finish-standings[hidden]{display:none}
 .finish-title{margin:0 0 10px;text-align:center;font-size:16px}
 .finish-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
-.finish-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:32px;border-top:1px solid rgba(255,255,255,.1);font-size:13px}
-.finish-rank{color:#9edcff;font-weight:800}.finish-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.finish-points{color:var(--muted)}
+.finish-row{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:8px;min-height:32px;border-top:1px solid rgba(255,255,255,.1);font-size:13px}
+.finish-rank{color:#9edcff;font-weight:800}.finish-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
 @keyframes duck-paddle{from{transform:translateY(-2px) rotate(-1.5deg)}to{transform:translateY(3px) rotate(1.5deg)}}
 .good{color:var(--good);font-weight:800}.bad{color:var(--bad);font-weight:800}
 .message{padding:24px;color:var(--muted)}
@@ -69,7 +68,7 @@ body.embed main{max-width:none;padding:0}
 body.embed .section{border:0;border-radius:0}
 body.embed .section-header{padding:12px 16px}
 body.embed .duck-track{height:560px}
-@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.duck-track{height:520px}.duck-label{min-width:118px;max-width:150px;font-size:12px}.duck-stats{font-size:11px}}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.duck-track{height:520px}.duck-label{min-width:118px;max-width:150px;font-size:12px}}
 @media(max-width:650px){main{padding:16px}.cards{grid-template-columns:1fr}.race-hud{right:76px;grid-template-columns:1fr auto}.race-hud-right{display:none}.finish-grid{grid-template-columns:1fr}.finish-standings{padding:12px 14px}.finish-row{min-height:28px}body.embed .duck-track{height:500px}}
 </style>
 </head>
@@ -244,20 +243,12 @@ function rowTopFor(index,count){
   return start+((end-start)/(rows-1))*row;
 }
 function clamp01(value){return Math.max(0,Math.min(1,value))}
-function smoothstep(value){const t=clamp01(value);return t*t*(3-2*t)}
-function raceLeftFor(point,place,count,timelineProgress,minPoints,maxPoints){
-  const raceProgress=smoothstep(clamp01(timelineProgress/.82));
-  const fieldPosition=maxPoints>minPoints
-    ?clamp01((point.points-minPoints)/(maxPoints-minPoints))
-    :(count<=1?1:(count-place)/(count-1));
-  const base=7+raceProgress*48;
-  const spread=5+raceProgress*31;
-  const raceLeft=base+fieldPosition*spread;
-  if(timelineProgress<=.82)return raceLeft;
-  const finishProgress=smoothstep((timelineProgress-.82)/.18);
-  const finishSpread=count<=1?0:((place-1)/(count-1))*15;
-  const finishLeft=116-finishSpread;
-  return raceLeft+(finishLeft-raceLeft)*finishProgress;
+function raceLeftFor(place,count,timelineProgress){
+  const fieldPosition=count<=1?1:(count-place)/(count-1);
+  const finishSpread=count<=10?15:30;
+  const startLeft=7+fieldPosition*5;
+  const finishLeft=101+fieldPosition*finishSpread;
+  return startLeft+(finishLeft-startLeft)*clamp01(timelineProgress);
 }
 function replayScaleText(start,end){
   const minutesPerSecond=((end-start)/60000)/(REPLAY_DURATION_MS/1000);
@@ -359,43 +350,35 @@ function paintReplayFrame(state,elapsed){
   const replayTime=state.startTime+(state.endTime-state.startTime)*progress;
   const live=state.racers.map((racer,index)=>({racer,index,point:pointAt(racer.timeline,replayTime,state.startTime)}));
   live.sort((a,b)=>b.point.points-a.point.points||a.racer.endRank-b.racer.endRank||a.index-b.index);
-  const livePoints=live.map(item=>item.point.points);
-  const minPoints=Math.min(...livePoints);
-  const maxPoints=Math.max(...livePoints);
-  const desiredLeft=live.map((item,placeIndex)=>raceLeftFor(item.point,placeIndex+1,state.racers.length,progress,minPoints,maxPoints));
+  const desiredLeft=live.map((_,placeIndex)=>raceLeftFor(placeIndex+1,state.racers.length,progress));
   const resolvedLeft=new Array(live.length);
-  const rankGap=state.racers.length<=10?.45:.08;
-  for(let placeIndex=live.length-1;placeIndex>=0;placeIndex-=1){
+  const progressDelta=Math.max(0,progress-(state.motionProgress??progress));
+  const minimumAdvance=progressDelta*90;
+  const maximumAdvance=progressDelta*130;
+  for(let placeIndex=0;placeIndex<live.length;placeIndex+=1){
     const refs=state.elements[live[placeIndex].index];
-    const previous=Number.isFinite(refs?.left)?refs.left:desiredLeft[placeIndex];
-    const behind=placeIndex<live.length-1?resolvedLeft[placeIndex+1]+rankGap:Number.NEGATIVE_INFINITY;
-    resolvedLeft[placeIndex]=Math.max(desiredLeft[placeIndex],previous,behind);
+    if(!Number.isFinite(refs?.left)){
+      resolvedLeft[placeIndex]=desiredLeft[placeIndex];
+      continue;
+    }
+    const targetAdvance=desiredLeft[placeIndex]-refs.left;
+    resolvedLeft[placeIndex]=refs.left+Math.max(minimumAdvance,Math.min(maximumAdvance,targetAdvance));
   }
-  const updateLabels=!state.lastLabelUpdate||performance.now()-state.lastLabelUpdate>180||progress>=1;
+  state.motionProgress=progress;
+  const updateHud=!state.lastHudUpdate||performance.now()-state.lastHudUpdate>180||progress>=1;
+  let visualLeader=null;
   live.forEach((item,placeIndex)=>{
-    const place=placeIndex+1;
     const refs=state.elements[item.index];
     const el=refs?.el;
     if(!el)return;
-    const gain=item.point.points-item.racer.startPoints;
     refs.left=resolvedLeft[placeIndex];
     el.style.setProperty("--duck-left",refs.left.toFixed(3)+"%");
-    const placeChanged=refs.place!==place;
-    if(placeChanged){
-      refs.place=place;
-      if(refs.name)refs.name.textContent="#"+place+" "+item.racer.label;
-      if(refs.rank)refs.rank.textContent="Current #"+place+" · Final #"+(item.racer.endRank||"-");
-    }
-    if(updateLabels){
-      if(refs.stats)refs.stats.textContent=shortNum(item.point.points)+" | "+(gain>=0?"+":"")+shortNum(gain);
-      if(refs.rank)refs.rank.textContent="Current #"+place+" · Final #"+(item.racer.endRank||"-");
-    }
+    if(!visualLeader||refs.left>visualLeader.left)visualLeader={racer:item.racer,left:refs.left};
   });
-  if(updateLabels){
-    state.lastLabelUpdate=performance.now();
+  if(updateHud){
+    state.lastHudUpdate=performance.now();
     document.getElementById("race-meta").textContent=state.battle+" - "+Math.round(progress*100)+"% - "+fmtDate(replayTime)+" - "+state.scaleText;
-    const leader=live[0];
-    const leaderText=leader?leader.racer.label+" · "+shortNum(leader.point.points):"Waiting for racers";
+    const leaderText=progress>=1?state.racers[0]?.label:(visualLeader?.racer.label||"Waiting for racers");
     const leaderEl=document.getElementById("race-leader");
     const progressEl=document.getElementById("race-progress");
     if(leaderEl)leaderEl.textContent=(progress>=1?"Winner: ":"Leader: ")+leaderText;
@@ -414,10 +397,9 @@ function paintReplayFrame(state,elapsed){
 
 function startReplay(state){
   cancelAnimationFrame(replayFrame);
-  state.racers.forEach(racer=>{racer.motionStartPoints=pointAt(racer.timeline,state.startTime,state.startTime).points});
   state.elements=state.racers.map((_,index)=>{
     const el=document.getElementById("duck-racer-"+index);
-    return {el,name:el?.querySelector("[data-race-name]"),stats:el?.querySelector("[data-race-stats]"),rank:el?.querySelector("[data-race-rank]")};
+    return {el};
   });
   const start=performance.now();
   const tick=now=>{
@@ -463,10 +445,9 @@ function renderRecap(payload){
     return '<div class="duck-waterline" style="top:'+top.toFixed(1)+'%"></div>';
   }).join("");
   const logoType=payload.mode==="members"?"member":"clan";
-  const finalRows=racers.slice(0,10).map((row,index)=>'<div class="finish-row"><span class="finish-rank">#'+(index+1)+'</span><span class="finish-name">'+esc(row.label)+'</span><strong class="finish-points">'+esc(shortNum(row.endPoints))+'</strong></div>').join("");
+  const finalRows=racers.slice(0,10).map((row,index)=>'<div class="finish-row"><span class="finish-rank">#'+(index+1)+'</span><span class="finish-name">'+esc(row.label)+'</span></div>').join("");
   track.innerHTML='<div class="race-hud"><strong id="race-leader">Race starting…</strong><span id="race-progress" class="race-hud-center">0%</span><span class="race-hud-right">18 second replay</span></div>'+waterLines+racers.map((row,index)=>{
-    const rankClass=row.rankMove>0?"good":row.rankMove<0?"bad":"";
-    return '<div id="duck-racer-'+index+'" class="duck-racer" style="--duck-size:'+duckSize+'px;--duck-top:'+rowTopFor(index,racers.length).toFixed(1)+'%">'+duckImage()+(row.icon_url?'<span class="duck-logo-shell '+logoType+'"><img class="duck-logo" src="'+esc(row.icon_url)+'" data-fallback="'+esc(row.avatar_fallback||"")+'" alt=""></span>':'')+'<div class="duck-label"><div class="duck-name" data-race-name>#'+(index+1)+' '+esc(row.label)+'</div><div class="duck-stats" data-race-stats>'+esc(shortNum(row.startPoints))+' | +0</div><div class="duck-stats '+rankClass+'" data-race-rank>Current #'+(index+1)+' · Final #'+esc(row.endRank||"-")+'</div></div></div>';
+    return '<div id="duck-racer-'+index+'" class="duck-racer" style="--duck-size:'+duckSize+'px;--duck-top:'+rowTopFor(index,racers.length).toFixed(1)+'%">'+duckImage()+(row.icon_url?'<span class="duck-logo-shell '+logoType+'"><img class="duck-logo" src="'+esc(row.icon_url)+'" data-fallback="'+esc(row.avatar_fallback||"")+'" alt=""></span>':'')+'<div class="duck-label"><div class="duck-name">'+esc(row.label)+'</div></div></div>';
   }).join("")+'<div id="finish-standings" class="finish-standings" hidden><h3 class="finish-title">Final standings</h3><div class="finish-grid">'+finalRows+'</div></div>';
   track.querySelectorAll(".duck-logo[data-fallback]").forEach(image=>image.addEventListener("error",()=>{
     const fallback=image.dataset.fallback;
