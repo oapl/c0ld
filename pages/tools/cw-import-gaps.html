@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CW Import Gaps</title>
+<title>CW History Gaps</title>
 <style>
 *,*::before,*::after{box-sizing:border-box}
 :root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--bad:#f85149;--warn:#d29922;--blue:#58a6ff}
@@ -80,7 +80,7 @@ tr.missing-row{background:rgba(248,81,73,.035)}
         <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
         <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
         <a class="menu-btn" href="award-candidates.html">Award Candidates</a>
-        <a class="menu-btn active" href="cw-import-gaps.html">CW Import Gaps</a>
+        <a class="menu-btn active" href="cw-import-gaps.html">CW History Gaps</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
         <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
@@ -91,7 +91,7 @@ tr.missing-row{background:rgba(248,81,73,.035)}
 <main>
   <section class="hero">
     <div>
-      <h1>CW Import Gaps</h1>
+      <h1>CW History Gaps</h1>
       <div id="status" class="subtle">Loading battle list.</div>
     </div>
     <div class="controls">
@@ -110,15 +110,15 @@ tr.missing-row{background:rgba(248,81,73,.035)}
 
   <section class="cards">
     <div class="card"><div class="label">Final Members</div><div class="value" id="members-card">-</div></div>
-    <div class="card"><div class="label">Missing CW_Bot</div><div class="value" id="missing-card">-</div></div>
-    <div class="card"><div class="label">Imported</div><div class="value" id="imported-card">-</div></div>
+    <div class="card"><div class="label">Missing History</div><div class="value" id="missing-card">-</div></div>
+    <div class="card"><div class="label">Has History</div><div class="value" id="imported-card">-</div></div>
     <div class="card"><div class="label">Final Snapshot</div><div class="value" id="snapshot-card">-</div></div>
   </section>
 
   <section class="table-shell">
     <div class="table-head">
       <div>
-        <div class="table-title" id="table-title">Missing CW_Bot Imports</div>
+        <div class="table-title" id="table-title">Missing CW_Bot History</div>
         <div class="table-meta" id="table-meta">Waiting for battle data.</div>
       </div>
     </div>
@@ -212,15 +212,16 @@ function profileHref(row){
 }
 
 function statusClass(row){
-  if(!row.has_cw_bot_import)return"missing";
+  if(!hasCwBotHistory(row))return"missing";
   const status=String(row.cw_bot_status||"").toLowerCase();
   if(status==="approved")return"approved";
   if(status==="pending")return"pending";
   return"other";
 }
 
+function hasCwBotHistory(row){return Boolean(row.has_cw_bot_history??row.has_cw_bot_import)}
 function statusText(row){
-  if(!row.has_cw_bot_import)return"Missing";
+  if(!hasCwBotHistory(row))return"Missing";
   const status=String(row.cw_bot_status||"imported").trim();
   return status.charAt(0).toUpperCase()+status.slice(1);
 }
@@ -229,7 +230,7 @@ function visibleRows(){
   const query=String(els.searchInput.value||"").trim().toLowerCase();
   const rows=Array.isArray(payload?.rows)?payload.rows:[];
   return rows
-    .filter(row=>viewMode==="all"||!row.has_cw_bot_import)
+    .filter(row=>viewMode==="all"||!hasCwBotHistory(row))
     .filter(row=>{
       if(!query)return true;
       return [playerName(row),row.username,row.user_id,row.rank].some(value=>String(value??"").toLowerCase().includes(query));
@@ -239,13 +240,13 @@ function visibleRows(){
 function render(){
   const rows=visibleRows();
   const totalRows=Array.isArray(payload?.rows)?payload.rows:[];
-  const missingRows=totalRows.filter(row=>!row.has_cw_bot_import);
+  const missingRows=totalRows.filter(row=>!hasCwBotHistory(row));
   const battleName=payload?.battle_display_name||payload?.battle_key||"-";
   els.membersCard.textContent=(payload?.final_member_count??0).toLocaleString("en-US");
   els.missingCard.textContent=(payload?.missing_count??missingRows.length).toLocaleString("en-US");
   els.importedCard.textContent=(payload?.imported_count??0).toLocaleString("en-US");
   els.snapshotCard.textContent=fmtDate(payload?.final_snapshot_at);
-  els.tableTitle.textContent=viewMode==="all"?"Final Members":"Missing CW_Bot Imports";
+  els.tableTitle.textContent=viewMode==="all"?"Final Members":"Missing CW_Bot History";
   els.tableMeta.textContent=payload
     ? battleName+" - "+rows.length.toLocaleString("en-US")+" shown"
     : "Waiting for battle data.";
@@ -263,7 +264,7 @@ function render(){
   }
 
   els.tableWrap.innerHTML='<table><thead><tr><th>Rank</th><th>Player</th><th class="num">Points</th><th>CW_Bot</th></tr></thead><tbody>'+
-    rows.map(row=>'<tr class="'+(row.has_cw_bot_import?'':'missing-row')+'">'+
+    rows.map(row=>'<tr class="'+(hasCwBotHistory(row)?'':'missing-row')+'">'+
       '<td class="rank">#'+esc(row.rank||"-")+'</td>'+
       '<td><div class="player"><img class="avatar" src="'+esc(avatarFor(row))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="name" href="'+esc(profileHref(row))+'">'+esc(playerName(row))+'</a></div></td>'+
       '<td class="num">'+esc(shortNum(row.total_points))+'</td>'+
@@ -287,7 +288,7 @@ async function loadGaps(){
     url.searchParams.set("include_all","1");
     payload=await fetchJson(url.toString());
     render();
-    setStatus("Loaded "+payload.final_member_count.toLocaleString("en-US")+" final members; "+payload.missing_count.toLocaleString("en-US")+" missing CW_Bot imports.");
+    setStatus("Loaded "+payload.final_member_count.toLocaleString("en-US")+" final members; "+payload.missing_count.toLocaleString("en-US")+" missing CW_Bot history.");
     const nextUrl=new URL(location.href);
     nextUrl.searchParams.set("battle",battle);
     history.replaceState(null,"",nextUrl);
@@ -304,10 +305,10 @@ async function loadGaps(){
 }
 
 async function copyMissing(){
-  const rows=(Array.isArray(payload?.rows)?payload.rows:[]).filter(row=>!row.has_cw_bot_import);
+  const rows=(Array.isArray(payload?.rows)?payload.rows:[]).filter(row=>!hasCwBotHistory(row));
   const text=rows.map(row=>playerName(row)).join("\n");
   if(!text){
-    setStatus("No missing CW_Bot imports to copy.");
+    setStatus("No missing CW_Bot history to copy.");
     return;
   }
   try{

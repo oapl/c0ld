@@ -1665,19 +1665,11 @@ async function handleMissingCwBotImports(request, env) {
     fetchFinalClanRosterForBattle(env, clan, requestedBattle)
   ]);
   const roster = rosterResult.rows;
-  const battleKeys = new Set([
-    requestedBattle,
-    battleRun?.battle_key,
-    battleRun?.battle_display_name
-  ].map(externalBattleKey).filter(Boolean));
   const userIds = roster.map(row => toNumber(row.user_id)).filter(Boolean);
   const cwRows = await fetchCwBotRowsForUsers(env, userIds);
   const cwRowsByUser = new Map();
 
   for (const row of cwRows) {
-    const rowBattleKey = externalBattleKey(row.battle_key || row.battle_name);
-    if (!battleKeys.has(rowBattleKey)) continue;
-
     const userId = toNumber(row.user_id);
     if (!userId) continue;
     if (!cwRowsByUser.has(userId)) cwRowsByUser.set(userId, []);
@@ -1697,12 +1689,14 @@ async function handleMissingCwBotImports(request, env) {
       snapshot_id: row.snapshot_id || null,
       fetched_at: row.fetched_at || null,
       has_cw_bot_import: Boolean(bestImport),
+      has_cw_bot_history: Boolean(bestImport),
       cw_bot_status: bestImport?.status || null,
       cw_bot_rows: importRows.length,
+      cw_bot_history_rows: importRows.length,
       cw_bot_import: bestImport ? normalizeExternalHistoryOutput(bestImport) : null
     };
   }).sort((a, b) => (toNumber(a.rank) || Number.MAX_SAFE_INTEGER) - (toNumber(b.rank) || Number.MAX_SAFE_INTEGER));
-  const missingRows = finalMembers.filter(row => !row.has_cw_bot_import);
+  const missingRows = finalMembers.filter(row => !row.has_cw_bot_history);
   const statusCounts = finalMembers.reduce((counts, row) => {
     const key = row.cw_bot_status || "missing";
     counts[key] = (counts[key] || 0) + 1;
