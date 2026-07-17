@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Superlative Candidates</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--bad:#f85149;--warn:#d29922;--blue:#58a6ff}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+a{color:var(--link);text-decoration:none}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}
+.logo-wrap{display:flex;justify-content:center;align-items:center;width:100%}
+.site-logo{display:block;width:76px;border-radius:10px;margin:0 auto}
+.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.menu a,.menu-btn,.lookup-summary{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel-2);color:var(--text);font-size:13px;line-height:1}
+.menu a.active,.lookup-summary.active{border-color:var(--link);color:var(--link);background:rgba(248,81,73,.12)}
+.lookup-menu{position:relative;display:inline-block}
+.lookup-menu>summary{list-style:none;cursor:pointer}
+.lookup-menu>summary::-webkit-details-marker{display:none}
+.lookup-menu-list{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:50;min-width:180px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--panel);box-shadow:0 10px 24px rgba(0,0,0,.45)}
+.lookup-menu[open] .lookup-menu-list{display:flex;flex-direction:column;gap:4px}
+.lookup-menu-list a{display:block;white-space:nowrap;text-align:left}
+main{max-width:1440px;margin:0 auto;padding:22px 24px 32px}
+.hero,.card,.section,.award-card{background:var(--panel);border:1px solid var(--border);border-radius:8px}
+.hero{padding:18px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+h1{margin:0 0 5px;font-size:30px}
+.subtle{color:var(--muted);font-size:13px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+select,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+button{cursor:pointer}
+button:hover,select:focus{border-color:var(--link);background:var(--hover)}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
+.label{color:var(--muted);font-size:13px;margin-bottom:6px}
+.value{font-size:20px;font-weight:800;line-height:1.25}
+.awards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-bottom:18px}
+.award-card{overflow:hidden}
+.award-head{padding:15px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.award-title{margin:0;font-size:18px}
+.award-note{margin-top:4px;color:var(--muted);font-size:12px;line-height:1.35}
+.award-weight{color:var(--muted);font-size:12px;text-align:right;white-space:nowrap}
+.candidate-list{display:flex;flex-direction:column}
+.candidate{display:grid;grid-template-columns:34px 42px minmax(0,1fr);gap:11px;align-items:center;padding:12px 14px;border-bottom:1px solid rgba(48,54,61,.75)}
+.candidate:last-child{border-bottom:0}
+.place{height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--muted);font-weight:800;font-size:13px}
+.avatar{width:42px;height:42px;border-radius:8px;object-fit:cover;background:var(--panel-2);border:1px solid var(--border)}
+.candidate-main{min-width:0}
+.candidate-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:6px}
+.candidate-name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.candidate-score{color:var(--muted);font-size:12px;white-space:nowrap}
+.bar{height:6px;border-radius:999px;background:#0b1220;overflow:hidden;border:1px solid rgba(255,255,255,.06);margin-bottom:7px}
+.bar>span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--link),var(--blue))}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;min-height:20px;padding:3px 7px;border:1px solid rgba(255,255,255,.09);border-radius:999px;background:rgba(13,17,23,.7);color:var(--muted);font-size:11px;line-height:1.15}
+.chip.good{color:var(--good)}.chip.bad{color:var(--bad)}.chip.warn{color:var(--warn)}
+.section{overflow:hidden}
+.section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.section-title{margin:0;font-size:18px}
+.custom-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
+.custom-card{padding:14px;border-right:1px solid var(--border);min-height:150px}
+.custom-card:last-child{border-right:0}
+.custom-title{font-size:14px;font-weight:800;margin-bottom:10px}
+.custom-player{display:flex;gap:9px;align-items:center;margin-bottom:10px}
+.custom-player img{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
+.custom-name{font-weight:800;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.custom-metric{color:var(--muted);font-size:12px;line-height:1.35}
+.empty,.message{padding:24px;color:var(--muted)}
+.error{padding:14px 16px;margin-bottom:18px;border:1px solid rgba(248,81,73,.45);border-radius:8px;background:rgba(248,81,73,.1);color:#ffb4ad;display:none}
+@media(max-width:1100px){.awards-grid{grid-template-columns:1fr}.custom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-card{border-bottom:1px solid var(--border)}}
+@media(max-width:760px){main{padding:16px}.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.candidate{grid-template-columns:30px 38px minmax(0,1fr);padding:11px}.avatar{width:38px;height:38px}.candidate-top{flex-direction:column;align-items:flex-start;gap:3px}.custom-grid{grid-template-columns:1fr}.custom-card{border-right:0}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Clans Leaderboard</a>
+    <a href="global-leaderboard.html">Global Leaderboard</a>
+    <details class="lookup-menu">
+      <summary class="lookup-summary active">Tools</summary>
+      <div class="lookup-menu-list">
+        <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+        <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+        <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+        <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+        <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
+        <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
+        <a class="menu-btn active" href="award-candidates.html">Award Candidates</a>
+        <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+        <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div>
+      <h1>Superlative Candidates</h1>
+      <div id="status" class="subtle">Loading battle list.</div>
+    </div>
+    <div class="controls">
+      <select id="battle-select"><option value="current">Current Battle</option></select>
+      <button id="load-btn" type="button">Refresh</button>
+    </div>
+  </section>
+
+  <div id="error" class="error"></div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Battle</div><div class="value" id="battle-card">-</div></div>
+    <div class="card"><div class="label">Players</div><div class="value" id="players-card">-</div></div>
+    <div class="card"><div class="label">Snapshots</div><div class="value" id="snapshots-card">-</div></div>
+    <div class="card"><div class="label">Latest Data</div><div class="value" id="latest-card">-</div></div>
+  </section>
+
+  <section id="awards-grid" class="awards-grid">
+    <div class="award-card"><div class="message">Loading candidates.</div></div>
+  </section>
+
+  <section class="section">
+    <div class="section-header">
+      <h2 class="section-title">Custom Award Ideas</h2>
+      <div id="custom-meta" class="subtle">Waiting for battle data.</div>
+    </div>
+    <div id="custom-grid" class="custom-grid">
+      <div class="empty">No candidates loaded yet.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
+const CLAN="c0ld";
+const HISTORY_LIMIT=50000;
+const MAX_INTERVAL_MS=12*60*1000;
+const FALLBACK_AVATAR="assets/c0ld-kitsune-logo.gif";
+let battles=[];
+let playerById=new Map();
+let playerByName=new Map();
+let loading=false;
+
+const els={
+  status:document.getElementById("status"),
+  error:document.getElementById("error"),
+  battleSelect:document.getElementById("battle-select"),
+  loadBtn:document.getElementById("load-btn"),
+  battleCard:document.getElementById("battle-card"),
+  playersCard:document.getElementById("players-card"),
+  snapshotsCard:document.getElementById("snapshots-card"),
+  latestCard:document.getElementById("latest-card"),
+  awardsGrid:document.getElementById("awards-grid"),
+  customGrid:document.getElementById("custom-grid"),
+  customMeta:document.getElementById("custom-meta")
+};
+
+function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
+function finite(value){const number=Number(value);return Number.isFinite(number)?number:null}
+function clamp(value,min,max){return Math.max(min,Math.min(max,value))}
+function rowTime(row){const time=new Date(row?.fetched_at||row?.snapshot_at||row?.created_at||0).getTime();return Number.isFinite(time)&&time>0?time:null}
+function pointsFor(row){return finite(row?.total_points??row?.points??row?.clan_points??row?.global_points)??0}
+function rankFor(row){return finite(row?.rank)}
+function playerKey(row){const id=row?.user_id??row?.roblox_user_id;if(id!==null&&id!==undefined&&id!=="")return "id:"+String(id);const name=String(row?.username||row?.display_name||"").trim().toLowerCase();return name?"name:"+name:""}
+function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
+function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
+function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
+function fmtScore(value){const number=Number(value);return Number.isFinite(number)?number.toFixed(1):"0.0"}
+function rankLabel(rank){return rank?("#"+Math.trunc(rank)):"-"}
+function setStatus(text){els.status.textContent=text}
+function showError(message){els.error.textContent=message;els.error.style.display=message?"block":"none"}
+
+async function fetchJson(url,fallback){
+  try{
+    const response=await fetch(url,{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const data=await response.json();
+    if(data&&data.ok===false)throw new Error(data.message||"API error");
+    return data;
+  }catch(error){
+    if(arguments.length>1)return fallback;
+    throw error;
+  }
+}
+
+function profileFor(row){
+  const id=row?.user_id??row?.roblox_user_id;
+  if(id!==null&&id!==undefined&&playerById.has(String(id)))return playerById.get(String(id));
+  const name=String(row?.username||row?.display_name||"").trim().toLowerCase();
+  return name?playerByName.get(name)||null:null;
+}
+
+async function loadPlayers(){
+  const rows=await fetchJson("Data/players.json",[]);
+  playerById=new Map();
+  playerByName=new Map();
+  for(const row of Array.isArray(rows)?rows:[]){
+    if(row.user_id!==null&&row.user_id!==undefined)playerById.set(String(row.user_id),row);
+    if(row.username)playerByName.set(String(row.username).trim().toLowerCase(),row);
+  }
+}
+
+async function loadBattles(){
+  const data=await fetchJson(API+"/api/battles?clan="+encodeURIComponent(CLAN)+"&limit=100",{rows:[]});
+  battles=(Array.isArray(data.rows)?data.rows:[]).sort((a,b)=>new Date(b.last_snapshot||b.latest_snapshot_at||0)-new Date(a.last_snapshot||a.latest_snapshot_at||0));
+  els.battleSelect.innerHTML='<option value="current">Current Battle</option>'+battles.map(row=>{
+    const key=row.battle||row.battle_key;
+    const name=row.display_name||row.battle_display_name||key;
+    return '<option value="'+esc(key)+'">'+esc(name)+'</option>';
+  }).join("");
+  const requested=new URLSearchParams(location.search).get("battle");
+  if(requested&&[...els.battleSelect.options].some(option=>option.value===requested))els.battleSelect.value=requested;
+}
+
+function battleHours(battle){
+  const found=battles.find(row=>(row.battle||row.battle_key)===battle);
+  const start=found?.battle_start_iso||found?.battle_started_at||found?.first_snapshot;
+  const startTime=new Date(start||0).getTime();
+  if(!Number.isFinite(startTime)||startTime<=0)return 100000;
+  return Math.max(24,Math.ceil((Date.now()-startTime)/(60*60*1000))+24);
+}
+
+async function fetchCurrent(selectedBattle){
+  const url=new URL(API+"/api/current");
+  url.searchParams.set("clan",CLAN);
+  url.searchParams.set("avatars","false");
+  url.searchParams.set("downtime","false");
+  if(selectedBattle&&selectedBattle!=="current")url.searchParams.set("battle",selectedBattle);
+  return fetchJson(url.toString(),{rows:[]});
+}
+
+async function fetchHistory(battle){
+  const base=new URL(API+"/api/history");
+  base.searchParams.set("clan",CLAN);
+  base.searchParams.set("battle",battle);
+  base.searchParams.set("hours",String(battleHours(battle)));
+  base.searchParams.set("limit",String(HISTORY_LIMIT));
+  base.searchParams.set("order","asc");
+  const unique=new Map();
+  let offset=0;
+  let previousSignature="";
+  for(let pageIndex=0;pageIndex<12;pageIndex+=1){
+    base.searchParams.set("offset",String(offset));
+    const page=await fetchJson(base.toString(),{rows:[]});
+    const rows=Array.isArray(page.rows)?page.rows:[];
+    const first=rows[0]||{};
+    const last=rows[rows.length-1]||{};
+    const signature=rows.length+":"+(first.snapshot_id||first.fetched_at||"")+":"+(last.snapshot_id||last.fetched_at||"");
+    if(offset>0&&signature===previousSignature)break;
+    for(const row of rows){
+      const key=(row.snapshot_id||row.fetched_at||"snapshot")+":"+(playerKey(row)||row.rank||unique.size);
+      unique.set(key,row);
+    }
+    previousSignature=signature;
+    if(rows.length<HISTORY_LIMIT)break;
+    offset+=HISTORY_LIMIT;
+  }
+  return [...unique.values()];
+}
+
+function mergeCurrentRows(historyRows,current,effectiveBattle){
+  const unique=new Map();
+  for(const row of historyRows){
+    const key=(row.snapshot_id||row.fetched_at||"snapshot")+":"+(playerKey(row)||row.rank||unique.size);
+    unique.set(key,row);
+  }
+  const stamp=current?.snapshot_at||current?.generated_at;
+  for(const row of Array.isArray(current?.rows)?current.rows:[]){
+    const merged={
+      ...row,
+      snapshot_id:row.snapshot_id||("current:"+stamp),
+      fetched_at:row.fetched_at||stamp,
+      battle_key:row.battle_key||current.battle||effectiveBattle,
+      clan_name:row.clan_name||CLAN
+    };
+    const key=(merged.snapshot_id||merged.fetched_at||"current")+":"+(playerKey(merged)||merged.rank||unique.size);
+    unique.set(key,merged);
+  }
+  return [...unique.values()];
+}
+
+function buildSnapshots(rows){
+  const byTime=new Map();
+  for(const row of rows){
+    const time=rowTime(row);
+    const key=playerKey(row);
+    if(!time||!key)continue;
+    if(!byTime.has(time))byTime.set(time,[]);
+    byTime.get(time).push(row);
+  }
+  return [...byTime.entries()].map(([time,rawRows])=>{
+    const byPlayer=new Map();
+    for(const row of rawRows){
+      const key=playerKey(row);
+      const existing=byPlayer.get(key);
+      const rank=rankFor(row)??999999;
+      const existingRank=rankFor(existing)??999999;
+      if(!existing||rank<existingRank||pointsFor(row)>pointsFor(existing))byPlayer.set(key,row);
+    }
+    const rows=[...byPlayer.values()].sort((a,b)=>(rankFor(a)??999999)-(rankFor(b)??999999)||pointsFor(b)-pointsFor(a));
+    return {time:Number(time),rows};
+  }).filter(snapshot=>snapshot.rows.length).sort((a,b)=>a.time-b.time);
+}
+
+function rememberStat(stats,row){
+  const key=playerKey(row);
+  if(!key)return null;
+  let stat=stats.get(key);
+  const profile=profileFor(row);
+  if(!stat){
+    stat={
+      key,
+      user_id:row.user_id??profile?.user_id??null,
+      username:profile?.username||row.username||row.display_name||"Unknown player",
+      avatar_url:profile?.avatar_url||row.avatar_url||null,
+      profile,
+      firstSeenAt:null,
+      latestSeenAt:null,
+      startRank:null,
+      finalRank:null,
+      bestRank:null,
+      worstRank:null,
+      startPoints:0,
+      finalPoints:0,
+      maxPoints:0,
+      trackedMs:0,
+      downtimeMs:0,
+      timeAtFirst:0,
+      timeAtLast:0,
+      rankChanges:0,
+      bestSegmentGain:0,
+      lateGain:0,
+      snapshotCount:0
+    };
+    stats.set(key,stat);
+  }
+  stat.profile=stat.profile||profile;
+  stat.user_id=stat.user_id??row.user_id??profile?.user_id??null;
+  stat.username=profile?.username||row.username||row.display_name||stat.username;
+  stat.avatar_url=profile?.avatar_url||row.avatar_url||stat.avatar_url;
+  return stat;
+}
+
+function computeStats(snapshots){
+  const stats=new Map();
+  if(!snapshots.length)return [];
+  const firstTime=snapshots[0].time;
+  const lastTime=snapshots[snapshots.length-1].time;
+  const lateStart=firstTime+((lastTime-firstTime)*0.8);
+  let previousRows=new Map();
+
+  snapshots.forEach((snapshot,index)=>{
+    const next=snapshots[index+1];
+    const previous=snapshots[index-1];
+    const duration=next?clamp(next.time-snapshot.time,0,MAX_INTERVAL_MS):0;
+    const interval=previous?clamp(snapshot.time-previous.time,0,MAX_INTERVAL_MS):0;
+    const ranked=snapshot.rows.filter(row=>rankFor(row)!==null);
+    const lastRank=ranked.length?Math.max(...ranked.map(row=>rankFor(row))):null;
+    const currentRows=new Map();
+
+    for(const row of snapshot.rows){
+      const key=playerKey(row);
+      const stat=rememberStat(stats,row);
+      if(!key||!stat)continue;
+      const rank=rankFor(row);
+      const points=pointsFor(row);
+      currentRows.set(key,{rank,points,time:snapshot.time});
+      stat.snapshotCount+=1;
+
+      if(stat.firstSeenAt===null){
+        stat.firstSeenAt=snapshot.time;
+        stat.startRank=rank;
+        stat.startPoints=points;
+      }
+      stat.latestSeenAt=snapshot.time;
+      stat.finalRank=rank;
+      stat.finalPoints=points;
+      stat.maxPoints=Math.max(stat.maxPoints,points);
+      if(rank!==null){
+        stat.bestRank=stat.bestRank===null?rank:Math.min(stat.bestRank,rank);
+        stat.worstRank=stat.worstRank===null?rank:Math.max(stat.worstRank,rank);
+      }
+      if(duration>0){
+        stat.trackedMs+=duration;
+        if(rank===1)stat.timeAtFirst+=duration;
+        if(lastRank!==null&&rank===lastRank)stat.timeAtLast+=duration;
+      }
+
+      const previousRow=previousRows.get(key);
+      if(previousRow&&interval>0){
+        const gain=points-previousRow.points;
+        if(gain===0)stat.downtimeMs+=interval;
+        if(gain>stat.bestSegmentGain)stat.bestSegmentGain=gain;
+        if(snapshot.time>=lateStart&&gain>0)stat.lateGain+=gain;
+        if(rank!==null&&previousRow.rank!==null&&rank!==previousRow.rank)stat.rankChanges+=1;
+      }
+    }
+    previousRows=currentRows;
+  });
+
+  return [...stats.values()].map(stat=>{
+    const archivedBattles=finite(stat.profile?.total_battles);
+    const totalGain=Math.max(0,stat.finalPoints-stat.startPoints);
+    const rankMove=stat.startRank&&stat.finalRank?stat.startRank-stat.finalRank:0;
+    const rankLoss=stat.startRank&&stat.finalRank?Math.max(0,stat.finalRank-stat.startRank):0;
+    const worstDrop=stat.bestRank&&stat.worstRank?Math.max(0,stat.worstRank-stat.bestRank):0;
+    return {
+      ...stat,
+      archivedBattles,
+      totalGain,
+      rankMove,
+      rankLoss,
+      worstDrop,
+      downtimePct:stat.trackedMs?(stat.downtimeMs/stat.trackedMs)*100:0,
+      uptimeMs:Math.max(0,stat.trackedMs-stat.downtimeMs),
+      rookie:archivedBattles===null||archivedBattles<=1
+    };
+  }).filter(stat=>stat.snapshotCount>0);
+}
+
+function playerName(stat){return stat.username||("user_"+(stat.user_id||"unknown"))}
+function avatarFor(stat){return stat.avatar_url||FALLBACK_AVATAR}
+function profileHref(stat){return "player-lookup.html?q="+encodeURIComponent(stat.user_id||playerName(stat))}
+function rankScore(stat,totalPlayers){return stat.finalRank?clamp((totalPlayers-stat.finalRank+1)/Math.max(1,totalPlayers),0,1):0}
+function sortTop(list){return list.sort((a,b)=>b.score-a.score||b.finalPoints-a.finalPoints||(a.finalRank??999999)-(b.finalRank??999999)).slice(0,5)}
+
+function awardDefinitions(stats){
+  const players=stats.filter(stat=>stat.finalPoints>0);
+  const totalPlayers=Math.max(1,players.length);
+  const maxPoints=Math.max(1,...players.map(stat=>stat.finalPoints));
+  const maxGain=Math.max(1,...players.map(stat=>stat.totalGain));
+  const maxFirst=Math.max(1,...players.map(stat=>stat.timeAtFirst));
+  const maxDowntime=Math.max(1,...players.map(stat=>stat.downtimeMs));
+  const maxLast=Math.max(1,...players.map(stat=>stat.timeAtLast));
+  const maxRankLoss=Math.max(1,...players.map(stat=>stat.rankLoss));
+
+  const mvp=sortTop(players.map(stat=>({
+    ...stat,
+    score:100*((stat.finalPoints/maxPoints)*0.62+(stat.timeAtFirst/maxFirst)*0.23+rankScore(stat,totalPlayers)*0.15)
+  })));
+
+  const improved=sortTop(players
+    .filter(stat=>stat.rankMove>0||stat.totalGain>0)
+    .map(stat=>({
+      ...stat,
+      score:(Math.max(0,stat.rankMove)*12)+((stat.totalGain/maxGain)*35)+(stat.startRank?((Math.max(0,stat.rankMove)/stat.startRank)*35):0)+(rankScore(stat,totalPlayers)*18)
+    })));
+
+  let rookies=players.filter(stat=>stat.rookie);
+  if(!rookies.length)rookies=players.map(stat=>({...stat,rookieFallback:true}));
+  const rookie=sortTop(rookies.map(stat=>({
+    ...stat,
+    score:100*((stat.finalPoints/maxPoints)*0.7+rankScore(stat,totalPlayers)*0.3)
+  })));
+
+  const throwers=sortTop(players
+    .filter(stat=>stat.downtimeMs>0||stat.rankLoss>0||stat.timeAtLast>0)
+    .map(stat=>({
+      ...stat,
+      score:((stat.downtimeMs/maxDowntime)*45)+(clamp(stat.downtimePct,0,100)*0.25)+((stat.rankLoss/maxRankLoss)*20)+((stat.timeAtLast/maxLast)*10)
+    })));
+
+  return [
+    {
+      title:"MVP",
+      note:"Final impact, time at #1, and finishing rank.",
+      weight:"points + lead time",
+      items:mvp,
+      metrics:stat=>[
+        {text:rankLabel(stat.finalRank),tone:"good"},
+        {text:shortNum(stat.finalPoints)+" pts"},
+        {text:fmtDuration(stat.timeAtFirst)+" at #1"},
+        {text:"+"+shortNum(stat.totalGain)}
+      ]
+    },
+    {
+      title:"Most Improved",
+      note:"Rank climb and point growth from first tracked snapshot.",
+      weight:"rank climb + gain",
+      items:improved,
+      metrics:stat=>[
+        {text:rankLabel(stat.startRank)+" &rarr; "+rankLabel(stat.finalRank),tone:stat.rankMove>0?"good":""},
+        {text:(stat.rankMove>0?"+":"")+stat.rankMove+" ranks",tone:stat.rankMove>0?"good":"warn"},
+        {text:"+"+shortNum(stat.totalGain)+" pts"},
+        {text:stat.snapshotCount+" snapshots"}
+      ]
+    },
+    {
+      title:"Rookie of the War",
+      note:"New-to-archive players ranked by battle output.",
+      weight:"rookie signal + output",
+      items:rookie,
+      metrics:stat=>[
+        {text:stat.rookieFallback?"no rookie match":((stat.archivedBattles??0)+" archived battle"+((stat.archivedBattles??0)===1?"":"s")),tone:stat.rookieFallback?"warn":"good"},
+        {text:rankLabel(stat.finalRank)},
+        {text:shortNum(stat.finalPoints)+" pts"},
+        {text:"+"+shortNum(stat.totalGain)}
+      ]
+    },
+    {
+      title:"Biggest Thrower",
+      note:"Idle time, rank loss, and last-place exposure.",
+      weight:"idle + drop",
+      items:throwers,
+      metrics:stat=>[
+        {text:fmtDuration(stat.downtimeMs)+" idle",tone:"bad"},
+        {text:stat.downtimePct.toFixed(0)+"% no-gain",tone:stat.downtimePct>35?"bad":"warn"},
+        {text:stat.rankLoss?("lost "+stat.rankLoss+" ranks"):"no rank loss"},
+        {text:fmtDuration(stat.timeAtLast)+" last"}
+      ]
+    }
+  ];
+}
+
+function renderCandidate(stat,index,metrics,maxScore){
+  const width=clamp((stat.score/Math.max(1,maxScore))*100,4,100);
+  const chips=metrics(stat).map(chip=>'<span class="chip '+esc(chip.tone||"")+'">'+chip.text+'</span>').join("");
+  return '<article class="candidate">'+
+    '<div class="place">#'+(index+1)+'</div>'+
+    '<img class="avatar" src="'+esc(avatarFor(stat))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'">'+
+    '<div class="candidate-main">'+
+      '<div class="candidate-top"><a class="candidate-name" href="'+esc(profileHref(stat))+'">'+esc(playerName(stat))+'</a><div class="candidate-score">'+fmtScore(stat.score)+'</div></div>'+
+      '<div class="bar"><span style="width:'+width.toFixed(2)+'%"></span></div>'+
+      '<div class="chips">'+chips+'</div>'+
+    '</div>'+
+  '</article>';
+}
+
+function renderAwards(defs){
+  els.awardsGrid.innerHTML=defs.map(def=>{
+    const maxScore=Math.max(1,...def.items.map(item=>item.score));
+    const body=def.items.length
+      ? def.items.map((item,index)=>renderCandidate(item,index,def.metrics,maxScore)).join("")
+      : '<div class="empty">No candidates matched this award.</div>';
+    return '<section class="award-card">'+
+      '<div class="award-head"><div><h2 class="award-title">'+esc(def.title)+'</h2><div class="award-note">'+esc(def.note)+'</div></div><div class="award-weight">'+esc(def.weight)+'</div></div>'+
+      '<div class="candidate-list">'+body+'</div>'+
+    '</section>';
+  }).join("");
+}
+
+function customIdeas(stats){
+  const players=stats.filter(stat=>stat.finalPoints>0);
+  const byPoints=[...players].sort((a,b)=>b.finalPoints-a.finalPoints)[0];
+  const byClutch=[...players].sort((a,b)=>b.lateGain-a.lateGain||b.finalPoints-a.finalPoints)[0];
+  const byChaos=[...players].sort((a,b)=>b.rankChanges-a.rankChanges||b.worstDrop-a.worstDrop)[0];
+  const byMarathon=[...players].sort((a,b)=>b.uptimeMs-a.uptimeMs||b.finalPoints-a.finalPoints)[0];
+  const byComeback=[...players].sort((a,b)=>(b.worstRank-b.finalRank)-(a.worstRank-a.finalRank)||b.totalGain-a.totalGain)[0];
+  return [
+    {title:"Point Printer",stat:byPoints,metric:stat=>shortNum(stat.finalPoints)+" final points"},
+    {title:"Clutch Finisher",stat:byClutch,metric:stat=>"+"+shortNum(stat.lateGain)+" late points"},
+    {title:"Rank Chaos",stat:byChaos,metric:stat=>stat.rankChanges+" rank changes"},
+    {title:"Marathon Mode",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active"},
+    {title:"Comeback Arc",stat:byComeback,metric:stat=>rankLabel(stat.worstRank)+" worst, "+rankLabel(stat.finalRank)+" final"}
+  ];
+}
+
+function renderCustom(stats){
+  const ideas=customIdeas(stats);
+  els.customMeta.textContent=ideas.filter(idea=>idea.stat).length+" award ideas";
+  els.customGrid.innerHTML=ideas.map(idea=>{
+    if(!idea.stat)return '<div class="custom-card"><div class="custom-title">'+esc(idea.title)+'</div><div class="custom-metric">No candidate.</div></div>';
+    return '<div class="custom-card">'+
+      '<div class="custom-title">'+esc(idea.title)+'</div>'+
+      '<div class="custom-player"><img src="'+esc(avatarFor(idea.stat))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="custom-name" href="'+esc(profileHref(idea.stat))+'">'+esc(playerName(idea.stat))+'</a></div>'+
+      '<div class="custom-metric">'+esc(idea.metric(idea.stat))+'</div>'+
+    '</div>';
+  }).join("");
+}
+
+function renderSummary(effectiveBattle,current,snapshots,stats){
+  const battleRow=battles.find(row=>(row.battle||row.battle_key)===effectiveBattle);
+  els.battleCard.textContent=battleRow?.display_name||current?.display_name||current?.battle_display_name||effectiveBattle;
+  els.playersCard.textContent=stats.length.toLocaleString("en-US");
+  els.snapshotsCard.textContent=snapshots.length.toLocaleString("en-US");
+  const latest=snapshots.length?snapshots[snapshots.length-1].time:(current?.snapshot_at||current?.generated_at);
+  els.latestCard.textContent=fmtDate(latest);
+}
+
+async function loadCandidates(){
+  if(loading)return;
+  loading=true;
+  showError("");
+  setStatus("Loading battle snapshots.");
+  els.loadBtn.disabled=true;
+  els.awardsGrid.innerHTML='<div class="award-card"><div class="message">Loading candidates.</div></div>';
+  try{
+    const selected=els.battleSelect.value||"current";
+    const current=await fetchCurrent(selected);
+    const effectiveBattle=selected==="current"?(current.battle||battles[0]?.battle||"current"):selected;
+    setStatus("Loading "+effectiveBattle+" history.");
+    const historyRows=await fetchHistory(effectiveBattle);
+    const mergedRows=mergeCurrentRows(historyRows,current,effectiveBattle);
+    const snapshots=buildSnapshots(mergedRows);
+    const stats=computeStats(snapshots);
+    if(!snapshots.length||!stats.length)throw new Error("No battle snapshots were found for "+effectiveBattle+".");
+    renderSummary(effectiveBattle,current,snapshots,stats);
+    renderAwards(awardDefinitions(stats));
+    renderCustom(stats);
+    setStatus("Loaded "+stats.length.toLocaleString("en-US")+" players from "+snapshots.length.toLocaleString("en-US")+" snapshots.");
+    const url=new URL(location.href);
+    if(selected==="current")url.searchParams.delete("battle");else url.searchParams.set("battle",selected);
+    history.replaceState(null,"",url);
+  }catch(error){
+    console.error(error);
+    showError(error.message||String(error));
+    setStatus("Candidate load failed.");
+    els.awardsGrid.innerHTML='<div class="award-card"><div class="empty">No candidates available.</div></div>';
+    els.customGrid.innerHTML='<div class="empty">No custom award ideas available.</div>';
+  }finally{
+    els.loadBtn.disabled=false;
+    loading=false;
+  }
+}
+
+els.loadBtn.addEventListener("click",loadCandidates);
+els.battleSelect.addEventListener("change",loadCandidates);
+
+Promise.all([loadPlayers(),loadBattles()])
+  .then(loadCandidates)
+  .catch(error=>{
+    console.error(error);
+    showError(error.message||String(error));
+    setStatus("Page setup failed.");
+  });
+</script>
+</body>
+</html>
