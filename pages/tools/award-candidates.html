@@ -914,14 +914,15 @@ function awardDefinitions(stats){
     },
     {
       title:"Rookie of the War",
-      note:"Newest c0ld players weighted by battle output.",
-      weight:"tenure + output",
+      note:"Newest c0ld players weighted by final output and time spent leading.",
+      weight:"new + output + lead",
       items:rookie,
       metrics:stat=>[
         {text:historyOf(stat).firstC0ldWar?"first c0ld war":historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount<=1?"good":"warn"},
         {text:daysLabel(historyOf(stat).tenureDays),tone:historyOf(stat).tenureDays<=45?"good":"warn"},
         {text:rankLabel(stat.finalRank)},
-        {text:shortNum(stat.finalPoints)+" pts"}
+        {text:shortNum(stat.finalPoints)+" pts"},
+        stat.timeAtFirst>0?{text:fmtDuration(stat.timeAtFirst)+" at #1",tone:"good"}:null
       ]
     },
     {
