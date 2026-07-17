@@ -1,6 +1,13 @@
 const SNAPSHOT_TABLE = "ps99_inventory_snapshots";
 const ITEM_TABLE = "ps99_inventory_snapshot_items";
 const DISCORD_POSTS_TABLE = "ps99_inventory_discord_posts";
+const OAUTH_GRANTS_TABLE = "ps99_inventory_oauth_grants";
+const OAUTH_STATES_TABLE = "ps99_inventory_oauth_states";
+const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
+const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
+const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
+const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
+const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
@@ -16,14 +23,25 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/inventory/health") {
+        const oauth = await oauthStatus(env);
         response = json({
           ok: true,
           service: "ps99-inventory-detector",
           timezone: timeZone(env),
           min_fetch_interval_minutes: inventoryMinFetchIntervalMinutes(env),
           skip_duplicate_source: envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true),
-          supabase_configured: !!(supabaseUrl(env) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY))
+          supabase_configured: !!(supabaseUrl(env) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)),
+          big_games_oauth_configured: bigGamesOAuthConfigured(env),
+          big_games_oauth_connected: oauth.connected,
+          big_games_oauth_expires_at: oauth.expires_at
         });
+      } else if (request.method === "POST" && url.pathname === "/api/inventory/oauth/start") {
+        requireAdmin(request, env);
+        response = await handleOAuthStart(env);
+      } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/callback") {
+        response = await handleOAuthCallback(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/status") {
+        response = json({ ok: true, ...(await oauthStatus(env)) });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -57,6 +75,184 @@ export default {
     })());
   }
 };
+
+async function handleOAuthStart(env) {
+  requireSupabase(env);
+  requireBigGamesOAuth(env);
+
+  const state = randomBase64Url(32);
+  const verifier = randomBase64Url(64);
+  const challenge = await sha256Base64Url(verifier);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+
+  await supabaseUpsert(env, OAUTH_STATES_TABLE, [{
+    state_hash: await sha256Base64Url(state),
+    code_verifier_ciphertext: await sealSecret(verifier, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier"),
+    expires_at: expiresAt,
+    created_at: now.toISOString(),
+    used_at: null
+  }], "state_hash");
+
+  const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
+  authorizeUrl.searchParams.set("client_id", String(env.BIG_GAMES_CLIENT_ID));
+  authorizeUrl.searchParams.set("redirect_uri", bigGamesRedirectUri(env));
+  authorizeUrl.searchParams.set("scope", BIG_GAMES_INVENTORY_SCOPE);
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("state", state);
+
+  return json({
+    ok: true,
+    authorize_url: authorizeUrl.toString(),
+    expires_at: expiresAt,
+    message: "Open authorize_url and approve access within 10 minutes."
+  });
+}
+
+async function handleOAuthCallback(request, env) {
+  requireSupabase(env);
+  requireBigGamesOAuth(env);
+  const url = new URL(request.url);
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) return oauthHtml(false, `Big Games authorization was denied: ${oauthError}`);
+
+  const code = String(url.searchParams.get("code") || "");
+  const state = String(url.searchParams.get("state") || "");
+  if (!code || !state) return oauthHtml(false, "The callback did not include both code and state.");
+
+  const stateHash = await sha256Base64Url(state);
+  const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
+    select: "state_hash,code_verifier_ciphertext,expires_at,used_at",
+    state_hash: `eq.${stateHash}`,
+    limit: "1"
+  });
+  const pending = states[0];
+  if (!pending || pending.used_at || new Date(pending.expires_at).getTime() <= Date.now()) {
+    return oauthHtml(false, "This authorization link is invalid, expired, or was already used. Start again.");
+  }
+
+  const verifier = await openSecret(pending.code_verifier_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier");
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: bigGamesRedirectUri(env),
+    code_verifier: verifier
+  });
+  const basic = btoa(`${env.BIG_GAMES_CLIENT_ID}:${env.BIG_GAMES_CLIENT_SECRET}`);
+  const tokenResponse = await fetch(BIG_GAMES_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Basic ${basic}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: body.toString()
+  });
+  const tokenText = await tokenResponse.text();
+  let token;
+  try { token = JSON.parse(tokenText); } catch { return oauthHtml(false, `Big Games returned a non-JSON token response (${tokenResponse.status}).`); }
+  if (!tokenResponse.ok || !token.access_token) {
+    const message = token?.error_description || token?.error?.message || token?.error || `HTTP ${tokenResponse.status}`;
+    return oauthHtml(false, `Token exchange failed: ${message}`);
+  }
+
+  const scopes = String(token.scope || BIG_GAMES_INVENTORY_SCOPE).split(/\s+/).filter(Boolean);
+  if (!scopes.includes(BIG_GAMES_INVENTORY_SCOPE)) return oauthHtml(false, "The approved token does not include Inventory access.");
+  const authorizedAt = new Date();
+  const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
+  const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
+  await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
+    grant_key: BIG_GAMES_GRANT_KEY,
+    roblox_user_id: Number(configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID),
+    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
+    token_type: token.token_type || "Bearer",
+    scope: scopes.join(" "),
+    authorized_at: authorizedAt.toISOString(),
+    expires_at: expiresAt,
+    last_used_at: null,
+    metadata: { expires_in: expiresIn },
+    updated_at: authorizedAt.toISOString()
+  }], "grant_key");
+  await supabaseUpdate(env, OAUTH_STATES_TABLE, { state_hash: `eq.${stateHash}` }, { used_at: authorizedAt.toISOString() });
+
+  return oauthHtml(true, `Inventory access is connected through ${formatDateTime(expiresAt)}. You can close this tab.`);
+}
+
+async function oauthStatus(env) {
+  const configured = bigGamesOAuthConfigured(env);
+  if (!configured || !supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) {
+    return { configured, connected: false, expires_at: null };
+  }
+  try {
+    const rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+      select: "grant_key,scope,authorized_at,expires_at,last_used_at",
+      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
+      limit: "1"
+    });
+    const grant = rows[0];
+    const connected = !!grant && new Date(grant.expires_at).getTime() > Date.now();
+    return {
+      configured,
+      connected,
+      authorized_at: grant?.authorized_at || null,
+      expires_at: grant?.expires_at || null,
+      last_used_at: grant?.last_used_at || null,
+      scope: grant?.scope || null,
+      reauthorization_required: !!grant && !connected
+    };
+  } catch (error) {
+    return { configured, connected: false, expires_at: null, storage_ready: false, message: error?.message || String(error) };
+  }
+}
+
+async function getUsableOAuthGrant(env) {
+  if (!bigGamesOAuthConfigured(env) || !supabaseUrl(env)) return null;
+  let rows;
+  try {
+    rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+      select: "grant_key,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at",
+      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
+      limit: "1"
+    });
+  } catch (error) {
+    if (/does not exist|schema cache|PGRST205/i.test(error?.message || "")) return null;
+    throw error;
+  }
+  const grant = rows[0];
+  if (!grant) return null;
+  if (new Date(grant.expires_at).getTime() <= Date.now()) {
+    throw httpError(401, "Big Games authorization expired. Run /api/inventory/oauth/start again.");
+  }
+  return grant;
+}
+
+function bigGamesOAuthConfigured(env) {
+  return !!(env.BIG_GAMES_CLIENT_ID && env.BIG_GAMES_CLIENT_SECRET && bigGamesRedirectUri(env));
+}
+
+function requireBigGamesOAuth(env) {
+  if (!bigGamesOAuthConfigured(env)) throw httpError(500, "Missing BIG_GAMES_CLIENT_ID, BIG_GAMES_CLIENT_SECRET, or BIG_GAMES_REDIRECT_URI.");
+}
+
+function bigGamesRedirectUri(env) {
+  return String(env.BIG_GAMES_REDIRECT_URI || "").trim();
+}
+
+function oauthHtml(success, message) {
+  const color = success ? "#55d98a" : "#ff6b72";
+  const title = success ? "Inventory tracker connected" : "Connection failed";
+  const safeMessage = escapeHtml(message);
+  return new Response(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{margin:0;background:#0b1118;color:#edf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 48px));background:#151e29;border:1px solid #314052;border-left:5px solid ${color};border-radius:12px;padding:28px}h1{font-size:24px;margin:0 0 12px}p{color:#b8c5d6;line-height:1.5;margin:0}</style></head><body><main class="card"><h1>${title}</h1><p>${safeMessage}</p></main></body></html>`, { status: success ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+}
+
+function formatDateTime(iso) {
+  try { return new Date(iso).toLocaleString("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short" }) + " UTC"; } catch { return iso; }
+}
 
 async function handleIngest(request, env, source) {
   requireSupabase(env);
@@ -97,9 +293,11 @@ async function handleDiff(request, env) {
   const snapshots = await getUserSnapshots(env, userId, Number(url.searchParams.get("limit") || 500));
   if (!snapshots.length) return json({ ok: false, message: "No inventory snapshots found." }, 404);
 
-  const picked = mode === "hour" || mode === "hourly" || url.searchParams.get("hours") === "1"
-    ? pickLastHourSnapshots(snapshots)
-    : pickDailyComparisonSnapshots(snapshots, url.searchParams.get("day"));
+  const picked = ["previous", "latest", "snapshot"].includes(mode)
+    ? pickPreviousSnapshots(snapshots)
+    : mode === "hour" || mode === "hourly" || url.searchParams.get("hours") === "1"
+      ? pickLastHourSnapshots(snapshots)
+      : pickDailyComparisonSnapshots(snapshots, url.searchParams.get("day"));
 
   const payload = await buildDiffPayload(env, userId, picked);
   if (!payload.ok) return json(payload, 404);
@@ -116,24 +314,29 @@ async function handleHourlySeries(request, env) {
 
   const sorted = sortAsc(snapshots);
   const latest = sorted[sorted.length - 1];
-  const latestDate = new Date(latest.captured_at);
+  const cutoff = new Date(new Date(latest.captured_at).getTime() - (hours + 1) * 3600000);
+  const recent = sorted.filter(snapshot => new Date(snapshot.captured_at) >= cutoff);
+  const itemCache = new Map();
+  const itemsFor = async snapshot => {
+    if (!itemCache.has(snapshot.id)) itemCache.set(snapshot.id, getSnapshotItems(env, snapshot.id));
+    return itemCache.get(snapshot.id);
+  };
   const rows = [];
 
-  for (let i = hours; i >= 1; i--) {
-    const endTarget = new Date(latestDate.getTime() - (i - 1) * 3600000);
-    const startTarget = new Date(endTarget.getTime() - 3600000);
-    const start = closestSnapshotAtOrBefore(sorted, startTarget);
-    const end = closestSnapshotAtOrBefore(sorted, endTarget);
-    if (!start || !end || start.id === end.id) continue;
-    const diff = await buildDiffFromSnapshots(env, start, end);
+  for (let i = 1; i < recent.length; i++) {
+    const start = recent[i - 1];
+    const end = recent[i];
+    const [startItems, endItems] = await Promise.all([itemsFor(start), itemsFor(end)]);
+    const diff = buildDiff(startItems, endItems);
     rows.push({
-      period_start: startTarget.toISOString(),
-      period_end: endTarget.toISOString(),
+      period_start: start.captured_at,
+      period_end: end.captured_at,
+      duration_minutes: Math.max(0, Math.round((new Date(end.captured_at) - new Date(start.captured_at)) / 60000)),
       start: lightSnapshot(start),
       end: lightSnapshot(end),
       totals: diff.totals,
-      top_gained: diff.gained.slice(0, 12),
-      top_lost: diff.lost.slice(0, 12)
+      gained: diff.gained.slice(0, 250).map(compactDiffRow),
+      top_gained: diff.gained.slice(0, 12).map(compactDiffRow)
     });
   }
 
@@ -147,7 +350,7 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const userId = String(user.user_id || DEFAULT_USER_ID).trim();
   const username = String(user.username || userId).trim();
 
-  const raw = await fetchPublicInventory(username || userId);
+  const raw = await fetchInventory(env, username || userId, { forceRefresh: options.force === true });
   const rawItems = extractInventoryItems(raw);
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
@@ -357,9 +560,13 @@ function buildDiff(startItems, endItems) {
 function aggregateItems(items) {
   const map = new Map();
   for (const item of items || []) {
-    const key = item.item_key || item.item_hash || `${item.item_class || ""}:${item.item_id || ""}:${item.variant || ""}`;
+    const source = item?.raw && typeof item.raw === "object" ? item.raw : item;
+    const itemClass = item.item_class || source.class || source.category || source.type || null;
+    const itemId = item.item_id || source.id || source.itemId || source.configName || source.name || null;
+    const variant = getVariant(source);
+    const key = getItemKey(source, itemClass, itemId, variant);
     const existing = map.get(key);
-    if (!existing) map.set(key, { ...item });
+    if (!existing) map.set(key, { ...item, item_key: key, item_class: itemClass, item_id: itemId, variant });
     else {
       existing.count = Number(existing.count || 0) + Number(item.count || 0);
       existing.rap = Math.max(Number(existing.rap || 0), Number(item.rap || 0));
@@ -369,7 +576,47 @@ function aggregateItems(items) {
 }
 
 function diffRow(item, before, after, delta) {
-  return { item_key: item.item_key, item_class: item.item_class, item_id: item.item_id, display_name: item.display_name || item.item_id || item.item_key, variant: item.variant, before, after, delta, rap: Number(item.rap || 0), raw: item.raw || null };
+  const raw = item.raw || null;
+  return { item_key: item.item_key, item_class: item.item_class, item_category: raw?.category || raw?.collection || null, item_id: item.item_id, display_name: item.display_name || item.item_id || item.item_key, variant: item.variant, before, after, delta, rap: Number(item.rap || 0), icon: raw?.icon || null, raw };
+}
+
+function compactDiffRow(row) {
+  return { item_key: row.item_key, item_class: row.item_class, item_category: row.item_category, item_id: row.item_id, display_name: row.display_name, variant: row.variant, before: row.before, after: row.after, delta: row.delta, rap: row.rap, icon: row.icon };
+}
+
+async function fetchInventory(env, usernameOrId, options = {}) {
+  const grant = await getUsableOAuthGrant(env);
+  if (grant) return fetchAuthorizedInventory(env, grant, options);
+  return fetchPublicInventory(usernameOrId);
+}
+
+function pickPreviousSnapshots(snapshots) {
+  const snaps = sortAsc(snapshots);
+  return {
+    mode: "previous_snapshot",
+    start: snaps[snaps.length - 2] || null,
+    end: snaps[snaps.length - 1] || null
+  };
+}
+
+async function fetchAuthorizedInventory(env, grant, options = {}) {
+  const url = new URL(env.BIG_GAMES_INVENTORY_URL || BIG_GAMES_INVENTORY_URL);
+  if (options.forceRefresh) url.searchParams.set("refresh", "true");
+  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
+  const res = await fetch(url.toString(), {
+    headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
+    cf: { cacheTtl: 0 }
+  });
+  const text = await res.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw httpError(502, `Big Games Player API returned non-JSON: ${text.slice(0, 160)}`); }
+  if (res.status === 401) throw httpError(401, "Big Games authorization expired or was revoked. Run the OAuth authorization flow again.");
+  if (res.status === 403) throw httpError(403, "Big Games token does not include the Inventory permission. Re-authorize the app.");
+  if (!res.ok || payload.status === "error") throw httpError(502, `Big Games Player API inventory fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
+  try {
+    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${BIG_GAMES_GRANT_KEY}` }, { last_used_at: new Date().toISOString() });
+  } catch {}
+  return payload;
 }
 
 async function fetchPublicInventory(usernameOrId) {
@@ -401,6 +648,15 @@ function inventorySourceMeta(raw) {
     };
   }
   const data = raw.data || raw;
+  if (data?.fetchedAt || raw.refresh) {
+    return {
+      fetched_at: data?.fetchedAt || null,
+      is_stale: data?.cached ?? null,
+      available: true,
+      cached: data?.cached ?? null,
+      refresh: raw.refresh || null
+    };
+  }
   const view = data?.views?.inventory || data?.inventory || null;
   return {
     fetched_at: view?.fetchedAt || view?.fetched_at || null,
@@ -414,10 +670,11 @@ function inventorySnapshotMeta(raw) {
   const account = data?.account || {};
   const source = inventorySourceMeta(raw);
   return {
-    provider: "big_games_player_api",
+    provider: raw?.refresh ? "big_games_oauth_player_api" : "big_games_public_player_api",
     source_fetched_at: source.fetched_at,
     source_is_stale: source.is_stale,
     inventory_available: source.available,
+    refresh: source.refresh || null,
     account: {
       roblox_user_id: account.robloxUserId || account.roblox_user_id || null,
       username: account.username || null,
@@ -464,10 +721,41 @@ function normalizeItemRow(item, snapshotId, userId, capturedAt, localDay) {
   return { snapshot_id: snapshotId, roblox_user_id: Number(userId), captured_at: capturedAt, local_day: localDay, item_key: itemKey, item_class: itemClass, item_id: itemId, display_name: displayName, variant, count: itemCount(item), rap: itemRap(item), raw: item };
 }
 
-function getItemKey(item, itemClass, itemId, variant) { return String(item.stackKey || item.stack_key || item.uid || `${itemClass || ""}:${itemId || ""}:${variant || ""}`).trim(); }
+function getItemKey(item, itemClass, itemId, variant) {
+  const stackKey = stableStackKey(item?.stackKey || item?.stack_key);
+  if (stackKey) return `${itemClass || "Unknown"}:${stackKey}`;
+  const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  const tier = rawData.tn ?? item?.tn ?? "";
+  return `${itemClass || "Unknown"}:${itemId || "Unknown"}:${variant || "Normal"}:${tier}`;
+}
+function stableStackKey(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return text;
+    for (const key of ["_am", "amount", "count", "quantity", "qty"]) delete parsed[key];
+    return stableJson(parsed);
+  } catch {
+    return text.replace(/([,{]\s*"?_am"?\s*:\s*)-?\d+(\.\d+)?/i, "$10");
+  }
+}
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
 function itemCount(item) { const n = Number(item.count ?? item.amount ?? item.quantity ?? item.qty ?? 1); return Number.isFinite(n) ? n : 1; }
 function itemRap(item) { for (const v of [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap]) { const n = Number(v); if (Number.isFinite(n) && n > 0) return n; } return 0; }
-function getVariant(item) { const raw = JSON.stringify(item).toLowerCase(); const parts = []; if (raw.includes("rainbow")) parts.push("Rainbow"); else if (raw.includes("golden") || raw.includes('"pt":1')) parts.push("Golden"); if (raw.includes("shiny") || raw.includes('"sh":true')) parts.push("Shiny"); return parts.join(" ") || "Normal"; }
+function getVariant(item) {
+  let stack = {};
+  try { stack = JSON.parse(String(item?.stackKey || item?.stack_key || "{}")); } catch {}
+  const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  const paint = Number(rawData.pt ?? stack.pt ?? item?.pt ?? 0);
+  const shiny = [true, 1, "1", "true"].includes(rawData.sh ?? stack.sh ?? item?.sh ?? false);
+  const base = paint === 2 ? "Rainbow" : paint === 1 ? "Golden" : "Normal";
+  return shiny ? `Shiny ${base}` : base;
+}
 
 async function getUserSnapshots(env, userId, limit = 500) {
   return supabaseSelect(env, SNAPSHOT_TABLE, {
@@ -486,9 +774,31 @@ async function getLatestSnapshot(env, userId, options = {}) {
   });
   return rows[0] || null;
 }
-async function getSnapshotItems(env, snapshotId) { return supabaseSelect(env, ITEM_TABLE, { snapshot_id: `eq.${snapshotId}`, limit: "10000" }); }
+async function getSnapshotItems(env, snapshotId) {
+  const rows = await supabaseSelectAll(env, ITEM_TABLE, { snapshot_id: `eq.${snapshotId}`, order: "id.asc" }, 10000);
+  return rows.map(normalizeStoredItem);
+}
+function normalizeStoredItem(item) {
+  const source = item?.raw && typeof item.raw === "object" ? item.raw : item;
+  const itemClass = item.item_class || source.class || source.category || source.type || null;
+  const itemId = item.item_id || source.id || source.itemId || source.configName || source.name || null;
+  const variant = getVariant(source);
+  return {
+    ...item,
+    item_key: getItemKey(source, itemClass, itemId, variant),
+    item_class: itemClass,
+    item_category: source.category || source.collection || null,
+    item_id: itemId,
+    display_name: item.display_name || source.displayName || source.name || itemId,
+    variant,
+    icon: source.icon || null
+  };
+}
 async function supabaseSelect(env, table, params) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { headers: supabaseHeaders(env) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("select", text)); return text ? JSON.parse(text) : []; }
+async function supabaseSelectAll(env, table, params, maxRows = 10000) { const rows = []; const pageSize = 1000; for (let offset = 0; offset < maxRows; offset += pageSize) { const page = await supabaseSelect(env, table, { ...(params || {}), limit: String(Math.min(pageSize, maxRows - offset)), offset: String(offset) }); rows.push(...page); if (page.length < pageSize) break; } return rows; }
 async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("insert", text)); return text ? JSON.parse(text) : []; }
+async function supabaseUpsert(env, table, rows, conflict) { if (!rows.length) return []; const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); if (conflict) url.searchParams.set("on_conflict", conflict); const res = await fetch(url.toString(), { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("upsert", text)); return text ? JSON.parse(text) : []; }
+async function supabaseUpdate(env, table, filters, values) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(filters || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { method: "PATCH", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "return=minimal" }, body: JSON.stringify(values) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("update", text)); return true; }
 function supabaseFailureMessage(operation, text) { const detail = String(text || "").trim(); if (/error\s*code:\s*1016/i.test(detail)) return `Supabase ${operation} failed because SUPABASE_URL does not resolve (Cloudflare 1016). Update the Worker variable to the current Supabase Data API project URL.`; return `Supabase ${operation} failed: ${detail}`; }
 function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY; return { apikey: key, authorization: `Bearer ${key}` }; }
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }
@@ -513,6 +823,13 @@ function parseBool(v) { if (v === null || v === undefined || v === "") return nu
 function envBool(value, fallback = false) { const parsed = parseBool(value); return parsed === null ? fallback : parsed; }
 function fmtNumber(n) { return Number(n || 0).toLocaleString("en-US"); }
 function formatDiscordTime(iso) { return new Date(iso).toLocaleString("en-US", { timeZone: DEFAULT_TIME_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+function randomBase64Url(byteLength) { const bytes = new Uint8Array(byteLength); crypto.getRandomValues(bytes); return bytesToBase64Url(bytes); }
+async function sha256Base64Url(value) { return bytesToBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value))))); }
+async function secretKey(secret, context) { const material = new TextEncoder().encode(`${context}:${secret}`); const digest = await crypto.subtle.digest("SHA-256", material); return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]); }
+async function sealSecret(value, secret, context) { const iv = new Uint8Array(12); crypto.getRandomValues(iv); const key = await secretKey(secret, context); const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(String(value)))); return `v1.${bytesToBase64Url(iv)}.${bytesToBase64Url(encrypted)}`; }
+async function openSecret(value, secret, context) { const parts = String(value || "").split("."); if (parts.length !== 3 || parts[0] !== "v1") throw httpError(500, "Stored OAuth credential has an invalid format."); const key = await secretKey(secret, context); try { const clear = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(parts[1]) }, key, base64UrlToBytes(parts[2])); return new TextDecoder().decode(clear); } catch { throw httpError(500, "Stored OAuth credential could not be decrypted. Re-authorize the app after changing its client secret."); } }
+function bytesToBase64Url(bytes) { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
+function base64UrlToBytes(value) { const padded = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "="); const binary = atob(padded); return Uint8Array.from(binary, char => char.charCodeAt(0)); }
 function httpError(status, message) { const err = new Error(message); err.status = status; return err; }
 function json(value, status = 200) { return new Response(JSON.stringify(value, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8" } }); }
 function cacheJson(value, env, status = 200) { const seconds = Number(env.PUBLIC_CACHE_SECONDS || DEFAULT_PUBLIC_CACHE_SECONDS); return new Response(JSON.stringify(value, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": `public, max-age=${seconds}` } }); }

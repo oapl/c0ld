@@ -660,11 +660,20 @@ Worker's `SUPABASE_URL` hostname is invalid or no longer exists. Replace it with
 the exact current project URL from Supabase **Project Settings > Data API**.
 This value is a normal Worker variable; `SUPABASE_SERVICE_KEY` remains a secret.
 
-The official Big Games player endpoint exposes the most recently collected
-inventory and its `fetchedAt` timestamp. It does not expose the signed-in
-account page's refresh action through the public response, so this Worker reads
-the latest public inventory on schedule rather than automating a private login
-session.
+The Worker supports the official Big Games OAuth Player API. Configure
+`BIG_GAMES_CLIENT_ID`, `BIG_GAMES_REDIRECT_URI`, and the
+`BIG_GAMES_CLIENT_SECRET` secret, then apply
+`supabase/migrations/027_inventory_oauth.sql`. Start authorization with an
+admin-authenticated `POST /api/inventory/oauth/start`, open the returned
+`authorize_url`, and approve Inventory access. The callback securely exchanges
+the one-time code and stores only an encrypted access token. Check the result
+with `GET /api/inventory/oauth/status`.
+
+After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
+`POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big
+Games refresh-quota slot, so reserve it for explicit tests. Big Games access
+tokens expire after 30 days and must then be authorized again; there is no
+refresh-token endpoint.
 
 ## WMSY hourly Discord board
 
