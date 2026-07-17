@@ -455,12 +455,100 @@
     });
   }
 
-  function drawExportDuck(ctx, row, index, x, y, scale) {
-    const clan = row.clan_name || "Unknown";
-    const accent = clanColor(clan, index);
+  function loadExportImage(url) {
+    return new Promise(resolve => {
+      if (!url) {
+        resolve(null);
+        return;
+      }
+
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = url;
+    });
+  }
+
+  function roundedRect(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+  }
+
+  function drawTrackBackground(ctx, x, y, width, height) {
+    ctx.save();
+    ctx.beginPath();
+    roundedRect(ctx, x, y, width, height, 8);
+    ctx.clip();
+
+    const water = ctx.createLinearGradient(0, y, 0, y + height);
+    water.addColorStop(0, "#142434");
+    water.addColorStop(.22, "#0f1b2a");
+    water.addColorStop(.23, "#092237");
+    water.addColorStop(1, "#0a314a");
+    ctx.fillStyle = water;
+    ctx.fillRect(x, y, width, height);
+
+    for (let stripe = 0; stripe < width; stripe += 36) {
+      ctx.fillStyle = stripe % 72 === 0 ? "rgba(107,205,255,.16)" : "rgba(107,205,255,.04)";
+      ctx.fillRect(x + stripe, y + 58, 18, height - 58);
+    }
+
+    ctx.strokeStyle = "rgba(255,255,255,.035)";
+    ctx.lineWidth = 1;
+    for (let yy = y + 58; yy < y + height; yy += 54) {
+      ctx.beginPath();
+      ctx.moveTo(x, yy);
+      ctx.lineTo(x + width, yy);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#3d7f33";
+    ctx.fillRect(x, y, width, 58);
+    ctx.fillStyle = "#5fbd4e";
+    [
+      [width * .12, 28, 22],
+      [width * .17, 22, 27],
+      [width * .23, 30, 23]
+    ].forEach(([cx, cy, radius]) => {
+      ctx.beginPath();
+      ctx.arc(x + cx, y + cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.fillStyle = "#7b4f26";
+    ctx.fillRect(x, y + 56, width, 4);
+
+    const finishX = x + width - 38 - 20;
+    for (let yy = y + 58; yy < y + height; yy += 20) {
+      const odd = Math.floor((yy - y) / 20) % 2;
+      ctx.fillStyle = odd ? "#111" : "#f5f5f5";
+      ctx.fillRect(finishX, yy, 10, 20);
+      ctx.fillStyle = odd ? "#f5f5f5" : "#111";
+      ctx.fillRect(finishX + 10, yy, 10, 20);
+    }
+
+    ctx.restore();
+    ctx.strokeStyle = "#30363d";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    roundedRect(ctx, x + .5, y + .5, width - 1, height - 1, 8);
+    ctx.stroke();
+  }
+
+  function drawDuckFallback(ctx, left, top, scale, accent) {
+    const centerX = left + 74 * scale;
+    const centerY = top + 74 * scale;
 
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(centerX, centerY);
     ctx.scale(scale, scale);
     ctx.lineWidth = 5;
     ctx.strokeStyle = "#030303";
@@ -489,86 +577,66 @@
     ctx.fillRect(-23, 20, 28, 28);
     ctx.strokeRect(-23, 20, 28, 28);
     ctx.restore();
+  }
+
+  function drawDuckLabel(ctx, racer, left, top, duckWidth) {
+    const row = racer.row;
+    const clan = row.clan_name || "Unknown";
+    const name = `#${row.rank || racer.index + 1} ${clan}`;
+    const centerX = left + duckWidth / 2;
+    const labelTop = top - 50 - racer.labelLift;
 
     ctx.save();
-    ctx.font = "700 18px Arial";
+    ctx.font = "800 13px Arial";
     ctx.textAlign = "center";
-    const name = `#${row.rank || index + 1} ${clan}`;
-    const labelWidth = Math.min(190, Math.max(112, ctx.measureText(name).width + 22));
-    ctx.fillStyle = "rgba(13,17,23,.86)";
-    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    const labelWidth = Math.min(150, Math.max(126, ctx.measureText(name).width + 14));
+    ctx.fillStyle = "rgba(13,17,23,.78)";
+    ctx.strokeStyle = "rgba(255,255,255,.12)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(x - labelWidth / 2, y - 74, labelWidth, 44, 7);
+    roundedRect(ctx, centerX - labelWidth / 2, labelTop, labelWidth, 42, 7);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#e6edf3";
-    ctx.fillText(name, x, y - 55, labelWidth - 12);
-    ctx.font = "13px Arial";
+    ctx.fillText(name, centerX, labelTop + 17, labelWidth - 14);
+    ctx.font = "11px Arial";
     ctx.fillStyle = "#8b949e";
-    const next = state.rows[index + 1];
-    const points = Number(row.points || 0);
-    const lead = next ? points - Number(next.points || 0) : null;
-    ctx.fillText(`${formatNumber(points)}${lead !== null ? ` - +${formatNumber(lead)}` : ""}`, x, y - 38, labelWidth - 12);
+    const stats = `${formatNumber(row.points)}${racer.lead !== null ? ` - +${formatNumber(racer.lead)}` : ""}`;
+    ctx.fillText(stats, centerX, labelTop + 33, labelWidth - 14);
     ctx.restore();
   }
 
-  function renderDuckExportCanvas() {
+  async function renderDuckExportCanvas() {
+    const track = document.getElementById("duck-race-track");
+    const meta = document.getElementById("duck-race-meta");
+    const trackRect = track?.getBoundingClientRect();
+    const cssWidth = Math.max(720, Math.round(trackRect?.width || 1280));
+    const trackHeight = Math.max(310, Math.round(trackRect?.height || 370));
+    const metaText = String(meta?.textContent || `${selectedBattle()} - latest data`).trim();
+    const metaHeight = metaText ? 20 : 0;
+    const gap = metaText ? 10 : 0;
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const canvas = document.createElement("canvas");
-    canvas.width = 1280;
-    canvas.height = 720;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round((metaHeight + gap + trackHeight) * dpr);
     const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const rows = state.rows.length ? state.rows : [];
 
-    ctx.fillStyle = "#0d1117";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#161b22";
-    ctx.fillRect(28, 28, canvas.width - 56, canvas.height - 56);
-    ctx.strokeStyle = "#30363d";
-    ctx.strokeRect(28.5, 28.5, canvas.width - 57, canvas.height - 57);
+    ctx.fillRect(0, 0, cssWidth, metaHeight + gap + trackHeight);
 
-    ctx.fillStyle = "#e6edf3";
-    ctx.font = "700 30px Arial";
-    ctx.fillText("c0ld Clan Duck Chart", 52, 76);
-    ctx.fillStyle = "#8b949e";
-    ctx.font = "15px Arial";
-    ctx.fillText(`${selectedBattle()} - latest top 10`, 52, 102);
-
-    const trackX = 52;
-    const trackY = 130;
-    const trackW = canvas.width - 104;
-    const trackH = canvas.height - 178;
-
-    const water = ctx.createLinearGradient(0, trackY, 0, trackY + trackH);
-    water.addColorStop(0, "#142434");
-    water.addColorStop(.23, "#092237");
-    water.addColorStop(1, "#0a314a");
-    ctx.fillStyle = water;
-    ctx.fillRect(trackX, trackY, trackW, trackH);
-
-    ctx.fillStyle = "#3d7f33";
-    ctx.fillRect(trackX, trackY, trackW, 58);
-    ctx.fillStyle = "#5fbd4e";
-    [140, 205, 282].forEach((cx, i) => {
-      ctx.beginPath();
-      ctx.arc(trackX + cx, trackY + 28 + (i % 2) * 6, 22 + i * 2, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.fillStyle = "#7b4f26";
-    ctx.fillRect(trackX, trackY + 56, trackW, 4);
-
-    for (let x = trackX; x < trackX + trackW; x += 36) {
-      ctx.fillStyle = x / 36 % 2 < 1 ? "rgba(107,205,255,.14)" : "rgba(107,205,255,.04)";
-      ctx.fillRect(x, trackY + 60, 18, trackH - 60);
+    if (metaText) {
+      ctx.fillStyle = "#8b949e";
+      ctx.font = "13px Arial";
+      ctx.fillText(metaText, 0, 14);
     }
 
-    const finishX = trackX + trackW - 58;
-    for (let y = trackY + 60; y < trackY + trackH; y += 20) {
-      ctx.fillStyle = (Math.floor((y - trackY) / 20) % 2) ? "#111" : "#f5f5f5";
-      ctx.fillRect(finishX, y, 20, 20);
-      ctx.fillStyle = (Math.floor((y - trackY) / 20) % 2) ? "#f5f5f5" : "#111";
-      ctx.fillRect(finishX + 20, y, 20, 20);
-    }
+    const trackX = 0;
+    const trackY = metaHeight + gap;
+    const trackW = cssWidth;
+    const trackH = trackHeight;
+    drawTrackBackground(ctx, trackX, trackY, trackW, trackH);
 
     if (!rows.length) {
       ctx.fillStyle = "#8b949e";
@@ -581,11 +649,52 @@
     const minPoints = Math.min(...points);
     const maxPoints = Math.max(...points);
     const range = maxPoints - minPoints;
-    rows.forEach((row, index) => {
+
+    const duckImage = await loadExportImage(DUCK_IMAGE_URL);
+    const logoEntries = await Promise.all(rows.map(async row => {
+      const logo = await loadExportImage(iconUrl(row));
+      return [row, logo];
+    }));
+    const logos = new Map(logoEntries);
+    const mobile = trackW <= 760;
+    const duckWidth = mobile ? 126 : 148;
+    const duckHeight = mobile ? 114 : 134;
+    const duckBottom = mobile ? 44 : 46;
+    const scale = duckWidth / 148;
+
+    const racers = rows.map((row, index) => {
       const progress = range > 0 ? (Number(row.points || 0) - minPoints) / range : 1 - index * .08;
-      const x = trackX + 92 + Math.max(0, Math.min(1, progress)) * (trackW - 180);
-      const y = trackY + 206 + (index % 4) * 82 + Math.floor(index / 4) * 24;
-      drawExportDuck(ctx, row, index, x, y, rows.length > 7 ? .78 : .9);
+      const laneLeft = 5 + Math.max(0, Math.min(1, progress)) * 88;
+      const racerLeft = Math.min(laneLeft / 100 * trackW, trackW - duckWidth - 10);
+      const next = rows[index + 1];
+      return {
+        row,
+        index,
+        left: trackX + racerLeft,
+        top: trackY + trackH - duckBottom - duckHeight,
+        lead: next ? Number(row.points || 0) - Number(next.points || 0) : null,
+        labelLift: (index % 4) * 18
+      };
+    });
+
+    racers.slice().reverse().forEach(racer => {
+      const row = racer.row;
+      const logo = logos.get(row);
+      const accent = clanColor(row.clan_name, racer.index);
+
+      if (duckImage) ctx.drawImage(duckImage, racer.left, racer.top, duckWidth, duckHeight);
+      else drawDuckFallback(ctx, racer.left, racer.top, scale, accent);
+
+      if (logo) {
+        const logoLeft = racer.left + 44 * scale;
+        const logoTop = racer.top + 74 * scale;
+        const logoSize = 34 * scale;
+        ctx.fillStyle = "#0d1117";
+        ctx.fillRect(logoLeft - 1, logoTop - 1, logoSize + 2, logoSize + 2);
+        ctx.drawImage(logo, logoLeft, logoTop, logoSize, logoSize);
+      }
+
+      drawDuckLabel(ctx, racer, racer.left, racer.top, duckWidth);
     });
 
     return canvas;
@@ -593,7 +702,7 @@
 
   async function exportDuckPng() {
     if (!state.rows.length && !state.loading) await loadRace(true);
-    const canvas = renderDuckExportCanvas();
+    const canvas = await renderDuckExportCanvas();
     const save = blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);

@@ -33,6 +33,11 @@ const CLAN_REWARD_CATEGORIES = [
   { label: "Top 50", rank: 50 },
   { label: "Top 500", rank: 500 }
 ];
+const CHART_LINE_RANGE = { label: "Ranks 1-4", min: 1, max: 4, cutoffRank: 3, challengerRank: 4 };
+const CHART_LOOKBACK_HOURS = 1;
+const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
+const CHART_LARGE_GAP_BREAK_MINUTES = 25;
+let chartDuckImagePromise = null;
 
 export default {
   async fetch(request, env, ctx) {
@@ -835,7 +840,7 @@ async function buildClanChartMessage(env) {
 async function buildDuckChartMessage(env) {
   const data = await loadClanChartData(env, { history: false });
   const filename = `c0ld-duck-chart-${chartFilenamePart(data.current?.battle || "current")}.png`;
-  const bytes = await renderDuckChartPng(data.current);
+  const bytes = await renderDuckChartPng(data.current, env);
   return {
     content: null,
     embeds: [{
@@ -865,7 +870,11 @@ async function loadClanChartData(env, options = {}) {
 
   const historyUrl = clanApiUrl(env, "/api/clans/history", apiBase);
   historyUrl.searchParams.set("battle", current.battle || "current");
-  historyUrl.searchParams.set("hours", "336");
+  historyUrl.searchParams.set("hours", String(chartHistoryHoursForBattle(current)));
+  historyUrl.searchParams.set("rank_min", String(CHART_LINE_RANGE.min));
+  historyUrl.searchParams.set("rank_max", String(CHART_LINE_RANGE.max));
+  historyUrl.searchParams.set("bucket_minutes", "5");
+  historyUrl.searchParams.set("include_baseline", "1");
   historyUrl.searchParams.set("limit", "50000");
   historyUrl.searchParams.set("order", "asc");
   const historyResponse = await fetchClanApi(env, historyUrl, {
@@ -886,36 +895,40 @@ async function renderClanLineChartPng(data) {
   const height = 675;
   const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 1);
   const color = chartColors();
-  const rows = chartCurrentRows(data.current).filter(row => row.rank >= 1 && row.rank <= 10).slice(0, 10);
-  const series = rows.map((row, index) => chartBuildPointSeries(row, data.history, index)).filter(item => item.points.length >= 1);
+  const rows = chartCurrentRows(data.current)
+    .filter(row => row.rank >= CHART_LINE_RANGE.min && row.rank <= CHART_LINE_RANGE.max)
+    .slice(0, CHART_LINE_RANGE.max - CHART_LINE_RANGE.min + 1);
+  const series = rows
+    .map((row, index) => chartBuildHourlyGainSeries(row, data.history, index, data.current))
+    .filter(item => item.points.length >= 1);
   const title = `${data.current?.display_name || data.current?.battle || "Current Battle"} - Clan Line Chart`;
-  const subtitle = "Current top clans by recorded point progression";
+  const subtitle = `${CHART_LINE_RANGE.label} actual hourly gains`;
 
   chartPanel(canvas, 24, 24, width - 48, height - 48, color);
   canvas.drawFontText(fonts.bold, title, 52, 48, 28, color.white, 760);
   canvas.drawFontText(fonts.regular, subtitle, 54, 86, 15, color.muted, 760);
   canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(data.current?.snapshot_at || data.current?.generated_at)}`, 930, 60, 13, color.muted, 220);
 
-  const plot = { x: 78, y: 132, w: 960, h: 392 };
+  const plot = { x: 78, y: 132, w: 930, h: 392 };
   canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
   canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
   canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
 
   if (!series.length) {
-    canvas.drawFontText(fonts.regular, "No clan chart data is available yet.", plot.x + 28, plot.y + 38, 18, color.muted, plot.w - 56);
+    canvas.drawFontText(fonts.regular, "Not enough actual hourly gain data is available for Ranks 1-4 yet.", plot.x + 28, plot.y + 38, 18, color.muted, plot.w - 56);
     return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
   }
 
   const allPoints = series.flatMap(item => item.points);
   const minT = Math.min(...allPoints.map(point => point.t));
   const maxT = Math.max(...allPoints.map(point => point.t));
-  const minY = Math.min(...allPoints.map(point => point.points));
-  const maxY = Math.max(...allPoints.map(point => point.points));
-  const yPad = Math.max((maxY - minY) * 0.08, 1000);
+  const minY = Math.min(...allPoints.map(point => point.pointsGained));
+  const maxY = Math.max(...allPoints.map(point => point.pointsGained));
+  const yPad = Math.max((maxY - minY) * 0.1, 1000);
   const yMin = Math.max(0, minY - yPad);
   const yMax = maxY + yPad;
   const xFor = point => maxT === minT ? plot.x : plot.x + ((point.t - minT) / (maxT - minT)) * plot.w;
-  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.points - yMin) / (yMax - yMin))) * plot.h;
+  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.pointsGained - yMin) / (yMax - yMin))) * plot.h;
 
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
@@ -924,36 +937,40 @@ async function renderClanLineChartPng(data) {
     canvas.drawFontText(fonts.regular, shortNumber(value), 12, yy - 8, 12, color.muted, 58);
   }
 
-  series.forEach(item => {
+  [...series]
+    .sort((a, b) => Number(a.isCutoffPair) - Number(b.isCutoffPair))
+    .forEach(item => {
     for (let index = 1; index < item.points.length; index += 1) {
-      chartDrawLine(canvas, xFor(item.points[index - 1]), yFor(item.points[index - 1]), xFor(item.points[index]), yFor(item.points[index]), item.color, item.rank <= 4 ? 3 : 2);
+      if (item.points[index].breakBefore) continue;
+      chartDrawLine(canvas, xFor(item.points[index - 1]), yFor(item.points[index - 1]), xFor(item.points[index]), yFor(item.points[index]), item.color, item.isCutoffPair ? 3 : 2);
     }
     const last = item.points[item.points.length - 1];
-    chartFillCircle(canvas, xFor(last), yFor(last), item.rank <= 4 ? 5 : 4, item.color);
-    if (item.rank <= 6) {
-      canvas.drawFontText(fonts.bold, `#${item.rank} ${item.clan_name}`, Math.min(plot.x + plot.w - 120, xFor(last) + 8), yFor(last) - 8, 12, item.color, 112);
-    }
+    chartFillCircle(canvas, xFor(last), yFor(last), item.isCutoffPair ? 5 : 4, item.color);
+    canvas.drawFontText(fonts.bold, `#${item.rank} ${item.clan_name}`, Math.min(plot.x + plot.w - 130, xFor(last) + 8), yFor(last) - 8, 12, item.color, 122);
   });
 
   canvas.drawFontText(fonts.regular, chartShortDate(minT), plot.x, plot.y + plot.h + 18, 12, color.muted, 120);
   canvas.drawFontText(fonts.regular, chartShortDate(maxT), plot.x + plot.w - 120, plot.y + plot.h + 18, 12, color.muted, 120);
 
-  const legendX = 1060;
-  canvas.drawFontText(fonts.bold, "Top 10", legendX, 132, 18, color.white, 110);
-  series.slice(0, 10).forEach((item, index) => {
-    const y = 164 + index * 34;
+  const legendX = 1030;
+  canvas.drawFontText(fonts.bold, CHART_LINE_RANGE.label, legendX, 132, 18, color.white, 130);
+  series.forEach((item, index) => {
+    const y = 164 + index * 58;
+    const latest = item.points[item.points.length - 1];
     canvas.fillRect(legendX, y + 7, 20, 4, item.color);
     canvas.drawFontText(fonts.bold, `#${item.rank}`, legendX + 28, y, 12, item.color, 36);
     canvas.drawFontText(fonts.regular, item.clan_name, legendX + 64, y, 12, color.white, 88);
-    canvas.drawFontText(fonts.regular, shortNumber(item.current.points), legendX + 64, y + 15, 10, color.muted, 88);
+    canvas.drawFontText(fonts.regular, `${shortNumber(latest.pointsGained)}/hr`, legendX + 64, y + 15, 10, color.muted, 88);
+    canvas.drawFontText(fonts.regular, shortNumber(item.current.points), legendX + 64, y + 30, 10, color.muted, 88);
   });
 
   canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 52, height - 42, 13, color.muted, 300);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
-async function renderDuckChartPng(current) {
+async function renderDuckChartPng(current, env) {
   const fonts = await loadHistoryFonts();
+  const duckImage = await loadChartDuckImage(env).catch(() => null);
   const width = 1200;
   const height = 675;
   const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 1);
@@ -989,54 +1006,182 @@ async function renderDuckChartPng(current) {
   const minPoints = Math.min(...points);
   const maxPoints = Math.max(...points);
   const range = maxPoints - minPoints;
-  rows.forEach((row, index) => {
+  const logos = await chartLoadClanLogos(rows, env);
+  const scale = 1;
+  const duckWidth = 148 * scale;
+  const duckHeight = 134 * scale;
+  const racers = rows.map((row, index) => {
     const progress = range > 0 ? (Number(row.points || 0) - minPoints) / range : 1 - index * 0.08;
-    const x = track.x + 88 + Math.max(0, Math.min(1, progress)) * (track.w - 176);
-    const y = track.y + 188 + (index % 4) * 76 + Math.floor(index / 4) * 18;
-    chartDrawDuck(canvas, fonts, row, index, x, y, rows.length > 7 ? 0.82 : 0.94, color);
+    const laneLeft = 5 + Math.max(0, Math.min(1, progress)) * 88;
+    const left = Math.min(track.x + laneLeft / 100 * track.w, track.x + track.w - duckWidth - 10);
+    const x = left + duckWidth / 2;
+    const y = track.y + track.h - 46 - duckHeight / 2;
+    const next = rows[index + 1];
+    const lead = next ? Number(row.points || 0) - Number(next.points || 0) : null;
+    return {
+      row,
+      index,
+      x,
+      y,
+      lead,
+      labelLift: (index % 4) * 18,
+      logo: logos.get(chartNormalize(row.clan_name)) || null
+    };
+  });
+
+  racers.slice().reverse().forEach(racer => {
+    chartDrawDuck(canvas, fonts, racer.row, racer.index, racer.x, racer.y, scale, color, {
+      duckImage,
+      logo: racer.logo,
+      lead: racer.lead,
+      labelLift: racer.labelLift
+    });
   });
 
   canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 52, height - 42, 13, color.muted, 300);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
-function chartBuildPointSeries(currentRow, history, index) {
+function chartBuildHourlyGainSeries(currentRow, history, index, context) {
   const key = chartNormalize(currentRow.clan_name);
-  const points = (history?.rows || [])
-    .map(chartNormalizeClanRow)
+  const rows = (history?.rows || [])
+    .map(row => chartNormalizeClanRow(row, context))
     .filter(row => chartNormalize(row.clan_name) === key && row.points !== null && row.t)
     .sort((a, b) => a.t - b.t);
-  const currentPoint = chartNormalizeClanRow(currentRow);
-  if (currentPoint.t && currentPoint.points !== null && !points.some(point => point.t === currentPoint.t)) points.push(currentPoint);
-  const deduped = [];
-  for (const point of points.sort((a, b) => a.t - b.t)) {
-    const last = deduped[deduped.length - 1];
-    if (last && last.t === point.t) deduped[deduped.length - 1] = point.points >= last.points ? point : last;
-    else deduped.push(point);
-  }
+  const currentPoint = chartNormalizeClanRow(currentRow, context);
+  if (currentPoint.t && currentPoint.points !== null && !rows.some(point => point.t === currentPoint.t)) rows.push(currentPoint);
+  const points = chartBuildHourlyPoints(chartDedupePullRows(rows), currentRow);
   return {
     clan_name: currentRow.clan_name,
     rank: currentRow.rank,
     current: currentRow,
     color: chartClanColor(currentRow.clan_name, index),
-    points: deduped
+    isCutoffPair: currentRow.rank === CHART_LINE_RANGE.cutoffRank || currentRow.rank === CHART_LINE_RANGE.challengerRank,
+    points
   };
+}
+
+function chartDedupePullRows(rows) {
+  const byTime = new Map();
+  for (const row of rows || []) {
+    if (!row?.t || row.points === null) continue;
+    const existing = byTime.get(row.t);
+    if (!existing || row.points >= existing.points) byTime.set(row.t, row);
+  }
+  return [...byTime.values()].sort((a, b) => a.t - b.t);
+}
+
+function chartFindPriorHourPoint(rows, targetT) {
+  const targetPrior = targetT - CHART_LOOKBACK_HOURS * 60 * 60 * 1000;
+  const tolerance = CHART_PRIOR_PULL_TOLERANCE_MINUTES * 60 * 1000;
+  let best = null;
+
+  for (const row of rows || []) {
+    const diff = Math.abs(row.t - targetPrior);
+    if (diff > tolerance) continue;
+    if (!best || diff < best.diff) best = { row, diff };
+  }
+
+  return best?.row || null;
+}
+
+function chartBuildHourlyPoints(rows, clanRow) {
+  const points = [];
+  for (const current of rows || []) {
+    const prior = chartFindPriorHourPoint(rows, current.t);
+    if (!prior) continue;
+
+    const gain = current.points - prior.points;
+    if (!Number.isFinite(gain) || gain < 0) continue;
+
+    const previous = points[points.length - 1];
+    const gapMinutes = previous ? (current.t - previous.t) / 60000 : 5;
+    points.push({
+      t: current.t,
+      priorT: prior.t,
+      pointsGained: gain,
+      totalPoints: current.points,
+      rank: current.rank ?? clanRow.rank,
+      breakBefore: gapMinutes > CHART_LARGE_GAP_BREAK_MINUTES
+    });
+  }
+  return points;
+}
+
+function chartHistoryHoursForBattle(current) {
+  const start = Date.parse(String(current?.battle_start_iso || ""));
+  const end =
+    Date.parse(String(current?.snapshot_at || "")) ||
+    Date.parse(String(current?.generated_at || "")) ||
+    Date.now();
+
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    const hours = Math.ceil((end - start) / (60 * 60 * 1000)) + 6;
+    return Math.max(24, Math.min(336, hours));
+  }
+
+  return 168;
+}
+
+function chartBattleEndMs(context) {
+  const ms = Date.parse(String(context?.battle_end_iso || context?.battle_ended_at || ""));
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function chartCurrentRows(payload) {
   return (payload?.rows || [])
-    .map(chartNormalizeClanRow)
+    .map(row => chartNormalizeClanRow(row, payload))
     .filter(row => row.clan_name && row.rank !== null && row.points !== null)
     .sort((a, b) => a.rank - b.rank);
 }
 
-function chartNormalizeClanRow(row) {
+function chartNormalizeClanRow(row, context) {
+  const explicitT = chartFinite(row.t);
+  let t = explicitT === null
+    ? Date.parse(String(row.fetched_at || row.snapshot_at || row.generated_at || "")) || Date.parse(String(row.last_updated || "")) || 0
+    : explicitT;
+  const endMs = chartBattleEndMs(context);
+  if (endMs !== null && t > endMs) t = endMs;
+
   return {
-    t: Date.parse(String(row.fetched_at || row.snapshot_at || row.generated_at || "")) || Date.parse(String(row.last_updated || "")) || 0,
+    t,
     rank: chartFinite(row.rank) === null ? null : Math.round(Number(row.rank)),
     clan_name: String(row.clan_name || row.clan || row.name || row.tag || "").replace(/★/g, "").trim(),
-    points: chartFinite(row.points ?? row.total_points)
+    points: chartFinite(row.points ?? row.total_points),
+    icon_url: row.icon_url || row.logo_url || row.image_url || null,
+    icon_id: row.icon_id || row.logo_id || null
   };
+}
+
+async function loadChartDuckImage(env) {
+  if (!chartDuckImagePromise) {
+    const siteBase = String(env.SITE_BASE_URL || "https://c0ld-clan.com").replace(/\/$/, "");
+    const duckUrl = `${siteBase}/assets/duck-race-duck.png`;
+    chartDuckImagePromise = fetch(duckUrl, {
+      headers: { Accept: "image/png,image/*;q=0.8", "User-Agent": "c0ld-Discord-Chart-Worker" },
+      cf: { cacheTtl: 3600, cacheEverything: true }
+    })
+      .then(async response => response.ok ? decodeHistoryPng(new Uint8Array(await response.arrayBuffer())) : null)
+      .catch(() => null);
+  }
+  return chartDuckImagePromise;
+}
+
+async function chartLoadClanLogos(rows, env) {
+  const entries = await Promise.all((rows || []).map(async row => {
+    const url = chartClanIconUrl(row, env);
+    if (!url) return null;
+    const image = await loadHistoryAvatar(url).catch(() => null);
+    return image ? [chartNormalize(row.clan_name), image] : null;
+  }));
+  return new Map(entries.filter(Boolean));
+}
+
+function chartClanIconUrl(row, env) {
+  const url = row?.icon_url || row?.logo_url || row?.image_url;
+  if (url) return absoluteProfileAssetUrl(url, env);
+  const iconId = String(row?.icon_id || row?.logo_id || "").trim();
+  return iconId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(iconId)}` : null;
 }
 
 function chartFinite(value) {
@@ -1109,29 +1254,53 @@ function chartFillEllipse(canvas, cx, cy, rx, ry, rgba) {
   }
 }
 
-function chartDrawDuck(canvas, fonts, row, index, x, y, scale, color) {
+function chartDrawDuck(canvas, fonts, row, index, x, y, scale, color, options = {}) {
   const duck = [255, 242, 0, 255];
   const outline = color.black;
   const red = [255, 45, 32, 255];
   const accent = chartClanColor(row.clan_name, index);
-  const sx = value => x + value * scale;
-  const sy = value => y + value * scale;
-  chartFillEllipse(canvas, sx(0), sy(28), 54 * scale, 34 * scale, outline);
-  chartFillEllipse(canvas, sx(0), sy(25), 48 * scale, 29 * scale, duck);
-  chartFillCircle(canvas, sx(33), sy(-4), 31 * scale, outline);
-  chartFillCircle(canvas, sx(33), sy(-4), 25 * scale, duck);
-  chartFillEllipse(canvas, sx(70), sy(8), 24 * scale, 12 * scale, outline);
-  chartFillEllipse(canvas, sx(72), sy(8), 18 * scale, 8 * scale, red);
-  chartFillCircle(canvas, sx(43), sy(-13), 5 * scale, outline);
-  canvas.fillRect(sx(-25), sy(16), 26 * scale, 26 * scale, outline);
-  canvas.fillRect(sx(-22), sy(19), 20 * scale, 20 * scale, accent);
+  const duckWidth = 148 * scale;
+  const duckHeight = 134 * scale;
+  const duckLeft = x - duckWidth / 2;
+  const duckTop = y - duckHeight / 2;
 
-  const labelWidth = 148;
-  canvas.fillRect(x - labelWidth / 2, y - 76 * scale, labelWidth, 43, [13, 17, 23, 235]);
-  canvas.fillRect(x - labelWidth / 2, y - 76 * scale, labelWidth, 1, color.line);
-  canvas.drawFontText(fonts.bold, `#${row.rank} ${row.clan_name}`, x - labelWidth / 2 + 8, y - 68 * scale, 13, color.white, labelWidth - 16);
-  const next = row.rank && index >= 0 ? null : null;
-  canvas.drawFontText(fonts.regular, shortNumber(row.points), x - labelWidth / 2 + 8, y - 50 * scale, 11, color.muted, labelWidth - 16);
+  if (options.duckImage) {
+    canvas.drawImageStretch(options.duckImage, duckLeft, duckTop, duckWidth, duckHeight);
+  } else {
+    const sx = value => x + value * scale;
+    const sy = value => duckTop + 74 * scale + value * scale;
+    chartFillEllipse(canvas, sx(0), sy(28), 54 * scale, 34 * scale, outline);
+    chartFillEllipse(canvas, sx(0), sy(25), 48 * scale, 29 * scale, duck);
+    chartFillCircle(canvas, sx(33), sy(-4), 31 * scale, outline);
+    chartFillCircle(canvas, sx(33), sy(-4), 25 * scale, duck);
+    chartFillEllipse(canvas, sx(70), sy(8), 24 * scale, 12 * scale, outline);
+    chartFillEllipse(canvas, sx(72), sy(8), 18 * scale, 8 * scale, red);
+    chartFillCircle(canvas, sx(43), sy(-13), 5 * scale, outline);
+    canvas.fillRect(sx(-25), sy(16), 26 * scale, 26 * scale, outline);
+    canvas.fillRect(sx(-22), sy(19), 20 * scale, 20 * scale, accent);
+  }
+
+  if (options.logo) {
+    const logoSize = 34 * scale;
+    const logoLeft = duckLeft + 44 * scale;
+    const logoTop = duckTop + 74 * scale;
+    canvas.fillRect(logoLeft - 1, logoTop - 1, logoSize + 2, logoSize + 2, [13, 17, 23, 255]);
+    canvas.drawImageCover(options.logo, logoLeft, logoTop, logoSize, logoSize, false);
+  }
+
+  const labelText = `#${row.rank} ${row.clan_name}`;
+  const labelWidth = Math.min(150, Math.max(126, canvas.measureFontText(fonts.bold, labelText, 13) + 14));
+  const labelTop = duckTop - 50 * scale - (options.labelLift || 0);
+  canvas.fillRect(x - labelWidth / 2, labelTop, labelWidth, 42, [13, 17, 23, 225]);
+  canvas.fillRect(x - labelWidth / 2, labelTop, labelWidth, 1, color.line);
+  const fittedLabel = canvas.fitFontText(fonts.bold, historyCardText(labelText, 10000), 13, labelWidth - 14);
+  const labelTextWidth = canvas.measureFontText(fonts.bold, fittedLabel, 13);
+  canvas.drawFontText(fonts.bold, fittedLabel, x - labelTextWidth / 2, labelTop + 7, 13, color.white, labelWidth - 14);
+  const lead = options.lead;
+  const stats = `${shortNumber(row.points)}${lead !== null && lead !== undefined ? ` - +${shortNumber(lead)}` : ""}`;
+  const fittedStats = canvas.fitFontText(fonts.regular, historyCardText(stats, 10000), 11, labelWidth - 14);
+  const statsWidth = canvas.measureFontText(fonts.regular, fittedStats, 11);
+  canvas.drawFontText(fonts.regular, fittedStats, x - statsWidth / 2, labelTop + 25, 11, color.muted, labelWidth - 14);
 }
 
 function chartDate(value) {
@@ -1970,6 +2139,29 @@ class HistoryPixelCanvas {
         this.pixels[offset++] = rgba[1];
         this.pixels[offset++] = rgba[2];
         this.pixels[offset++] = rgba[3] ?? 255;
+      }
+    }
+  }
+
+  drawImageStretch(image, x, y, width, height) {
+    if (!image?.width || !image?.height || !image?.pixels) return;
+    const ratio = this.pixelRatio;
+    x *= ratio;
+    y *= ratio;
+    width *= ratio;
+    height *= ratio;
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const sourceX = (px + 0.5) / width * image.width - 0.5;
+        const sourceY = (py + 0.5) / height * image.height - 0.5;
+        const sample = historyBilinearRgba(image, sourceX, sourceY);
+        this.blendPixel(
+          Math.trunc(x + px),
+          Math.trunc(y + py),
+          sample,
+          255
+        );
       }
     }
   }
