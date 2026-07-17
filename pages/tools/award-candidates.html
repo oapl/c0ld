@@ -171,6 +171,17 @@ function norm(value){return String(value??"").trim().toLowerCase().replace(/[^a-
 function clanKey(value){const key=norm(value);return key==="cold"?"c0ld":key}
 function isTrackedClanName(value){const key=clanKey(value||CLAN);return !key||key===clanKey(CLAN)}
 function importedRowIsTrackedClan(row){const clan=String(row?.clan_name||row?.clan||"").trim();return Boolean(clan)&&isTrackedClanName(clan)}
+function explicitHistoryClan(row){return String(row?.clan_name||row?.source_clan||row?.clan||"").trim()}
+function importedNonTrackedBattleKeys(rows,currentKey){
+  return new Set((Array.isArray(rows)?rows:[])
+    .filter(row=>battleKeyOf(row)!==currentKey)
+    .filter(row=>{
+      const clan=explicitHistoryClan(row);
+      return clan&&!isTrackedClanName(clan);
+    })
+    .map(battleKeyOf)
+    .filter(Boolean));
+}
 function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
 function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
 function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
@@ -650,9 +661,16 @@ function mergeHistoryRecords(rows){
 
 function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null,trackedPrior=[]){
   const currentKey=norm(currentBattleKey);
+  const imported=(Array.isArray(imports)?imports:[])
+    .filter(row=>battleKeyOf(row)!==currentKey);
+  const importedNonC0ldKeys=importedNonTrackedBattleKeys(imported,currentKey);
   const trackedRows=(Array.isArray(detail?.battles)?detail.battles:[])
     .filter(row=>battleKeyOf(row)!==currentKey)
-    .filter(row=>isTrackedClanName(row.clan_name||row.source_clan||CLAN))
+    .filter(row=>{
+      const clan=explicitHistoryClan(row);
+      if(clan)return isTrackedClanName(clan);
+      return !importedNonC0ldKeys.has(battleKeyOf(row));
+    })
     .map(row=>normalizeHistoryRecord({...row,clan_name:row.clan_name||row.source_clan||CLAN},"profile"));
   const trackedPriorRows=(Array.isArray(trackedPrior)?trackedPrior:[])
     .filter(row=>row.key!==currentKey)
@@ -665,8 +683,6 @@ function summarizeHistory(detail,imports,currentBattleKey,referenceTime=null,tra
       global_rank:row.globalRank,
       final_points:row.points
     },row.source||"tracked"));
-  const imported=(Array.isArray(imports)?imports:[])
-    .filter(row=>battleKeyOf(row)!==currentKey);
   const importedC0ldRows=imported
     .filter(importedRowIsTrackedClan)
     .map(row=>normalizeHistoryRecord(row,row.source||"import"));
