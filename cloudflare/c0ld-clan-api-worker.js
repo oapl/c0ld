@@ -1708,9 +1708,9 @@ async function handleCwBotHistoryImport(request, env) {
   }
 
   const preventOverwrite = historyImportFlag(env, "CW_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
-  const [trackedKeys, existingKeys] = await Promise.all([
+  const [trackedKeys, existingRowsByKey] = await Promise.all([
     trackedHistoryBattleKeySet(env, userId),
-    preventOverwrite ? externalHistoryBattleKeySet(env, userId, "cw_bot") : Promise.resolve(new Set())
+    preventOverwrite ? externalHistoryBattleRowMap(env, userId, "cw_bot") : Promise.resolve(new Map())
   ]);
   const importedAt = new Date().toISOString();
   const importStatus = String(env.CW_BOT_IMPORT_AUTO_APPROVE || "false").toLowerCase() === "true"
@@ -1726,6 +1726,7 @@ async function handleCwBotHistoryImport(request, env) {
     ocrText
   ].join("\n"));
   const rows = [];
+  const backfills = [];
   const skipped = [];
   const queuedKeys = new Set();
 
@@ -1743,16 +1744,6 @@ async function handleCwBotHistoryImport(request, env) {
       continue;
     }
 
-    if (trackedKeys.has(battleKeyValue)) {
-      skipped.push({ reason: "already_tracked", battle_name: battleName, battle_key: battleKeyValue });
-      continue;
-    }
-
-    if (preventOverwrite && existingKeys.has(battleKeyValue)) {
-      skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
-      continue;
-    }
-
     const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.global_rank ?? parsedRow.g_rank ?? parsedRow.rank);
     const totalRanked = toNumber(parsedRow.total_ranked ?? parsedRow.total_global_players ?? parsedRow.total);
     const clanRank = toNumber(parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.final_clan_rank);
@@ -1766,7 +1757,7 @@ async function handleCwBotHistoryImport(request, env) {
       continue;
     }
 
-    rows.push({
+    const row = {
       source: "cw_bot",
       user_id: userId,
       username: stringOrNull(parsed.player_name || username),
@@ -1795,16 +1786,43 @@ async function handleCwBotHistoryImport(request, env) {
         parser: parseSource,
         discord_author_id: authorId,
         discord_message_id: messageRef.messageId,
+        already_tracked: trackedKeys.has(battleKeyValue),
         parsed_row: parsedRow
       },
       raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
       updated_at: importedAt
-    });
+    };
+
+    if (preventOverwrite) {
+      const existingRow = existingRowsByKey.get(battleKeyValue);
+      if (existingRow) {
+        const patch = externalHistoryBackfillPatch(existingRow, row);
+        if (patch) {
+          backfills.push({ existing: existingRow, patch });
+        } else {
+          skipped.push({ reason: "already_imported_complete", battle_name: battleName, battle_key: battleKeyValue });
+        }
+        queuedKeys.add(battleKeyValue);
+        continue;
+      }
+    }
+
+    rows.push(row);
     queuedKeys.add(battleKeyValue);
   }
 
   if (rows.length) {
     await supabaseUpsertChunked(env, EXTERNAL_PLAYER_HISTORY_TABLE, rows, "source,user_id,battle_key", 100);
+  }
+
+  const backfilledRows = [];
+  for (const item of backfills) {
+    await supabasePatch(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+      source: `eq.${item.existing.source || "cw_bot"}`,
+      user_id: `eq.${userId}`,
+      battle_key: `eq.${item.existing.battle_key}`
+    }, item.patch);
+    backfilledRows.push({ ...item.existing, ...item.patch });
   }
 
   return json({
@@ -1816,8 +1834,9 @@ async function handleCwBotHistoryImport(request, env) {
     parsed_count: parsed.rows.length,
     status: importStatus,
     imported_count: rows.length,
+    backfilled_count: backfilledRows.length,
     skipped_count: skipped.length,
-    rows: rows.map(normalizeExternalHistoryOutput),
+    rows: rows.concat(backfilledRows).map(normalizeExternalHistoryOutput),
     skipped
   });
 }
@@ -1870,9 +1889,9 @@ async function handleBigBotHistoryImport(request, env) {
   }
 
   const preventOverwrite = historyImportFlag(env, "BIG_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
-  const [trackedKeys, existingKeys] = await Promise.all([
+  const [trackedKeys, existingRowsByKey] = await Promise.all([
     trackedHistoryBattleKeySet(env, userId),
-    preventOverwrite ? externalHistoryBattleKeySet(env, userId, "big_bot") : Promise.resolve(new Set())
+    preventOverwrite ? externalHistoryBattleRowMap(env, userId, "big_bot") : Promise.resolve(new Map())
   ]);
   const importedAt = new Date().toISOString();
   const importStatus = historyImportFlag(env, "BIG_BOT_IMPORT_AUTO_APPROVE", "CW_BOT_IMPORT_AUTO_APPROVE")
@@ -1887,6 +1906,7 @@ async function handleBigBotHistoryImport(request, env) {
     messageText
   ].join("\n"));
   const rows = [];
+  const backfills = [];
   const skipped = [];
   const queuedKeys = new Set();
 
@@ -1904,16 +1924,6 @@ async function handleBigBotHistoryImport(request, env) {
       continue;
     }
 
-    if (trackedKeys.has(battleKeyValue)) {
-      skipped.push({ reason: "already_tracked", battle_name: battleName, battle_key: battleKeyValue });
-      continue;
-    }
-
-    if (preventOverwrite && existingKeys.has(battleKeyValue)) {
-      skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
-      continue;
-    }
-
     const finalRank = toNumber(parsedRow.final_rank ?? parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.rank);
     const clanRank = toNumber(parsedRow.clan_rank ?? parsedRow.member_rank ?? parsedRow.final_rank ?? parsedRow.rank);
     const globalRank = toNumber(parsedRow.global_rank ?? parsedRow.g_rank ?? parsedRow.final_global_rank);
@@ -1925,7 +1935,7 @@ async function handleBigBotHistoryImport(request, env) {
       continue;
     }
 
-    rows.push({
+    const row = {
       source: "big_bot",
       user_id: userId,
       username: stringOrNull(parsed.player_name || username),
@@ -1956,16 +1966,43 @@ async function handleBigBotHistoryImport(request, env) {
         discord_message_id: messageRef.messageId,
         page: parsed.page,
         pages: parsed.pages,
+        already_tracked: trackedKeys.has(battleKeyValue),
         parsed_row: parsedRow
       },
       raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
       updated_at: importedAt
-    });
+    };
+
+    if (preventOverwrite) {
+      const existingRow = existingRowsByKey.get(battleKeyValue);
+      if (existingRow) {
+        const patch = externalHistoryBackfillPatch(existingRow, row);
+        if (patch) {
+          backfills.push({ existing: existingRow, patch });
+        } else {
+          skipped.push({ reason: "already_imported_complete", battle_name: battleName, battle_key: battleKeyValue });
+        }
+        queuedKeys.add(battleKeyValue);
+        continue;
+      }
+    }
+
+    rows.push(row);
     queuedKeys.add(battleKeyValue);
   }
 
   if (rows.length) {
     await supabaseUpsertChunked(env, EXTERNAL_PLAYER_HISTORY_TABLE, rows, "source,user_id,battle_key", 100);
+  }
+
+  const backfilledRows = [];
+  for (const item of backfills) {
+    await supabasePatch(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+      source: `eq.${item.existing.source || "big_bot"}`,
+      user_id: `eq.${userId}`,
+      battle_key: `eq.${item.existing.battle_key}`
+    }, item.patch);
+    backfilledRows.push({ ...item.existing, ...item.patch });
   }
 
   return json({
@@ -1980,8 +2017,9 @@ async function handleBigBotHistoryImport(request, env) {
     parsed_count: parsed.rows.length,
     status: importStatus,
     imported_count: rows.length,
+    backfilled_count: backfilledRows.length,
     skipped_count: skipped.length,
-    rows: rows.map(normalizeExternalHistoryOutput),
+    rows: rows.concat(backfilledRows).map(normalizeExternalHistoryOutput),
     skipped
   });
 }
@@ -8923,12 +8961,43 @@ async function trackedHistoryBattleKeySet(env, userId) {
   return keys;
 }
 
-async function externalHistoryBattleKeySet(env, userId, source = "") {
+async function externalHistoryBattleRowMap(env, userId, source = "") {
   const params = {
-    select: "battle_key",
+    select: [
+      "source",
+      "user_id",
+      "username",
+      "battle_key",
+      "battle_name",
+      "clan_name",
+      "final_rank",
+      "total_ranked",
+      "clan_rank",
+      "total_clan_members",
+      "global_rank",
+      "total_global_players",
+      "final_points",
+      "final_snapshot_at",
+      "status",
+      "is_manual_import",
+      "import_batch_id",
+      "imported_from",
+      "discord_guild_id",
+      "discord_channel_id",
+      "discord_message_id",
+      "discord_message_url",
+      "image_url",
+      "raw_text",
+      "raw_payload",
+      "raw_fingerprint",
+      "created_at",
+      "updated_at",
+      "reviewed_at",
+      "reviewed_by"
+    ].join(","),
     user_id: `eq.${userId}`,
     status: "neq.rejected",
-    limit: "1000"
+    limit: "2000"
   };
 
   if (source) params.source = `eq.${source}`;
@@ -8937,8 +9006,75 @@ async function externalHistoryBattleKeySet(env, userId, source = "") {
     if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
     throw err;
   });
+  const map = new Map();
 
-  return new Set(rows.map(row => externalBattleKey(row.battle_key)).filter(Boolean));
+  for (const row of rows) {
+    const key = externalBattleKey(row.battle_key || row.battle_name);
+    if (key && !map.has(key)) map.set(key, row);
+  }
+
+  return map;
+}
+
+const EXTERNAL_HISTORY_DATA_FIELDS = [
+  "username",
+  "battle_name",
+  "clan_name",
+  "final_rank",
+  "total_ranked",
+  "clan_rank",
+  "total_clan_members",
+  "global_rank",
+  "total_global_players",
+  "final_points",
+  "final_snapshot_at"
+];
+
+const EXTERNAL_HISTORY_METADATA_FIELDS = [
+  "import_batch_id",
+  "imported_from",
+  "discord_guild_id",
+  "discord_channel_id",
+  "discord_message_id",
+  "discord_message_url",
+  "image_url",
+  "raw_text",
+  "raw_fingerprint"
+];
+
+function isBlankExternalHistoryValue(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return value.trim() === "";
+  return false;
+}
+
+function externalHistoryBackfillPatch(existing, incoming) {
+  const patch = {};
+  let hasDataBackfill = false;
+
+  for (const field of EXTERNAL_HISTORY_DATA_FIELDS) {
+    if (
+      isBlankExternalHistoryValue(existing?.[field]) &&
+      !isBlankExternalHistoryValue(incoming?.[field])
+    ) {
+      patch[field] = incoming[field];
+      hasDataBackfill = true;
+    }
+  }
+
+  if (!hasDataBackfill) return null;
+
+  for (const field of EXTERNAL_HISTORY_METADATA_FIELDS) {
+    if (
+      isBlankExternalHistoryValue(existing?.[field]) &&
+      !isBlankExternalHistoryValue(incoming?.[field])
+    ) {
+      patch[field] = incoming[field];
+    }
+  }
+
+  patch.updated_at = incoming.updated_at || new Date().toISOString();
+  return patch;
 }
 
 function normalizeExternalHistoryOutput(row) {
@@ -9042,6 +9178,29 @@ async function supabaseDelete(env, tableName, filters) {
   if (!res.ok) {
     const text = await res.text();
     throw httpError(502, `Supabase delete failed for ${tableName} (${res.status}): ${text}`);
+  }
+}
+
+async function supabasePatch(env, tableName, filters, patch) {
+  const url = supabaseUrl(env, tableName);
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const res = await fetch(url.toString(), {
+    method: "PATCH",
+    headers: supabaseHeaders(env, {
+      Prefer: "return=minimal"
+    }),
+    body: JSON.stringify(patch)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw httpError(502, `Supabase patch failed for ${tableName} (${res.status}): ${text}`);
   }
 }
 

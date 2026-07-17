@@ -1907,10 +1907,13 @@ async function submitHistoryImport(){
     const payload=await res.json().catch(()=>({}));
     if(!res.ok||payload.ok===false)throw new Error(payload.message||`Import failed with HTTP ${res.status}`);
 
+    const importedCount=payload.imported_count||0;
+    const backfilledCount=payload.backfilled_count||0;
     const statusText=payload.status==="approved"
-      ? `${payload.imported_count||0} new battle${payload.imported_count===1?"":"s"} imported.`
-      : `${payload.imported_count||0} new battle${payload.imported_count===1?"":"s"} saved as pending review.`;
-    const skippedText=payload.skipped_count?` ${payload.skipped_count} duplicate/known row${payload.skipped_count===1?"":"s"} skipped.`:"";
+      ? `${importedCount} new history row${importedCount===1?"":"s"} imported.`
+      : `${importedCount} new history row${importedCount===1?"":"s"} saved as pending review.`;
+    const backfilledText=backfilledCount?` ${backfilledCount} existing row${backfilledCount===1?"":"s"} backfilled.`:"";
+    const skippedText=payload.skipped_count?` ${payload.skipped_count} complete/known row${payload.skipped_count===1?"":"s"} skipped.`:"";
     const hasMorePages=activeHistoryImporter==="big_bot"&&Number(payload.page)<Number(payload.pages);
     const pageText=activeHistoryImporter==="big_bot"&&payload.page&&payload.pages
       ? ` Page ${payload.page} of ${payload.pages} processed.`
@@ -1921,11 +1924,11 @@ async function submitHistoryImport(){
 
     await refreshExternalHistory();
     render();
-    setHistoryImportStatus(statusText+skippedText+pageText+nextPageText,"success-text");
+    setHistoryImportStatus(statusText+backfilledText+skippedText+pageText+nextPageText,"success-text");
 
     if(hasMorePages){
       button.disabled=false;
-    }else if(payload.status==="approved"&&payload.imported_count){
+    }else if(payload.status==="approved"&&(importedCount||backfilledCount)){
       setTimeout(closeHistoryImportModal,1200);
     }else{
       button.disabled=false;
