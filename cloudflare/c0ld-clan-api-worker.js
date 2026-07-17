@@ -1585,8 +1585,11 @@ async function handleCwBotHistoryImport(request, env) {
     }, 422);
   }
 
-  const trackedKeys = await trackedHistoryBattleKeySet(env, userId);
-  const existingKeys = await externalHistoryBattleKeySet(env, userId, "cw_bot");
+  const preventOverwrite = historyImportFlag(env, "CW_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
+  const [trackedKeys, existingKeys] = await Promise.all([
+    trackedHistoryBattleKeySet(env, userId),
+    preventOverwrite ? externalHistoryBattleKeySet(env, userId) : Promise.resolve(new Set())
+  ]);
   const importedAt = new Date().toISOString();
   const importStatus = String(env.CW_BOT_IMPORT_AUTO_APPROVE || "false").toLowerCase() === "true"
     ? "approved"
@@ -1602,6 +1605,7 @@ async function handleCwBotHistoryImport(request, env) {
   ].join("\n"));
   const rows = [];
   const skipped = [];
+  const queuedKeys = new Set();
 
   for (const parsedRow of parsed.rows) {
     const battleName = cleanExternalBattleName(parsedRow.battle_name || parsedRow.battle || parsedRow.label);
@@ -1612,12 +1616,17 @@ async function handleCwBotHistoryImport(request, env) {
       continue;
     }
 
+    if (queuedKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "duplicate_in_message", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
     if (trackedKeys.has(battleKeyValue)) {
       skipped.push({ reason: "already_tracked", battle_name: battleName, battle_key: battleKeyValue });
       continue;
     }
 
-    if (existingKeys.has(battleKeyValue)) {
+    if (preventOverwrite && existingKeys.has(battleKeyValue)) {
       skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
       continue;
     }
@@ -1661,7 +1670,7 @@ async function handleCwBotHistoryImport(request, env) {
       raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
       updated_at: importedAt
     });
-    existingKeys.add(battleKeyValue);
+    queuedKeys.add(battleKeyValue);
   }
 
   if (rows.length) {
@@ -1673,6 +1682,7 @@ async function handleCwBotHistoryImport(request, env) {
     user_id: userId,
     source: "cw_bot",
     discord_message_url: canonicalDiscordMessageUrl(messageRef),
+    prevent_overwrite: preventOverwrite,
     parsed_count: parsed.rows.length,
     status: importStatus,
     imported_count: rows.length,
@@ -1729,7 +1739,11 @@ async function handleBigBotHistoryImport(request, env) {
     throw httpError(400, `That Big Bot history belongs to ${parsed.player_name}, not ${username}.`);
   }
 
-  const existingKeys = await externalHistoryBattleKeySet(env, userId, "big_bot");
+  const preventOverwrite = historyImportFlag(env, "BIG_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
+  const [trackedKeys, existingKeys] = await Promise.all([
+    trackedHistoryBattleKeySet(env, userId),
+    preventOverwrite ? externalHistoryBattleKeySet(env, userId) : Promise.resolve(new Set())
+  ]);
   const importedAt = new Date().toISOString();
   const importStatus = historyImportFlag(env, "BIG_BOT_IMPORT_AUTO_APPROVE", "CW_BOT_IMPORT_AUTO_APPROVE")
     ? "approved"
@@ -1744,6 +1758,7 @@ async function handleBigBotHistoryImport(request, env) {
   ].join("\n"));
   const rows = [];
   const skipped = [];
+  const queuedKeys = new Set();
 
   for (const parsedRow of parsed.rows) {
     const battleName = cleanExternalBattleName(parsedRow.battle_name || parsedRow.battle || parsedRow.label);
@@ -1754,7 +1769,17 @@ async function handleBigBotHistoryImport(request, env) {
       continue;
     }
 
-    if (existingKeys.has(battleKeyValue)) {
+    if (queuedKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "duplicate_in_message", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    if (trackedKeys.has(battleKeyValue)) {
+      skipped.push({ reason: "already_tracked", battle_name: battleName, battle_key: battleKeyValue });
+      continue;
+    }
+
+    if (preventOverwrite && existingKeys.has(battleKeyValue)) {
       skipped.push({ reason: "already_imported", battle_name: battleName, battle_key: battleKeyValue });
       continue;
     }
@@ -1799,7 +1824,7 @@ async function handleBigBotHistoryImport(request, env) {
       raw_fingerprint: `${rawFingerprintBase}:${battleKeyValue}`,
       updated_at: importedAt
     });
-    existingKeys.add(battleKeyValue);
+    queuedKeys.add(battleKeyValue);
   }
 
   if (rows.length) {
@@ -1814,6 +1839,7 @@ async function handleBigBotHistoryImport(request, env) {
     page: parsed.page,
     pages: parsed.pages,
     discord_message_url: canonicalDiscordMessageUrl(messageRef),
+    prevent_overwrite: preventOverwrite,
     parsed_count: parsed.rows.length,
     status: importStatus,
     imported_count: rows.length,
@@ -8636,14 +8662,17 @@ async function trackedHistoryBattleKeySet(env, userId) {
   return keys;
 }
 
-async function externalHistoryBattleKeySet(env, userId, source) {
-  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+async function externalHistoryBattleKeySet(env, userId, source = "") {
+  const params = {
     select: "battle_key",
-    source: `eq.${source}`,
     user_id: `eq.${userId}`,
     status: "neq.rejected",
     limit: "1000"
-  }).catch(err => {
+  };
+
+  if (source) params.source = `eq.${source}`;
+
+  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, params).catch(err => {
     if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
     throw err;
   });

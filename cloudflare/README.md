@@ -204,6 +204,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CW_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated allowlist of Discord channel IDs accepted for CW_Bot imports. |
 | `CW_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Defaults to `false`; when `true`, imports require `INGEST_ADMIN_TOKEN`. |
 | `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_external_player_history` until reviewed. |
+| `CW_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in either bot's imported history. Set to `false` to allow the CW_Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
 | `OPENAI_API_KEY` | Optional secret. Enables image OCR when the CW_Bot message is image-only. |
 | `CW_BOT_OCR_MODEL` | Optional. Model used for OCR. Defaults to `gpt-5.6`. |
 | `BIG_BOT_IMPORT_ENABLED` | Optional. Enables text-only Big Bot history imports. Falls back to `CW_BOT_IMPORT_ENABLED` when unset. |
@@ -212,6 +213,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `BIG_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated Big Bot channel allowlist. Falls back to `CW_BOT_IMPORT_CHANNEL_IDS`. |
 | `BIG_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Falls back to `CW_BOT_IMPORT_REQUIRE_ADMIN`. |
 | `BIG_BOT_IMPORT_AUTO_APPROVE` | Optional. Falls back to `CW_BOT_IMPORT_AUTO_APPROVE`. |
+| `BIG_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in either bot's imported history. Set to `false` to allow the Big Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 

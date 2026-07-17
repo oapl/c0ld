@@ -52,7 +52,7 @@
     .history-line-title{font-weight:700;text-align:left;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .history-line-date{text-align:left;color:var(--muted);font-size:10px;line-height:1.25;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .history-line-data{display:grid;flex:0 0 auto;align-items:center;justify-content:end;gap:0;min-width:0}
-    .history-line-data-clan{grid-template-columns:48px 92px 58px}
+    .history-line-data-clan{grid-template-columns:48px 54px 92px 58px}
     .history-line-data-league{grid-template-columns:52px 40px 42px 58px}
     .history-line-data-leaderboard{grid-template-columns:104px 58px}
     .history-line-chip{min-width:0;padding:0 4px;text-align:center;border-left:1px solid rgba(139,148,158,.28)}
@@ -114,7 +114,7 @@
     @media(max-width:520px){
       .history-line{grid-template-columns:1fr;gap:7px}
       .history-line-data{width:100%;justify-content:stretch}
-      .history-line-data-clan{grid-template-columns:repeat(3,minmax(0,1fr))}
+      .history-line-data-clan{grid-template-columns:repeat(4,minmax(0,1fr))}
       .history-line-data-league{grid-template-columns:repeat(4,minmax(0,1fr))}
       .history-line-data-leaderboard{grid-template-columns:repeat(2,minmax(0,1fr))}
     }
@@ -1105,10 +1105,15 @@ function clanPlacementKey(row){
   return normalize(stripClanPrefix(row?.battle||row?.battle_key||row?.label||row?.battle_name||row?.battle_display_name||"",row));
 }
 
+function isImportedClanPlacement(row){
+  const source=String(row?.source||"").toLowerCase();
+  return Boolean(row?.imported_from)||source==="cw_bot"||source==="big_bot";
+}
+
 function clanPlacementPriority(row){
-  if(String(row?.source||"").toLowerCase()==="big_bot")return 3;
-  if(row?.imported_from||String(row?.source||"").toLowerCase()==="cw_bot")return 1;
-  return 2;
+  if(!isImportedClanPlacement(row))return 3;
+  if(String(row?.source||"").toLowerCase()==="big_bot")return 2;
+  return 1;
 }
 
 function mergeClanPlacementRows(...lists){
@@ -1131,6 +1136,48 @@ function mergeClanPlacementRows(...lists){
   return[...map.values()];
 }
 
+function placementMatchKeys(row){
+  const ignored=new Set(["clanbattle","globalleaderboard","leaderboard"]);
+  return new Set([
+    row?.battle,
+    row?.battle_key,
+    row?.label,
+    row?.battle_display_name,
+    row?.event_name,
+    row?.leaderboard_name
+  ].map(value=>normalize(stripClanPrefix(value,row))).filter(key=>key&&!ignored.has(key)));
+}
+
+function placementDayKeys(row){
+  return new Set([
+    row?.period_start_at,
+    row?.period_end_at,
+    row?.battle_start_iso,
+    row?.battle_end_iso,
+    row?.first_snapshot_at,
+    row?.final_snapshot_at
+  ].map(value=>{
+    const date=new Date(value||0);
+    return Number.isNaN(date.getTime())?"":date.toISOString().slice(0,10);
+  }).filter(Boolean));
+}
+
+function matchingLeaderboardSummary(row,leaderboards){
+  const rowKeys=placementMatchKeys(row);
+  const nameMatch=(leaderboards||[]).find(candidate=>
+    [...placementMatchKeys(candidate)].some(key=>rowKeys.has(key))
+  );
+  if(nameMatch)return nameMatch;
+
+  // Imported rows use the Discord message timestamp, not the historical battle date.
+  if(isImportedClanPlacement(row))return null;
+
+  const rowDays=placementDayKeys(row);
+  return(leaderboards||[]).find(candidate=>
+    [...placementDayKeys(candidate)].some(day=>rowDays.has(day))
+  )||null;
+}
+
 function clanPlacementSummaries(){
   const tracked=clanHistoryBattles().map(battle=>{
     const row=recalcBattle(battle);
@@ -1147,7 +1194,17 @@ function clanPlacementSummaries(){
     };
   }).filter(row=>row.final_rank!==null||row.final_points!==null);
 
-  return mergeClanPlacementRows(tracked,normalizeExternalClanSummaryRows(profile?.external_clan_summaries||[]));
+  const merged=mergeClanPlacementRows(tracked,normalizeExternalClanSummaryRows(profile?.external_clan_summaries||[]));
+  const leaderboards=leaderboardHistorySummaries();
+
+  return merged.map(row=>{
+    const leaderboard=matchingLeaderboardSummary(row,leaderboards);
+    return{
+      ...row,
+      global_rank:finite(row.global_rank)??finite(leaderboard?.final_rank),
+      total_global_players:finite(row.total_global_players)??finite(leaderboard?.total_ranked)
+    };
+  });
 }
 
 function leagueHistorySummaries(){
@@ -1415,6 +1472,7 @@ function historyLineRows(row,type){
     const clanName=placementName(row,type);
     lines.push(["Clan",clanName?String(clanName).toUpperCase():"—"]);
     lines.push(["Rank",rankDisplay(row.final_rank,row.total_ranked,true)]);
+    lines.push(["G Rank",rankDisplay(row.global_rank,row.total_global_players,true)]);
     lines.push(["Pts",fmtShort(row.final_points)]);
   }else if(type==="league"){
     lines.push(["League",placementName(row,type)||"—"]);
