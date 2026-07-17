@@ -243,12 +243,18 @@ function rowTopFor(index,count){
   return start+((end-start)/(rows-1))*row;
 }
 function clamp01(value){return Math.max(0,Math.min(1,value))}
-function raceLeftFor(place,count,timelineProgress){
-  const fieldPosition=count<=1?1:(count-place)/(count-1);
+function smoothstep(value){const t=clamp01(value);return t*t*(3-2*t)}
+function raceLeftFor(point,place,count,timelineProgress,minPoints,maxPoints,finalRank){
+  const rankPosition=count<=1?1:(count-place)/(count-1);
+  const pointPosition=maxPoints>minPoints?clamp01((point.points-minPoints)/(maxPoints-minPoints)):rankPosition;
+  const livePosition=pointPosition*.72+rankPosition*.28;
+  const finalPosition=count<=1?1:(count-Math.max(1,finalRank||place))/(count-1);
+  const finishBlend=smoothstep((timelineProgress-.74)/.20);
+  const fieldPosition=livePosition+(finalPosition-livePosition)*finishBlend;
   const finishSpread=count<=10?15:30;
-  const startLeft=7+fieldPosition*5;
-  const finishLeft=101+fieldPosition*finishSpread;
-  return startLeft+(finishLeft-startLeft)*clamp01(timelineProgress);
+  const baseLeft=7+94*clamp01(timelineProgress);
+  const fieldSpread=5+(finishSpread-5)*clamp01(timelineProgress);
+  return baseLeft+fieldPosition*fieldSpread;
 }
 function replayScaleText(start,end){
   const minutesPerSecond=((end-start)/60000)/(REPLAY_DURATION_MS/1000);
@@ -350,11 +356,14 @@ function paintReplayFrame(state,elapsed){
   const replayTime=state.startTime+(state.endTime-state.startTime)*progress;
   const live=state.racers.map((racer,index)=>({racer,index,point:pointAt(racer.timeline,replayTime,state.startTime)}));
   live.sort((a,b)=>b.point.points-a.point.points||a.racer.endRank-b.racer.endRank||a.index-b.index);
-  const desiredLeft=live.map((_,placeIndex)=>raceLeftFor(placeIndex+1,state.racers.length,progress));
+  const livePoints=live.map(item=>item.point.points);
+  const minPoints=Math.min(...livePoints);
+  const maxPoints=Math.max(...livePoints);
+  const desiredLeft=live.map((item,placeIndex)=>raceLeftFor(item.point,placeIndex+1,state.racers.length,progress,minPoints,maxPoints,item.racer.endRank));
   const resolvedLeft=new Array(live.length);
   const progressDelta=Math.max(0,progress-(state.motionProgress??progress));
-  const minimumAdvance=progressDelta*90;
-  const maximumAdvance=progressDelta*130;
+  const minimumAdvance=progressDelta*65;
+  const maximumAdvance=progressDelta*150;
   for(let placeIndex=0;placeIndex<live.length;placeIndex+=1){
     const refs=state.elements[live[placeIndex].index];
     if(!Number.isFinite(refs?.left)){
