@@ -220,6 +220,8 @@ th{color:var(--muted);font-size:13px;text-align:left}
   </section>
 </main>
 
+<script src="assets/protected-access.js"></script>
+<script src="assets/protected-page.js"></script>
 <script>
 const PET_CATEGORIES=["Gargantuans","Titanics","Huges"];
 const PET_VARIANTS=["Normal","Golden","Shiny","Rainbow","Golden Shiny","Rainbow Shiny"];
@@ -492,7 +494,16 @@ function init(){
   document.getElementById("reset-form").addEventListener("click",()=>{if(confirm("Reset application review form?"))location.reload()});
   updateAll();
 }
-init();
+C0LD_PROTECTED.requirePage({
+  page:"application-review",
+  title:"WIP Access Required",
+  status:"Checking Discord WIP access..."
+})
+  .then(init)
+  .catch(error=>{
+    if(error?.auth)return;
+    console.error(error);
+  });
 </script>
 <script src="assets/site-announcement.js"></script>
 </body>

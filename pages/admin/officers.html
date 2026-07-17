@@ -364,8 +364,8 @@
 
   <main>
     <section id="auth-panel" class="panel auth-panel">
-      <h2 class="panel-title">Officer Access Required</h2>
-      <p id="auth-status" class="muted">Checking Discord officer access...</p>
+      <h2 class="panel-title">WIP Access Required</h2>
+      <p id="auth-status" class="muted">Checking Discord WIP access...</p>
       <div class="auth-actions">
         <a id="discord-login-btn" class="auth-button" href="#">Sign in with Discord</a>
         <button id="discord-logout-btn" type="button">Clear Session</button>
@@ -385,12 +385,11 @@
         </div>
         <div class="panel-body">
           <p class="muted">
-            Officer-only area for C0LD management tools. The frontend is ready for the Officers role gate;
-            backend officer tools can be wired in after the auth Worker supports the <strong>officers</strong> page key.
+            Work-in-progress area for C0LD management tools. This page now uses the WIP role gate.
           </p>
           <div class="tag-row">
             <span class="tag ready">Page key: officers</span>
-            <span class="tag ready">Role ID: 1489032325009506456</span>
+            <span class="tag ready">Role ID: 1500890188526915695</span>
             <span id="worker-rule-tag" class="tag pending">Worker role check pending</span>
           </div>
         </div>
@@ -439,9 +438,9 @@
                 <td>officers.html is present and uses protected-access.js.</td>
               </tr>
               <tr>
-                <td>Officer role</td>
+                <td>WIP role</td>
                 <td>Ready</td>
-                <td>Expected Discord role ID: 1489032325009506456.</td>
+                <td>Expected Discord role ID: 1500890188526915695.</td>
               </tr>
               <tr>
                 <td>Worker route</td>
@@ -459,7 +458,7 @@
   <script>
     const PROTECTED_API_BASE = "https://c0ldauth.opal-dde.workers.dev/auth/discord/callback";
     const PAGE_KEY = "officers";
-    const OFFICERS_ROLE_ID = "1489032325009506456";
+    const WIP_ROLE_ID = "1500890188526915695";
 
     function setStatus(message, kind = "info") {
       const el = document.getElementById("status");
@@ -478,23 +477,23 @@
       const tag = document.getElementById("worker-rule-tag");
       const requiredRoles = auth?.session?.required_roles || [];
 
-      if (requiredRoles.includes(OFFICERS_ROLE_ID)) {
+      if (requiredRoles.includes(WIP_ROLE_ID)) {
         tag.className = "tag ready";
-        tag.textContent = "Worker requiring Officers role";
+        tag.textContent = "Worker requiring WIP role";
         return;
       }
 
       tag.className = "tag pending";
-      tag.textContent = "Worker not wired for Officers role yet";
+      tag.textContent = "Worker not wired for WIP role yet";
       setStatus(
-        "Frontend Officers page loaded. The auth Worker still needs the officers page key mapped to role 1489032325009506456 before this is a real officer-only gate.",
+        "Frontend Officers page loaded. The auth Worker still needs the officers page key mapped to role 1500890188526915695 before this is a real WIP-only gate.",
         "warn"
       );
     }
 
     async function refreshOfficers() {
       hideStatus();
-      setStatus("Officer page frontend is ready. Backend officer tools are not wired yet.", "info");
+      setStatus("Officers page frontend is ready. Backend officer tools are not wired yet.", "info");
     }
 
     async function initPage() {

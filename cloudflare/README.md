@@ -44,13 +44,33 @@ Edit `PAGE_ACCESS_JSON` in Worker variables:
 
 ```json
 {
+  "officer-tools": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "cw-import-gaps": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "award-candidates": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "wip-tools": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "archive-tools": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
   "servers": {
     "mode": "any",
-    "roles": ["1489032328855556096", "1501632370082840576"]
+    "roles": ["1500890188526915695"]
   },
   "macros": {
     "mode": "any",
-    "roles": ["1489032328855556096", "1501632370082840576"]
+    "roles": ["1500890188526915695"]
   }
 }
 ```
@@ -647,7 +667,7 @@ c0ld Supabase project, deploy it, and re-enable the cron.
 ## PS99 hourly inventory gains
 
 `inventory-detector-worker.js` stores normalized Big Games inventory snapshots
-and powers `Cinnamowopal.html`. Apply `supabase/inventory-detector.sql`, deploy
+and powers `cinnamowopal.html`. Apply `supabase/inventory-detector.sql`, deploy
 the Worker using `wrangler-inventory-detector.toml.example`, and add the
 `SUPABASE_SERVICE_KEY` secret. The example cron runs at minute 17 of every hour,
 using 24 inventory reads per day. The 55-minute minimum interval also protects

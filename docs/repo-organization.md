@@ -33,15 +33,16 @@ These remain available by direct URL after deploy:
 
 | Source file | Public URL | Purpose |
 |---|---|---|
-| `pages/analytics/activity.html` | `activity.html` | Member activity chart |
+| `pages/analytics/activity.html` | `activity.html` | WIP member activity chart |
 | `pages/admin/application-review.html` | `application-review.html` | Application review helper |
-| `pages/admin/officers.html` | `officers.html` | Officer-only tooling |
+| `pages/admin/officers.html` | `officers.html` | WIP officer tooling |
 | `pages/servers/server.html` | `server.html` | Individual server detail page |
 | `pages/servers/servers.html` | `servers.html` | Approved server list and submissions |
-| `pages/tools/macros.html` | `macros.html` | Macros page |
+| `pages/site/home-draft.html` | `home-draft.html` | WIP home page draft |
+| `pages/tools/macros.html` | `macros.html` | WIP macros page |
 | `pages/legacy/players.html` | `players.html` | Older member grid |
 | `pages/legacy/clan-filter.html` | `clan-filter.html` | Older c0ld-only filter page |
-| `pages/legacy/Cinnamowopal.html` | `Cinnamowopal.html` | Inventory detector page |
+| `pages/legacy/cinnamowopal.html` | `cinnamowopal.html` | WIP inventory detector page |
 
 ## League Pages
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>c0ld Home Preview</title>
+  <title>c0ld Home Draft</title>
   <meta name="description" content="Prototype c0ld clan command center with live activity, PS99 status, battle movement, and member spotlights." />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -752,12 +752,12 @@
 <body>
   <header>
     <div class="brand header-inner">
-      <a class="site-logo-link" href="home-preview.html" aria-label="c0ld home preview">
+      <a class="site-logo-link" href="home-draft.html" aria-label="c0ld home draft">
         <img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
       </a>
     </div>
     <nav class="menu-bar">
-      <a class="menu-btn active" href="home-preview.html">c0ld Home</a>
+      <a class="menu-btn active" href="home-draft.html">c0ld Home Draft</a>
       <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
       <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
       <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
@@ -967,6 +967,8 @@
 
   </main>
 
+  <script src="assets/protected-access.js"></script>
+  <script src="assets/protected-page.js"></script>
   <script>
     const API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev";
     const CLAN_NAME = "c0ld";
@@ -1840,13 +1842,26 @@
       }
     }
 
-    restoreAwardDisplayCache();
-    els.wrappedDuckPlay.addEventListener("click", playWrappedDuckRace);
-    load();
-    loadWrapped();
-    window.setInterval(updateCountdown, 1000);
-    window.setInterval(load, REFRESH_MS);
-    window.setInterval(loadWrapped, WRAPPED_REFRESH_MS);
+    async function initProtectedPage() {
+      await C0LD_PROTECTED.requirePage({
+        page: "home-draft",
+        title: "WIP Access Required",
+        status: "Checking Discord WIP access..."
+      });
+      restoreAwardDisplayCache();
+      els.wrappedDuckPlay.addEventListener("click", playWrappedDuckRace);
+      load();
+      loadWrapped();
+      window.setInterval(updateCountdown, 1000);
+      window.setInterval(load, REFRESH_MS);
+      window.setInterval(loadWrapped, WRAPPED_REFRESH_MS);
+    }
+
+    initProtectedPage().catch(error => {
+      if (error?.auth) return;
+      els.errorBanner.textContent = `Could not start the home draft: ${error.message || error}`;
+      els.errorBanner.style.display = "block";
+    });
   </script>
 </body>
 </html>

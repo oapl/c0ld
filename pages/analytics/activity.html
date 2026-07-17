@@ -400,6 +400,8 @@ canvas{
   </section>
 </main>
 
+<script src="assets/protected-access.js"></script>
+<script src="assets/protected-page.js"></script>
 <script>
 const CURRENT_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const HISTORY_API = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
@@ -1454,7 +1456,17 @@ window.addEventListener("resize", () => {
   window.__activityResize = setTimeout(drawChart, 100);
 });
 
-loadData();
+C0LD_PROTECTED.requirePage({
+  page: "activity",
+  title: "WIP Access Required",
+  status: "Checking Discord WIP access..."
+})
+  .then(loadData)
+  .catch(error => {
+    if (error?.auth) return;
+    console.error(error);
+    setStatus(error.message || String(error), true);
+  });
 </script>
 </body>
 </html>

@@ -73,6 +73,7 @@ jobs:
               '  <script src="assets/clan-switcher.js"></script>\n',
               '  <script src="assets/header-logo-lock.js"></script>\n',
               '  <script src="assets/site-announcement.js"></script>\n',
+              '  <script src="assets/protected-menus.js"></script>\n',
               '  <script src="assets/site-enhancements.js"></script>\n',
               '  <script src="assets/site-enhancements-compat.js"></script>\n',
               '  <script src="assets/clan-page-links.js"></script>\n',

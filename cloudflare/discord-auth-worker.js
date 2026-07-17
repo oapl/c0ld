@@ -1,8 +1,35 @@
 const DISCORD_API = "https://discord.com/api/v10";
-const DEFAULT_ROLES = ["1489032328855556096", "1501632370082840576"];
+const MEMBER_ROLES = ["1489032328855556096", "1501632370082840576"];
+const OFFICER_ROLE_ID = "1489032325009506456";
+const WIP_ROLE_ID = "1500890188526915695";
+const OFFICER_ROLES = [OFFICER_ROLE_ID];
+const WIP_ROLES = [WIP_ROLE_ID];
 const DEFAULT_PAGE_ACCESS = {
-  servers: { mode: "any", roles: DEFAULT_ROLES },
-  macros: { mode: "any", roles: DEFAULT_ROLES }
+  "officer-tools": { mode: "any", roles: OFFICER_ROLES },
+  "cw-import-gaps": { mode: "any", roles: OFFICER_ROLES },
+  "award-candidates": { mode: "any", roles: OFFICER_ROLES },
+
+  "wip-tools": { mode: "any", roles: WIP_ROLES },
+  "archive-tools": { mode: "any", roles: WIP_ROLES },
+  activity: { mode: "any", roles: WIP_ROLES },
+  officers: { mode: "any", roles: WIP_ROLES },
+  "application-review": { mode: "any", roles: WIP_ROLES },
+  cinnamowopal: { mode: "any", roles: WIP_ROLES },
+  "home-draft": { mode: "any", roles: WIP_ROLES },
+  servers: { mode: "any", roles: WIP_ROLES },
+  macros: { mode: "any", roles: WIP_ROLES },
+
+  server: { mode: "any", roles: WIP_ROLES },
+  players: { mode: "any", roles: WIP_ROLES },
+  "clan-filter": { mode: "any", roles: WIP_ROLES },
+  "c0ld-leagues": { mode: "any", roles: WIP_ROLES },
+  "c0ld-league-matches": { mode: "any", roles: WIP_ROLES },
+  "top-leagues": { mode: "any", roles: WIP_ROLES },
+  league: { mode: "any", roles: WIP_ROLES },
+  "league-profile": { mode: "any", roles: WIP_ROLES },
+  "yamo1-9": { mode: "any", roles: WIP_ROLES },
+  layok: { mode: "any", roles: WIP_ROLES },
+  wmsy: { mode: "any", roles: WIP_ROLES }
 };
 
 const FALLBACK_SERVERS = {
@@ -399,7 +426,10 @@ function getPageAccess(env) {
   if (!env.PAGE_ACCESS_JSON) return DEFAULT_PAGE_ACCESS;
 
   try {
-    return JSON.parse(env.PAGE_ACCESS_JSON);
+    return {
+      ...DEFAULT_PAGE_ACCESS,
+      ...JSON.parse(env.PAGE_ACCESS_JSON)
+    };
   } catch {
     return DEFAULT_PAGE_ACCESS;
   }
@@ -419,13 +449,25 @@ function hasRoleAccess(userRoles, rule) {
 }
 
 function normalizePage(value) {
-  const page = String(value || "servers").toLowerCase();
-  return page === "macros" ? "macros" : "servers";
+  const raw = String(value || "servers")
+    .toLowerCase()
+    .replace(/^https?:\/\/[^/]+/i, "")
+    .split("#")[0]
+    .split("?")[0]
+    .split("/")
+    .pop()
+    .replace(/\.html$/i, "")
+    .trim();
+  if (!raw) return "servers";
+  if (raw === "cinnamowopal" || raw === "cinnamowopal.html") return "cinnamowopal";
+  if (raw === "home-preview") return "home-draft";
+  return raw;
 }
 
 function defaultReturnTo(page, env) {
   const base = String(env.SITE_BASE_URL || "https://oapl.github.io/c0ld").replace(/\/$/, "");
-  return `${base}/${page === "macros" ? "macros.html" : "servers.html"}`;
+  const normalized = normalizePage(page);
+  return `${base}/${normalized}.html`;
 }
 
 function safeReturnTo(value, page, env) {

@@ -88,8 +88,6 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
         <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
         <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
         <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
-        <a class="menu-btn active" href="award-candidates.html">Award Candidates</a>
-        <a class="menu-btn" href="cw-import-gaps.html">CW History Gaps</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
         <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
@@ -133,6 +131,8 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
   </section>
 </main>
 
+<script src="assets/protected-access.js"></script>
+<script src="assets/protected-page.js"></script>
 <script>
 const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
 const CLAN="c0ld";
@@ -1029,13 +1029,22 @@ async function loadCandidates(){
 els.loadBtn.addEventListener("click",loadCandidates);
 els.battleSelect.addEventListener("change",loadCandidates);
 
-Promise.all([loadPlayers(),loadBattles()])
-  .then(loadCandidates)
-  .catch(error=>{
-    console.error(error);
-    showError(error.message||String(error));
-    setStatus("Page setup failed.");
+async function initPage(){
+  await C0LD_PROTECTED.requirePage({
+    page:"award-candidates",
+    title:"Officer Access Required",
+    status:"Checking Discord officer access..."
   });
+  await Promise.all([loadPlayers(),loadBattles()]);
+  await loadCandidates();
+}
+
+initPage().catch(error=>{
+  if(error?.auth)return;
+  console.error(error);
+  showError(error.message||String(error));
+  setStatus("Page setup failed.");
+});
 </script>
 </body>
 </html>

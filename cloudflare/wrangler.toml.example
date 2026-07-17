@@ -28,13 +28,53 @@ DISCORD_BOT_TOKEN = ""
 # - all: user must have every listed role
 PAGE_ACCESS_JSON = '''
 {
+  "officer-tools": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "cw-import-gaps": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "award-candidates": {
+    "mode": "any",
+    "roles": ["1489032325009506456"]
+  },
+  "wip-tools": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "archive-tools": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "activity": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "officers": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "application-review": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "cinnamowopal": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
+  "home-draft": {
+    "mode": "any",
+    "roles": ["1500890188526915695"]
+  },
   "servers": {
     "mode": "any",
-    "roles": ["1489032328855556096", "1501632370082840576"]
+    "roles": ["1500890188526915695"]
   },
   "macros": {
     "mode": "any",
-    "roles": ["1489032328855556096", "1501632370082840576"]
+    "roles": ["1500890188526915695"]
   }
 }
 '''

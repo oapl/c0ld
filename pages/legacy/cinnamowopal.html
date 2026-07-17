@@ -157,6 +157,8 @@
     </div>
   </main>
 
+  <script src="assets/protected-access.js"></script>
+  <script src="assets/protected-page.js"></script>
   <script>
     const WORKER_BASE = "https://inventory-detector-worker.opal-dde.workers.dev";
     const USER_ID = "109818";
@@ -293,8 +295,20 @@
     $("hours").addEventListener("change",refreshAll);
     $("category").addEventListener("change",event=>setCategory(event.target.value));
     $("search").addEventListener("input",()=>{ state.inventoryLimit=250; render(); });
-    refreshAll();
-    setInterval(refreshAll,5*60*1000);
+    C0LD_PROTECTED.requirePage({
+      page:"cinnamowopal",
+      title:"WIP Access Required",
+      status:"Checking Discord WIP access..."
+    })
+      .then(()=>{
+        refreshAll();
+        setInterval(refreshAll,5*60*1000);
+      })
+      .catch(error=>{
+        if(error?.auth)return;
+        console.error(error);
+        setNotice(`Could not start monitor: ${esc(error.message || error)}`,"error");
+      });
   </script>
 </body>
 </html>
