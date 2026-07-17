@@ -48,6 +48,7 @@ th,td{padding:10px 12px;border-bottom:1px solid rgba(48,54,61,.75);text-align:le
 th{color:var(--muted);font-size:12px;font-weight:700;background:rgba(13,17,23,.35)}
 td.rank{width:66px;color:var(--muted);font-weight:800}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.import-cell{min-width:320px}
 .player{display:flex;gap:10px;align-items:center;min-width:0}
 .avatar{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
 .name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -56,10 +57,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 .status.approved{color:var(--good)}
 .status.pending{color:var(--warn)}
 .status.other{color:var(--blue)}
+.link-wrap{display:flex;flex-direction:column;gap:5px}
+.link-input{width:100%;min-width:280px;padding:7px 9px;font-size:13px}
+.row-note{font-size:11px;color:var(--muted);min-height:14px}
+.row-note.good{color:var(--good)}.row-note.bad{color:var(--bad)}.row-note.warn{color:var(--warn)}
 tr.missing-row{background:rgba(248,81,73,.035)}
 .empty,.error{padding:24px;color:var(--muted)}
 .error{display:none;margin-bottom:18px;border:1px solid rgba(248,81,73,.45);border-radius:8px;background:rgba(248,81,73,.1);color:#ffb4ad}
-@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.segmented{width:100%}.segmented button{flex:1}table{min-width:760px}.table-shell{overflow-x:auto}}
+@media(max-width:900px){.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.segmented{width:100%}.segmented button{flex:1}table{min-width:980px}.table-shell{overflow-x:auto}}
 @media(max-width:560px){main{padding:16px}.cards{grid-template-columns:1fr}.hero{align-items:stretch}}
 </style>
 </head>
@@ -101,6 +106,7 @@ tr.missing-row{background:rgba(248,81,73,.035)}
         <button id="missing-btn" class="active" type="button">Missing</button>
         <button id="all-btn" type="button">All</button>
       </div>
+      <button id="import-all-btn" type="button">Import All Links</button>
       <button id="copy-btn" type="button">Copy Missing</button>
       <button id="refresh-btn" type="button">Refresh</button>
     </div>
@@ -135,6 +141,9 @@ let playerById=new Map();
 let payload=null;
 let viewMode="missing";
 let loading=false;
+let importing=false;
+let linkDrafts=new Map();
+let importResults=new Map();
 
 const els={
   status:document.getElementById("status"),
@@ -143,6 +152,7 @@ const els={
   searchInput:document.getElementById("search-input"),
   missingBtn:document.getElementById("missing-btn"),
   allBtn:document.getElementById("all-btn"),
+  importAllBtn:document.getElementById("import-all-btn"),
   copyBtn:document.getElementById("copy-btn"),
   refreshBtn:document.getElementById("refresh-btn"),
   membersCard:document.getElementById("members-card"),
@@ -160,6 +170,26 @@ function shortNum(value){const number=Number(value);if(!Number.isFinite(number))
 function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
 function setStatus(text){els.status.textContent=text}
 function showError(message){els.error.textContent=message;els.error.style.display=message?"block":"none"}
+function rowId(row){return String(row?.user_id||"")}
+function storageKey(row){
+  const battle=payload?.battle_key||els.battleSelect.value||"battle";
+  return "cw-history-link:"+battle+":"+rowId(row);
+}
+function draftLink(row){
+  const key=storageKey(row);
+  if(!key)return"";
+  return linkDrafts.has(key)?linkDrafts.get(key):(localStorage.getItem(storageKey(row))||"");
+}
+function setDraftLink(row,value){
+  const key=storageKey(row);
+  if(!key)return;
+  const clean=String(value||"").trim();
+  linkDrafts.set(key,clean);
+  if(clean)localStorage.setItem(storageKey(row),clean);
+  else localStorage.removeItem(storageKey(row));
+}
+function resultFor(row){return importResults.get(storageKey(row))||null}
+function setResult(row,type,text){if(rowId(row))importResults.set(storageKey(row),{type,text})}
 
 async function fetchJson(url,fallback){
   try{
@@ -226,6 +256,20 @@ function statusText(row){
   return status.charAt(0).toUpperCase()+status.slice(1);
 }
 
+function linkCell(row){
+  if(hasCwBotHistory(row)){
+    const link=row.cw_bot_import?.discord_message_url;
+    return link?'<a href="'+esc(link)+'" target="_blank" rel="noopener">Imported message</a>':'<span class="subtle">Already has CW_Bot history</span>';
+  }
+
+  const result=resultFor(row);
+  const note=result?'<div class="row-note '+esc(result.type||"")+'">'+esc(result.text||"")+'</div>':'<div class="row-note">Paste this player&apos;s CW_Bot message link.</div>';
+  return '<div class="link-wrap">'+
+    '<input class="link-input" data-user-id="'+esc(rowId(row))+'" placeholder="Discord message link..." value="'+esc(draftLink(row))+'" '+(importing?'disabled':'')+'>'+
+    note+
+  '</div>';
+}
+
 function visibleRows(){
   const query=String(els.searchInput.value||"").trim().toLowerCase();
   const rows=Array.isArray(payload?.rows)?payload.rows:[];
@@ -263,14 +307,26 @@ function render(){
     return;
   }
 
-  els.tableWrap.innerHTML='<table><thead><tr><th>Rank</th><th>Player</th><th class="num">Points</th><th>CW_Bot</th></tr></thead><tbody>'+
+  els.tableWrap.innerHTML='<table><thead><tr><th>Rank</th><th>Player</th><th class="num">Points</th><th>CW_Bot</th><th>CW_Bot Message Link</th></tr></thead><tbody>'+
     rows.map(row=>'<tr class="'+(hasCwBotHistory(row)?'':'missing-row')+'">'+
       '<td class="rank">#'+esc(row.rank||"-")+'</td>'+
       '<td><div class="player"><img class="avatar" src="'+esc(avatarFor(row))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="name" href="'+esc(profileHref(row))+'">'+esc(playerName(row))+'</a></div></td>'+
       '<td class="num">'+esc(shortNum(row.total_points))+'</td>'+
       '<td><span class="status '+statusClass(row)+'">'+esc(statusText(row))+'</span></td>'+
+      '<td class="import-cell">'+linkCell(row)+'</td>'+
     '</tr>').join("")+
   '</tbody></table>';
+  attachLinkInputs();
+}
+
+function attachLinkInputs(){
+  const rowsById=new Map((Array.isArray(payload?.rows)?payload.rows:[]).map(row=>[rowId(row),row]));
+  els.tableWrap.querySelectorAll(".link-input").forEach(input=>{
+    input.addEventListener("input",()=>{
+      const row=rowsById.get(String(input.dataset.userId||""));
+      if(row)setDraftLink(row,input.value);
+    });
+  });
 }
 
 async function loadGaps(){
@@ -279,6 +335,7 @@ async function loadGaps(){
   showError("");
   setStatus("Checking final roster against CW_Bot imports.");
   els.refreshBtn.disabled=true;
+  els.importAllBtn.disabled=true;
   try{
     const battle=els.battleSelect.value||battles[0]?.battle||battles[0]?.battle_key;
     if(!battle)throw new Error("No battle is available.");
@@ -300,8 +357,78 @@ async function loadGaps(){
     setStatus("CW import gap check failed.");
   }finally{
     els.refreshBtn.disabled=false;
+    els.importAllBtn.disabled=false;
     loading=false;
   }
+}
+
+async function importOne(row,messageUrl){
+  const response=await fetch(API+"/api/external-history/cwbot/import",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      user_id:row.user_id,
+      username:playerName(row),
+      message_url:messageUrl
+    })
+  });
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok||body.ok===false)throw new Error(body.message||("HTTP "+response.status));
+  return body;
+}
+
+function importSuccessText(result){
+  const imported=result.imported_count||0;
+  const backfilled=result.backfilled_count||0;
+  if(imported&&result.status==="approved")return imported+" imported";
+  if(imported)return imported+" pending";
+  if(backfilled)return backfilled+" backfilled";
+  if(result.skipped_count)return result.skipped_count+" skipped";
+  return "Processed";
+}
+
+async function importAllLinks(){
+  if(importing)return;
+  const sourceRows=Array.isArray(payload?.rows)?payload.rows:[];
+  const targets=sourceRows
+    .filter(row=>!hasCwBotHistory(row))
+    .map(row=>({row,link:draftLink(row)}))
+    .filter(item=>item.link);
+
+  if(!targets.length){
+    setStatus("Paste at least one CW_Bot message link first.");
+    return;
+  }
+
+  importing=true;
+  els.importAllBtn.disabled=true;
+  els.refreshBtn.disabled=true;
+  setStatus("Importing "+targets.length.toLocaleString("en-US")+" CW_Bot link"+(targets.length===1?"":"s")+".");
+  for(const item of targets)setResult(item.row,"warn","Queued");
+  render();
+
+  let successCount=0;
+  let failureCount=0;
+  for(const item of targets){
+    setResult(item.row,"warn","Importing...");
+    render();
+    try{
+      const result=await importOne(item.row,item.link);
+      successCount+=1;
+      setResult(item.row,"good",importSuccessText(result));
+      setDraftLink(item.row,"");
+    }catch(error){
+      failureCount+=1;
+      setResult(item.row,"bad",error.message||String(error));
+    }
+    render();
+  }
+
+  importing=false;
+  els.importAllBtn.disabled=false;
+  els.refreshBtn.disabled=false;
+  await loadGaps();
+  setStatus("Import run complete: "+successCount.toLocaleString("en-US")+" succeeded, "+failureCount.toLocaleString("en-US")+" failed.");
 }
 
 async function copyMissing(){
@@ -324,6 +451,7 @@ els.battleSelect.addEventListener("change",loadGaps);
 els.searchInput.addEventListener("input",render);
 els.missingBtn.addEventListener("click",()=>{viewMode="missing";render()});
 els.allBtn.addEventListener("click",()=>{viewMode="all";render()});
+els.importAllBtn.addEventListener("click",importAllLinks);
 els.copyBtn.addEventListener("click",copyMissing);
 
 Promise.all([loadPlayers(),loadBattles()])
