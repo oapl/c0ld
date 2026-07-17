@@ -1125,8 +1125,8 @@
       const snapshotAt = leaderboard?.snapshot_at || globalCurrent?.snapshot_at;
       const bands = [
         { label: "Top 100", min: 1, max: 100 },
-        { label: "Top 500", min: 101, max: 500 },
-        { label: "Top 1,000", min: 501, max: 1000 }
+        { label: "101-500", min: 101, max: 500 },
+        { label: "501-1,000", min: 501, max: 1000 }
       ];
 
       els.wrappedBattle.textContent = prettifyBattle(battleName);
@@ -1134,8 +1134,7 @@
       els.wrappedPlacements.className = "";
       els.wrappedPlacements.innerHTML = bands.map(band => {
         const members = c0ldRows.filter(row => wrappedRank(row) >= band.min && wrappedRank(row) <= band.max);
-        const cumulative = c0ldRows.filter(row => wrappedRank(row) <= band.max).length;
-        const count = band.min === 1 ? `${cumulative} member${cumulative === 1 ? "" : "s"}` : `${cumulative} total`;
+        const count = `${members.length} member${members.length === 1 ? "" : "s"}`;
         return `<div class="wrapped-tier"><div class="wrapped-tier-name">${band.label}</div><div class="wrapped-tier-count">${count}</div><div>${wrappedMemberList(members)}</div></div>`;
       }).join("");
 

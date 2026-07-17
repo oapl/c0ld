@@ -65,10 +65,17 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .custom-player img{width:34px;height:34px;border-radius:7px;object-fit:cover;border:1px solid var(--border);background:var(--panel-2)}
 .custom-name{font-weight:800;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .custom-metric{color:var(--muted);font-size:12px;line-height:1.35}
+.milestone-head,.milestone-row{display:grid;grid-template-columns:110px 96px minmax(0,1fr);gap:16px;align-items:start;padding:12px 16px;border-top:1px solid var(--border)}
+.milestone-head{padding-block:9px;background:var(--panel-2);color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.milestone-name{font-size:14px;font-weight:800}
+.milestone-count{color:var(--link);font-size:14px;font-weight:800}
+.milestone-members{color:var(--muted);font-size:12px;line-height:1.55}
+.milestone-member{color:var(--text);white-space:nowrap}
+.milestone-member+.milestone-member::before{content:" · ";color:var(--muted)}
 .empty,.message{padding:24px;color:var(--muted)}
 .error{padding:14px 16px;margin-bottom:18px;border:1px solid rgba(248,81,73,.45);border-radius:8px;background:rgba(248,81,73,.1);color:#ffb4ad;display:none}
 @media(max-width:1100px){.awards-grid{grid-template-columns:1fr}.custom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-card{border-bottom:1px solid var(--border)}}
-@media(max-width:760px){main{padding:16px}.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.candidate{grid-template-columns:30px 38px minmax(0,1fr);padding:11px}.avatar{width:38px;height:38px}.candidate-top{flex-direction:column;align-items:flex-start;gap:3px}.custom-grid{grid-template-columns:1fr}.custom-card{border-right:0}}
+@media(max-width:760px){main{padding:16px}.cards{grid-template-columns:1fr 1fr}.controls>*{width:100%}.candidate{grid-template-columns:30px 38px minmax(0,1fr);padding:11px}.avatar{width:38px;height:38px}.candidate-top{flex-direction:column;align-items:flex-start;gap:3px}.custom-grid{grid-template-columns:1fr}.custom-card{border-right:0}.milestone-head,.milestone-row{grid-template-columns:82px 82px minmax(0,1fr);gap:10px;padding-inline:14px}}
 @media(max-width:520px){.cards{grid-template-columns:1fr}}
 </style>
 </head>
@@ -129,6 +136,15 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
       <div class="empty">No candidates loaded yet.</div>
     </div>
   </section>
+
+  <section class="section">
+    <div class="section-header">
+      <h2 class="section-title">Milestones</h2>
+      <div id="milestones-meta" class="subtle">Loading global placements.</div>
+    </div>
+    <div class="milestone-head" aria-hidden="true"><span>Placement</span><span>c0ld</span><span>Members in this band</span></div>
+    <div id="milestones-list" class="message">Building c0ld’s Top 100, 101-500, and 501-1,000 report.</div>
+  </section>
 </main>
 
 <script src="assets/protected-access.js"></script>
@@ -157,7 +173,9 @@ const els={
   latestCard:document.getElementById("latest-card"),
   awardsGrid:document.getElementById("awards-grid"),
   customGrid:document.getElementById("custom-grid"),
-  customMeta:document.getElementById("custom-meta")
+  customMeta:document.getElementById("custom-meta"),
+  milestonesMeta:document.getElementById("milestones-meta"),
+  milestonesList:document.getElementById("milestones-list")
 };
 
 function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
@@ -183,6 +201,7 @@ function importedNonTrackedBattleKeys(rows,currentKey){
     .filter(Boolean));
 }
 function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.getTime())?"-":date.toLocaleString()}
+function relativeTime(value){const time=new Date(value||0).getTime();if(!Number.isFinite(time)||!value)return"-";const seconds=Math.round((Date.now()-time)/1000);const future=seconds<0;const absolute=Math.abs(seconds);let amount,unit;if(absolute<60){amount=absolute;unit="sec"}else if(absolute<3600){amount=Math.round(absolute/60);unit="min"}else if(absolute<86400){amount=Math.round(absolute/3600);unit="hr"}else{amount=Math.round(absolute/86400);unit="day"}if(amount!==1)unit+="s";return future?"in "+amount+" "+unit:amount+" "+unit+" ago"}
 function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
 function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
 function fmtScore(value){const number=Number(value);return Number.isFinite(number)?number.toFixed(1):"0.0"}
@@ -996,6 +1015,50 @@ function renderCustom(stats){
   }).join("");
 }
 
+function milestoneRank(row){return finite(row?.global_rank)}
+function milestonePlayerName(row){return row?.username||row?.display_name||(row?.user_id?("user_"+row.user_id):"Unknown player")}
+function milestoneMemberList(rows){
+  if(!rows.length)return '<span class="milestone-members">No c0ld members in this band.</span>';
+  return '<span class="milestone-members">'+rows.map(row=>'<span class="milestone-member">'+esc(milestonePlayerName(row))+' #'+Math.trunc(milestoneRank(row))+'</span>').join(" ")+'</span>';
+}
+function renderMilestones(globalCurrent){
+  const currentRows=Array.isArray(globalCurrent?.rows)?globalCurrent.rows:[];
+  const rows=currentRows
+    .filter(row=>row?.found!==false&&milestoneRank(row)!==null&&milestoneRank(row)<=1000)
+    .sort((a,b)=>milestoneRank(a)-milestoneRank(b));
+  const bands=[
+    {label:"Top 100",min:1,max:100},
+    {label:"101-500",min:101,max:500},
+    {label:"501-1,000",min:501,max:1000}
+  ];
+  const snapshotAt=globalCurrent?.snapshot_at||globalCurrent?.run?.finished_at||globalCurrent?.run?.updated_at;
+  els.milestonesMeta.textContent=snapshotAt?"Global snapshot · "+relativeTime(snapshotAt):"Latest global snapshot";
+  els.milestonesList.className="";
+  els.milestonesList.innerHTML=bands.map(band=>{
+    const members=rows.filter(row=>milestoneRank(row)>=band.min&&milestoneRank(row)<=band.max);
+    const count=members.length+" member"+(members.length===1?"":"s");
+    return '<div class="milestone-row">'+
+      '<div class="milestone-name">'+band.label+'</div>'+
+      '<div class="milestone-count">'+count+'</div>'+
+      '<div>'+milestoneMemberList(members)+'</div>'+
+    '</div>';
+  }).join("");
+}
+async function loadMilestones(){
+  els.milestonesMeta.textContent="Loading global placements.";
+  els.milestonesList.className="message";
+  els.milestonesList.textContent="Building c0ld’s Top 100, 101-500, and 501-1,000 report.";
+  try{
+    const url=new URL(API+"/api/global/current");
+    url.searchParams.set("clan",CLAN);
+    renderMilestones(await fetchJson(url.toString(),{rows:[]}));
+  }catch(error){
+    els.milestonesMeta.textContent="Global placements unavailable.";
+    els.milestonesList.className="message";
+    els.milestonesList.textContent="Milestones are temporarily unavailable: "+(error.message||String(error));
+  }
+}
+
 function renderSummary(effectiveBattle,current,snapshots,stats){
   const battleRow=battles.find(row=>(row.battle||row.battle_key)===effectiveBattle);
   els.battleCard.textContent=battleRow?.display_name||current?.display_name||current?.battle_display_name||effectiveBattle;
@@ -1027,6 +1090,7 @@ async function loadCandidates(){
     renderSummary(effectiveBattle,current,snapshots,stats);
     renderAwards(awardDefinitions(stats));
     renderCustom(stats);
+    await loadMilestones();
     setStatus("Loaded "+stats.length.toLocaleString("en-US")+" players from "+snapshots.length.toLocaleString("en-US")+" snapshots.");
     const url=new URL(location.href);
     if(selected==="current")url.searchParams.delete("battle");else url.searchParams.set("battle",selected);
@@ -1037,6 +1101,8 @@ async function loadCandidates(){
     setStatus("Candidate load failed.");
     els.awardsGrid.innerHTML='<div class="award-card"><div class="empty">No candidates available.</div></div>';
     els.customGrid.innerHTML='<div class="empty">No custom award ideas available.</div>';
+    els.milestonesList.className="message";
+    els.milestonesList.textContent="Milestones unavailable until candidates load.";
   }finally{
     els.loadBtn.disabled=false;
     loading=false;
