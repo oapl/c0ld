@@ -362,6 +362,15 @@ function paintReplayFrame(state,elapsed){
   const livePoints=live.map(item=>item.point.points);
   const minPoints=Math.min(...livePoints);
   const maxPoints=Math.max(...livePoints);
+  const desiredLeft=live.map((item,placeIndex)=>raceLeftFor(item.point,placeIndex+1,state.racers.length,progress,minPoints,maxPoints));
+  const resolvedLeft=new Array(live.length);
+  const rankGap=state.racers.length<=10?.45:.08;
+  for(let placeIndex=live.length-1;placeIndex>=0;placeIndex-=1){
+    const refs=state.elements[live[placeIndex].index];
+    const previous=Number.isFinite(refs?.left)?refs.left:desiredLeft[placeIndex];
+    const behind=placeIndex<live.length-1?resolvedLeft[placeIndex+1]+rankGap:Number.NEGATIVE_INFINITY;
+    resolvedLeft[placeIndex]=Math.max(desiredLeft[placeIndex],previous,behind);
+  }
   const updateLabels=!state.lastLabelUpdate||performance.now()-state.lastLabelUpdate>180||progress>=1;
   live.forEach((item,placeIndex)=>{
     const place=placeIndex+1;
@@ -369,7 +378,8 @@ function paintReplayFrame(state,elapsed){
     const el=refs?.el;
     if(!el)return;
     const gain=item.point.points-item.racer.startPoints;
-    el.style.setProperty("--duck-left",raceLeftFor(item.point,place,state.racers.length,progress,minPoints,maxPoints).toFixed(3)+"%");
+    refs.left=resolvedLeft[placeIndex];
+    el.style.setProperty("--duck-left",refs.left.toFixed(3)+"%");
     const placeChanged=refs.place!==place;
     if(placeChanged){
       refs.place=place;
