@@ -24,6 +24,7 @@ and `top-clan-filter.html` working.
 | `pages/tools/ps99-restart-tracker.html` | `ps99-restart-tracker.html` | PS99 public-server restart detector and confirmed history |
 | `pages/tools/live-clan.html` | `live-clan.html` | Clan Lookup tool |
 | `pages/tools/player-lookup.html` | `player-lookup.html` | Player Lookup tool |
+| `pages/tools/auth.html` | `auth.html` | Discord auth status and role-unlocked menus |
 | `pages/profiles/profile.html` | `profile.html` | Player profile route |
 | `pages/profiles/clan-profile.html` | `clan-profile.html` | Clan profile route |
 

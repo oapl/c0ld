@@ -1,8 +1,8 @@
 (function () {
-  const AUTH_BASE = window.C0LD_AUTH_BASE || "https://c0ldauth.opal-dde.workers.dev";
   const TOKEN_KEY = "c0ld.discord.session";
   const GOLD = "#d29922";
   const GOLD_SOFT = "rgba(210,153,34,.14)";
+  const AUTH_LINK = ["auth.html", "Auth"];
 
   const MENUS = [
     {
@@ -48,8 +48,28 @@
     }
   ];
 
-  function token() {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+  function cleanUrlHash(paramsToRemove) {
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams(url.hash.replace(/^#/, ""));
+    for (const key of paramsToRemove) params.delete(key);
+    const nextHash = params.toString();
+    url.hash = nextHash ? `#${nextHash}` : "";
+    window.history.replaceState(null, "", url.toString());
+  }
+
+  function consumeCallbackToken() {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const sessionToken = params.get("c0ld_token");
+    const denied = params.get("c0ld_auth") === "denied";
+
+    if (sessionToken) {
+      sessionStorage.setItem(TOKEN_KEY, sessionToken);
+      cleanUrlHash(["c0ld_token", "c0ld_page"]);
+    } else if (denied) {
+      cleanUrlHash(["c0ld_auth", "c0ld_page"]);
+    }
+
+    return { token: sessionToken, denied };
   }
 
   function currentFile() {
@@ -65,21 +85,39 @@
     return "menu-btn";
   }
 
-  async function isAllowed(page) {
-    const authToken = token();
-    if (!authToken) return false;
-    try {
-      const url = new URL("/auth/session", AUTH_BASE);
-      url.searchParams.set("page", page);
-      const response = await fetch(url.toString(), {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      const payload = await response.json().catch(() => ({}));
-      return response.ok && payload.allowed === true;
-    } catch {
-      return false;
-    }
+  function toolsMenu(root) {
+    return [...root.querySelectorAll("details.lookup-menu")]
+      .find(details => !details.classList.contains("c0ld-protected-menu")
+        && details.querySelector("summary")?.textContent?.trim().toLowerCase() === "tools");
+  }
+
+  function ensureAuthLink(root) {
+    const menu = toolsMenu(root);
+    const list = menu?.querySelector(".lookup-menu-list");
+    if (!list || list.querySelector('a[href="auth.html"]')) return;
+
+    const klass = buttonClass(root);
+    const link = document.createElement("a");
+    link.className = `${klass} ${currentFile() === AUTH_LINK[0] ? "active" : ""}`.trim();
+    link.href = AUTH_LINK[0];
+    link.textContent = AUTH_LINK[1];
+    list.appendChild(link);
+  }
+
+  function menuHasCurrentFile(menu) {
+    const file = currentFile();
+    return menu.items.some(([href]) => href.toLowerCase() === file);
+  }
+
+  function contextualMenus() {
+    const officer = MENUS.find(menu => menu.id === "officer");
+    const wip = MENUS.find(menu => menu.id === "wip");
+    const archive = MENUS.find(menu => menu.id === "archive");
+
+    if (wip && menuHasCurrentFile(wip)) return [officer, wip].filter(Boolean);
+    if (officer && menuHasCurrentFile(officer)) return [officer];
+    if (archive && menuHasCurrentFile(archive)) return [archive];
+    return [];
   }
 
   function ensureStyles() {
@@ -112,13 +150,16 @@
     `;
   }
 
-  async function renderMenus() {
+  function renderMenus() {
     const root = navRoot();
-    if (!root || root.dataset.protectedMenusLoaded === "1") return;
-    if (!token()) return;
+    if (!root || root.dataset.protectedMenusLoading === "1") return;
 
-    const allowed = await Promise.all(MENUS.map(menu => isAllowed(menu.page)));
-    const visibleMenus = MENUS.filter((_, index) => allowed[index]);
+    consumeCallbackToken();
+    ensureAuthLink(root);
+    root.querySelectorAll(".c0ld-protected-menu").forEach(menu => menu.remove());
+    root.dataset.protectedMenusLoaded = "0";
+
+    const visibleMenus = contextualMenus();
     if (!visibleMenus.length) return;
 
     ensureStyles();
@@ -132,4 +173,9 @@
   } else {
     renderMenus();
   }
+
+  window.C0LD_PROTECTED_MENUS = {
+    render: renderMenus,
+    menus: MENUS
+  };
 })();

@@ -8,6 +8,7 @@ DISCORD_REDIRECT_URI = "https://c0ld-auth.YOUR-SUBDOMAIN.workers.dev/auth/discor
 DISCORD_GUILD_ID = "YOUR_C0LD_DISCORD_SERVER_ID"
 SITE_BASE_URL = "https://oapl.github.io/c0ld"
 SESSION_TTL_SECONDS = "43200"
+AUTH_REQUIRED = "false"
 
 # Optional. If omitted, the Worker uses placeholder rows.
 # Use private storage or a private backend URL here for real protected data.

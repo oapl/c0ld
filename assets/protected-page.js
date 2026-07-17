@@ -65,6 +65,22 @@
 
     if (!content) throw new Error("Protected page content container was not found.");
 
+    if (window.C0LD_AUTH_REQUIRED !== true) {
+      content.hidden = false;
+      if (window.C0LD_AUTH?.consumeCallbackToken) {
+        window.C0LD_AUTH.consumeCallbackToken();
+      }
+      return {
+        allowed: true,
+        reason: "obscurity_mode",
+        session: {
+          page,
+          user: null,
+          required_roles: []
+        }
+      };
+    }
+
     await ensureAccessScript();
     ensureStyles();
 

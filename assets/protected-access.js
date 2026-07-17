@@ -100,6 +100,25 @@
       });
     }
 
+    if (window.C0LD_AUTH_REQUIRED !== true) {
+      setHidden(panelId, true);
+      setHidden(contentId, false);
+      if (login && isConfigured(apiBase)) {
+        login.href = buildLoginUrl(apiBase, page);
+        login.removeAttribute("aria-disabled");
+      }
+      return {
+        allowed: true,
+        reason: "obscurity_mode",
+        session: {
+          page,
+          user: null,
+          required_roles: []
+        },
+        callback
+      };
+    }
+
     if (!isConfigured(apiBase)) {
       setText(statusId, "Discord access is not configured yet. Set PROTECTED_API_BASE to your deployed auth Worker URL.");
       if (login) {
@@ -130,7 +149,9 @@
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok || !payload.allowed) {
-        clearToken();
+        if (res.status === 401 || payload.reason === "invalid_token") {
+          clearToken();
+        }
         setText(statusId, payload.message || "Your Discord session could not access this page.");
         return { allowed: false, reason: payload.reason || "forbidden" };
       }
@@ -148,6 +169,7 @@
 
   window.C0LD_AUTH = {
     clearToken,
+    consumeCallbackToken,
     fetch: authedFetch,
     getToken,
     requireAccess

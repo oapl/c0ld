@@ -5,6 +5,8 @@ const WIP_ROLE_ID = "1500890188526915695";
 const OFFICER_ROLES = [OFFICER_ROLE_ID];
 const WIP_ROLES = [WIP_ROLE_ID];
 const DEFAULT_PAGE_ACCESS = {
+  auth: { mode: "none", roles: [] },
+
   "officer-tools": { mode: "any", roles: OFFICER_ROLES },
   "cw-import-gaps": { mode: "any", roles: OFFICER_ROLES },
   "award-candidates": { mode: "any", roles: OFFICER_ROLES },
@@ -108,6 +110,10 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/auth/session") {
         return handleSession(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/auth/me") {
+        return handleMe(request, env);
       }
 
       if (url.pathname === "/protected/servers") {
@@ -228,8 +234,40 @@ async function handleSession(request, env) {
   }, 200, request, env);
 }
 
+async function handleMe(request, env) {
+  const session = await readSession(request, env);
+  if (!session.allowed) {
+    return json({
+      ok: false,
+      reason: session.reason,
+      message: session.message || "Discord session expired."
+    }, session.status || 401, request, env);
+  }
+
+  const config = getPageAccess(env);
+  const pages = {};
+  for (const page of Object.keys(config)) {
+    pages[page] = hasRoleAccess(session.roles, getAccessRule(env, page));
+  }
+
+  return json({
+    ok: true,
+    user: session.user,
+    role_flags: {
+      officer: session.roles.includes(OFFICER_ROLE_ID),
+      wip: session.roles.includes(WIP_ROLE_ID)
+    },
+    menus: {
+      officer: pages["officer-tools"] === true,
+      wip: pages["wip-tools"] === true,
+      archive: pages["archive-tools"] === true
+    },
+    pages
+  }, 200, request, env);
+}
+
 async function handleProtectedServers(request, env) {
-  const auth = await authorizeRequest(request, env, "servers");
+  const auth = await authorizeProtectedRoute(request, env, "servers");
   if (!auth.allowed) return json({ ok: false, message: "Forbidden" }, auth.status || 403, request, env);
 
   if (request.method === "GET") {
@@ -259,7 +297,7 @@ async function handleProtectedServers(request, env) {
 }
 
 async function handleProtectedMacros(request, env) {
-  const auth = await authorizeRequest(request, env, "macros");
+  const auth = await authorizeProtectedRoute(request, env, "macros");
   if (!auth.allowed) return json({ ok: false, message: "Forbidden" }, auth.status || 403, request, env);
 
   if (request.method !== "GET") {
@@ -268,6 +306,24 @@ async function handleProtectedMacros(request, env) {
 
   const data = await readJsonSource(env.MACROS_DATA_URL, FALLBACK_MACROS);
   return json(data, 200, request, env);
+}
+
+async function authorizeProtectedRoute(request, env, page) {
+  if (hardAuthEnabled(env)) return authorizeRequest(request, env, page);
+
+  return {
+    allowed: true,
+    status: 200,
+    reason: "obscurity_mode",
+    rule: { mode: "none", roles: [] },
+    roles: [],
+    user: {
+      id: "obscurity",
+      username: "obscurity",
+      global_name: "Obscurity Mode",
+      avatar: ""
+    }
+  };
 }
 
 async function authorizeRequest(request, env, page) {
@@ -313,6 +369,39 @@ async function authorizeRequest(request, env, page) {
     status: allowed ? 200 : 403,
     reason: allowed ? "allowed" : "missing_role",
     rule,
+    roles,
+    user: {
+      id: session.sub,
+      username: session.username,
+      global_name: session.global_name,
+      avatar: session.avatar
+    }
+  };
+}
+
+async function readSession(request, env) {
+  requireEnv(env, ["SESSION_SECRET"]);
+  if (env.DISCORD_BOT_TOKEN) requireEnv(env, ["DISCORD_GUILD_ID"]);
+
+  const header = request.headers.get("Authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    return { allowed: false, status: 401, reason: "missing_token", message: "Missing Discord session." };
+  }
+
+  const session = await verifyToken(match[1], env.SESSION_SECRET);
+  if (!session || session.type !== "session" || session.exp < nowSeconds()) {
+    return { allowed: false, status: 401, reason: "invalid_token", message: "Discord session expired." };
+  }
+
+  let roles = Array.isArray(session.roles) ? session.roles.map(String) : [];
+  if (env.DISCORD_BOT_TOKEN) {
+    roles = await fetchCurrentMemberRoles(env, session.sub);
+  }
+
+  return {
+    allowed: true,
+    status: 200,
     roles,
     user: {
       id: session.sub,
@@ -448,8 +537,12 @@ function hasRoleAccess(userRoles, rule) {
   return rule.roles.some(role => userSet.has(role));
 }
 
+function hardAuthEnabled(env) {
+  return String(env.AUTH_REQUIRED || "").trim().toLowerCase() === "true";
+}
+
 function normalizePage(value) {
-  const raw = String(value || "servers")
+  const raw = String(value || "auth")
     .toLowerCase()
     .replace(/^https?:\/\/[^/]+/i, "")
     .split("#")[0]
@@ -458,7 +551,7 @@ function normalizePage(value) {
     .pop()
     .replace(/\.html$/i, "")
     .trim();
-  if (!raw) return "servers";
+  if (!raw) return "auth";
   if (raw === "cinnamowopal" || raw === "cinnamowopal.html") return "cinnamowopal";
   if (raw === "home-preview") return "home-draft";
   return raw;

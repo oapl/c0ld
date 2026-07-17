@@ -25,6 +25,10 @@ wrangler secret put DISCORD_BOT_TOKEN
 
 `DISCORD_BOT_TOKEN` is optional, but recommended if role removals should take effect immediately instead of when the session expires.
 
+`AUTH_REQUIRED=false` leaves the hidden tool routes in temporary obscurity mode.
+Set `AUTH_REQUIRED=true` when you want the Worker data routes to enforce Discord
+role checks again.
+
 Deploy:
 
 ```bash
