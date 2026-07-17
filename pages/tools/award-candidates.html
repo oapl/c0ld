@@ -667,6 +667,68 @@ function avatarFor(stat){return stat.avatar_url||FALLBACK_AVATAR}
 function profileHref(stat){return "player-lookup.html?q="+encodeURIComponent(stat.user_id||playerName(stat))}
 function rankScore(stat,totalPlayers){return stat.finalRank?clamp((totalPlayers-stat.finalRank+1)/Math.max(1,totalPlayers),0,1):0}
 function sortTop(list){return list.sort((a,b)=>b.score-a.score||b.finalPoints-a.finalPoints||(a.finalRank??999999)-(b.finalRank??999999)).slice(0,5)}
+function rankDepthPastTop(rank,totalPlayers){
+  const value=finite(rank);
+  if(!value)return 0;
+  return clamp((value-15)/Math.max(1,totalPlayers-15),0,1);
+}
+function improvedPointLift(stat,history){
+  const previous=finite(history.previousC0ldPoints);
+  if(!previous||previous<=0)return 0;
+  return clamp((stat.finalPoints-previous)/previous,0,2);
+}
+function improvementProfile(stat,totalPlayers,maxCurrentRecovery,maxPoints){
+  const history=historyOf(stat);
+  const previousRank=finite(history.previousC0ldRank);
+  const finalRank=finite(stat.finalRank);
+  const worstRank=finite(stat.worstRank);
+  const previousJump=previousRank&&finalRank?Math.max(0,previousRank-finalRank):0;
+  const currentRecovery=worstRank&&finalRank?Math.max(0,worstRank-finalRank):0;
+  const previousDepth=rankDepthPastTop(previousRank,totalPlayers);
+  const currentDepth=rankDepthPastTop(worstRank,totalPlayers);
+  const pointLift=improvedPointLift(stat,history);
+  const currentLift=maxCurrentRecovery?currentRecovery/Math.max(1,maxCurrentRecovery):0;
+
+  if(previousRank){
+    const eligible=previousRank>15&&previousJump>0;
+    const bottomThreshold=Math.max(16,totalPlayers-14);
+    const previousScore=eligible
+      ? previousJump*(0.75+previousDepth*1.35)+
+        previousDepth*24+
+        (previousRank>=bottomThreshold?14:0)+
+        (finalRank&&finalRank<=15?8:0)+
+        pointLift*5
+      : 0;
+    return {
+      eligible,
+      source:"previous",
+      previousRank,
+      previousJump,
+      currentRecovery,
+      pointLift,
+      score:previousScore+(eligible?currentLift*currentDepth*6:0)
+    };
+  }
+
+  const eligible=currentRecovery>=10;
+  return {
+    eligible,
+    source:"current",
+    previousRank:null,
+    previousJump:0,
+    currentRecovery,
+    pointLift,
+    score:eligible
+      ? (currentRecovery*(0.65+currentDepth*1.35)+currentDepth*12+(stat.totalGain/Math.max(1,maxPoints))*3)*0.75
+      : 0
+  };
+}
+function improvementPointChip(stat){
+  const history=historyOf(stat);
+  const lift=improvedPointLift(stat,history);
+  if(lift>0)return {text:"pts +"+Math.round(lift*100)+"% vs prev",tone:"good"};
+  return {text:"+"+shortNum(stat.totalGain)+" pts"};
+}
 
 function awardDefinitions(stats){
   const players=stats.filter(stat=>stat.finalPoints>0);
@@ -691,36 +753,11 @@ function awardDefinitions(stats){
   })));
 
   const improved=sortTop(players
-    .filter(stat=>{
-      const history=historyOf(stat);
-      const previousJump=history.previousC0ldRank&&stat.finalRank?history.previousC0ldRank-stat.finalRank:0;
-      const currentRecovery=stat.worstRank&&stat.finalRank?stat.worstRank-stat.finalRank:0;
-      return previousJump>0||currentRecovery>0;
+    .map(stat=>{
+      const improvement=improvementProfile(stat,totalPlayers,maxCurrentRecovery,maxPoints);
+      return {...stat,improvement,score:improvement.score};
     })
-    .map(stat=>({
-      ...stat,
-      score:(()=>{
-        const history=historyOf(stat);
-        const previousRank=history.previousC0ldRank;
-        const previousJump=previousRank&&stat.finalRank?Math.max(0,previousRank-stat.finalRank):0;
-        const currentRecovery=stat.worstRank&&stat.finalRank?Math.max(0,stat.worstRank-stat.finalRank):0;
-        const previousWeakness=previousRank?clamp((previousRank-15)/Math.max(1,totalPlayers-15),0,1):0.25;
-        const bottomThreshold=Math.max(16,totalPlayers-14);
-        const bottomToTopBonus=previousRank>=bottomThreshold&&stat.finalRank&&stat.finalRank<=15?85:0;
-        const crossedTop15=previousRank&&previousRank>15&&stat.finalRank&&stat.finalRank<=15?32:0;
-        const pointLift=history.previousC0ldPoints
-          ? clamp((stat.finalPoints-history.previousC0ldPoints)/Math.max(1,history.previousC0ldPoints),0,2)*8
-          : 0;
-        return (
-          previousJump*11+
-          (currentRecovery/maxCurrentRecovery)*20*previousWeakness+
-          bottomToTopBonus+
-          crossedTop15+
-          rankScore(stat,totalPlayers)*10+
-          pointLift
-        );
-      })()
-    })));
+    .filter(stat=>stat.improvement.eligible));
 
   let rookies=players.filter(stat=>{
     const history=historyOf(stat);
@@ -770,16 +807,17 @@ function awardDefinitions(stats){
     },
     {
       title:"Most Improved",
-      note:"Previous-war jump plus real current-war recovery.",
-      weight:"prior jump + recovery",
+      note:"Previous c0ld rank jump first; current climb only when needed.",
+      weight:"rank improvement",
       items:improved,
       metrics:stat=>[
-        historyOf(stat).previousC0ldRank
-          ? {text:"prev "+rankLabel(historyOf(stat).previousC0ldRank)+" -> "+rankLabel(stat.finalRank),tone:"good"}
-          : {text:historyOf(stat).c0ldBattleCount?historyOf(stat).c0ldBattleCount+" prior c0ld":"no prior c0ld",tone:"warn"},
-        {text:stat.worstRank?("war low "+rankLabel(stat.worstRank)+" -> "+rankLabel(stat.finalRank)):"no rank swing",tone:stat.worstRank&&stat.finalRank&&stat.worstRank>stat.finalRank?"good":"warn"},
-        historyOf(stat).previousC0ldRank&&stat.finalRank?{text:"+"+Math.max(0,historyOf(stat).previousC0ldRank-stat.finalRank)+" vs prev"}:null,
-        {text:"+"+shortNum(stat.totalGain)+" pts"}
+        stat.improvement?.previousRank
+          ? {text:"prev "+rankLabel(stat.improvement.previousRank)+" -> "+rankLabel(stat.finalRank),tone:"good"}
+          : {text:"no previous c0ld rank",tone:"warn"},
+        {text:stat.worstRank?("war low "+rankLabel(stat.worstRank)+" -> "+rankLabel(stat.finalRank)):"no rank swing",tone:stat.improvement?.currentRecovery?"good":"warn"},
+        stat.improvement?.previousJump?{text:"+"+stat.improvement.previousJump+" vs prev",tone:"good"}:null,
+        !stat.improvement?.previousJump&&stat.improvement?.currentRecovery?{text:"+"+stat.improvement.currentRecovery+" in-war ranks",tone:"good"}:null,
+        improvementPointChip(stat)
       ]
     },
     {
