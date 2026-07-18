@@ -245,8 +245,17 @@
       const width=ctx.measureText(label).width;ctx.fillText(label,Math.max(padL,Math.min(rect.width-padR-width,x-width/2)),rect.height-11);
     }
     for(const series of visible){
-      ctx.strokeStyle=series.color;ctx.lineWidth=2;ctx.beginPath();let started=false,lastIndex=-1;
-      series.values.forEach((value,index)=>{if(value==null){started=false;return}const x=xIndex(index),y=yValue(value);if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y);lastIndex=index});ctx.stroke();
+      ctx.strokeStyle=series.color;ctx.lineWidth=2;ctx.beginPath();let started=false,lastIndex=-1,lastValue=null;
+      series.values.forEach((value,index)=>{
+        if(value==null){started=false;lastValue=null;return}
+        const x=xIndex(index),y=yValue(value);
+        if(!started){ctx.moveTo(x,y);started=true}
+        else{
+          ctx.lineTo(x,yValue(lastValue));
+          if(value!==lastValue)ctx.lineTo(x,y);
+        }
+        lastValue=value;lastIndex=index;
+      });ctx.stroke();
       if(lastIndex>=0){ctx.fillStyle=series.color;ctx.beginPath();ctx.arc(xIndex(lastIndex),yValue(series.values[lastIndex]),3,0,Math.PI*2);ctx.fill()}
     }
     canvas._memberGrowth={...chart,visible,xIndex,yValue,padT,padB,rect};
