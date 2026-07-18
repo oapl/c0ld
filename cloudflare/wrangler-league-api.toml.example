@@ -4,10 +4,11 @@ compatibility_date = "2026-06-20"
 
 [vars]
 LEAGUE_NAME = "YAMO"
-# Change this when a new league run starts. Existing database rows are "legacy".
-LEAGUE_RUN_KEY = "active"
-# Optional display label for this league run, such as "Tap Heroes".
-LEAGUE_RUN_LABEL = ""
+# Master safety switch. Leave false until Tap Heroes Part 2 collection should begin.
+LEAGUE_COLLECTION_ENABLED = "false"
+# A new run key starts a clean collection period without deleting older league history.
+LEAGUE_RUN_KEY = "tap-heroes-part-2"
+LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
 # Optional per-run labels. Keys are LEAGUE_RUN_KEY values.
 LEAGUE_RUN_LABELS_JSON = ""
 PS99_UPDATE_THEME = ""

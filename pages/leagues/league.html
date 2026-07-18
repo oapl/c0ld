@@ -40,7 +40,7 @@
 (function(){
   const params=new URLSearchParams(location.search);
   const league=String(params.get("league")||params.get("name")||"YAMO").trim()||"YAMO";
-  const run=String(params.get("run")||"active").trim()||"active";
+  const run=String(params.get("run")||"tap-heroes-part-2").trim()||"tap-heroes-part-2";
   const targetRank=Number(params.get("target_rank")||params.get("targetRank")||60);
   document.title=league+" League Tracker";
   document.getElementById("page-title").textContent=league+" League Tracker";

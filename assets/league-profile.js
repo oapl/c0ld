@@ -2,7 +2,7 @@
   const API = "https://yamo-league-api-worker.opal-dde.workers.dev";
   const params = new URLSearchParams(location.search);
   const LEAGUE = String(params.get("league") || "YAMO");
-  const RUN_KEY = String(params.get("run") || params.get("league_run_key") || "active").trim();
+  const RUN_KEY = String(params.get("run") || params.get("league_run_key") || "tap-heroes-part-2").trim();
   const USER_ID = String(params.get("id") || params.get("user_id") || "").trim();
 
   let currentData = null;

@@ -4,7 +4,7 @@
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
   const API_LEAGUE = String(config.apiLeague || config.league || "YAMO");
-  const RUN_KEY = String(config.run || config.runKey || "active").trim();
+  const RUN_KEY = String(config.run || config.runKey || "tap-heroes-part-2").trim();
   const TARGET_RANK = Number(config.targetRank || 60);
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;

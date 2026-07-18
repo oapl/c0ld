@@ -646,6 +646,17 @@ clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
 `yamo-league-api-worker.js` powers the league pages, the Top 1000 leaderboard,
 and the c0ld league overlap page.
 
+`LEAGUE_COLLECTION_ENABLED` is the master collection switch and defaults to
+`false`. While it is false, scheduled scans, manual ingest requests, and the
+page-triggered live overlap/window scans are all blocked. Set it to `true` only
+when the configured league run should begin. `INGEST_LEAGUES`,
+`INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
+sub-switches once the master switch is enabled.
+
+The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
+`LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
+and current rows without deleting previous league history.
+
 Run `supabase/migrations/026_league_player_history_index.sql` in the Supabase SQL
 Editor so cross-run player history lookups do not time out as the snapshot
 archive grows.
@@ -693,9 +704,8 @@ project, not the old NONG Leaderboard project. Create the league tables in c0ld
 with `supabase/c0ld_league_tables_setup.sql`, then update the Worker's
 `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` to the c0ld project values.
 
-To move existing league history out of the old NONG Supabase project, pause the
-league Worker cron or set `INGEST_LEAGUES=false` and `INGEST_TOP_LEAGUES=false`,
-then run:
+To move existing league history out of the old NONG Supabase project, set
+`LEAGUE_COLLECTION_ENABLED=false`, then run:
 
 ```powershell
 .\scripts\migrate-league-data-to-c0ld.ps1 `

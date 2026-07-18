@@ -124,11 +124,11 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <script>
 const API="https://yamo-league-api-worker.opal-dde.workers.dev";
 const CLAN_API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
-const RUN_KEY="active";
+const RUN_KEY="tap-heroes-part-2";
 const REFRESH_INTERVAL_MS=5*60*1000;
 const LEAGUE_FETCH_CONCURRENCY=4;
 const LEAGUE_FETCH_STAGGER_MS=150;
-const CACHE_KEY="c0ld:tracked-leagues:v1";
+const CACHE_KEY="c0ld:tracked-leagues:"+RUN_KEY;
 const TRACKED_LEAGUES=[
   {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",rank:1},
   {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",rank:2},

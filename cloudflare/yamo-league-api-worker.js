@@ -1,7 +1,8 @@
 const SNAPSHOT_TABLE = "ps99_league_snapshots";
 const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
-const DEFAULT_LEAGUE_RUN_KEY = "active";
+const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
+const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
@@ -33,7 +34,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -43,19 +44,24 @@ export default {
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
+        requireLeagueCollectionEnabled(env);
         response = await handleTopLeaguesWindowIngest(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-overlap") {
+        requireLeagueCollectionEnabled(env);
         response = await handleC0ldLeagueOverlap(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-discovered") {
         response = await handleC0ldDiscoveredLeagues(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/leagues/ingest-all") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeaguesIngest(env, "manual", runKeyParam(url));
       } else if (request.method === "POST" && (url.pathname === "/api/leagues/ingest" || url.pathname === "/api/ingest")) {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
       } else if (request.method === "POST" && url.pathname === "/api/leagues/top-leagues/ingest") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
         const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
         const requestedPageSize = url.searchParams.get("page_size") || url.searchParams.get("pageSize");
@@ -69,6 +75,7 @@ export default {
         });
       } else if (request.method === "POST" && url.pathname === "/api/leagues/rank-windows/refresh") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeagueRankWindowRefresh(env, "manual:rank-window", runKeyParam(url));
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
@@ -81,6 +88,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    if (!leagueCollectionEnabled(env)) {
+      console.log("scheduled league collection skipped: LEAGUE_COLLECTION_ENABLED is false");
+      return;
+    }
     ctx.waitUntil((async () => {
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
@@ -2204,10 +2215,15 @@ async function supabaseFetch(env, table, options = {}) {
 function stableLeagueUserId(value) { let h = 2166136261; const text = String(value || "unknown"); for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return 9000000000000 + h; }
 function requireSupabase(env) { if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw httpError(500, "SUPABASE_URL and SUPABASE_SERVICE_KEY are required"); }
 function requireAdmin(request, env) { const expected = String(env.INGEST_ADMIN_TOKEN || "").trim(); if (!expected) throw httpError(500, "INGEST_ADMIN_TOKEN is not configured"); const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim(); if (token !== expected) throw httpError(401, "Unauthorized"); }
+function leagueCollectionEnabled(env) { return String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase() === "true"; }
+function requireLeagueCollectionEnabled(env) { if (!leagueCollectionEnabled(env)) throw httpError(409, "League collection is disabled. Set LEAGUE_COLLECTION_ENABLED=true to activate it."); }
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
 function leagueNames(env) { const raw = String(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME); const names = raw.split(",").map(item => item.trim()).filter(Boolean); return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME]; }
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
-function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function leagueRunKey(env) {
+  const configured = normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);
+  return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
+}
 function leagueProfilePeriodGapHours(env) { return clamp(Number(env.LEAGUE_PROFILE_PERIOD_GAP_HOURS || 36), 1, 24 * 30); }
 function leagueProfilePeriodKey(runKey, leagueNameValue, firstSnapshotAt) {
   const date = new Date(firstSnapshotAt || 0);
@@ -2278,9 +2294,13 @@ function leagueRunLabel(env, runKey) {
     if (updateNumber) return `Update ${updateNumber}`;
   }
 
-  return key && key !== DEFAULT_LEAGUE_RUN_KEY ? key : "";
+  if (key === DEFAULT_LEAGUE_RUN_KEY) return DEFAULT_LEAGUE_RUN_LABEL;
+  return key || "";
 }
-function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function topLeaguesRunKey(env) {
+  const configured = normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);
+  return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
+}
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
 function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_ALL_LIMIT || DEFAULT_ALL_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
