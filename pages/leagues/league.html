@@ -51,6 +51,15 @@
     <div id="race-summary" class="race-summary" hidden></div>
   </div>
 </section>
+<section class="section hourly-pet-gains" id="hourly-pet-gains" hidden>
+  <div class="section-header"><div><h2 class="section-title">Hourly Pet Gains</h2><div class="meta">Cinnamowopal · inventory changes by completed hour</div></div><div class="meta" id="hourly-pet-gains-meta">Loading inventory history...</div></div>
+  <div class="table-wrap">
+    <table class="hourly-pet-gains-table">
+      <thead><tr><th>Hour</th><th class="numeric">War Elephant</th><th class="numeric">Warrior Jaguar</th><th class="numeric">Jewel Peacock</th><th class="numeric">Genie Fox</th><th class="numeric">Total</th></tr></thead>
+      <tbody id="hourly-pet-gains-body"><tr><td colspan="6" class="empty">Loading hourly pet gains...</td></tr></tbody>
+    </table>
+  </div>
+</section>
 <section class="section rank-log-section"><div class="section-header"><h2 class="section-title">League Rank Movement Log</h2><div class="meta" id="rank-log-count">Loading...</div></div><div class="rank-log-list" id="rank-log-list"><div class="rank-log-empty">Loading league rank movement history...</div></div></section>
 </main>
 <script>
@@ -65,6 +74,7 @@
 })();
 </script>
 <script src="assets/league-tracker.js"></script>
+<script src="assets/league-hourly-pet-gains.js"></script>
 <script src="assets/site-announcement.js"></script>
 </body>
 </html>
