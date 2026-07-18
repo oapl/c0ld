@@ -312,19 +312,17 @@
     const roster=list.slice();
     while(roster.length<capacity)roster.push(null);
     tbody.innerHTML=roster.map((r,index)=>{
-      if(!r)return '<tr class="empty-roster-slot"><td class="rank">#'+(index+1)+'</td><td><span>Open member slot</span></td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td></tr>';
+      if(!r)return '<tr class="empty-roster-slot"><td class="rank">#'+(index+1)+'</td><td><span>Open member slot</span></td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td></tr>';
       const name=memberName(r);
       const projection=playerGrowthProjection(r);
-      const pace=projection.pace==null?'<span class="unknown">—</span>':delta(Math.round(projection.pace));
-      const projected=projection.points==null?'<span class="unknown">—</span>':'<span title="'+esc(fullNum(Math.round(projection.points)))+'">'+esc(shortNum(Math.round(projection.points)))+'</span>';
-      const projectedGain=projection.pace==null?'':signedShort(Math.round(projection.pace));
-      const gainClass=Number(projection.pace)>0?'positive':Number(projection.pace)<0?'negative':'zero';
-      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric" title="Hourly growth based on '+esc(projection.basis)+'">'+pace+'</td><td class="numeric projection-cell">'+projected+'<div class="projection-basis"><span class="'+gainClass+'">'+esc(projectedGain)+'</span> · '+esc(projection.basis)+'</div></td></tr>'
+      const projectedGain=projection.pace==null?'<span class="unknown">—</span>':delta(Math.round(projection.pace));
+      const projectedTitle=projection.points==null?'Insufficient history':'Projected total '+fullNum(Math.round(projection.points))+' using '+projection.basis;
+      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td><td class="numeric projection-cell" title="'+esc(projectedTitle)+'">'+projectedGain+'</td></tr>'
     }).join("");
     renderLeagueRankLog();
   }
 
-  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="5" class="error">'+esc(msg)+'</td></tr>'}
+  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="9" class="error">'+esc(msg)+'</td></tr>'}
 
   async function fetchLeagueRankHistory(){
     const stable=currentData?.league_id||topLeagueRow?.league_id||currentData?.league_name||LEAGUE;
