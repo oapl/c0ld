@@ -37,7 +37,9 @@
   function delta(v){if(v==null)return'<span class="unknown">—</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">—</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
   function initials(s){s=String(s||"?").trim();return s.slice(0,2).toUpperCase()}
   function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
-  function avatar(r){const url=String(r.avatar_url||"").trim();return url?'<img class="avatar" src="'+esc(url)+'" alt="">':'<span class="avatar">'+esc(initials(r.username||r.display_name))+'</span>'}
+  function isFallbackMemberName(value,userId){const text=String(value||"").trim(),id=String(userId||"").trim();return !text||(id&&text===id)||/^user_\d+$/i.test(text)}
+  function memberName(row){const id=String(row?.user_id||"").trim();const names=[row?.username,row?.display_name];return names.map(value=>String(value||"").trim()).find(value=>!isFallbackMemberName(value,id))||(id?"User "+id:"Unknown player")}
+  function avatar(r){const url=String(r.avatar_url||"").trim();return url?'<img class="avatar" src="'+esc(url)+'" alt="">':'<span class="avatar">'+esc(initials(memberName(r)))+'</span>'}
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
   function addRunParam(url){if(RUN_KEY)url.searchParams.set("run",RUN_KEY);return url}
   function profileHref(r){
@@ -210,7 +212,7 @@
         }
         return {
           id,
-          name:member.username||member.display_name||member.user_id,
+          name:memberName(member),
           color:GROWTH_COLORS[index%GROWTH_COLORS.length],
           hidden:member.points_redacted===true,
           values:member.points_redacted===true?values.map(()=>null):values
@@ -306,13 +308,18 @@
     renderRewardMilestones();
     requestAnimationFrame(drawMemberGrowthChart);
     const list=visible();
-    if(!list.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
-    tbody.innerHTML=list.map(r=>{
-      const name=r.username||r.display_name||r.user_id;
+    const capacity=Math.max(4,Math.min(20,Number(currentData?.member_capacity)||4),list.length);
+    const roster=list.slice();
+    while(roster.length<capacity)roster.push(null);
+    tbody.innerHTML=roster.map((r,index)=>{
+      if(!r)return '<tr class="empty-roster-slot"><td class="rank">#'+(index+1)+'</td><td><span>Open member slot</span></td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td></tr>';
+      const name=memberName(r);
       const projection=playerGrowthProjection(r);
       const pace=projection.pace==null?'<span class="unknown">—</span>':delta(Math.round(projection.pace));
       const projected=projection.points==null?'<span class="unknown">—</span>':'<span title="'+esc(fullNum(Math.round(projection.points)))+'">'+esc(shortNum(Math.round(projection.points)))+'</span>';
-      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric" title="Hourly growth based on '+esc(projection.basis)+'">'+pace+'</td><td class="numeric projection-cell">'+projected+'<div class="projection-basis">'+esc(projection.basis)+'</div></td></tr>'
+      const projectedGain=projection.pace==null?'':signedShort(Math.round(projection.pace));
+      const gainClass=Number(projection.pace)>0?'positive':Number(projection.pace)<0?'negative':'zero';
+      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric" title="Hourly growth based on '+esc(projection.basis)+'">'+pace+'</td><td class="numeric projection-cell">'+projected+'<div class="projection-basis"><span class="'+gainClass+'">'+esc(projectedGain)+'</span> · '+esc(projection.basis)+'</div></td></tr>'
     }).join("");
     renderLeagueRankLog();
   }

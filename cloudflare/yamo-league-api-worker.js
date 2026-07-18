@@ -39,7 +39,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)), league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), c0ld_league_names: c0ldLeagueNames(env), alt_league_names: altLeagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)), league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -894,7 +894,10 @@ async function handleHistory(request, env) {
   } else {
     const ids = [...new Set(rows.map(row => toNumber(row.user_id)).filter(Boolean))];
     const usernameMap = ids.length ? await resolveRobloxUsernames(ids, env).catch(() => new Map()) : new Map();
-    visibleRows = rows.map(row => redactPublicMemberPoints(env, row, usernameMap.get(toNumber(row.user_id))));
+    visibleRows = rows.map(row => {
+      const username = displayUsername(row, usernameMap);
+      return redactPublicMemberPoints(env, { ...row, username, display_name: username }, username);
+    });
   }
   return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows: visibleRows }, env);
 }
@@ -1931,6 +1934,17 @@ async function resolveRobloxUsernames(userIds, env) {
     } catch {}
   };
   await Promise.all(chunk(ids, ROBLOX_BATCH_SIZE).map(lookupBatch));
+  const unresolved = ids.filter(id => isFallbackUsername(result.get(id), id));
+  for (const fallbackBatch of chunk(unresolved, 25)) {
+    await Promise.all(fallbackBatch.map(async id => {
+      try {
+        const res = await fetch(`https://users.roblox.com/v1/users/${id}`, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" } });
+        if (!res.ok) return;
+        const user = await res.json();
+        if (user?.name) result.set(id, String(user.name));
+      } catch {}
+    }));
+  }
   return result;
 }
 
@@ -1958,7 +1972,7 @@ async function resolveRobloxAvatarHeadshots(userIds, env) {
 function publicMemberRow(row, usernameMap, avatarMap) {
   const id = toNumber(row.user_id);
   const name = displayUsername(row, usernameMap);
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(id) || avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
 function visibleLeagueRank(value) {
@@ -2505,7 +2519,14 @@ function requireAdmin(request, env) { const expected = String(env.INGEST_ADMIN_T
 function leagueCollectionEnabled(env) { return String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase() === "true"; }
 function requireLeagueCollectionEnabled(env) { if (!leagueCollectionEnabled(env)) throw httpError(409, "League collection is disabled. Set LEAGUE_COLLECTION_ENABLED=true to activate it."); }
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
-function leagueNames(env) { const raw = String(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME); const names = raw.split(",").map(item => item.trim()).filter(Boolean); return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME]; }
+function csvLeagueNames(value) { return String(value || "").split(",").map(item => item.trim()).filter(Boolean); }
+function c0ldLeagueNames(env) { return [...new Set(csvLeagueNames(env.COLD_LEAGUE_NAMES))]; }
+function altLeagueNames(env) { return [...new Set(csvLeagueNames(env.ALT_LEAGUE_NAMES))]; }
+function leagueNames(env) {
+  const legacy = csvLeagueNames(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME);
+  const names = [...legacy, ...c0ldLeagueNames(env), ...altLeagueNames(env)];
+  return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME];
+}
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
 function leagueRunKey(env) {
   const configured = normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);

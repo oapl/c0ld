@@ -193,6 +193,8 @@
 .member-roster-table .player-cell,
 .member-roster-table .player-link { gap: 8px; }
 .member-roster-table tbody tr:last-child td { border-bottom: 0; }
+.empty-roster-slot td { color: #6e7681; }
+.empty-roster-slot td:nth-child(2) { font-style: italic; }
 .projection-cell { font-weight: 700; }
 .projection-basis { margin-top: 2px; color: #8b949e; font-size: 9px; font-weight: 400; }
 

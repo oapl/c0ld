@@ -20,6 +20,10 @@ PS99_UPDATE_LABEL = ""
 PS99_UPDATE_NUMBER = ""
 # Comma-separated league list used for scheduled pulls.
 LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,C0LD,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr,zee2"
+# Optional leagues forced into the main c0ld Leagues table even without a current c0ld-member match.
+COLD_LEAGUE_NAMES = ""
+# Optional manually tracked leagues shown in the separate Alt Leagues table.
+ALT_LEAGUE_NAMES = ""
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
 # Public-response visibility only. Collection and storage always remain complete.

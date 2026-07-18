@@ -37,7 +37,6 @@
         ["players.html", "Legacy Players"],
         ["clan-filter.html", "Legacy Clan Filter"],
         ["c0ld-league-matches.html", "c0ld League Matches"],
-        ["league.html", "League Tracker"],
         ["yamo1-9.html", "YAMO1-9"],
         ["layok.html", "Layok Redirect"],
         ["wmsy.html", "WMSY Redirect"]
