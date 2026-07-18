@@ -97,17 +97,16 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
         <option value="members">c0ld Members</option>
       </select>
       <input id="search-input" placeholder="Search leagues or members...">
-      <button id="copy-league-names-btn" type="button">Copy League Names</button>
       <button id="refresh-btn" type="button">Refresh</button>
     </div>
   </section>
   <section class="cards">
-    <div class="card"><div class="label">Top 60</div><div class="value" id="top60-count">-</div></div>
+    <div class="card"><div class="label">Top 3</div><div class="value" id="top3-count">-</div></div>
+    <div class="card"><div class="label">Top 10</div><div class="value" id="top10-count">-</div></div>
+    <div class="card"><div class="label">Top 100</div><div class="value" id="top100-count">-</div></div>
     <div class="card"><div class="label">Top 250</div><div class="value" id="top250-count">-</div></div>
-    <div class="card"><div class="label">Top 750</div><div class="value" id="top750-count">-</div></div>
-    <div class="card"><div class="label">Top 1,400</div><div class="value" id="top1400-count">-</div></div>
-    <div class="card"><div class="label">Top 3,300</div><div class="value" id="top3300-count">-</div></div>
-    <div class="card"><div class="label">Top 8,500</div><div class="value" id="top8500-count">-</div></div>
+    <div class="card"><div class="label">Top 500</div><div class="value" id="top500-count">-</div></div>
+    <div class="card"><div class="label">Top 1,000</div><div class="value" id="top1000-count">-</div></div>
     <div class="card"><div class="label">Top 10,000</div><div class="value" id="top10000-count">-</div></div>
   </section>
   <section class="section">
@@ -124,13 +123,12 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
   </section>
   <section class="section" id="alt-leagues-section">
     <div class="section-header">
-      <div><h2 class="section-title">Alt Leagues</h2><div class="subtle">Manually tracked through the Worker’s ALT_LEAGUE_NAMES variable.</div></div>
-      <div class="subtle" id="alt-table-meta">Refreshing...</div>
+      <h2 class="section-title">Alt Leagues</h2>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap" id="alt-table-wrap" hidden>
       <table>
         <thead><tr><th>Rank</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr></thead>
-        <tbody id="alt-tbody"><tr><td colspan="7" class="empty">Refreshing manually tracked alt leagues...</td></tr></tbody>
+        <tbody id="alt-tbody"></tbody>
       </table>
     </div>
   </section>
@@ -209,18 +207,16 @@ function mergeLeagueRows(baseRows,discoveredRows){const byKey=new Map();for(cons
 function tableHeaders(){const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}))}
 function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);return list.sort(leaguePointsDesc)}
 function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
-function renderCards(){document.getElementById("top60-count").textContent=countRankRange(1,60).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(61,250).toLocaleString("en-US");document.getElementById("top750-count").textContent=countRankRange(251,750).toLocaleString("en-US");document.getElementById("top1400-count").textContent=countRankRange(751,1400).toLocaleString("en-US");document.getElementById("top3300-count").textContent=countRankRange(1401,3300).toLocaleString("en-US");document.getElementById("top8500-count").textContent=countRankRange(3301,8500).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(8501,10000).toLocaleString("en-US")}
+function renderCards(){document.getElementById("top3-count").textContent=countRankRange(1,3).toLocaleString("en-US");document.getElementById("top10-count").textContent=countRankRange(4,10).toLocaleString("en-US");document.getElementById("top100-count").textContent=countRankRange(11,100).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(101,250).toLocaleString("en-US");document.getElementById("top500-count").textContent=countRankRange(251,500).toLocaleString("en-US");document.getElementById("top1000-count").textContent=countRankRange(501,1000).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(1001,10000).toLocaleString("en-US")}
 function renderMeta(){document.getElementById("table-meta").textContent=leagueRows.length+" leagues · "+memberRows.length+" c0ld members · Updated "+(lastUpdated?dt(lastUpdated):"-")}
 function leagueRowHtml(r,includeMembers=true){return '<tr><td class="rank">'+rankCell(r)+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td>'+(includeMembers?'<td><div class="members">'+memberPills(r.matches)+'</div></td>':'')+'</tr>'}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No current c0ld-member leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(row=>leagueRowHtml(row,true)).join("")}
-function renderAltLeagues(){const tbody=document.getElementById("alt-tbody"),meta=document.getElementById("alt-table-meta");const q=document.getElementById("search-input").value.trim().toLowerCase();const list=altLeagueRows.filter(row=>!q||String(row.league_name||"").toLowerCase().includes(q)).sort(leaguePointsDesc);meta.textContent=altLeagueRows.length+" manually tracked league"+(altLeagueRows.length===1?"":"s");if(!list.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No alt leagues configured. Add comma-separated names to ALT_LEAGUE_NAMES in the League Worker.</td></tr>';return}tbody.innerHTML=list.map(row=>leagueRowHtml(row,false)).join("")}
+function renderAltLeagues(){const tbody=document.getElementById("alt-tbody"),wrap=document.getElementById("alt-table-wrap");const q=document.getElementById("search-input").value.trim().toLowerCase();const list=altLeagueRows.filter(row=>!q||String(row.league_name||"").toLowerCase().includes(q)).sort(leaguePointsDesc);wrap.hidden=!list.length;tbody.innerHTML=list.map(row=>leagueRowHtml(row,false)).join("")}
 function renderMembers(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the tracked leagues yet.</td></tr>';return}tbody.innerHTML=list.map((r,index)=>'<tr><td class="rank">#'+esc(r.score_rank||index+1)+'</td><td><a href="'+esc(leaguePage(r))+'"><strong>'+esc(bestName(r.user_id,r.username,r.display_name))+'</strong></a><div class="subtle">'+esc(r.user_id||"")+'</div></td><td><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>').join("")}
 function readCache(){try{const data=JSON.parse(localStorage.getItem(CACHE_KEY)||"null");return data&&Array.isArray(data.leagueRows)?data:null}catch{return null}}
 function writeCache(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({savedAt:new Date().toISOString(),leagueRows,altLeagueRows,memberRows,lastUpdated}))}catch{}}
 function renderCached(){const data=readCache();if(!data)return false;leagueRows=data.leagueRows||[];altLeagueRows=data.altLeagueRows||[];memberRows=data.memberRows||[];lastUpdated=data.lastUpdated||null;setStatus("Showing cached c0ld league data while the latest pull refreshes.");render();return true}
 function render(){tableHeaders();document.getElementById("section-title").textContent=getMode()==="members"?"c0ld Members":"c0ld Leagues";const list=visible();getMode()==="members"?renderMembers(list):renderLeagues(list);renderAltLeagues();renderCards();renderMeta()}
-function discoveredLeagueNames(){const seen=new Set();return leagueRows.filter(row=>(row.matches||[]).length>0||Number(row.c0ld_member_count)>0).map(row=>String(row.league_name||"").trim()).filter(name=>{const id=norm(name);if(!id||seen.has(id))return false;seen.add(id);return true})}
-async function copyLeagueNames(){const button=document.getElementById("copy-league-names-btn");const names=discoveredLeagueNames();if(!names.length){button.textContent="No Names Found";setTimeout(()=>button.textContent="Copy League Names",1800);return}const text=names.join(",");try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);else{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();if(!document.execCommand("copy"))throw new Error("Copy failed");area.remove()}button.textContent="Copied "+names.length+" Names";setTimeout(()=>button.textContent="Copy League Names",1800)}catch(err){console.error(err);button.textContent="Copy Failed";setTimeout(()=>button.textContent="Copy League Names",1800)}}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function mapLimit(items,limit,fn){const out=new Array(items.length);let next=0;const workers=Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const index=next++;out[index]=await fn(items[index],index)}});await Promise.all(workers);return out}
 function currentC0ldDiscoveredRow(row){const matches=(row.matches||[]).filter(member=>isKnownC0ldMember(member.user_id));return {...row,matches,c0ld_member_count:matches.length}}
@@ -270,7 +266,6 @@ async function loadData(){
   }
 }
 document.getElementById("refresh-btn").addEventListener("click",loadData);
-document.getElementById("copy-league-names-btn").addEventListener("click",copyLeagueNames);
 document.getElementById("view-mode").addEventListener("change",()=>{sortKey="points";sortAsc=false;render()});
 document.getElementById("search-input").addEventListener("input",render);
 loadData();
