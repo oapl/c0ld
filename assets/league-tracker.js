@@ -103,6 +103,8 @@
     document.getElementById("league-points").title=fullNum(leaguePoints);
     document.getElementById("last-db-update").textContent=snapshotAt?dt(snapshotAt):"—";
     document.getElementById("page-title").textContent=leagueName+" League Tracker";
+    const runLabel=document.getElementById("run-label");
+    if(runLabel)runLabel.textContent=data.league_run_label||RUN_KEY;
     const currentRank=topLeagueRow?.rank||data.league_rank;
     const projectedRank=topLeagueRow?.projected_rank_1h;
     document.getElementById("league-rank").textContent=currentRank?"#"+currentRank:"—";

@@ -657,6 +657,20 @@ The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
 `LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
 and current rows without deleting previous league history.
 
+BIG Games can continue returning the previous run's cumulative point counters
+after a new league begins. Set `LEAGUE_BASELINE_RUN_KEY="active"` and keep
+`LEAGUE_NORMALIZE_POINTS_FROM_BASELINE=true`. The Worker then stores only the
+increase above the previous run's final values. If BIG Games resets a counter
+to a lower value, that lower value is treated as the new run's real total.
+The baseline is used only during calculation; previous points are removed from
+the stored member, league, and raw point fields for the new run.
+
+If the new run was ingested before baseline normalization was deployed, pause
+collection, run `supabase/reset_tap_heroes_part_2_league.sql`, deploy the
+updated Worker, and re-enable collection. The same cleanup is also available
+through `POST /api/leagues/run/reset?run=tap-heroes-part-2` with the ingest
+administrator token. Neither cleanup path modifies the baseline or older runs.
+
 Run `supabase/migrations/026_league_player_history_index.sql` in the Supabase SQL
 Editor so cross-run player history lookups do not time out as the snapshot
 archive grows.

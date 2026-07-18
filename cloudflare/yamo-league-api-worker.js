@@ -3,6 +3,7 @@ const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
 const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
+const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
@@ -34,7 +35,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)), league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -77,6 +78,9 @@ export default {
         requireAdmin(request, env);
         requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeagueRankWindowRefresh(env, "manual:rank-window", runKeyParam(url));
+      } else if (request.method === "POST" && url.pathname === "/api/leagues/run/reset") {
+        requireAdmin(request, env);
+        response = await handleLeagueRunReset(env, runKeyParam(url));
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -123,8 +127,9 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
   const api = await fetchLeagueApi(requested);
   const league = api.data || api;
-  const summary = summarizeLeague(league, requested);
-  const memberRows = normalizeLeagueRows(league);
+  let summary = summarizeLeague(league, requested);
+  let memberRows = normalizeLeagueRows(league);
+  ({ summary, memberRows } = await normalizeTrackedLeagueForRun(env, runKey, summary, memberRows));
   const snapshotId = `league:${runKey}:${summary.league_name}:${fetchedAt}`;
 
   const dbRows = memberRows.map(row => ({
@@ -170,8 +175,9 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
     try {
       const api = await fetchLeagueApi(requested, { allowFallback: options.allowApiFallback !== false });
       const league = api.data || api;
-      const summary = summarizeLeague(league, requested);
-      const memberRows = normalizeLeagueRows(league);
+      let summary = summarizeLeague(league, requested);
+      let memberRows = normalizeLeagueRows(league);
+      ({ summary, memberRows } = await normalizeTrackedLeagueForRun(env, runKey, summary, memberRows));
       const snapshotId = `league:${runKey}:${summary.league_name}:${fetchedAt}`;
       const rows = memberRows.map(row => ({
         snapshot_id: snapshotId,
@@ -233,8 +239,9 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize, allowApiFallback: options.allowApiFallback !== false });
   const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
   const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
+  const normalizedTopRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, top.rows, { recomputeRanks: true });
 
-  const dbRows = top.rows.map(row => topLeagueDbRow(row, {
+  const dbRows = normalizedTopRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source: `${source}:top-leagues`,
@@ -259,10 +266,12 @@ async function handleTopLeaguesWindowIngest(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 100);
   const topContext = await fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit);
   const rowsToPersist = topContext.persist_rows || topContext.rows || [];
+  const listName = topContext.list_name || topLeagueListNameForLimit(topLimit, env);
+  const responseRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, topContext.rows || [], { recomputeRanks: false });
 
   if (rowsToPersist.length) {
     await persistTopLeagueWindowRows(env, runKey, rowsToPersist, {
-      listName: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+      listName,
       fetchedAt: topContext.snapshot_at || new Date().toISOString(),
       source: "live:rank-baseline-window"
     });
@@ -272,13 +281,14 @@ async function handleTopLeaguesWindowIngest(request, env) {
     ok: true,
     generated_at: new Date().toISOString(),
     league_run_key: runKey,
-    league_name: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+    league_name: listName,
+    league_run_label: leagueRunLabel(env, runKey),
     snapshot_at: topContext.snapshot_at,
     offset,
     limit,
     top_leagues_requested: topLimit,
     rows_inserted: rowsToPersist.length,
-    rows: (topContext.rows || []).map(publicLeagueRow),
+    rows: responseRows.map(publicLeagueRow),
     next_offset: offset + limit < topLimit ? offset + limit : null
   }, env);
 }
@@ -312,14 +322,14 @@ async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey
 
   for (const target of targets) {
     const topRow = topLeagueLookupRow(topLookup, target);
-    const topRank = toNumber(topRow?.rank);
+    const topRank = visibleLeagueRank(topRow?.rank);
     if (topRank !== null && topRank <= scheduledLimit) {
       skippedTop.push({ league_name: target.league_name, rank: topRank });
       continue;
     }
 
     const seedRow = topLeagueLookupRow(seedLookup, target);
-    const seedRank = toNumber(seedRow?.rank);
+    const seedRank = visibleLeagueRank(seedRow?.rank);
     if (seedRank === null) {
       missingSeed.push({ league_name: target.league_name, requested_name: target.requested_name, league_id: target.league_id });
       continue;
@@ -377,7 +387,8 @@ async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey
 
   const rows = [...rowsByUserId.values()].sort((a, b) => (a.rank || 999999) - (b.rank || 999999));
   const snapshotId = `rank_windows:${runKey}:${fetchedAt}`;
-  const dbRows = rows.map(row => topLeagueDbRow(row, {
+  const normalizedRows = await normalizeTopLeagueRowsForRun(env, runKey, ALL_TOP_LEAGUES_NAME, rows, { recomputeRanks: false });
+  const dbRows = normalizedRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source: `${source}:top-leagues`,
@@ -444,7 +455,8 @@ async function persistTopLeagueWindowRows(env, runKey, rows, options = {}) {
   const listName = options.listName || ALL_TOP_LEAGUES_NAME;
   const snapshotId = `top_league_window:${runKey}:${listName}:${fetchedAt}`;
   const source = `${options.source || "live-window"}:top-leagues`;
-  const dbRows = rows.map(row => topLeagueDbRow(row, {
+  const normalizedRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, rows, { recomputeRanks: false });
+  const dbRows = normalizedRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source,
@@ -546,12 +558,14 @@ async function handleCurrent(request, env) {
   }
 
   const latest = latestMeta(rows);
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: requested, rows: [] }, env);
+  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: requested, rows: [] }, env);
 
   const [rowsWithGains, storedLeagueRank, liveLeagueRank] = await Promise.all([
     addGainFields(env, rows, latest),
     fetchStoredLeagueRank(env, runKey, requested, latest.league_id).catch(() => null),
-    boolParam(url.searchParams.get("rank_lookup"), true) ? fetchLeagueRank(requested).catch(() => null) : Promise.resolve(null)
+    boolParam(url.searchParams.get("rank_lookup"), true) && !shouldNormalizeLeagueRunPoints(env, runKey)
+      ? fetchLeagueRank(requested).catch(() => null)
+      : Promise.resolve(null)
   ]);
   const ids = rowsWithGains.map(row => row.user_id);
   const usernameMap = await resolveRobloxUsernames(ids, env).catch(() => new Map());
@@ -562,6 +576,9 @@ async function handleCurrent(request, env) {
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
+    league_run_label: leagueRunLabel(env, latest.league_run_key),
+    baseline_run_key: leagueBaselineRunKey(env, latest.league_run_key) || null,
+    points_are_run_only: shouldNormalizeLeagueRunPoints(env, latest.league_run_key),
     league_name: latest.league_name,
     league_id: latest.league_id,
     league_level: latest.league_level,
@@ -586,7 +603,7 @@ async function handleTopLeagues(request, env) {
 
   let latest = latestMeta(rows);
 
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: listName, rows: [] }, env);
+  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: listName, rows: [] }, env);
 
   const rowsWithGains = await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName });
   const publicRows = rowsWithGains.map(row => {
@@ -596,15 +613,20 @@ async function handleTopLeagues(request, env) {
     return out;
   });
 
-  publicRows.slice()
+  publicRows.filter(row => row.total_points > 0 || row.projected_points_1h > 0)
     .sort((a, b) => b.projected_points_1h - a.projected_points_1h || a.rank - b.rank)
     .forEach((row, index) => { row.projected_rank_1h = index + 1; });
+  publicRows.filter(row => row.total_points <= 0 && row.projected_points_1h <= 0)
+    .forEach(row => { row.projected_rank_1h = null; });
 
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
+    league_run_label: leagueRunLabel(env, latest.league_run_key),
+    baseline_run_key: leagueBaselineRunKey(env, latest.league_run_key) || null,
+    points_are_run_only: shouldNormalizeLeagueRunPoints(env, latest.league_run_key),
     league_name: listName,
     offset,
     source: "ps99-league-api-worker",
@@ -723,7 +745,9 @@ async function handleC0ldLeagueOverlap(request, env) {
     });
   }
 
-  const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
+  const rawBatch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
+  const topListName = topContext.list_name || topLeagueListNameForLimit(topLimit, env);
+  const batch = await normalizeTopLeagueRowsForRun(env, runKey, topListName, rawBatch, { recomputeRanks: false });
   const persistRows = liveScan ? (topContext.persist_rows || (topContext.source === "live-window" ? batch : [])) : [];
   if (persistRows.length) {
     await persistTopLeagueWindowRows(env, runKey, persistRows, {
@@ -732,7 +756,7 @@ async function handleC0ldLeagueOverlap(request, env) {
       source: "live:overlap-window"
     }).catch(err => console.warn("persist live overlap top league rows failed", err?.message || String(err)));
   }
-  const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
+  const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, runKey, row, clanMembers));
   const matchedRows = scanned
     .filter(row => row.matches.length)
     .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
@@ -1334,7 +1358,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
   };
 }
 
-async function scanLeagueForClanMembers(env, topRow, clanMembers) {
+async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
   const publicRow = publicLeagueRow(topRow);
   let leaguePayload = normalizeRawLeague(topRow.raw_league);
   let rosterSource = hasLeagueRoster(leaguePayload) ? "stored-top-row" : "live-detail";
@@ -1350,7 +1374,9 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
     }
   }
 
-  const leagueMembers = normalizeLeagueRows(leaguePayload);
+  let leagueSummary = summarizeLeague(leaguePayload, publicRow.league_name);
+  let leagueMembers = normalizeLeagueRows(leaguePayload);
+  ({ summary: leagueSummary, memberRows: leagueMembers } = await normalizeTrackedLeagueForRun(env, runKey, leagueSummary, leagueMembers));
   const matches = leagueMembers
     .map(member => ({ member, clan: clanMembers.get(String(member.user_id)) }))
     .filter(item => item.clan)
@@ -1369,6 +1395,8 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
 
   return {
     ...publicRow,
+    total_points: leagueSummary.league_points,
+    points: leagueSummary.league_points,
     c0ld_member_count: matches.length,
     c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
     roster_source: rosterSource,
@@ -1434,38 +1462,38 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
   for (const label of labels) {
     if (id) {
       const byId = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         league_id: `eq.${id}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const rank = toNumber(byId[0]?.rank);
+      const rank = (toNumber(byId[0]?.points) || 0) > 0 ? visibleLeagueRank(byId[0]?.rank) : null;
       if (rank !== null) return rank;
     }
 
     if (name) {
       const byName = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         display_name: `eq.${name}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const exactRank = toNumber(byName[0]?.rank);
+      const exactRank = (toNumber(byName[0]?.points) || 0) > 0 ? visibleLeagueRank(byName[0]?.rank) : null;
       if (exactRank !== null) return exactRank;
 
       const byLooseName = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         display_name: `ilike.${name}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const looseRank = toNumber(byLooseName[0]?.rank);
+      const looseRank = (toNumber(byLooseName[0]?.points) || 0) > 0 ? visibleLeagueRank(byLooseName[0]?.rank) : null;
       if (looseRank !== null) return looseRank;
     }
   }
@@ -1849,10 +1877,18 @@ function publicMemberRow(row, usernameMap, avatarMap) {
   return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
+function visibleLeagueRank(value) {
+  const rank = toNumber(value);
+  return rank !== null && rank > 0 && rank <= MAX_TOP_LEAGUES_LIMIT ? rank : null;
+}
+
 function publicLeagueRow(row) {
   const raw = row.raw_league || {};
   const name = String(firstDefined(raw.Name, raw.name, raw.LeagueName, raw.leagueName, row.display_name) || "").trim();
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  const points = toNumber(row.points) || 0;
+  const rank = points > 0 ? visibleLeagueRank(row.rank) : null;
+  const previousRank = points > 0 ? visibleLeagueRank(row.previous_rank_5m) : null;
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank, previous_rank_5m: previousRank, rank_move_5m: rank && previousRank ? previousRank - rank : null, synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: points, points, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
 function publicDiscoveredLeagueRow(row) {
@@ -2210,6 +2246,173 @@ async function supabaseFetch(env, table, options = {}) {
   const text = await res.text();
   if (!res.ok) throw httpError(res.status, `Supabase ${options.method || "GET"} ${table} failed: ${text.slice(0, 1000)}`);
   return text ? JSON.parse(text) : [];
+}
+
+async function handleLeagueRunReset(env, requestedRunKey) {
+  requireSupabase(env);
+  const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  if (!runKey || runKey === baselineRunKey || runKey.toLowerCase() === "active") {
+    throw httpError(400, "Refusing to reset the baseline or legacy active league run.");
+  }
+
+  await supabaseDelete(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}` });
+  await supabaseDelete(env, SNAPSHOT_TABLE, { league_run_key: `eq.${runKey}` });
+  await supabaseDelete(env, INACTIVITY_ALERT_TABLE, { league_run_key: `eq.${runKey}` }).catch(err => {
+    console.warn("league inactivity reset skipped", err?.message || String(err));
+  });
+
+  return json({
+    ok: true,
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    baseline_run_key: baselineRunKey || null,
+    message: "League run rows cleared. The next ingest will store run-only points."
+  }, 200);
+}
+
+function leagueBaselineRunKey(env, runKey) {
+  const current = normalizeRunKey(runKey || leagueRunKey(env));
+  const configured = String(env.LEAGUE_BASELINE_RUN_KEY || env.LEAGUE_PREVIOUS_RUN_KEY || DEFAULT_LEAGUE_BASELINE_RUN_KEY).trim();
+  if (!configured) return "";
+  const baseline = normalizeRunKey(configured);
+  return baseline === current ? "" : baseline;
+}
+
+function shouldNormalizeLeagueRunPoints(env, runKey) {
+  const enabled = !FALSEY_ENV_VALUES.has(String(env.LEAGUE_NORMALIZE_POINTS_FROM_BASELINE || "true").trim().toLowerCase());
+  return enabled && Boolean(leagueBaselineRunKey(env, runKey));
+}
+
+function runOnlyPointState(currentValue, baselineValue, resetPreviouslyDetected = false) {
+  const current = Math.max(0, toNumber(currentValue) || 0);
+  const baseline = toNumber(baselineValue);
+  if (baseline === null || baseline < 0) return { points: current, resetDetected: Boolean(resetPreviouslyDetected) };
+  const resetDetected = Boolean(resetPreviouslyDetected) || current < baseline;
+  return { points: resetDetected ? current : Math.max(0, current - baseline), resetDetected };
+}
+
+function withRunOnlyPointFields(value, points, runKey, resetDetected) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value || {};
+  const out = { ...value };
+  for (const field of ["Points", "points", "TotalPoints", "totalPoints", "total_points", "Score", "score", "Value", "value"]) {
+    if (Object.prototype.hasOwnProperty.call(out, field)) out[field] = points;
+  }
+  out._run_points_normalized = true;
+  out._run_key = runKey;
+  out._run_baseline_reset_detected = Boolean(resetDetected);
+  return out;
+}
+
+function runPointMetadata(value, runKey) {
+  const raw = normalizeRawLeague(value);
+  return {
+    normalized: raw._run_points_normalized === true && String(raw._run_key || "") === String(runKey || ""),
+    resetDetected: raw._run_baseline_reset_detected === true
+  };
+}
+
+async function normalizeTrackedLeagueForRun(env, runKey, summary, memberRows) {
+  if (!shouldNormalizeLeagueRunPoints(env, runKey)) return { summary, memberRows };
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  const select = "fetched_at,league_run_key,league_name,league_points,user_id,points";
+  let baselineRows = await supabaseSelect(env, CURRENT_TABLE, {
+    select,
+    league_run_key: `eq.${baselineRunKey}`,
+    league_name: `eq.${summary.league_name}`,
+    order: "rank.asc",
+    limit: "500"
+  });
+  if (!baselineRows.length) {
+    baselineRows = await supabaseSelect(env, CURRENT_TABLE, {
+      select,
+      league_run_key: `eq.${baselineRunKey}`,
+      league_name: `ilike.${summary.league_name}`,
+      order: "rank.asc",
+      limit: "500"
+    });
+  }
+  if (!baselineRows.length) return { summary, memberRows };
+
+  const currentRunRows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "fetched_at,league_run_key,league_name,user_id,raw_contribution,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `ilike.${summary.league_name}`,
+    order: "rank.asc",
+    limit: "500"
+  }).catch(() => []);
+
+  const baselineByUser = new Map(baselineRows.map(row => [String(row.user_id), toNumber(row.points) || 0]));
+  const currentMetadataByUser = new Map(currentRunRows.map(row => [String(row.user_id), runPointMetadata(row.raw_contribution, runKey)]));
+  const baselineLeaguePoints = toNumber(latestMeta(baselineRows)?.league_points);
+  const priorLeagueMetadata = runPointMetadata(latestMeta(currentRunRows)?.raw_league || currentRunRows[0]?.raw_league, runKey);
+  const leagueState = runOnlyPointState(summary.league_points, baselineLeaguePoints, priorLeagueMetadata.resetDetected);
+  const normalizedSummary = {
+    ...summary,
+    league_points: leagueState.points,
+    raw_league: withRunOnlyPointFields(summary.raw_league, leagueState.points, runKey, leagueState.resetDetected)
+  };
+  const normalizedRows = memberRows.map(row => {
+    const priorMetadata = currentMetadataByUser.get(String(row.user_id));
+    const state = runOnlyPointState(row.points, baselineByUser.get(String(row.user_id)), priorMetadata?.resetDetected);
+    return {
+      ...row,
+      points: state.points,
+      raw_member: withRunOnlyPointFields(row.raw_member, state.points, runKey, state.resetDetected),
+      raw_contribution: withRunOnlyPointFields(row.raw_contribution, state.points, runKey, state.resetDetected)
+    };
+  });
+  normalizedRows.sort((a, b) => (b.points - a.points) || String(a.display_name || "").localeCompare(String(b.display_name || "")));
+  normalizedRows.forEach((row, index) => { row.rank = index + 1; });
+  return { summary: normalizedSummary, memberRows: normalizedRows };
+}
+
+async function normalizeTopLeagueRowsForRun(env, runKey, listName, rows, options = {}) {
+  if (!rows?.length || !shouldNormalizeLeagueRunPoints(env, runKey)) return rows || [];
+  if (rows.every(row => runPointMetadata(row.raw_league, runKey).normalized)) return rows;
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  const names = rows.map(row => row.league_name).filter(Boolean);
+  const fetchComparableRows = targetRunKey => rows.length > 250
+    ? fetchStoredTopLeagueRows(env, targetRunKey, listName, Math.min(MAX_TOP_LEAGUES_LIMIT, Math.max(rows.length, 1000)))
+    : fetchStoredTopLeagueRowsByNames(env, targetRunKey, listName, names, Math.max(rows.length * 2, 100));
+  const [baselineRows, currentRunRows] = await Promise.all([
+    fetchComparableRows(baselineRunKey),
+    fetchComparableRows(runKey).catch(() => [])
+  ]);
+  const baselineByIdentity = new Map();
+  for (const row of baselineRows) {
+    for (const identity of [row.league_id, row.user_id, row.display_name]) {
+      const normalized = key(identity);
+      if (normalized) baselineByIdentity.set(normalized, toNumber(row.points) || 0);
+    }
+  }
+  const currentMetadataByIdentity = new Map();
+  for (const row of currentRunRows) {
+    const metadata = runPointMetadata(row.raw_league, runKey);
+    for (const identity of [row.league_id, row.user_id, row.display_name]) {
+      const normalized = key(identity);
+      if (normalized) currentMetadataByIdentity.set(normalized, metadata);
+    }
+  }
+
+  const normalizedRows = rows.map(row => {
+    const identities = [row.league_id, row.user_id, row.league_name].map(key).filter(Boolean);
+    const baseline = identities.map(identity => baselineByIdentity.get(identity)).find(value => value !== undefined);
+    const priorMetadata = identities.map(identity => currentMetadataByIdentity.get(identity)).find(Boolean);
+    const state = runOnlyPointState(row.points, baseline, priorMetadata?.resetDetected);
+    return { ...row, points: state.points, raw_league: withRunOnlyPointFields(row.raw_league, state.points, runKey, state.resetDetected) };
+  });
+
+  if (options.recomputeRanks !== false) {
+    normalizedRows.sort((a, b) => (b.points - a.points) || String(a.league_name || "").localeCompare(String(b.league_name || "")));
+    let rankedCount = 0;
+    let unrankedCount = 0;
+    for (const row of normalizedRows) {
+      if (row.points > 0) row.rank = ++rankedCount;
+      else row.rank = MAX_TOP_LEAGUES_LIMIT + (++unrankedCount);
+    }
+  }
+  return normalizedRows;
 }
 
 function stableLeagueUserId(value) { let h = 2166136261; const text = String(value || "unknown"); for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return 9000000000000 + h; }

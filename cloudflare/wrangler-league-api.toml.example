@@ -9,6 +9,10 @@ LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
 LEAGUE_RUN_KEY = "tap-heroes-part-2"
 LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
+# The previous run is used only as a subtraction baseline. Its totals are never
+# counted or stored as Tap Heroes Part 2 points.
+LEAGUE_BASELINE_RUN_KEY = "active"
+LEAGUE_NORMALIZE_POINTS_FROM_BASELINE = "true"
 # Optional per-run labels. Keys are LEAGUE_RUN_KEY values.
 LEAGUE_RUN_LABELS_JSON = ""
 PS99_UPDATE_THEME = ""
