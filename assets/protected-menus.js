@@ -36,11 +36,8 @@
         ["server.html", "Server Detail"],
         ["players.html", "Legacy Players"],
         ["clan-filter.html", "Legacy Clan Filter"],
-        ["c0ld-leagues.html", "c0ld Leagues"],
         ["c0ld-league-matches.html", "c0ld League Matches"],
-        ["top-leagues.html", "Top Leagues"],
         ["league.html", "League Tracker"],
-        ["league-profile.html", "League Profile"],
         ["yamo1-9.html", "YAMO1-9"],
         ["layok.html", "Layok Redirect"],
         ["wmsy.html", "WMSY Redirect"]
