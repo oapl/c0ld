@@ -1,9 +1,11 @@
 .reward-milestone-heading {
   display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
-  margin: 2px 0 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #30363d;
   color: #e6edf3;
 }
 
@@ -13,7 +15,7 @@
   gap: 3px;
 }
 
-.reward-milestone-heading strong { font-size: 16px; }
+.reward-milestone-heading strong { font-size: 18px; }
 .reward-milestone-heading span { color: #8b949e; font-size: 12px; }
 
 .reward-milestone-heading .squad-prize {
@@ -22,74 +24,76 @@
   background: rgba(242, 204, 96, .07);
   border-radius: 999px;
   padding: 6px 10px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .reward-milestone-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 6px 16px 10px;
 }
 
 .reward-milestone {
   position: relative;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid #30363d;
-  border-radius: 9px;
-  background: #161b22;
-  text-align: center;
-  overflow: hidden;
+  min-height: 72px;
+  padding: 9px 2px;
+  border-top: 1px solid rgba(139, 148, 158, .22);
 }
+.reward-milestone:first-child { border-top: 0; }
 
 .reward-milestone.current {
-  border-color: #ff8b86;
-  box-shadow: 0 0 0 1px rgba(255, 139, 134, .2) inset;
-  background: linear-gradient(180deg, rgba(255, 139, 134, .08), #161b22 45%);
+  opacity: 1;
 }
 
-.reward-milestone.reached { border-color: rgba(63, 185, 80, .5); }
+.reward-milestone.reached { opacity: .68; }
+.reward-milestone.needed { opacity: .9; }
+.reward-milestone.unknown { opacity: .58; }
 
 .reward-rank {
-  position: absolute;
-  top: 9px;
-  left: 9px;
-  z-index: 2;
-  padding: 4px 7px;
-  border-radius: 999px;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  color: #e6edf3;
+  margin-top: 4px;
+  color: #8b949e;
   font-size: 11px;
-  font-weight: 700;
 }
 
 .reward-art-shell {
   position: relative;
-  width: 90px;
-  height: 90px;
-  margin: 0 auto 8px;
-  padding: 3px;
-  border-radius: 14px;
-  background: #21262d;
+  grid-row: 1 / span 1;
+  width: 54px;
+  height: 54px;
+  border: 1px solid #30363d;
+  border-radius: 9px;
+  background: #0d1117;
+  overflow: hidden;
 }
 
 .reward-art-shell.rainbow {
-  background: conic-gradient(from 45deg, #ff7b72, #f2cc60, #56d364, #58a6ff, #bc8cff, #ff7b72);
+  border-color: #58a6ff;
+  box-shadow: inset 0 0 0 1px rgba(188, 140, 255, .45);
 }
 
 .reward-art-shell.golden {
-  background: linear-gradient(145deg, #8a6514, #f2cc60, #7d5810);
+  border-color: rgba(242, 204, 96, .65);
 }
 
 .reward-art-shell.shiny::after {
-  content: "";
+  content: "SHINY";
   position: absolute;
-  inset: 3px;
-  border-radius: 11px;
-  background: linear-gradient(115deg, transparent 26%, rgba(255, 255, 255, .62) 39%, transparent 52%);
-  transform: translateX(-130%);
-  animation: reward-shine 3.6s ease-in-out infinite;
+  right: 3px;
+  bottom: 3px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(13, 17, 23, .88);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  line-height: 1.2;
   pointer-events: none;
 }
 
@@ -97,29 +101,36 @@
   display: block;
   width: 100%;
   height: 100%;
-  border-radius: 11px;
-  object-fit: cover;
+  object-fit: contain;
   background: #0d1117;
 }
 
+.reward-copy { min-width: 0; }
+.reward-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .reward-name {
-  min-height: 34px;
+  min-width: 0;
   color: #e6edf3;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .reward-gap {
-  margin-top: 8px;
-  font-size: 13px;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(210, 153, 34, .14);
+  color: #f2cc60;
+  font-size: 9px;
   font-weight: 700;
-  color: #d29922;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.reward-milestone.current .reward-gap { color: #ff9b96; }
-.reward-milestone.reached .reward-gap { color: #3fb950; }
-.reward-milestone.unknown .reward-gap { color: #8b949e; }
+.reward-milestone.current .reward-gap { background: rgba(46, 160, 67, .16); color: #7ee787; }
+.reward-milestone.reached .reward-gap { background: #21262d; color: #8b949e; }
+.reward-milestone.unknown .reward-gap { background: #21262d; color: #8b949e; }
 
 .reward-threshold {
   margin-top: 4px;
@@ -129,21 +140,50 @@
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes reward-shine {
-  0%, 52% { transform: translateX(-130%); }
-  72%, 100% { transform: translateX(130%); }
+.league-insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(350px, .85fr);
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid #30363d;
+  background: #0d1117;
 }
+.member-growth {
+  padding: 16px;
+  border: 1px solid #30363d;
+  border-radius: 9px;
+  background: #161b22;
+}
+.member-growth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+.member-growth-head > div { display: flex; flex-direction: column; gap: 3px; }
+.member-growth-head strong { font-size: 16px; }
+.member-growth-head span, #member-growth-meta { color: #8b949e; font-size: 12px; }
+.member-growth-legend { display: flex; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 10px; color: #c9d1d9; font-size: 12px; }
+.growth-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.growth-legend-item strong { color: var(--series-color); font-size: 11px; }
+.growth-legend-item.hidden { color: #8b949e; }
+.growth-legend-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--series-color); }
+.growth-legend-item.hidden .growth-legend-dot { background: transparent; border: 1px solid #6e7681; }
+.member-growth-chart-shell { position: relative; }
+#member-growth-chart { display: block; width: 100%; height: 500px; border: 1px solid #30363d; border-radius: 8px; background: #0f141b; cursor: crosshair; }
+.member-growth-tooltip { display: none; position: absolute; z-index: 5; min-width: 210px; padding: 9px 11px; border: 1px solid #30363d; border-radius: 7px; background: rgba(11, 15, 20, .96); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); color: #c9d1d9; font-size: 12px; line-height: 1.5; pointer-events: none; }
+.growth-tip-time { margin-bottom: 4px; color: #e6edf3; font-weight: 700; }
+.growth-tip-row { display: flex; justify-content: space-between; gap: 16px; }
+.growth-tip-name { color: var(--series-color); }
 
-@media (max-width: 1050px) {
-  .reward-milestone-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.race-summary { padding: 0; border: 1px solid #30363d; border-radius: 9px; background: #161b22; overflow: hidden; }
+
+@media (max-width: 980px) {
+  .league-insights-grid { grid-template-columns: 1fr; }
+  #member-growth-chart { height: 360px; }
 }
 
 @media (max-width: 760px) {
-  .reward-milestone-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .reward-milestone-heading { align-items: flex-start; flex-direction: column; }
-  .reward-milestone-heading .squad-prize { white-space: normal; }
+  .member-growth-head { flex-direction: column; }
+  #member-growth-chart { height: 280px; }
 }
 
 @media (max-width: 480px) {
-  .reward-milestone-grid { grid-template-columns: 1fr; }
+  .reward-title-row { display: block; }
+  .reward-gap { display: inline-block; margin-top: 5px; }
 }
