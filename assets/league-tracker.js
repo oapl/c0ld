@@ -133,6 +133,27 @@
   }
 
   function numOrNull(v){if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null}
+  function playerGrowthProjection(row){
+    if(row?.points_redacted===true)return {pace:null,points:null,basis:"points hidden"};
+    const total=numOrNull(row?.total_points??row?.points);
+    const stored=numOrNull(row?.projected_points_1h);
+    if(total!=null&&stored!=null)return {pace:stored-total,points:stored,basis:String(row?.projection_basis||"stored projection")};
+    const windows=[
+      [row?.gain_1h,1,"1h pace"],
+      [row?.gain_6h,6,"6h average"],
+      [row?.gain_12h,12,"12h average"],
+      [row?.gain_24h,24,"24h average"],
+      [row?.gain_5m,1/12,"5m run rate"]
+    ];
+    for(const [value,hours,basis] of windows){
+      const gain=numOrNull(value);
+      if(gain!=null){
+        const pace=gain/hours;
+        return {pace,points:total==null?null:total+pace,basis};
+      }
+    }
+    return {pace:null,points:null,basis:"insufficient history"};
+  }
   function teamPoints(){return numOrNull(currentData?.league_points) ?? numOrNull(topLeagueRow?.total_points)}
   function renderRewardMilestones(){
     const box=document.getElementById("race-summary");
@@ -285,15 +306,18 @@
     renderRewardMilestones();
     requestAnimationFrame(drawMemberGrowthChart);
     const list=visible();
-    if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
+    if(!list.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
     tbody.innerHTML=list.map(r=>{
       const name=r.username||r.display_name||r.user_id;
-      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
+      const projection=playerGrowthProjection(r);
+      const pace=projection.pace==null?'<span class="unknown">—</span>':delta(Math.round(projection.pace));
+      const projected=projection.points==null?'<span class="unknown">—</span>':'<span title="'+esc(fullNum(Math.round(projection.points)))+'">'+esc(shortNum(Math.round(projection.points)))+'</span>';
+      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric" title="Hourly growth based on '+esc(projection.basis)+'">'+pace+'</td><td class="numeric projection-cell">'+projected+'<div class="projection-basis">'+esc(projection.basis)+'</div></td></tr>'
     }).join("");
     renderLeagueRankLog();
   }
 
-  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>'}
+  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="5" class="error">'+esc(msg)+'</td></tr>'}
 
   async function fetchLeagueRankHistory(){
     const stable=currentData?.league_id||topLeagueRow?.league_id||currentData?.league_name||LEAGUE;
