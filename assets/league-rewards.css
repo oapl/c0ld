@@ -3,8 +3,8 @@
   flex-direction: column;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 14px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 11px 14px 9px;
   border-bottom: 1px solid #30363d;
   color: #e6edf3;
 }
@@ -15,7 +15,7 @@
   gap: 3px;
 }
 
-.reward-milestone-heading strong { font-size: 18px; }
+.reward-milestone-heading strong { font-size: 16px; }
 .reward-milestone-heading span { color: #8b949e; font-size: 12px; }
 
 .reward-milestone-heading .squad-prize {
@@ -23,7 +23,8 @@
   border: 1px solid rgba(242, 204, 96, .35);
   background: rgba(242, 204, 96, .07);
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 4px 8px;
+  font-size: 10px;
   white-space: normal;
 }
 
@@ -31,18 +32,18 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  padding: 6px 16px 10px;
+  padding: 3px 12px 7px;
 }
 
 .reward-milestone {
   position: relative;
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 11px;
+  gap: 9px;
   min-width: 0;
-  min-height: 72px;
-  padding: 9px 2px;
+  min-height: 54px;
+  padding: 6px 2px;
   border-top: 1px solid rgba(139, 148, 158, .22);
 }
 .reward-milestone:first-child { border-top: 0; }
@@ -56,18 +57,18 @@
 .reward-milestone.unknown { opacity: .58; }
 
 .reward-rank {
-  margin-top: 4px;
+  margin-top: 2px;
   color: #8b949e;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .reward-art-shell {
   position: relative;
   grid-row: 1 / span 1;
-  width: 54px;
-  height: 54px;
+  width: 42px;
+  height: 42px;
   border: 1px solid #30363d;
-  border-radius: 9px;
+  border-radius: 7px;
   background: #0d1117;
   overflow: hidden;
 }
@@ -110,18 +111,18 @@
 .reward-name {
   min-width: 0;
   color: #e6edf3;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
 }
 
 .reward-gap {
   flex: 0 0 auto;
-  padding: 3px 6px;
+  padding: 2px 5px;
   border-radius: 999px;
   background: rgba(210, 153, 34, .14);
   color: #f2cc60;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;
@@ -133,54 +134,56 @@
 .reward-milestone.unknown .reward-gap { background: #21262d; color: #8b949e; }
 
 .reward-threshold {
-  margin-top: 4px;
+  margin-top: 2px;
   color: #8b949e;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.35;
   font-variant-numeric: tabular-nums;
 }
 
 .league-insights-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(350px, .85fr);
-  gap: 14px;
-  padding: 14px;
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, .85fr);
+  gap: 0;
+  padding: 0;
   border-bottom: 1px solid #30363d;
-  background: #0d1117;
+  background: transparent;
+  align-items: stretch;
 }
 .member-growth {
-  padding: 16px;
-  border: 1px solid #30363d;
-  border-radius: 9px;
-  background: #161b22;
+  padding: 13px 16px 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
-.member-growth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+.member-growth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 7px; }
 .member-growth-head > div { display: flex; flex-direction: column; gap: 3px; }
 .member-growth-head strong { font-size: 16px; }
 .member-growth-head span, #member-growth-meta { color: #8b949e; font-size: 12px; }
-.member-growth-legend { display: flex; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 10px; color: #c9d1d9; font-size: 12px; }
+.member-growth-legend { display: flex; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 7px; color: #c9d1d9; font-size: 11px; }
 .growth-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .growth-legend-item strong { color: var(--series-color); font-size: 11px; }
 .growth-legend-item.hidden { color: #8b949e; }
 .growth-legend-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--series-color); }
 .growth-legend-item.hidden .growth-legend-dot { background: transparent; border: 1px solid #6e7681; }
 .member-growth-chart-shell { position: relative; }
-#member-growth-chart { display: block; width: 100%; height: 500px; border: 1px solid #30363d; border-radius: 8px; background: #0f141b; cursor: crosshair; }
+#member-growth-chart { display: block; width: 100%; height: 280px; border: 1px solid #30363d; border-radius: 8px; background: #0f141b; cursor: crosshair; }
 .member-growth-tooltip { display: none; position: absolute; z-index: 5; min-width: 210px; padding: 9px 11px; border: 1px solid #30363d; border-radius: 7px; background: rgba(11, 15, 20, .96); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); color: #c9d1d9; font-size: 12px; line-height: 1.5; pointer-events: none; }
 .growth-tip-time { margin-bottom: 4px; color: #e6edf3; font-weight: 700; }
 .growth-tip-row { display: flex; justify-content: space-between; gap: 16px; }
 .growth-tip-name { color: var(--series-color); }
 
-.race-summary { padding: 0; border: 1px solid #30363d; border-radius: 9px; background: #161b22; overflow: hidden; }
+.race-summary { padding: 0; border: 0; border-left: 1px solid #30363d; border-radius: 0; background: transparent; overflow: hidden; }
 
 @media (max-width: 980px) {
   .league-insights-grid { grid-template-columns: 1fr; }
-  #member-growth-chart { height: 360px; }
+  .race-summary { border-left: 0; border-top: 1px solid #30363d; }
+  #member-growth-chart { height: 280px; }
 }
 
 @media (max-width: 760px) {
   .member-growth-head { flex-direction: column; }
-  #member-growth-chart { height: 280px; }
+  #member-growth-chart { height: 240px; }
 }
 
 @media (max-width: 480px) {
