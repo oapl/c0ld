@@ -22,6 +22,9 @@ PS99_UPDATE_NUMBER = ""
 LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,C0LD,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr,zee2"
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
+# Public-response visibility only. Collection and storage always remain complete.
+# Whole leagues go in "leagues"; players can be scoped by league name or "*".
+LEAGUE_PUBLIC_BLACKLIST_JSON = "{\"leagues\":[],\"players\":{\"YAMO\":[\"Younes89755\",\"1856284829\"]}}"
 INGEST_LEAGUES = "true"
 INGEST_TOP_LEAGUES = "true"
 LEAGUE_INGEST_CONCURRENCY = "4"

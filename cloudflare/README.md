@@ -665,6 +665,21 @@ to a lower value, that lower value is treated as the new run's real total.
 The baseline is used only during calculation; previous points are removed from
 the stored member, league, and raw point fields for the new run.
 
+`LEAGUE_PUBLIC_BLACKLIST_JSON` is a display-only blacklist. The Worker still
+collects and stores every configured league and member, but filters matching
+records from public current, history, profile, Top Leagues, and overlap
+responses. A hidden whole league still returns a successful empty current
+response so its page loads without data, and it is omitted from public league
+lists. For example, this hides Younes from YAMO while retaining all source data:
+
+```json
+{"leagues":[],"players":{"YAMO":["Younes89755","1856284829"]}}
+```
+
+Put a league name in `leagues` to hide its entire public dataset. Use `"*"` as
+a player-map key to hide a player from every league. Player IDs are recommended
+alongside usernames so a Roblox rename cannot bypass the filter.
+
 If the new run was ingested before baseline normalization was deployed, pause
 collection, run `supabase/reset_tap_heroes_part_2_league.sql`, deploy the
 updated Worker, and re-enable collection. The same cleanup is also available

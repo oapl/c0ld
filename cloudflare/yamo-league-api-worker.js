@@ -26,6 +26,9 @@ const ROBLOX_BATCH_SIZE = 100;
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
 const FALSEY_ENV_VALUES = new Set(["false", "0", "no", "off"]);
+const DEFAULT_LEAGUE_PUBLIC_BLACKLIST_JSON = '{"leagues":[],"players":{"YAMO":["Younes89755","1856284829"]}}';
+let publicVisibilityCacheRaw = null;
+let publicVisibilityCacheValue = null;
 
 export default {
   async fetch(request, env) {
@@ -288,7 +291,7 @@ async function handleTopLeaguesWindowIngest(request, env) {
     limit,
     top_leagues_requested: topLimit,
     rows_inserted: rowsToPersist.length,
-    rows: responseRows.map(publicLeagueRow),
+    rows: responseRows.map(publicLeagueRow).filter(row => !isLeaguePubliclyHidden(env, row.league_name)),
     next_offset: offset + limit < topLimit ? offset + limit : null
   }, env);
 }
@@ -540,6 +543,9 @@ async function handleCurrent(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
+  if (isLeaguePubliclyHidden(env, requested)) {
+    return cacheJson(hiddenLeaguePayload(env, runKey, requested), env);
+  }
   let rows = await supabaseSelect(env, CURRENT_TABLE, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     league_run_key: `eq.${runKey}`,
@@ -571,6 +577,10 @@ async function handleCurrent(request, env) {
   const usernameMap = await resolveRobloxUsernames(ids, env).catch(() => new Map());
   const avatarMap = await resolveRobloxAvatarHeadshots(ids, env).catch(() => new Map());
 
+  const publicRows = rowsWithGains
+    .map(row => publicMemberRow(row, usernameMap, avatarMap))
+    .filter(row => !isLeaguePlayerPubliclyHidden(env, latest.league_name, row));
+
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
@@ -588,7 +598,7 @@ async function handleCurrent(request, env) {
     league_rank: storedLeagueRank ?? liveLeagueRank,
     source: "ps99-league-api-worker",
     snapshot_retention: "permanent",
-    rows: rowsWithGains.map(row => publicMemberRow(row, usernameMap, avatarMap))
+    rows: publicRows
   }, env);
 }
 
@@ -631,7 +641,7 @@ async function handleTopLeagues(request, env) {
     offset,
     source: "ps99-league-api-worker",
     projection: "Projected rank uses current league points plus best available one-hour-equivalent gain.",
-    rows: publicRows
+    rows: publicRows.filter(row => !isLeaguePubliclyHidden(env, row.league_name))
   }, env);
 }
 
@@ -654,6 +664,7 @@ async function handleC0ldDiscoveredLeagues(request, env) {
     console.warn("c0ld discovered top league enrichment failed", err?.message || String(err));
     return rowsWithGains.map(publicDiscoveredLeagueRow);
   });
+  const visibleRows = filterPublicOverlapRows(env, publicRows);
 
   return cacheJson({
     ok: true,
@@ -661,7 +672,7 @@ async function handleC0ldDiscoveredLeagues(request, env) {
     snapshot_at: latest?.fetched_at || null,
     league_run_key: runKey,
     league_name: COLD_DISCOVERED_LEAGUES_NAME,
-    rows: publicRows
+    rows: visibleRows
   }, env);
 }
 
@@ -769,6 +780,7 @@ async function handleC0ldLeagueOverlap(request, env) {
       return 0;
     })
     : 0;
+  const visibleMatchedRows = filterPublicOverlapRows(env, matchedRows);
 
   return cacheJson({
     ok: true,
@@ -788,10 +800,10 @@ async function handleC0ldLeagueOverlap(request, env) {
       ? (batch.length && offset + batch.length < topLimit ? offset + batch.length : null)
       : (offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null),
     scanned_count: batch.length,
-    matched_count: matchedRows.length,
+    matched_count: visibleMatchedRows.length,
     discovered_upserted: discoveredUpserted,
-    scan_errors: scanned.filter(row => row.error).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
-    rows: matchedRows
+    scan_errors: scanned.filter(row => row.error && !isLeaguePubliclyHidden(env, row.league_name)).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
+    rows: visibleMatchedRows
   }, env);
 }
 
@@ -800,6 +812,9 @@ async function handleHistory(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
+  if (isLeaguePubliclyHidden(env, requested)) {
+    return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: url.searchParams.get("hours") || 24, rows: [], public_visibility: "hidden" }, env);
+  }
   const userId = url.searchParams.get("user_id");
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const hoursParam = url.searchParams.get("hours");
@@ -816,7 +831,15 @@ async function handleHistory(request, env) {
   }
   if (userId) params.user_id = `eq.${userId}`;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
-  return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows }, env);
+  let visibleRows;
+  if (isAggregateLeagueListName(requested)) {
+    visibleRows = rows.filter(row => !isLeaguePubliclyHidden(env, row.display_name));
+  } else {
+    const ids = [...new Set(rows.map(row => toNumber(row.user_id)).filter(Boolean))];
+    const usernameMap = ids.length ? await resolveRobloxUsernames(ids, env).catch(() => new Map()) : new Map();
+    visibleRows = rows.filter(row => !isLeaguePlayerPubliclyHidden(env, requested, row, usernameMap.get(toNumber(row.user_id))));
+  }
+  return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows: visibleRows }, env);
 }
 
 async function handleProfile(request, env) {
@@ -839,7 +862,13 @@ async function handleProfile(request, env) {
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
   const rows = await fetchLeagueProfileRows(env, params, limit);
-  const summaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(rows, env)
+  const usernameMap = await resolveRobloxUsernames([userId], env).catch(() => new Map());
+  const resolvedUsername = usernameMap.get(userId) || null;
+  const visibleRows = rows.filter(row =>
+    !isLeaguePubliclyHidden(env, row.league_name) &&
+    !isLeaguePlayerPubliclyHidden(env, row.league_name, row, resolvedUsername)
+  );
+  const summaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(visibleRows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
   const latest = summaries[0] || null;
@@ -850,7 +879,7 @@ async function handleProfile(request, env) {
     user_id: userId,
     username: latest?.display_name || null,
     profile_url: `https://www.roblox.com/users/${userId}/profile`,
-    rows_scanned: rows.length,
+    rows_scanned: visibleRows.length,
     rows: summaries
   }, env);
 }
@@ -2537,6 +2566,77 @@ function toNumber(value) { if (value === null || value === undefined || value ==
 function stringOrNull(value) { const text = String(value ?? "").trim(); return text || null; }
 function postgrestFilterText(value) { return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`; }
 function parseJsonObject(raw) { if (!raw) return {}; try { const parsed = JSON.parse(raw); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
+function visibilityValues(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === "") return [];
+  return String(value).split(",").map(item => item.trim()).filter(Boolean);
+}
+function visibilityTokenSet(value) { return new Set(visibilityValues(value).map(key).filter(Boolean)); }
+function publicVisibilityConfig(env) {
+  const raw = String(env.LEAGUE_PUBLIC_BLACKLIST_JSON || env.LEAGUE_VISIBILITY_BLACKLIST_JSON || DEFAULT_LEAGUE_PUBLIC_BLACKLIST_JSON).trim();
+  if (raw === publicVisibilityCacheRaw && publicVisibilityCacheValue) return publicVisibilityCacheValue;
+  const parsed = parseJsonObject(raw);
+  const leagues = visibilityTokenSet(parsed.leagues || parsed.hidden_leagues || parsed.hiddenLeagues);
+  const players = new Map();
+  const configuredPlayers = parsed.players || parsed.hidden_players || parsed.hiddenPlayers || {};
+  if (Array.isArray(configuredPlayers) || typeof configuredPlayers === "string") {
+    players.set("*", visibilityTokenSet(configuredPlayers));
+  } else if (configuredPlayers && typeof configuredPlayers === "object") {
+    for (const [league, values] of Object.entries(configuredPlayers)) {
+      const leagueKey = String(league || "").trim() === "*" ? "*" : key(league);
+      if (leagueKey) players.set(leagueKey, visibilityTokenSet(values));
+    }
+  }
+  publicVisibilityCacheRaw = raw;
+  publicVisibilityCacheValue = { leagues, players };
+  return publicVisibilityCacheValue;
+}
+function isLeaguePubliclyHidden(env, leagueNameValue) {
+  const leagueKey = key(leagueNameValue);
+  return Boolean(leagueKey && publicVisibilityConfig(env).leagues.has(leagueKey));
+}
+function isLeaguePlayerPubliclyHidden(env, leagueNameValue, row, aliases = []) {
+  const config = publicVisibilityConfig(env);
+  const scoped = new Set([...(config.players.get("*") || []), ...(config.players.get(key(leagueNameValue)) || [])]);
+  if (!scoped.size) return false;
+  const extra = Array.isArray(aliases) ? aliases : [aliases];
+  const identities = [
+    row?.user_id, row?.userId, row?.UserID, row?.id,
+    row?.username, row?.display_name, row?.DisplayName, row?.name,
+    ...extra
+  ].map(key).filter(Boolean);
+  return identities.some(identity => scoped.has(identity));
+}
+function isAggregateLeagueListName(value) {
+  const normalized = key(value);
+  return [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME, COLD_DISCOVERED_LEAGUES_NAME].some(name => key(name) === normalized);
+}
+function filterPublicOverlapRows(env, rows) {
+  return (rows || []).map(row => {
+    if (isLeaguePubliclyHidden(env, row?.league_name || row?.display_name)) return null;
+    if (!Array.isArray(row?.matches)) return row;
+    const matches = row.matches.filter(member => !isLeaguePlayerPubliclyHidden(env, row.league_name, member));
+    if (!matches.length) return null;
+    return {
+      ...row,
+      matches,
+      c0ld_member_count: matches.length,
+      c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points ?? member.points) || 0), 0)
+    };
+  }).filter(Boolean);
+}
+function hiddenLeaguePayload(env, runKey, leagueNameValue) {
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: null,
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    league_name: leagueNameValue,
+    public_visibility: "hidden",
+    rows: []
+  };
+}
 function c0ldMemberOverrides(env) {
   const raw = String(env.COLD_MEMBER_OVERRIDES_JSON || env.COLD_LEAGUES_MEMBER_OVERRIDES_JSON || "").trim();
   if (!raw) return [];

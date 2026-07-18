@@ -280,6 +280,14 @@
       const current=await getJson(currentUrl);
       rows=current.rows||[];
       currentData=current;
+      if(current.public_visibility==="hidden"){
+        topLeagueRow=null;
+        targetRankRow=null;
+        leagueRankHistoryRows=[];
+        renderCards(current);
+        render();
+        return;
+      }
       topLeagueRow=await fetchTopLeagueContext().catch(err=>{console.warn("Projected rank unavailable",err);targetRankRow=null;return null});
       renderCards(current);
       leagueRankHistoryRows=await fetchLeagueRankHistory().catch(err=>{console.warn("League rank history unavailable",err);return []});
