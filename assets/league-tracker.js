@@ -5,26 +5,26 @@
   const LEAGUE = String(config.league || "YAMO");
   const API_LEAGUE = String(config.apiLeague || config.league || "YAMO");
   const RUN_KEY = String(config.run || config.runKey || "tap-heroes-part-2").trim();
-  const TARGET_RANK = Number(config.targetRank || 60);
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-  const GAIN_WINDOWS = [
-    { key: "gain_5m", label: "5m", minutes: 5 },
-    { key: "gain_1h", label: "1 hour", minutes: 60 },
-    { key: "gain_6h", label: "6 hours", minutes: 360 },
-    { key: "gain_12h", label: "12 hours", minutes: 720 },
-    { key: "gain_24h", label: "24 hours", minutes: 1440 }
-  ];
-
   let rows = [];
   let currentData = null;
   let topLeagueRow = null;
-  let targetRankRow = null;
+  let milestoneRows = [];
   let topLeagueHistoryName = TOP_LEAGUES_NAME;
   let leagueRankHistoryRows = [];
   let sortKey = "rank";
   let sortAsc = true;
   let loading = false;
+  const REWARD_TIERS = [
+    { start:1,end:1,reward:"Rainbow Shiny Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/123380410310415",variant:"rainbow shiny" },
+    { start:2,end:3,reward:"Golden Shiny Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/132193905783959",variant:"golden shiny" },
+    { start:4,end:15,reward:"Rainbow Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/123380410310415",variant:"rainbow" },
+    { start:16,end:50,reward:"Shiny Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/123380410310415",variant:"shiny" },
+    { start:51,end:100,reward:"Golden Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/132193905783959",variant:"golden" },
+    { start:101,end:250,reward:"Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/123380410310415",variant:"standard" },
+    { start:251,end:2000,reward:"Huge Naga Cobra",image:"https://ps99.biggamesapi.io/image/101644631988314",variant:"standard" }
+  ];
 
   function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
   function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"—";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
@@ -83,13 +83,18 @@
     const targetName=norm(currentData?.league_name||LEAGUE);
     const targetId=String(currentData?.league_id||"").trim();
     const topRows=data.rows||[];
-    targetRankRow=Number.isFinite(TARGET_RANK)
-      ? topRows.find(r=>Number(r.rank)===TARGET_RANK) || topRows[TARGET_RANK-1] || null
-      : null;
     return topRows.find(r =>
       (targetId && String(r.league_id||"").trim()===targetId) ||
       norm(r.league_name||r.display_name)===targetName
     ) || null;
+  }
+
+  async function fetchRewardMilestones(){
+    const url=new URL(API+"/api/leagues/milestones");
+    url.searchParams.set("ranks",REWARD_TIERS.map(tier=>tier.end).join(","));
+    addRunParam(url);
+    const data=await getJson(url);
+    return data.rows||[];
   }
 
   function renderCards(data){
@@ -113,98 +118,35 @@
     if(src){img.src=src;img.hidden=false}else img.hidden=true;
   }
 
-  function numOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
+  function numOrNull(v){if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null}
   function teamPoints(){return numOrNull(currentData?.league_points) ?? numOrNull(topLeagueRow?.total_points)}
-  function targetPoints(){return numOrNull(targetRankRow?.total_points ?? targetRankRow?.points)}
-  function goalGap(){
-    const team=teamPoints(),target=targetPoints();
-    if(team==null||target==null)return null;
-    return Math.max(0, Math.ceil(target-team+1));
-  }
-  function teamGain(key){
-    let total=0,has=false;
-    for(const r of rows){
-      const n=numOrNull(r?.[key]);
-      if(n==null)continue;
-      total+=n;has=true;
-    }
-    return has?total:null;
-  }
-  function formatDuration(totalMinutes){
-    if(!Number.isFinite(totalMinutes))return"&mdash;";
-    if(totalMinutes<1)return"<1m";
-    const minutes=Math.ceil(totalMinutes);
-    if(minutes<60)return"~"+minutes+"m";
-    if(minutes<1440){
-      const h=Math.floor(minutes/60),m=minutes%60;
-      return"~"+h+"h"+(m?" "+m+"m":"");
-    }
-    const d=Math.floor(minutes/1440),h=Math.round((minutes%1440)/60);
-    return"~"+d+"d"+(h?" "+h+"h":"");
-  }
-  function ordinal(n){
-    const value=Number(n);
-    if(!Number.isFinite(value))return String(n||"");
-    const mod100=value%100,mod10=value%10;
-    const suffix=mod100>=11&&mod100<=13?"th":mod10===1?"st":mod10===2?"nd":mod10===3?"rd":"th";
-    return value+suffix;
-  }
-  function raceBasis(){
-    const preference=["gain_1h","gain_6h","gain_12h","gain_24h","gain_5m"];
-    for(const key of preference){
-      const win=GAIN_WINDOWS.find(w=>w.key===key);
-      const targetGain=numOrNull(targetRankRow?.[key]);
-      const currentGain=teamGain(key);
-      if(win&&targetGain!=null&&currentGain!=null)return{...win,targetGain,currentGain};
-    }
-    return null;
-  }
-  function raceStats(){
-    const gap=goalGap(),basis=raceBasis();
-    if(gap==null||!basis)return{time:'&mdash;',hourly:'&mdash;',tone:'unknown',title:'Pace unavailable.'};
-    const hours=basis.minutes/60;
-    const targetHourly=basis.targetGain/hours;
-    const currentHourly=basis.currentGain/hours;
-    const basisLabel=basis.key==="gain_1h"?"1h":basis.label;
-    const leagueName=currentData?.league_name||LEAGUE;
-    const title="Uses "+basisLabel+" pace: "+leagueName+" "+fullNum(Math.round(currentHourly))+"/hr, #"+TARGET_RANK+" "+fullNum(Math.round(targetHourly))+"/hr.";
-    if(gap<=0)return{time:'Passed',hourly:shortNum(currentHourly)+"/hr",tone:'met',title};
-    const netHourly=currentHourly-targetHourly;
-    const requiredHourly=Math.ceil(targetHourly+1);
-    return {
-      time:netHourly>0?formatDuration(gap/(netHourly/60)):"won't pass",
-      hourly:shortNum(currentHourly)+"/hr",
-      required:netHourly>0?"":shortNum(requiredHourly)+"/hr",
-      tone:netHourly>0?"met":"need",
-      title:title+" Time is based on "+leagueName+"'s net gain after #"+TARGET_RANK+"'s pace."
-    };
-  }
-  function renderRaceSummary(){
+  function renderRewardMilestones(){
     const box=document.getElementById("race-summary");
     if(!box)return;
     if(!SHOW_RACE_SUMMARY){box.hidden=true;return}
     box.hidden=false;
-    if(!targetRankRow){
-      box.innerHTML='<div class="race-summary-empty">#'+esc(TARGET_RANK)+' target unavailable until Top 1000 league data updates.</div>';
-      return;
-    }
-    const targetName=targetRankRow.league_name||targetRankRow.display_name||"Top "+TARGET_RANK;
-    const actualRank=targetRankRow.rank||TARGET_RANK;
-    const headers=['<th>'+esc(ordinal(actualRank))+'</th>','<th class="numeric">Total</th>'].concat(GAIN_WINDOWS.map(w=>'<th class="numeric">'+esc(w.key==="gain_1h"?"Hr":w.label)+'</th>')).join("");
-    const targetCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(targetRankRow?.[win.key])+'</td>').join("");
-    const teamCells=GAIN_WINDOWS.map(win=>'<td class="numeric">'+delta(teamGain(win.key))+'</td>').join("");
-    const stats=raceStats();
-    box.innerHTML='<div class="race-summary-scroll"><table class="race-mini-table"><thead><tr>'+headers+'</tr></thead><tbody>'+
-      '<tr><td class="race-name" title="'+esc(targetName)+'">'+esc(targetName)+'</td><td class="numeric" title="'+esc(fullNum(targetPoints()))+'">'+esc(shortNum(targetPoints()))+'</td>'+targetCells+'</tr>'+
-      '<tr><td class="race-name" title="'+esc(currentData?.league_name||LEAGUE)+'">'+esc(currentData?.league_name||LEAGUE)+'</td><td class="numeric" title="'+esc(fullNum(teamPoints()))+'">'+esc(shortNum(teamPoints()))+'</td>'+teamCells+'</tr>'+
-      '</tbody></table></div><div class="race-summary-stats">'+
-      '<span title="'+esc(stats.title)+'">Time to Pass: <strong class="'+esc(stats.tone)+'">'+stats.time+'</strong> @ '+esc(stats.hourly)+(stats.required?' | <strong class="need">'+esc(stats.required)+'</strong> required to pass':'')+'</span>'+
-      '</div>';
+    const thresholds=new Map(milestoneRows.map(row=>[Number(row.rank),row]));
+    const points=teamPoints();
+    const currentRank=numOrNull(topLeagueRow?.rank??currentData?.league_rank);
+    const cards=REWARD_TIERS.map(tier=>{
+      const threshold=thresholds.get(tier.end);
+      const thresholdPoints=threshold?.available?numOrNull(threshold.points):null;
+      const gap=points!=null&&thresholdPoints!=null?Math.max(0,Math.ceil(thresholdPoints-points+1)):null;
+      const inTier=currentRank!=null&&currentRank>=tier.start&&currentRank<=tier.end;
+      const surpassed=currentRank!=null&&currentRank<tier.start;
+      const status=inTier?"Current reward":surpassed?"Surpassed":gap===0?"Reached":gap==null?"Threshold unavailable":"Need "+shortNum(gap)+" points";
+      const statusClass=inTier?"current":surpassed||gap===0?"reached":gap==null?"unknown":"needed";
+      const range=tier.start===tier.end?"#"+tier.start:"#"+tier.start+"–"+tier.end;
+      const entry=thresholdPoints==null?"Entry points unavailable":fullNum(thresholdPoints)+" points at #"+tier.end;
+      const gapTitle=gap==null?entry:fullNum(gap)+" more points required; "+entry;
+      return '<article class="reward-milestone '+statusClass+'"><div class="reward-rank">'+esc(range)+'</div><div class="reward-art-shell '+esc(tier.variant)+'"><img class="reward-art" src="'+esc(tier.image)+'" alt="'+esc(tier.reward)+'" loading="lazy"></div><div class="reward-name">'+esc(tier.reward)+'</div><div class="reward-gap" title="'+esc(gapTitle)+'">'+esc(status)+'</div><div class="reward-threshold">'+esc(entry)+'</div></article>';
+    }).join("");
+    box.innerHTML='<div class="reward-milestone-heading"><div><strong>League Reward Milestones</strong><span>Points needed to enter each reward range</span></div><span class="squad-prize">Every squad member receives the prize</span></div><div class="reward-milestone-grid">'+cards+'</div>';
   }
 
   function render(){
     const tbody=document.getElementById("members-tbody");
-    renderRaceSummary();
+    renderRewardMilestones();
     const list=visible();
     if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No stored '+esc(LEAGUE)+' members found yet.</td></tr>';return}
     tbody.innerHTML=list.map(r=>{
@@ -282,13 +224,18 @@
       currentData=current;
       if(current.public_visibility==="hidden"){
         topLeagueRow=null;
-        targetRankRow=null;
+        milestoneRows=[];
         leagueRankHistoryRows=[];
         renderCards(current);
         render();
         return;
       }
-      topLeagueRow=await fetchTopLeagueContext().catch(err=>{console.warn("Projected rank unavailable",err);targetRankRow=null;return null});
+      const [top,milestones]=await Promise.all([
+        fetchTopLeagueContext().catch(err=>{console.warn("Projected rank unavailable",err);return null}),
+        fetchRewardMilestones().catch(err=>{console.warn("Reward milestones unavailable",err);return []})
+      ]);
+      topLeagueRow=top;
+      milestoneRows=milestones;
       renderCards(current);
       leagueRankHistoryRows=await fetchLeagueRankHistory().catch(err=>{console.warn("League rank history unavailable",err);return []});
       render();

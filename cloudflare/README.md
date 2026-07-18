@@ -665,20 +665,24 @@ to a lower value, that lower value is treated as the new run's real total.
 The baseline is used only during calculation; previous points are removed from
 the stored member, league, and raw point fields for the new run.
 
-`LEAGUE_PUBLIC_BLACKLIST_JSON` is a display-only blacklist. The Worker still
-collects and stores every configured league and member, but filters matching
-records from public current, history, profile, Top Leagues, and overlap
-responses. A hidden whole league still returns a successful empty current
-response so its page loads without data, and it is omitted from public league
-lists. For example, this hides Younes from YAMO while retaining all source data:
+`LEAGUE_POINTS_BLACKLIST_JSON` is a display-only blacklist. The Worker still
+collects and stores every configured league and member. A listed player remains
+visible in rosters, history, profiles, and overlap results, but all of their
+point totals and gain fields are omitted from public responses (and render as
+blank) in every league. A hidden whole league returns a successful empty
+current response so its page loads
+without data, and it is omitted from public league lists. For example, this
+redacts Younes's points globally while retaining all source data:
 
 ```json
-{"leagues":[],"players":{"YAMO":["Younes89755","1856284829"]}}
+{"leagues":[],"players":["Younes89755","1856284829"]}
 ```
 
-Put a league name in `leagues` to hide its entire public dataset. Use `"*"` as
-a player-map key to hide a player from every league. Player IDs are recommended
-alongside usernames so a Roblox rename cannot bypass the filter.
+Put a league name in `leagues` to hide its entire public dataset. Player IDs are
+recommended alongside usernames so a Roblox rename cannot bypass the global
+point redaction. The older `LEAGUE_PUBLIC_BLACKLIST_JSON` variable name remains
+accepted as a compatibility alias; legacy per-league player maps are flattened
+to global player redactions.
 
 If the new run was ingested before baseline normalization was deployed, pause
 collection, run `supabase/reset_tap_heroes_part_2_league.sql`, deploy the
@@ -696,6 +700,7 @@ Useful endpoints:
 |---|---|
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 

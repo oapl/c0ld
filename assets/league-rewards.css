@@ -1,0 +1,149 @@
+.reward-milestone-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin: 2px 0 12px;
+  color: #e6edf3;
+}
+
+.reward-milestone-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.reward-milestone-heading strong { font-size: 16px; }
+.reward-milestone-heading span { color: #8b949e; font-size: 12px; }
+
+.reward-milestone-heading .squad-prize {
+  color: #f2cc60;
+  border: 1px solid rgba(242, 204, 96, .35);
+  background: rgba(242, 204, 96, .07);
+  border-radius: 999px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.reward-milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.reward-milestone {
+  position: relative;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #30363d;
+  border-radius: 9px;
+  background: #161b22;
+  text-align: center;
+  overflow: hidden;
+}
+
+.reward-milestone.current {
+  border-color: #ff8b86;
+  box-shadow: 0 0 0 1px rgba(255, 139, 134, .2) inset;
+  background: linear-gradient(180deg, rgba(255, 139, 134, .08), #161b22 45%);
+}
+
+.reward-milestone.reached { border-color: rgba(63, 185, 80, .5); }
+
+.reward-rank {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 2;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #e6edf3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.reward-art-shell {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  margin: 0 auto 8px;
+  padding: 3px;
+  border-radius: 14px;
+  background: #21262d;
+}
+
+.reward-art-shell.rainbow {
+  background: conic-gradient(from 45deg, #ff7b72, #f2cc60, #56d364, #58a6ff, #bc8cff, #ff7b72);
+}
+
+.reward-art-shell.golden {
+  background: linear-gradient(145deg, #8a6514, #f2cc60, #7d5810);
+}
+
+.reward-art-shell.shiny::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 11px;
+  background: linear-gradient(115deg, transparent 26%, rgba(255, 255, 255, .62) 39%, transparent 52%);
+  transform: translateX(-130%);
+  animation: reward-shine 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.reward-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 11px;
+  object-fit: cover;
+  background: #0d1117;
+}
+
+.reward-name {
+  min-height: 34px;
+  color: #e6edf3;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.reward-gap {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #d29922;
+}
+
+.reward-milestone.current .reward-gap { color: #ff9b96; }
+.reward-milestone.reached .reward-gap { color: #3fb950; }
+.reward-milestone.unknown .reward-gap { color: #8b949e; }
+
+.reward-threshold {
+  margin-top: 4px;
+  color: #8b949e;
+  font-size: 10px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes reward-shine {
+  0%, 52% { transform: translateX(-130%); }
+  72%, 100% { transform: translateX(130%); }
+}
+
+@media (max-width: 1050px) {
+  .reward-milestone-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .reward-milestone-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reward-milestone-heading { align-items: flex-start; flex-direction: column; }
+  .reward-milestone-heading .squad-prize { white-space: normal; }
+}
+
+@media (max-width: 480px) {
+  .reward-milestone-grid { grid-template-columns: 1fr; }
+}

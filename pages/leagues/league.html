@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>League Tracker</title>
 <link rel="stylesheet" href="assets/league-page.css">
+<link rel="stylesheet" href="assets/league-rewards.css">
 </head>
 <body>
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu">
@@ -41,11 +42,10 @@
   const params=new URLSearchParams(location.search);
   const league=String(params.get("league")||params.get("name")||"YAMO").trim()||"YAMO";
   const run=String(params.get("run")||"tap-heroes-part-2").trim()||"tap-heroes-part-2";
-  const targetRank=Number(params.get("target_rank")||params.get("targetRank")||60);
   document.title=league+" League Tracker";
   document.getElementById("page-title").textContent=league+" League Tracker";
   document.getElementById("members-title").textContent=league+" Member Progress";
-  window.LEAGUE_CONFIG={league,apiLeague:String(params.get("apiLeague")||league),run,title:league+" League Tracker",showRaceSummary:true,targetRank:Number.isFinite(targetRank)?targetRank:60};
+  window.LEAGUE_CONFIG={league,apiLeague:String(params.get("apiLeague")||league),run,title:league+" League Tracker",showRaceSummary:true};
 })();
 </script>
 <script src="assets/league-tracker.js"></script>
