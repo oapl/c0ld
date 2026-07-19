@@ -2,6 +2,8 @@
   "use strict";
 
   const API="https://inventory-detector-worker.opal-dde.workers.dev";
+  const LEAGUE_API="https://yamo-league-api-worker.opal-dde.workers.dev";
+  const AUTH_USER_STORAGE_KEY="c0ld:inventory-authorized-user";
   const USER={user_id:"463900811",username:"AgentP_0928"};
   const PETS=[
     {key:"elephant",name:"War Elephant"},
@@ -95,7 +97,7 @@
     elements.connect.textContent="Preparing approval...";
     showNotice("Preparing the secure BIG Games approval page...");
     try{
-      const params=new URLSearchParams({user_id:USER.user_id,username:USER.username,return_url:returnUrl()});
+      const params=new URLSearchParams({self:"1",return_url:returnUrl()});
       const data=await request(`/api/inventory/oauth/start?${params}`,{method:"POST",headers:{"content-type":"application/json"}});
       location.assign(data.authorize_url);
     }catch(error){
@@ -104,17 +106,34 @@
       showNotice(error.message||String(error),"error");
     }
   }
-  function consumeCallback(){
+  async function consumeCallback(){
     const params=new URLSearchParams(location.search);
     const result=params.get("inventory_oauth");
-    if(!result)return;
+    if(!result)return false;
     const message=params.get("inventory_message")||(result==="connected"?"Inventory access was approved and the first snapshot was pulled.":"Inventory authorization failed.");
+    const userId=String(params.get("user_id")||"").trim();
+    if(result==="connected"&&userId){
+      localStorage.setItem(AUTH_USER_STORAGE_KEY,userId);
+      try{
+        const response=await fetch(`${LEAGUE_API}/api/leagues/player-location?user_id=${encodeURIComponent(userId)}&v=${Date.now()}`,{cache:"no-store"});
+        const data=await response.json();
+        if(response.ok&&data.ok!==false&&data.found&&data.league_name){
+          const target=new URL("league.html",location.href);
+          target.searchParams.set("league",String(data.league_name));
+          target.searchParams.set("inventory_oauth","connected");
+          target.searchParams.set("user_id",userId);
+          target.searchParams.set("inventory_message",message);
+          location.replace(target.toString());
+          return true;
+        }
+      }catch(error){console.warn("Could not locate the authorized player's current league",error)}
+    }
     showNotice(message,result==="connected"?"success":"error");
     history.replaceState({},document.title,location.pathname);
+    return false;
   }
 
   elements.connect.addEventListener("click",connect);
   elements.refresh.addEventListener("click",load);
-  consumeCallback();
-  load();
+  (async()=>{if(await consumeCallback())return;load()})();
 })();

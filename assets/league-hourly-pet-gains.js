@@ -19,10 +19,12 @@
   const INVENTORY_API="https://inventory-detector-worker.opal-dde.workers.dev";
   const LEAGUE_API="https://yamo-league-api-worker.opal-dde.workers.dev";
   const CONNECTED_APPS_URL="https://db.biggames.io/settings/connected-apps";
+  const AUTH_USER_STORAGE_KEY="c0ld:inventory-authorized-user";
   const HOURS=24;
   let requestVersion=0;
   let activeView="hourly";
   let connected=false;
+  let authorizedUserId=String(localStorage.getItem(AUTH_USER_STORAGE_KEY)||"").trim();
   const PETS=[
     {key:"elephant",name:"War Elephant"},
     {key:"jaguar",name:"Warrior Jaguar"},
@@ -36,6 +38,7 @@
   function petName(row){return String(row?.item_id||row?.display_name||"").trim().toLowerCase()}
   function usableName(value,userId){const name=String(value||"").trim(),id=String(userId||"");return name&&name!==id&&!/^user[ _-]?\d+$/i.test(name)?name:""}
   function selectedName(){const option=memberSelect.selectedOptions?.[0];return option?.dataset?.name||option?.textContent||memberSelect.value}
+  function leagueKey(value){return String(value||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
   function oauthReturnUrl(){const url=new URL(location.href);url.searchParams.delete("inventory_oauth");url.searchParams.delete("inventory_message");url.searchParams.delete("user_id");url.searchParams.delete("pulled");url.searchParams.delete("forced");url.searchParams.delete("snapshot_at");url.searchParams.delete("connected");return url.toString()}
   function hourLabel(row){
     const start=new Date(row?.period_start||0),end=new Date(row?.period_end||0);
@@ -110,7 +113,7 @@
       if(!response.ok||data.ok===false)throw new Error(data.message||"League roster request failed");
       const members=(data.rows||[]).slice().sort((a,b)=>(Number(a.rank)||999)-(Number(b.rank)||999));
       const names=await resolveRobloxNames(members.map(member=>String(member.user_id)).filter(Boolean));
-      const previous=memberSelect.value;
+      const previous=authorizedUserId||memberSelect.value;
       memberSelect.innerHTML="";
       for(const member of members){
         const userId=String(member.user_id||"").trim();
@@ -120,45 +123,59 @@
         option.value=userId;option.dataset.name=name;option.textContent=(member.rank?"#"+member.rank+" · ":"")+name;
         memberSelect.appendChild(option);
       }
-      if(!memberSelect.options.length){memberSelect.innerHTML='<option value="">No league members found</option>';connectButton.disabled=true;return}
+      if(!memberSelect.options.length){memberSelect.innerHTML='<option value="">No league members found</option>';return}
       memberSelect.value=[...memberSelect.options].some(option=>option.value===previous)?previous:memberSelect.options[0].value;
-    }catch(error){console.warn("League roster unavailable",error);memberSelect.innerHTML='<option value="">Roster unavailable</option>';connectButton.disabled=true}
+    }catch(error){console.warn("League roster unavailable",error);memberSelect.innerHTML='<option value="">Roster unavailable</option>'}
   }
-  async function loadAccessStatus(userId=memberSelect.value){
-    if(!userId){connectButton.disabled=true;connectStatus.textContent="Select a league member";return}
+  async function loadAccessStatus(){
+    if(!authorizedUserId){
+      connected=false;connectButton.disabled=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");connectButton.title="Authorize your own Roblox inventory";connectStatus.className="meta";connectStatus.textContent="Connect the Roblox account you are currently signed into at BIG Games.";return;
+    }
     connectButton.disabled=true;
     connectStatus.className="meta";
-    connectStatus.textContent="Checking "+selectedName()+"'s inventory access...";
+    connectStatus.textContent="Checking your saved inventory access...";
     try{
-      const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",String(userId));url.searchParams.set("v",Date.now());
+      const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",authorizedUserId);url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory access check failed");
       connected=!!data.connected;
-      connectButton.textContent=connected?"Revoke Inventory Access":"Connect Inventory";
+      if(!connected){localStorage.removeItem(AUTH_USER_STORAGE_KEY);authorizedUserId=""}
+      connectButton.textContent=connected?"Revoke Inventory Access":"Connect Your Inventory";
       connectButton.classList.toggle("connected",connected);
-      connectButton.title=connected?"Open BIG Games Connected Apps to revoke this authorization":"Approve inventory access for the selected member";
+      connectButton.title=connected?"Open BIG Games Connected Apps to revoke this authorization":"Authorize your own Roblox inventory";
       connectStatus.className="meta"+(connected?" connected":"");
-      connectStatus.textContent=connected?selectedName()+" is opted in":selectedName()+" has not opted in";
+      connectStatus.textContent=connected?"Your Roblox account is opted in":"Connect the Roblox account you are currently signed into at BIG Games.";
     }catch(error){
-      connected=false;connectButton.textContent="Connect Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);
+      connected=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);
     }finally{connectButton.disabled=false}
   }
-  async function connectSelected(){
+  async function connectSelf(){
     if(connected){window.open(CONNECTED_APPS_URL,"_blank","noopener,noreferrer");return}
-    const userId=String(memberSelect.value||"").trim();if(!userId)return;
     connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening the secure BIG Games approval page...";
     try{
-      const params=new URLSearchParams({user_id:userId,username:selectedName(),league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
+      const params=new URLSearchParams({self:"1",league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
       location.assign(data.authorize_url);
-    }catch(error){connectButton.disabled=false;connectButton.textContent=connected?"Revoke Inventory Access":"Connect Inventory";connectStatus.className="meta error";connectStatus.textContent=error.message||String(error)}
+    }catch(error){connectButton.disabled=false;connectButton.textContent=connected?"Revoke Inventory Access":"Connect Your Inventory";connectStatus.className="meta error";connectStatus.textContent=error.message||String(error)}
   }
-  function consumeOAuthResult(){
+  async function consumeOAuthResult(){
     const params=new URLSearchParams(location.search),result=params.get("inventory_oauth");if(!result)return;
+    const userId=String(params.get("user_id")||"").trim();
+    if(result==="connected"&&userId){
+      authorizedUserId=userId;localStorage.setItem(AUTH_USER_STORAGE_KEY,userId);
+      try{
+        const lookup=new URL(LEAGUE_API+"/api/leagues/player-location");lookup.searchParams.set("user_id",userId);if(config.run)lookup.searchParams.set("run",String(config.run));lookup.searchParams.set("v",Date.now());
+        const response=await fetch(lookup,{cache:"no-store"}),data=await response.json();
+        if(response.ok&&data.ok!==false&&data.found&&leagueKey(data.league_name)!==leagueKey(config.apiLeague||config.league)){
+          const target=new URL("league.html",location.href);target.searchParams.set("league",String(data.league_name));if(config.run)target.searchParams.set("run",String(config.run));target.searchParams.set("inventory_oauth","connected");target.searchParams.set("user_id",userId);target.searchParams.set("inventory_message",params.get("inventory_message")||"Inventory access connected.");location.replace(target.toString());return true;
+        }
+      }catch(error){console.warn("Could not locate the authorized player's current league",error)}
+    }
     connectStatus.className="meta "+(result==="connected"?"connected":"error");
     connectStatus.textContent=params.get("inventory_message")||(result==="connected"?"Inventory access connected.":"Inventory authorization failed.");
     history.replaceState({},document.title,oauthReturnUrl());
+    return false;
   }
   async function load(userId=memberSelect.value){
     if(!userId){meta.textContent="No league member selected";tbody.innerHTML='<tr><td colspan="6" class="empty">No league members are available.</td></tr>';return}
@@ -196,12 +213,12 @@
 
   async function init(){
     section.hidden=false;
-    consumeOAuthResult();
+    if(await consumeOAuthResult())return;
     await loadRoster();
-    memberSelect.addEventListener("change",()=>{loadAccessStatus(memberSelect.value);load(memberSelect.value)});
-    connectButton.addEventListener("click",connectSelected);
+    memberSelect.addEventListener("change",()=>load(memberSelect.value));
+    connectButton.addEventListener("click",connectSelf);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
-    loadAccessStatus(memberSelect.value);
+    loadAccessStatus();
     load(memberSelect.value);
   }
 

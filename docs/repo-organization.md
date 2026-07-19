@@ -53,7 +53,9 @@ These are hidden from the main menu for now but remain available by direct URL:
 |---|---|---|
 | `pages/leagues/c0ld-leagues.html` | `c0ld-leagues.html` | Curated c0ld league list |
 | `pages/leagues/c0ld-league-matches.html` | `c0ld-league-matches.html` | Manual/deep c0ld league discovery scanner |
-| `pages/leagues/top-leagues.html` | `top-leagues.html` | Top Leagues leaderboard |
+| `pages/leagues/solo-leaderboard.html` | `solo-leaderboard.html` | Top individual league contributors with expanded search |
+| `pages/leagues/league-leaderboard.html` | `league-leaderboard.html` | Ranked League leaderboard |
+| `pages/redirects/top-leagues.html` | `top-leagues.html` | Legacy redirect to League Leaderboard |
 | `pages/leagues/league.html` | `league.html` | Generic league tracker page |
 | `pages/leagues/league-profile.html` | `league-profile.html` | League member profile route |
 | `pages/leagues/yamo1-9.html` | `yamo1-9.html` | YAMO1-9 view |

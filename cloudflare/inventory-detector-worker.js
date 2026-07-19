@@ -87,18 +87,19 @@ async function handleOAuthStart(request, env) {
   requireBigGamesOAuth(env);
 
   const url = new URL(request.url);
-  const requestedUserId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || "").trim();
-  const configuredUser = configuredUsers(env).find(user => String(user.user_id) === requestedUserId);
-  const leagueMember = !configuredUser && envBool(env.INVENTORY_LEAGUE_FEATURE, true) && envBool(env.INVENTORY_AUTO_DISCOVER_MEMBERS, true)
+  const selfAuthorization = envBool(url.searchParams.get("self"), false);
+  const requestedUserId = selfAuthorization ? "" : String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || "").trim();
+  const configuredUser = requestedUserId ? configuredUsers(env).find(user => String(user.user_id) === requestedUserId) : null;
+  const leagueMember = requestedUserId && !configuredUser && envBool(env.INVENTORY_LEAGUE_FEATURE, true) && envBool(env.INVENTORY_AUTO_DISCOVER_MEMBERS, true)
     ? await isCurrentLeagueMember(env, requestedUserId, url.searchParams.get("league"), url.searchParams.get("run"))
     : null;
-  if (!requestedUserId) throw httpError(400, "A Roblox user_id is required.");
-  if (!configuredUser && !leagueMember && !hasAdminAuthorization(request, env)) {
+  if (!selfAuthorization && !requestedUserId) throw httpError(400, "A Roblox user_id is required.");
+  if (!selfAuthorization && !configuredUser && !leagueMember && !hasAdminAuthorization(request, env)) {
     throw httpError(403, "This Roblox account is not a current member of the selected tracked league.");
   }
   const targetUser = {
-    user_id: requestedUserId,
-    username: String(url.searchParams.get("username") || configuredUser?.username || leagueMember?.username || requestedUserId).trim()
+    user_id: requestedUserId || null,
+    username: String(url.searchParams.get("username") || configuredUser?.username || leagueMember?.username || requestedUserId || "").trim() || null
   };
   const returnUrl = validatedOAuthReturnUrl(url.searchParams.get("return_url"), env);
 
@@ -114,7 +115,7 @@ async function handleOAuthStart(request, env) {
     expires_at: expiresAt,
     created_at: now.toISOString(),
     used_at: null,
-    target_roblox_user_id: Number(targetUser.user_id),
+    target_roblox_user_id: targetUser.user_id ? Number(targetUser.user_id) : null,
     target_roblox_username: targetUser.username,
     return_url: returnUrl || null,
     force_ingest: true
@@ -132,6 +133,7 @@ async function handleOAuthStart(request, env) {
     ok: true,
     user_id: targetUser.user_id,
     username: targetUser.username,
+    self_authorization: selfAuthorization,
     authorize_url: authorizeUrl.toString(),
     expires_at: expiresAt,
     message: "Open authorize_url and approve access within 10 minutes."
@@ -198,33 +200,32 @@ async function handleOAuthCallback(request, env) {
     return oauthCompletion(pending, false, "The approved token does not include Inventory access.");
   }
 
-  const targetUserId = String(pending.target_roblox_user_id || "").trim();
-  if (!targetUserId) {
-    await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, false, "This approval is missing its target Roblox account. Start again.");
-  }
   const authorizedAt = new Date();
   const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
   const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
   const tokenAccount = authorizedInventoryAccount(null, token);
-  if (tokenAccount.user_id && tokenAccount.user_id !== targetUserId) {
+  const invitedUserId = String(pending.target_roblox_user_id || "").trim();
+  let targetUserId = invitedUserId || tokenAccount.user_id;
+  if (invitedUserId && tokenAccount.user_id && tokenAccount.user_id !== invitedUserId) {
     await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, false, `This invitation is for Roblox user ${targetUserId}, but a different account approved it.`);
+    return oauthCompletion(pending, false, `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`);
   }
 
   // Persist a valid grant before the initial inventory read. BIG Games records the
   // app as connected as soon as consent succeeds, and a transient read failure must
   // not discard that consent or make every later manual retry fall back to public data.
-  await saveOAuthGrant(env, {
-    userId: targetUserId,
-    username: tokenAccount.username || pending.target_roblox_username || null,
-    token,
-    scopes,
-    authorizedAt,
-    expiresAt,
-    expiresIn,
-    identityVerified: tokenAccount.user_id === targetUserId
-  });
+  if (targetUserId) {
+    await saveOAuthGrant(env, {
+      userId: targetUserId,
+      username: tokenAccount.username || pending.target_roblox_username || null,
+      token,
+      scopes,
+      authorizedAt,
+      expiresAt,
+      expiresIn,
+      identityVerified: tokenAccount.user_id === targetUserId
+    });
+  }
 
   let rawInventory;
   let forcedRefresh = pending.force_ingest !== false;
@@ -233,21 +234,32 @@ async function handleOAuthCallback(request, env) {
   } catch (forcedError) {
     if (!forcedRefresh) {
       await markOAuthStateUsed(env, stateHash);
-      return oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" });
+      return targetUserId
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" })
+        : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${forcedError?.message || forcedError}`);
     }
     try {
       rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: false });
       forcedRefresh = false;
     } catch (fallbackError) {
       await markOAuthStateUsed(env, stateHash);
-      return oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" });
+      return targetUserId
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" })
+        : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${fallbackError?.message || fallbackError}`);
     }
   }
   const account = authorizedInventoryAccount(rawInventory, token);
+  if (!targetUserId) targetUserId = account.user_id;
+  if (!targetUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "Authorization succeeded, but BIG Games did not identify the approving Roblox account.");
+  }
   if (account.user_id && account.user_id !== targetUserId) {
     await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${oauthGrantKey(targetUserId)}` });
     await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, false, `This invitation is for Roblox user ${targetUserId}, but a different account approved it.`);
+    return oauthCompletion(pending, false, invitedUserId
+      ? `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`
+      : "The approving Roblox identity did not match the inventory account returned by BIG Games.");
   }
   await saveOAuthGrant(env, {
     userId: targetUserId,
@@ -455,14 +467,16 @@ function authorizedInventoryAccount(raw, token = null) {
     token?.account,
     token?.user,
     token?.player,
+    token,
     tokenClaims
   ].filter(value => value && typeof value === "object");
   for (const account of candidates) {
     const roblox = account.roblox || account.robloxAccount || account.roblox_account || {};
-    const userId = account.robloxUserId || account.roblox_user_id || roblox.userId || roblox.user_id || roblox.id || account.userId || account.user_id || "";
-    if (!userId) continue;
+    const userId = account.robloxUserId || account.roblox_user_id || account.robloxId || account.roblox_id || roblox.userId || roblox.user_id || roblox.id || account.userId || account.user_id || account.sub || "";
+    const normalizedUserId = String(userId || "").trim();
+    if (!/^\d+$/.test(normalizedUserId)) continue;
     return {
-      user_id: String(userId).trim(),
+      user_id: normalizedUserId,
       username: String(account.robloxUsername || account.roblox_username || roblox.username || roblox.name || account.username || account.name || "").trim()
     };
   }

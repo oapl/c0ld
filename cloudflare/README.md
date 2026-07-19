@@ -700,6 +700,8 @@ Useful endpoints:
 |---|---|
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
+| `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
 | `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
@@ -775,14 +777,13 @@ The Worker supports the official Big Games OAuth Player API. Configure
 `BIG_GAMES_CLIENT_ID`, `BIG_GAMES_REDIRECT_URI`, and the
 `BIG_GAMES_CLIENT_SECRET` secret, then apply
 `supabase/migrations/027_inventory_oauth.sql` and
-`supabase/migrations/029_inventory_multi_account_oauth.sql`. Add every account
-that may authorize inventory access to `INVENTORY_USERS_JSON`. Start a specific
-authorization with `POST /api/inventory/oauth/start?user_id=463900811`, open
-the returned `authorize_url`, and approve Inventory access. Configured users
-may start their own consent flow from an allowed site origin; unconfigured
-accounts require the Worker administrator token. The callback verifies that
-the approving Roblox account matches the invitation and stores a separate
-encrypted grant for that user. Check one account with
+`supabase/migrations/029_inventory_multi_account_oauth.sql`. Start open
+self-authorization with `POST /api/inventory/oauth/start?self=1`, open the
+returned `authorize_url`, and approve Inventory access. The callback derives
+the Roblox identity from the approved token/inventory response and stores a
+separate encrypted grant only for that approving user. Targeted invitations
+using `user_id=` remain available for configured users and verified league
+members. Check one account with
 `GET /api/inventory/oauth/status?user_id=463900811`.
 `GET /api/inventory/oauth/summary` returns only the number of active and expired
 saved approvals for the public opt-in counter; it does not expose account IDs.

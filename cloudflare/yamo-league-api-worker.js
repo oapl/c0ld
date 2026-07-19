@@ -49,6 +49,10 @@ export default {
         response = await handleProfile(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/solo-leaderboard") {
+        response = await handleSoloLeaderboard(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/player-location") {
+        response = await handleLeaguePlayerLocation(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/milestones") {
         response = await handleLeagueMilestones(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
@@ -647,6 +651,144 @@ async function handleTopLeagues(request, env) {
     projection: "Projected rank uses current league points plus best available one-hour-equivalent gain.",
     rows: publicRows.filter(row => !isLeaguePubliclyHidden(env, row.league_name))
   }, env);
+}
+
+async function handleSoloLeaderboard(request, env) {
+  const url = new URL(request.url);
+  const query = String(url.searchParams.get("q") || url.searchParams.get("search") || "").trim();
+  const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 500);
+  const runKey = requestedRunKey(url, env);
+  const api = await fetchLeaguePlayersApi();
+  const livePlayers = leaguePlayersFromResponse(api)
+    .map(normalizeSoloLeaguePlayer)
+    .filter(row => row.user_id && row.league_name && !isLeaguePubliclyHidden(env, row.league_name))
+    .sort((a, b) => b.points - a.points || a.user_id - b.user_id);
+
+  livePlayers.forEach((row, index) => { row.rank = index + 1; });
+  const rowsByUser = new Map(livePlayers.map(row => [String(row.user_id), row]));
+
+  if (query) {
+    const storedRows = await fetchStoredSoloSearchRows(env, runKey).catch(err => {
+      console.warn("expanded solo leaderboard search unavailable", err?.message || String(err));
+      return [];
+    });
+    for (const row of storedRows) {
+      const id = String(row.user_id || "");
+      if (!id || rowsByUser.has(id) || isLeaguePubliclyHidden(env, row.league_name)) continue;
+      rowsByUser.set(id, {
+        rank: null,
+        user_id: toNumber(row.user_id),
+        username: String(row.display_name || "").trim(),
+        display_name: String(row.display_name || "").trim(),
+        league_name: String(row.league_name || "").trim(),
+        league_id: stringOrNull(row.league_id),
+        league_icon: stringOrNull(row.league_icon),
+        points: toNumber(row.points) || 0,
+        total_points: toNumber(row.points) || 0,
+        fetched_at: row.fetched_at || row.updated_at || null,
+        source: "stored-tracked-league"
+      });
+    }
+    const directUserId = await resolveRobloxUserIdForSearch(query).catch(() => null);
+    if (directUserId && !rowsByUser.has(String(directUserId))) {
+      const directApi = await fetchLeaguePlayerApi(directUserId).catch(() => null);
+      const directRow = directApi ? normalizeSoloLeaguePlayer(leaguePlayerFromResponse(directApi)) : null;
+      if (directRow?.user_id && directRow.league_name && !isLeaguePubliclyHidden(env, directRow.league_name)) {
+        rowsByUser.set(String(directRow.user_id), { ...directRow, rank: null, source: "big-games-direct-player" });
+      }
+    }
+  }
+
+  const allRows = [...rowsByUser.values()];
+  const usernameMap = await resolveRobloxUsernames(allRows.map(row => row.user_id), env).catch(() => new Map());
+  const normalizedRows = allRows.map(row => {
+    const resolved = String(usernameMap.get(toNumber(row.user_id)) || "").trim();
+    const existing = String(row.username || row.display_name || "").trim();
+    const username = resolved && !isFallbackUsername(resolved, row.user_id)
+      ? resolved
+      : (existing && !isFallbackUsername(existing, row.user_id) ? existing : `user_${row.user_id}`);
+    return redactPublicMemberPoints(env, { ...row, username, display_name: username });
+  });
+
+  const needle = query.toLowerCase();
+  const visibleRows = (query
+    ? normalizedRows.filter(row => [row.username, row.display_name, row.user_id, row.league_name, row.league_id]
+      .some(value => String(value || "").toLowerCase().includes(needle)))
+    : normalizedRows.slice(0, limit))
+    .sort((a, b) => {
+      const aRank = toNumber(a.rank), bRank = toNumber(b.rank);
+      if (aRank !== null && bRank !== null) return aRank - bRank;
+      if (aRank !== null) return -1;
+      if (bRank !== null) return 1;
+      return (toNumber(b.points) || 0) - (toNumber(a.points) || 0) || String(a.username || "").localeCompare(String(b.username || ""));
+    });
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    source: "big-games-public-league-players",
+    query: query || null,
+    top_limit: limit,
+    top_available: livePlayers.length,
+    search_scope: query ? "top-500-plus-direct-player-plus-stored-league-rosters" : "top-500",
+    rows: visibleRows
+  }, env);
+}
+
+async function handleLeaguePlayerLocation(request, env) {
+  const url = new URL(request.url);
+  const userId = toNumber(url.searchParams.get("user_id"));
+  if (!userId) throw httpError(400, "A Roblox user_id is required.");
+  const runKey = requestedRunKey(url, env);
+  let rows = [];
+  try {
+    rows = await supabaseSelect(env, CURRENT_TABLE, {
+      select: "fetched_at,updated_at,league_run_key,league_name,league_id,league_icon,user_id,display_name,points",
+      league_run_key: `eq.${runKey}`,
+      user_id: `eq.${userId}`,
+      order: "updated_at.desc",
+      limit: "25"
+    });
+  } catch (err) {
+    console.warn("stored league player location unavailable", err?.message || String(err));
+  }
+  const stored = rows.find(row => !isAggregateLeagueListName(row.league_name) && !isLeaguePubliclyHidden(env, row.league_name));
+  if (stored) {
+    return cacheJson({ ok: true, found: true, user_id: userId, league_run_key: runKey, league_name: stored.league_name, league_id: stored.league_id || null, source: "stored-current-roster" }, env);
+  }
+
+  const directApi = await fetchLeaguePlayerApi(userId).catch(() => null);
+  const live = directApi ? normalizeSoloLeaguePlayer(leaguePlayerFromResponse(directApi)) : null;
+  return cacheJson(live?.user_id && live.league_name && !isLeaguePubliclyHidden(env, live.league_name)
+    ? { ok: true, found: true, user_id: userId, league_run_key: runKey, league_name: live.league_name, league_id: live.league_id || null, source: "big-games-direct-player" }
+    : { ok: true, found: false, user_id: userId, league_run_key: runKey, league_name: null, source: "not-in-stored-rosters-or-current-league-player-api" }, env);
+}
+
+async function fetchStoredSoloSearchRows(env, runKey) {
+  requireSupabase(env);
+  const rows = [];
+  const excluded = [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME, COLD_DISCOVERED_LEAGUES_NAME].map(postgrestFilterText).join(",");
+  for (let offset = 0; offset < 10000; offset += 1000) {
+    const page = await supabaseSelect(env, CURRENT_TABLE, {
+      select: "fetched_at,updated_at,league_run_key,league_name,league_id,league_icon,user_id,display_name,points",
+      league_run_key: `eq.${runKey}`,
+      league_name: `not.in.(${excluded})`,
+      order: "points.desc",
+      limit: "1000",
+      offset: String(offset)
+    });
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  const byUser = new Map();
+  for (const row of rows) {
+    const id = String(row.user_id || "");
+    const existing = byUser.get(id);
+    if (!existing || new Date(row.updated_at || row.fetched_at || 0) > new Date(existing.updated_at || existing.fetched_at || 0)) byUser.set(id, row);
+  }
+  return [...byUser.values()];
 }
 
 async function handleLeagueMilestones(request, env) {
@@ -1525,6 +1667,67 @@ async function fetchLeagueListApi(page = 1, pageSize = 100, options = {}) {
   throw httpError(502, `Big Games leagues API failed: ${lastError?.message || "unknown error"}`);
 }
 
+async function fetchLeaguePlayersApi(options = {}) {
+  const primary = "https://ps99.biggamesapi.io/v1/leagues/players";
+  const urls = options.allowFallback === false ? [primary] : [primary, "https://biggamesapi.io/v1/leagues/players"];
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 30, cacheEverything: true } });
+      const data = await readJsonResponse(res, url);
+      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+      return data;
+    } catch (err) { lastError = err; }
+  }
+  throw httpError(502, `Big Games league players API failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function fetchLeaguePlayerApi(userId, options = {}) {
+  const id = toNumber(userId);
+  if (!id) throw httpError(400, "A Roblox user_id is required.");
+  const primary = `https://ps99.biggamesapi.io/v1/leagues/players/${id}`;
+  const urls = options.allowFallback === false ? [primary] : [primary, `https://biggamesapi.io/v1/leagues/players/${id}`];
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 30, cacheEverything: true } });
+      const data = await readJsonResponse(res, url);
+      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+      return data;
+    } catch (err) { lastError = err; }
+  }
+  throw httpError(502, `Big Games league player API failed for ${id}: ${lastError?.message || "unknown error"}`);
+}
+
+function leaguePlayersFromResponse(api) {
+  const root = api?.data || api || {};
+  return firstArray(root.players, root.Players, root.rows, root.Rows);
+}
+
+function leaguePlayerFromResponse(api) {
+  const root = api?.data || api || {};
+  return root.player || root.Player || root;
+}
+
+function normalizeSoloLeaguePlayer(item, index = 0) {
+  const league = item?.League || item?.league || {};
+  const userId = getUserId(item);
+  const existingName = getDisplayName(item, userId);
+  return {
+    rank: index + 1,
+    user_id: userId,
+    username: existingName,
+    display_name: existingName,
+    league_name: String(firstDefined(league.Name, league.name, item?.LeagueName, item?.leagueName) || "").trim(),
+    league_id: stringOrNull(firstDefined(league.ID, league.Id, league.id, item?.LeagueID, item?.leagueId)),
+    league_icon: stringOrNull(firstDefined(league.Icon, league.icon)),
+    points: toNumber(firstDefined(item?.Points, item?.points, item?.TotalPoints, item?.totalPoints)) || 0,
+    total_points: toNumber(firstDefined(item?.Points, item?.points, item?.TotalPoints, item?.totalPoints)) || 0,
+    fetched_at: parseTimestamp(firstDefined(item?.Timestamp, item?.timestamp)) || new Date().toISOString(),
+    source: "live-top-500"
+  };
+}
+
 async function readJsonResponse(res, url) {
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
@@ -1918,6 +2121,22 @@ function normalizeLeagueRows(league) {
   rows.sort((a, b) => ((toNumber(b.points) || 0) - (toNumber(a.points) || 0)) || String(a.display_name || "").localeCompare(String(b.display_name || "")));
   rows.forEach((row, index) => { row.rank = index + 1; });
   return rows;
+}
+
+async function resolveRobloxUserIdForSearch(value) {
+  const query = String(value || "").trim();
+  if (!query) return null;
+  if (/^\d+$/.test(query)) return toNumber(query);
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(query)) return null;
+  const response = await fetch("https://users.roblox.com/v1/usernames/users", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" },
+    body: JSON.stringify({ usernames: [query], excludeBannedUsers: false })
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const exact = firstArray(data?.data).find(user => String(user?.requestedUsername || user?.name || "").toLowerCase() === query.toLowerCase());
+  return toNumber(exact?.id);
 }
 
 async function resolveRobloxUsernames(userIds, env) {

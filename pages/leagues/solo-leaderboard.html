@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Solo Leaderboard</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#0f141b;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}a{color:var(--link);text-decoration:none}header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 22px 10px}.logo-wrap{display:flex;justify-content:center}.site-logo{display:block;width:76px;border-radius:10px}.menu{margin-top:9px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}.menu a{display:inline-block;padding:7px 12px;border:1px solid var(--border);border-radius:5px;background:var(--panel2);color:var(--text);font-size:13px}main{max-width:1180px;margin:0 auto;padding:22px 24px 30px}.hero,.section,.card{background:var(--panel);border:1px solid var(--border);border-radius:10px}.hero{padding:18px;margin-bottom:18px}.hero h1{margin:0;font-size:26px}.hero p{margin:5px 0 0;color:#9fc5ef;font-size:13px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:18px}.card{padding:16px;text-align:center;min-height:90px;display:flex;flex-direction:column;justify-content:center}.label{color:var(--muted);font-size:13px}.value{font-size:20px;font-weight:700;margin-top:6px}.section{overflow:hidden}.section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.section-title{margin:0;font-size:18px}.controls{display:flex;gap:8px;align-items:center}.controls input{width:min(330px,55vw)}input,button{border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);padding:9px 11px;font-size:14px}button{cursor:pointer}.table-meta{padding:10px 16px;color:var(--muted);font-size:12px;border-bottom:1px solid var(--border)}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:680px}th,td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle}th{color:var(--muted);font-size:13px;text-align:left}th.numeric,td.numeric{text-align:right;font-variant-numeric:tabular-nums}.rank{font-weight:700;width:90px}.player-name{font-weight:600}.subtle{color:var(--muted);font-size:12px;margin-top:2px}.empty,.error{padding:24px}.error{color:#ffb4ad;background:rgba(248,81,73,.09)}@media(max-width:700px){main{padding:16px}.cards{grid-template-columns:1fr}.controls{width:100%}.controls input{width:100%;min-width:0}.section-header{align-items:stretch}}
+</style>
+</head>
+<body>
+<header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu">
+  <a href="index.html">c0ld Leaderboard</a>
+  <a href="clans.html">Clans Leaderboard</a>
+  <a href="global-leaderboard.html">Global Leaderboard</a>
+  <details class="lookup-menu"><summary class="menu-btn lookup-summary">Tools</summary><div class="lookup-menu-list"><a href="top-clan-filter.html">Top Clan Filter</a><a href="clans-activity.html">Clans Activity</a><a href="activity-feed.html">Activity Feed</a><a href="ps99-version-history.html">PS99 Versions</a><a href="ps99-restart-tracker.html">PS99 Restarts</a></div></details>
+</div></header>
+<main>
+<section class="hero"><h1>Solo Leaderboard</h1><p>Top individual contributors across every PS99 league.</p></section>
+<section class="cards">
+  <div class="card"><div class="label">Default View</div><div class="value">Top 500</div></div>
+  <div class="card"><div class="label">Players Loaded</div><div class="value" id="player-count">&mdash;</div></div>
+  <div class="card"><div class="label">Last Checked</div><div class="value" id="last-checked">&mdash;</div></div>
+</section>
+<section class="section">
+  <div class="section-header"><h2 class="section-title">League Players</h2><div class="controls"><input id="search-input" type="search" autocomplete="off" placeholder="Search the expanded player or league list..."><button id="refresh-btn" type="button">Refresh</button></div></div>
+  <div class="table-meta" id="table-meta">Loading the top 500 league players...</div>
+  <div class="table-wrap"><table><thead><tr><th>Rank</th><th>Username</th><th>League</th><th class="numeric">Points</th></tr></thead><tbody id="tbody"><tr><td colspan="4" class="empty">Loading league players...</td></tr></tbody></table></div>
+</section>
+</main>
+<script>
+(function(){
+  "use strict";
+  const API="https://yamo-league-api-worker.opal-dde.workers.dev";
+  const RUN_KEY="tap-heroes-part-2";
+  const TOP_LIMIT=500;
+  const tbody=document.getElementById("tbody"),search=document.getElementById("search-input"),meta=document.getElementById("table-meta"),refresh=document.getElementById("refresh-btn");
+  let timer=null,requestId=0;
+  function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
+  function number(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString("en-US"):"&mdash;"}
+  function stamp(value){const d=new Date(value||0);return Number.isNaN(d.getTime())?"&mdash;":d.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}
+  function rankLabel(row){const rank=Number(row.rank);return Number.isFinite(rank)&&rank>0?"#"+rank:"500+"}
+  function render(data){
+    const rows=data.rows||[];
+    document.getElementById("player-count").textContent=rows.length.toLocaleString("en-US");
+    document.getElementById("last-checked").textContent=stamp(data.generated_at);
+    const queried=Boolean(data.query);
+    meta.textContent=queried?rows.length.toLocaleString("en-US")+" expanded-list match"+(rows.length===1?"":"es")+" for “"+data.query+"”":"Showing the top "+Math.min(TOP_LIMIT,Number(data.top_available)||rows.length).toLocaleString("en-US")+" league players";
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="4" class="empty">No matching league players found.</td></tr>';return}
+    tbody.innerHTML=rows.map(row=>{
+      const id=String(row.user_id||"");
+      const username=row.username||row.display_name||("User "+id);
+      const playerHref="https://www.roblox.com/users/"+encodeURIComponent(id)+"/profile";
+      const leagueHref="league.html?league="+encodeURIComponent(row.league_name||"");
+      const points=row.points_redacted?"Hidden":number(row.points??row.total_points);
+      return '<tr><td class="rank">'+esc(rankLabel(row))+'</td><td><a class="player-name" href="'+esc(playerHref)+'" target="_blank" rel="noopener">'+esc(username)+'</a><div class="subtle">'+esc(id)+'</div></td><td><a href="'+esc(leagueHref)+'">'+esc(row.league_name||"—")+'</a></td><td class="numeric">'+points+'</td></tr>';
+    }).join("");
+  }
+  async function load(){
+    const version=++requestId,q=search.value.trim();
+    refresh.disabled=true;meta.textContent=q?"Searching the expanded league-player list...":"Loading the top 500 league players...";
+    try{
+      const url=new URL(API+"/api/leagues/solo-leaderboard");url.searchParams.set("limit",String(TOP_LIMIT));url.searchParams.set("run",RUN_KEY);if(q)url.searchParams.set("q",q);url.searchParams.set("v",Date.now());
+      const response=await fetch(url,{cache:"no-store"}),data=await response.json();
+      if(!response.ok||data.ok===false)throw new Error(data.message||"League player request failed");
+      if(version!==requestId)return;render(data);
+    }catch(error){if(version!==requestId)return;tbody.innerHTML='<tr><td colspan="4" class="error">'+esc(error.message||String(error))+'</td></tr>';meta.textContent="Could not load the Solo Leaderboard."}
+    finally{if(version===requestId)refresh.disabled=false}
+  }
+  search.addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(load,350)});
+  refresh.addEventListener("click",load);
+  load();
+})();
+</script>
+</body>
+</html>

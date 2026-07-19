@@ -3,7 +3,7 @@
 
   const currentPage = (window.location.pathname.split("/").pop() || "index.html").toLowerCase();
   const leaderboardPages = new Set(["index.html", "", "clans.html", "global-leaderboard.html"]);
-  const leaguePages = new Set(["c0ld-leagues.html", "c0ld-league-matches.html", "league.html", "league-profile.html"]);
+  const c0ldLeaguePages = new Set(["c0ld-leagues.html", "c0ld-league-matches.html"]);
 
   function pageName(href) {
     try {
@@ -62,10 +62,12 @@
   );
   leaderboardMenu.append(leaderboardSummary, leaderboardList);
 
-  const c0ldLeaguesLink = makeLink("c0ld Leagues", "c0ld-leagues.html", leaguePages.has(currentPage));
+  const c0ldLeaguesLink = makeLink("c0ld Leagues", "c0ld-leagues.html", c0ldLeaguePages.has(currentPage));
   c0ldLeaguesLink.classList.add("site-c0ld-leagues-link");
-  const topLeaguesLink = makeLink("Top Leagues", "top-leagues.html", currentPage === "top-leagues.html");
-  topLeaguesLink.classList.add("site-top-leagues-link");
+  const soloLeaderboardLink = makeLink("Solo Leaderboard", "solo-leaderboard.html", currentPage === "solo-leaderboard.html");
+  soloLeaderboardLink.classList.add("site-solo-leaderboard-link");
+  const leagueLeaderboardLink = makeLink("League Leaderboard", "league-leaderboard.html", currentPage === "league-leaderboard.html");
+  leagueLeaderboardLink.classList.add("site-league-leaderboard-link");
 
   menu.insertBefore(leaderboardMenu, c0ldLink);
   c0ldLink.remove();
@@ -74,7 +76,8 @@
 
   const insertionPoint = toolsMenu && toolsMenu.parentElement === menu ? toolsMenu : null;
   menu.insertBefore(c0ldLeaguesLink, insertionPoint);
-  menu.insertBefore(topLeaguesLink, insertionPoint);
+  menu.insertBefore(soloLeaderboardLink, insertionPoint);
+  menu.insertBefore(leagueLeaderboardLink, insertionPoint);
 
   const style = document.createElement("style");
   style.id = "site-navigation-style";
