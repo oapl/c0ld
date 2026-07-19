@@ -197,6 +197,12 @@
 .empty-roster-slot td:nth-child(2) { font-style: italic; }
 .hourly-pet-gains-table { min-width: 720px; }
 .hourly-pet-gains-table th { cursor: default; }
+.hourly-pet-gains-controls { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; }
+.hourly-pet-gains-controls select { min-width: 210px; border: 1px solid #30363d; border-radius: 6px; background: #0f141b; color: #e6edf3; padding: 8px 10px; font-size: 14px; }
+.pet-gains-view-switch { display: flex; gap: 5px; }
+.pet-gains-view-switch button { border: 1px solid #30363d; border-radius: 6px; background: #0f141b; color: #8b949e; padding: 7px 10px; font-size: 12px; }
+.pet-gains-view-switch button:hover { border-color: #6e7681; color: #e6edf3; }
+.pet-gains-view-switch button.active { border-color: #ff7b72; background: rgba(248, 81, 73, .12); color: #ff9b96; }
 .hourly-pet-gains .table-wrap { max-height: 440px; overflow: auto; }
 .hourly-pet-gains-table thead th { position: sticky; top: 0; z-index: 1; background: #161b22; }
 .hourly-pet-gains-table th:first-child,
@@ -216,6 +222,9 @@
 @media (max-width: 760px) {
   .member-growth-head { flex-direction: column; }
   #member-growth-chart { height: 240px; }
+  .hourly-pet-gains-controls { width: 100%; align-items: stretch; }
+  .hourly-pet-gains-controls select { width: 100%; }
+  .pet-gains-view-switch button { flex: 1; }
 }
 
 @media (max-width: 480px) {
