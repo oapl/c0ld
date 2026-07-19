@@ -23,6 +23,7 @@ const DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS = 2500;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
+const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
 const FALSEY_ENV_VALUES = new Set(["false", "0", "no", "off"]);
@@ -1925,26 +1926,46 @@ async function resolveRobloxUsernames(userIds, env) {
   const ids = [...new Set(userIds.map(Number).filter(Boolean))];
   for (const id of ids) result.set(id, `user_${id}`);
   if (!shouldLookup || !ids.length) return result;
+  const cacheHours = clamp(Number(env.ROBLOX_USERNAME_CACHE_HOURS || 168), 1, 24 * 365);
+  const staleBefore = Date.now() - cacheHours * 3600000;
+  const freshCachedIds = new Set();
+  try {
+    for (const batch of chunk(ids, 250)) {
+      const cached = await supabaseSelect(env, USER_LOOKUP_CACHE_TABLE, { select: "user_id,username,updated_at", user_id: `in.(${batch.join(",")})`, limit: String(batch.length) });
+      for (const row of cached) {
+        const id = toNumber(row.user_id), username = String(row.username || "").trim();
+        if (!id || isFallbackUsername(username, id)) continue;
+        result.set(id, username);
+        if (new Date(row.updated_at || 0).getTime() >= staleBefore) freshCachedIds.add(id);
+      }
+    }
+  } catch {}
+
   const lookupBatch = async batch => {
-    try {
-      const res = await fetch("https://users.roblox.com/v1/users", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" }, body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }) });
-      if (!res.ok) return;
-      const data = await res.json();
-      for (const user of data.data || []) { const id = toNumber(user.id); if (id && user.name) result.set(id, String(user.name)); }
-    } catch {}
-  };
-  await Promise.all(chunk(ids, ROBLOX_BATCH_SIZE).map(lookupBatch));
-  const unresolved = ids.filter(id => isFallbackUsername(result.get(id), id));
-  for (const fallbackBatch of chunk(unresolved, 25)) {
-    await Promise.all(fallbackBatch.map(async id => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        const res = await fetch(`https://users.roblox.com/v1/users/${id}`, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" } });
-        if (!res.ok) return;
-        const user = await res.json();
-        if (user?.name) result.set(id, String(user.name));
-      } catch {}
-    }));
-  }
+        const res = await fetch("https://users.roblox.com/v1/users", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" }, body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }) });
+        if (!res.ok) {
+          if (attempt < 3 && (res.status === 429 || res.status >= 500)) { const retryAfter = Number(res.headers.get("retry-after") || 0); await sleep(Math.max(retryAfter * 1000, 250 * attempt)); continue; }
+          return;
+        }
+        const data = await res.json(), cacheRows = [];
+        for (const user of data.data || []) {
+          const id = toNumber(user.id);
+          if (!id || !user.name) continue;
+          const username = String(user.name);
+          result.set(id, username);
+          cacheRows.push({ user_id: id, username, display_name: user.displayName || null, updated_at: new Date().toISOString() });
+        }
+        if (cacheRows.length) await supabaseUpsert(env, USER_LOOKUP_CACHE_TABLE, cacheRows, "user_id").catch(() => {});
+        return;
+      } catch {
+        if (attempt < 3) await sleep(250 * attempt);
+      }
+    }
+  };
+  const needsLookup = ids.filter(id => !freshCachedIds.has(id));
+  for (const batch of chunk(needsLookup, ROBLOX_BATCH_SIZE)) await lookupBatch(batch);
   return result;
 }
 
@@ -2748,7 +2769,7 @@ function clamp(value, min, max) { const n = Number(value); if (!Number.isFinite(
 function key(v) { return String(v || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function lname(r) { return String(firstDefined(r.Name, r.name, r.LeagueName, r.leagueName, "") || "").trim(); }
 function lpoints(r) { const n = Number(firstDefined(r.Points, r.points, r.TotalPoints, r.totalPoints, r.Score, r.score, 0)); return Number.isFinite(n) ? n : 0; }
-function isFallbackUsername(username, userId) { const text = String(username || "").trim(); const id = String(userId || "").trim(); return !text || (id && text === id) || /^user_\d+$/i.test(text); }
+function isFallbackUsername(username, userId) { const text = String(username || "").trim(); const id = String(userId || "").trim(); return !text || (id && text === id) || /^user[ _-]?\d+$/i.test(text); }
 function bestUsernameForOverlap(userId, ...values) { const names = values.map(value => String(value || "").trim()).filter(Boolean); return names.find(name => !isFallbackUsername(name, userId)) || names[0] || `user_${userId}`; }
 function displayUsername(row, usernameMap) { const id = toNumber(row.user_id); const existing = String(row.display_name || "").trim(); const resolved = id ? String(usernameMap.get(id) || "").trim() : ""; if (resolved && !isFallbackUsername(resolved, id)) return resolved; if (existing && !isFallbackUsername(existing, id)) return existing; return existing || (id ? `user_${id}` : ""); }
 function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }

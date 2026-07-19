@@ -8,6 +8,7 @@ const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
+const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
@@ -68,7 +69,7 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const now = new Date();
-      for (const user of configuredUsers(env)) {
+      for (const user of await trackedInventoryUsers(env)) {
         if (!await inventoryScanIsDue(env, user, now)) continue;
         const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
         if (!result.skipped && shouldPostHourly(now, env)) await postHourlyDiffIfNeeded(env, user);
@@ -84,13 +85,16 @@ async function handleOAuthStart(request, env) {
   const url = new URL(request.url);
   const requestedUserId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || "").trim();
   const configuredUser = configuredUsers(env).find(user => String(user.user_id) === requestedUserId);
+  const leagueMember = !configuredUser && envBool(env.INVENTORY_LEAGUE_FEATURE, true) && envBool(env.INVENTORY_AUTO_DISCOVER_MEMBERS, true)
+    ? await isCurrentLeagueMember(env, requestedUserId, url.searchParams.get("league"), url.searchParams.get("run"))
+    : null;
   if (!requestedUserId) throw httpError(400, "A Roblox user_id is required.");
-  if (!configuredUser && !hasAdminAuthorization(request, env)) {
-    throw httpError(403, "This Roblox account is not enabled for inventory tracking.");
+  if (!configuredUser && !leagueMember && !hasAdminAuthorization(request, env)) {
+    throw httpError(403, "This Roblox account is not a current member of the selected tracked league.");
   }
   const targetUser = {
     user_id: requestedUserId,
-    username: String(url.searchParams.get("username") || configuredUser?.username || requestedUserId).trim()
+    username: String(url.searchParams.get("username") || configuredUser?.username || leagueMember?.username || requestedUserId).trim()
   };
   const returnUrl = validatedOAuthReturnUrl(url.searchParams.get("return_url"), env);
 
@@ -1049,6 +1053,53 @@ function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/
 function requireSupabase(env) { if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) throw httpError(500, "Missing Supabase environment variables."); }
 function requireAdmin(request, env) { const expected = env.INGEST_ADMIN_TOKEN; if (!expected) return; if ((request.headers.get("authorization") || "") !== `Bearer ${expected}`) throw httpError(401, "Unauthorized"); }
 function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
+async function trackedInventoryUsers(env) {
+  const users = new Map(configuredUsers(env).map(user => [String(user.user_id), user]));
+  if (!envBool(env.INVENTORY_LEAGUE_FEATURE, true) || !supabaseUrl(env)) return [...users.values()];
+  try {
+    const grants = await supabaseSelectAll(env, OAUTH_GRANTS_TABLE, {
+      select: "roblox_user_id,expires_at,metadata",
+      roblox_user_id: "not.is.null",
+      expires_at: `gt.${new Date().toISOString()}`,
+      order: "last_used_at.asc.nullsfirst"
+    }, 10000);
+    for (const grant of grants) {
+      const userId = String(grant.roblox_user_id || "").trim();
+      if (!userId) continue;
+      users.set(userId, {
+        user_id: userId,
+        username: String(grant.metadata?.username || users.get(userId)?.username || userId).trim()
+      });
+    }
+  } catch (error) {
+    console.warn("Connected inventory accounts could not be added to this scan", error?.message || error);
+  }
+  return [...users.values()];
+}
+async function isCurrentLeagueMember(env, userId, leagueName, runKey) {
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedLeague = String(leagueName || "").trim();
+  if (!normalizedUserId || !normalizedLeague) return null;
+  const endpoint = new URL(`${String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/+$/, "")}/api/leagues/current`);
+  endpoint.searchParams.set("league", normalizedLeague);
+  if (runKey) endpoint.searchParams.set("run", String(runKey));
+  endpoint.searchParams.set("rank_lookup", "false");
+  endpoint.searchParams.set("v", String(Date.now()));
+  try {
+    const response = await fetch(endpoint.toString(), { headers: { accept: "application/json" }, cf: { cacheTtl: 0 } });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const row = (payload.rows || []).find(member => String(member.user_id || "").trim() === normalizedUserId);
+    if (!row) return null;
+    return {
+      user_id: normalizedUserId,
+      username: String(row.username || row.display_name || normalizedUserId).trim(),
+      league: String(payload.league_name || normalizedLeague).trim()
+    };
+  } catch {
+    return null;
+  }
+}
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }

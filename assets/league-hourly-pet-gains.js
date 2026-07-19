@@ -3,7 +3,7 @@
 
   const config=window.LEAGUE_CONFIG||{};
   const league=String(config.league||"").trim().toLowerCase();
-  if(league!=="dezzz")return;
+  if(!league)return;
 
   const section=document.getElementById("hourly-pet-gains");
   const tbody=document.getElementById("hourly-pet-gains-body");
@@ -11,16 +11,17 @@
   const memberSelect=document.getElementById("hourly-pet-member-select");
   const title=document.getElementById("hourly-pet-gains-title");
   const periodLabel=document.getElementById("hourly-pet-period-label");
+  const connectButton=document.getElementById("hourly-pet-connect");
+  const connectStatus=document.getElementById("hourly-pet-connect-status");
   const viewButtons=[...document.querySelectorAll("[data-pet-view]")];
-  if(!section||!tbody||!meta||!memberSelect||!title||!periodLabel)return;
+  if(!section||!tbody||!meta||!memberSelect||!title||!periodLabel||!connectButton||!connectStatus)return;
 
   const INVENTORY_API="https://inventory-detector-worker.opal-dde.workers.dev";
   const LEAGUE_API="https://yamo-league-api-worker.opal-dde.workers.dev";
-  const DEFAULT_USER_ID="109818";
-  const DEFAULT_USERNAME="Cinnamowopal";
   const HOURS=24;
   let requestVersion=0;
   let activeView="hourly";
+  let connected=false;
   const PETS=[
     {key:"elephant",name:"War Elephant"},
     {key:"jaguar",name:"Warrior Jaguar"},
@@ -32,8 +33,9 @@
   function count(value){const number=Number(value);return Number.isFinite(number)&&number>0?Math.floor(number):0}
   function formatCount(value){return Number(value||0).toLocaleString("en-US")}
   function petName(row){return String(row?.item_id||row?.display_name||"").trim().toLowerCase()}
-  function usableName(value,userId){const name=String(value||"").trim(),id=String(userId||"");return name&&name!==id&&!/^user_?\d+$/i.test(name)?name:""}
+  function usableName(value,userId){const name=String(value||"").trim(),id=String(userId||"");return name&&name!==id&&!/^user[ _-]?\d+$/i.test(name)?name:""}
   function selectedName(){const option=memberSelect.selectedOptions?.[0];return option?.dataset?.name||option?.textContent||memberSelect.value}
+  function oauthReturnUrl(){const url=new URL(location.href);url.searchParams.delete("inventory_oauth");url.searchParams.delete("inventory_message");url.searchParams.delete("user_id");url.searchParams.delete("pulled");url.searchParams.delete("forced");url.searchParams.delete("snapshot_at");url.searchParams.delete("connected");return url.toString()}
   function hourLabel(row){
     const start=new Date(row?.period_start||0),end=new Date(row?.period_end||0);
     if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime()))return "Unknown hour";
@@ -106,22 +108,57 @@
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"League roster request failed");
       const members=(data.rows||[]).slice().sort((a,b)=>(Number(a.rank)||999)-(Number(b.rank)||999));
-      if(!members.some(member=>String(member.user_id)===DEFAULT_USER_ID))members.push({user_id:DEFAULT_USER_ID,username:DEFAULT_USERNAME,display_name:DEFAULT_USERNAME,rank:null});
       const names=await resolveRobloxNames(members.map(member=>String(member.user_id)).filter(Boolean));
-      const previous=memberSelect.value||DEFAULT_USER_ID;
+      const previous=memberSelect.value;
       memberSelect.innerHTML="";
       for(const member of members){
         const userId=String(member.user_id||"").trim();
         if(!userId)continue;
-        const name=names.get(userId)||usableName(member.username,userId)||usableName(member.display_name,userId)||(userId===DEFAULT_USER_ID?DEFAULT_USERNAME:"User "+userId);
+        const name=names.get(userId)||usableName(member.username,userId)||usableName(member.display_name,userId)||"User "+userId;
         const option=document.createElement("option");
         option.value=userId;option.dataset.name=name;option.textContent=(member.rank?"#"+member.rank+" · ":"")+name;
         memberSelect.appendChild(option);
       }
-      memberSelect.value=[...memberSelect.options].some(option=>option.value===previous)?previous:DEFAULT_USER_ID;
-    }catch(error){console.warn("League roster unavailable",error)}
+      if(!memberSelect.options.length){memberSelect.innerHTML='<option value="">No league members found</option>';connectButton.disabled=true;return}
+      memberSelect.value=[...memberSelect.options].some(option=>option.value===previous)?previous:memberSelect.options[0].value;
+    }catch(error){console.warn("League roster unavailable",error);memberSelect.innerHTML='<option value="">Roster unavailable</option>';connectButton.disabled=true}
   }
-  async function load(userId=memberSelect.value||DEFAULT_USER_ID){
+  async function loadAccessStatus(userId=memberSelect.value){
+    if(!userId){connectButton.disabled=true;connectStatus.textContent="Select a league member";return}
+    connectButton.disabled=true;
+    connectStatus.className="meta";
+    connectStatus.textContent="Checking "+selectedName()+"'s inventory access...";
+    try{
+      const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",String(userId));url.searchParams.set("v",Date.now());
+      const response=await fetch(url,{cache:"no-store"}),data=await response.json();
+      if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory access check failed");
+      connected=!!data.connected;
+      connectButton.textContent=connected?"Reconnect Inventory":"Connect Inventory";
+      connectButton.classList.toggle("connected",connected);
+      connectStatus.className="meta"+(connected?" connected":"");
+      connectStatus.textContent=connected?selectedName()+" is opted in":selectedName()+" has not opted in";
+    }catch(error){
+      connected=false;connectButton.textContent="Connect Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);
+    }finally{connectButton.disabled=false}
+  }
+  async function connectSelected(){
+    const userId=String(memberSelect.value||"").trim();if(!userId)return;
+    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening the secure BIG Games approval page...";
+    try{
+      const params=new URLSearchParams({user_id:userId,username:selectedName(),league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
+      const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
+      const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
+      location.assign(data.authorize_url);
+    }catch(error){connectButton.disabled=false;connectButton.textContent=connected?"Reconnect Inventory":"Connect Inventory";connectStatus.className="meta error";connectStatus.textContent=error.message||String(error)}
+  }
+  function consumeOAuthResult(){
+    const params=new URLSearchParams(location.search),result=params.get("inventory_oauth");if(!result)return;
+    connectStatus.className="meta "+(result==="connected"?"connected":"error");
+    connectStatus.textContent=params.get("inventory_message")||(result==="connected"?"Inventory access connected.":"Inventory authorization failed.");
+    history.replaceState({},document.title,oauthReturnUrl());
+  }
+  async function load(userId=memberSelect.value){
+    if(!userId){meta.textContent="No league member selected";tbody.innerHTML='<tr><td colspan="6" class="empty">No league members are available.</td></tr>';return}
     const version=++requestVersion,username=selectedName();
     meta.textContent="Loading "+username+"...";
     tbody.innerHTML='<tr><td colspan="6" class="empty">Loading inventory data...</td></tr>';
@@ -151,15 +188,18 @@
   function setView(view){
     activeView=view==="totals"?"totals":"hourly";
     for(const button of viewButtons)button.classList.toggle("active",button.dataset.petView===activeView);
-    load(memberSelect.value||DEFAULT_USER_ID);
+    load(memberSelect.value);
   }
 
   async function init(){
     section.hidden=false;
+    consumeOAuthResult();
     await loadRoster();
-    memberSelect.addEventListener("change",()=>load(memberSelect.value));
+    memberSelect.addEventListener("change",()=>{loadAccessStatus(memberSelect.value);load(memberSelect.value)});
+    connectButton.addEventListener("click",connectSelected);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
-    load(memberSelect.value||DEFAULT_USER_ID);
+    loadAccessStatus(memberSelect.value);
+    load(memberSelect.value);
   }
 
   init();

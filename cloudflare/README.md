@@ -787,6 +787,12 @@ encrypted grant for that user. Check one account with
 `GET /api/inventory/oauth/summary` returns only the number of active and expired
 saved approvals for the public opt-in counter; it does not expose account IDs.
 
+With `INVENTORY_LEAGUE_FEATURE=true` and
+`INVENTORY_AUTO_DISCOVER_MEMBERS=true`, every current member returned by
+`LEAGUE_API_BASE` may start consent from a league page without first being
+copied into `INVENTORY_USERS_JSON`. Scheduled scans include all active saved
+grants; `INVENTORY_USERS_JSON` remains the seed list for permanent/test users.
+
 The callback performs one immediate `refresh=true` inventory read and stores
 the first snapshot before returning to the initiating page. This deliberately
 bypasses the normal hourly timer and consumes one BIG Games refresh-quota slot.

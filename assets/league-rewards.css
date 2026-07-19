@@ -199,10 +199,16 @@
 .hourly-pet-gains-table th { cursor: default; }
 .hourly-pet-gains-controls { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; }
 .hourly-pet-gains-controls select { min-width: 210px; border: 1px solid #30363d; border-radius: 6px; background: #0f141b; color: #e6edf3; padding: 8px 10px; font-size: 14px; }
+.pet-gains-action-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .pet-gains-view-switch { display: flex; gap: 5px; }
 .pet-gains-view-switch button { border: 1px solid #30363d; border-radius: 6px; background: #0f141b; color: #8b949e; padding: 7px 10px; font-size: 12px; }
 .pet-gains-view-switch button:hover { border-color: #6e7681; color: #e6edf3; }
 .pet-gains-view-switch button.active { border-color: #ff7b72; background: rgba(248, 81, 73, .12); color: #ff9b96; }
+#hourly-pet-connect { border-color: #ff7b72; color: #ff9b96; padding: 7px 10px; font-size: 12px; }
+#hourly-pet-connect.connected { border-color: #3fb950; color: #7ee787; }
+#hourly-pet-connect:disabled { cursor: wait; opacity: .55; }
+#hourly-pet-connect-status.connected { color: #7ee787; }
+#hourly-pet-connect-status.error { color: #ff9b96; }
 .hourly-pet-gains .table-wrap { max-height: 440px; overflow: auto; }
 .hourly-pet-gains-table thead th { position: sticky; top: 0; z-index: 1; background: #161b22; }
 .hourly-pet-gains-table th:first-child,
@@ -224,7 +230,9 @@
   #member-growth-chart { height: 240px; }
   .hourly-pet-gains-controls { width: 100%; align-items: stretch; }
   .hourly-pet-gains-controls select { width: 100%; }
+  .pet-gains-action-row { align-items: stretch; flex-direction: column; }
   .pet-gains-view-switch button { flex: 1; }
+  #hourly-pet-connect { width: 100%; }
 }
 
 @media (max-width: 480px) {

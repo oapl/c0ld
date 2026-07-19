@@ -37,7 +37,7 @@
   function delta(v){if(v==null)return'<span class="unknown">—</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">—</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
   function initials(s){s=String(s||"?").trim();return s.slice(0,2).toUpperCase()}
   function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
-  function isFallbackMemberName(value,userId){const text=String(value||"").trim(),id=String(userId||"").trim();return !text||(id&&text===id)||/^user_\d+$/i.test(text)}
+  function isFallbackMemberName(value,userId){const text=String(value||"").trim(),id=String(userId||"").trim();return !text||(id&&text===id)||/^user[ _-]?\d+$/i.test(text)}
   function memberName(row){const id=String(row?.user_id||"").trim();const names=[row?.username,row?.display_name];return names.map(value=>String(value||"").trim()).find(value=>!isFallbackMemberName(value,id))||(id?"User "+id:"Unknown player")}
   function avatar(r){const url=String(r.avatar_url||"").trim();return url?'<img class="avatar" src="'+esc(url)+'" alt="">':'<span class="avatar">'+esc(initials(memberName(r)))+'</span>'}
   function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
