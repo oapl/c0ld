@@ -36,12 +36,11 @@ export default {
           big_games_oauth_expires_at: oauth.expires_at
         });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/oauth/start") {
-        requireAdmin(request, env);
-        response = await handleOAuthStart(env);
+        response = await handleOAuthStart(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/callback") {
         response = await handleOAuthCallback(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/status") {
-        response = json({ ok: true, ...(await oauthStatus(env)) });
+        response = await handleOAuthStatus(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -76,9 +75,22 @@ export default {
   }
 };
 
-async function handleOAuthStart(env) {
+async function handleOAuthStart(request, env) {
   requireSupabase(env);
   requireBigGamesOAuth(env);
+
+  const url = new URL(request.url);
+  const requestedUserId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || "").trim();
+  const configuredUser = configuredUsers(env).find(user => String(user.user_id) === requestedUserId);
+  if (!requestedUserId) throw httpError(400, "A Roblox user_id is required.");
+  if (!configuredUser && !hasAdminAuthorization(request, env)) {
+    throw httpError(403, "This Roblox account is not enabled for inventory tracking.");
+  }
+  const targetUser = {
+    user_id: requestedUserId,
+    username: String(url.searchParams.get("username") || configuredUser?.username || requestedUserId).trim()
+  };
+  const returnUrl = validatedOAuthReturnUrl(url.searchParams.get("return_url"), env);
 
   const state = randomBase64Url(32);
   const verifier = randomBase64Url(64);
@@ -91,7 +103,11 @@ async function handleOAuthStart(env) {
     code_verifier_ciphertext: await sealSecret(verifier, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier"),
     expires_at: expiresAt,
     created_at: now.toISOString(),
-    used_at: null
+    used_at: null,
+    target_roblox_user_id: Number(targetUser.user_id),
+    target_roblox_username: targetUser.username,
+    return_url: returnUrl || null,
+    force_ingest: true
   }], "state_hash");
 
   const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
@@ -104,6 +120,8 @@ async function handleOAuthStart(env) {
 
   return json({
     ok: true,
+    user_id: targetUser.user_id,
+    username: targetUser.username,
     authorize_url: authorizeUrl.toString(),
     expires_at: expiresAt,
     message: "Open authorize_url and approve access within 10 minutes."
@@ -114,16 +132,13 @@ async function handleOAuthCallback(request, env) {
   requireSupabase(env);
   requireBigGamesOAuth(env);
   const url = new URL(request.url);
-  const oauthError = url.searchParams.get("error");
-  if (oauthError) return oauthHtml(false, `Big Games authorization was denied: ${oauthError}`);
-
   const code = String(url.searchParams.get("code") || "");
   const state = String(url.searchParams.get("state") || "");
-  if (!code || !state) return oauthHtml(false, "The callback did not include both code and state.");
+  if (!state) return oauthHtml(false, "The callback did not include an authorization state.");
 
   const stateHash = await sha256Base64Url(state);
   const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
-    select: "state_hash,code_verifier_ciphertext,expires_at,used_at",
+    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest",
     state_hash: `eq.${stateHash}`,
     limit: "1"
   });
@@ -131,6 +146,12 @@ async function handleOAuthCallback(request, env) {
   if (!pending || pending.used_at || new Date(pending.expires_at).getTime() <= Date.now()) {
     return oauthHtml(false, "This authorization link is invalid, expired, or was already used. Start again.");
   }
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Big Games authorization was denied: ${oauthError}`);
+  }
+  if (!code) return oauthCompletion(pending, false, "The callback did not include an authorization code.");
 
   const verifier = await openSecret(pending.code_verifier_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier");
   const body = new URLSearchParams({
@@ -151,46 +172,99 @@ async function handleOAuthCallback(request, env) {
   });
   const tokenText = await tokenResponse.text();
   let token;
-  try { token = JSON.parse(tokenText); } catch { return oauthHtml(false, `Big Games returned a non-JSON token response (${tokenResponse.status}).`); }
+  try { token = JSON.parse(tokenText); } catch {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Big Games returned a non-JSON token response (${tokenResponse.status}).`);
+  }
   if (!tokenResponse.ok || !token.access_token) {
     const message = token?.error_description || token?.error?.message || token?.error || `HTTP ${tokenResponse.status}`;
-    return oauthHtml(false, `Token exchange failed: ${message}`);
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Token exchange failed: ${message}`);
   }
 
   const scopes = String(token.scope || BIG_GAMES_INVENTORY_SCOPE).split(/\s+/).filter(Boolean);
-  if (!scopes.includes(BIG_GAMES_INVENTORY_SCOPE)) return oauthHtml(false, "The approved token does not include Inventory access.");
+  if (!scopes.includes(BIG_GAMES_INVENTORY_SCOPE)) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "The approved token does not include Inventory access.");
+  }
+
+  let rawInventory;
+  let forcedRefresh = pending.force_ingest !== false;
+  try {
+    rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: forcedRefresh });
+  } catch (forcedError) {
+    if (!forcedRefresh) {
+      await markOAuthStateUsed(env, stateHash);
+      return oauthCompletion(pending, false, `Inventory access was approved, but the first pull failed: ${forcedError?.message || forcedError}`);
+    }
+    try {
+      rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: false });
+      forcedRefresh = false;
+    } catch (fallbackError) {
+      await markOAuthStateUsed(env, stateHash);
+      return oauthCompletion(pending, false, `Inventory access was approved, but the first pull failed: ${fallbackError?.message || fallbackError}`);
+    }
+  }
+  const account = authorizedInventoryAccount(rawInventory);
+  const targetUserId = String(pending.target_roblox_user_id || "").trim();
+  if (!account.user_id) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "BIG Games did not identify the Roblox account attached to this approval.");
+  }
+  if (targetUserId && account.user_id !== targetUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `This invitation is for Roblox user ${targetUserId}, but a different account approved it.`);
+  }
+
   const authorizedAt = new Date();
   const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
   const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
   await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
-    grant_key: BIG_GAMES_GRANT_KEY,
-    roblox_user_id: Number(configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID),
+    grant_key: oauthGrantKey(account.user_id),
+    roblox_user_id: Number(account.user_id),
     access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
     token_type: token.token_type || "Bearer",
     scope: scopes.join(" "),
     authorized_at: authorizedAt.toISOString(),
     expires_at: expiresAt,
     last_used_at: null,
-    metadata: { expires_in: expiresIn },
+    metadata: { expires_in: expiresIn, username: account.username || pending.target_roblox_username || null },
     updated_at: authorizedAt.toISOString()
   }], "grant_key");
-  await supabaseUpdate(env, OAUTH_STATES_TABLE, { state_hash: `eq.${stateHash}` }, { used_at: authorizedAt.toISOString() });
+  const user = {
+    user_id: account.user_id,
+    username: account.username || pending.target_roblox_username || account.user_id
+  };
+  let ingest;
+  try {
+    ingest = await ingestInventory(env, user, "oauth_callback", false, { force: true, rawInventory });
+  } catch (error) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Access is connected, but the first inventory snapshot could not be saved: ${error?.message || error}`, { user_id: account.user_id });
+  }
+  await markOAuthStateUsed(env, stateHash);
 
-  return oauthHtml(true, `Inventory access is connected through ${formatDateTime(expiresAt)}. You can close this tab.`);
+  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled.`, {
+    user_id: account.user_id,
+    pulled: "1",
+    forced: forcedRefresh ? "1" : "0",
+    snapshot_at: ingest.snapshot?.captured_at || ""
+  });
 }
 
-async function oauthStatus(env) {
+async function handleOAuthStatus(request, env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID).trim();
+  return json({ ok: true, user_id: userId, ...(await oauthStatus(env, userId)) });
+}
+
+async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID) {
   const configured = bigGamesOAuthConfigured(env);
   if (!configured || !supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) {
     return { configured, connected: false, expires_at: null };
   }
   try {
-    const rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
-      select: "grant_key,scope,authorized_at,expires_at,last_used_at",
-      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
-      limit: "1"
-    });
-    const grant = rows[0];
+    const grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at");
     const connected = !!grant && new Date(grant.expires_at).getTime() > Date.now();
     return {
       configured,
@@ -206,25 +280,42 @@ async function oauthStatus(env) {
   }
 }
 
-async function getUsableOAuthGrant(env) {
+async function getUsableOAuthGrant(env, userId) {
   if (!bigGamesOAuthConfigured(env) || !supabaseUrl(env)) return null;
-  let rows;
+  let grant;
   try {
-    rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
-      select: "grant_key,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at",
-      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
-      limit: "1"
-    });
+    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at");
   } catch (error) {
     if (/does not exist|schema cache|PGRST205/i.test(error?.message || "")) return null;
     throw error;
   }
-  const grant = rows[0];
   if (!grant) return null;
   if (new Date(grant.expires_at).getTime() <= Date.now()) {
-    throw httpError(401, "Big Games authorization expired. Run /api/inventory/oauth/start again.");
+    throw httpError(401, `Big Games authorization expired for Roblox user ${userId}. Run the OAuth authorization flow again.`);
   }
   return grant;
+}
+
+async function findOAuthGrant(env, userId, select) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return null;
+  const keyed = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select,
+    grant_key: `eq.${oauthGrantKey(normalizedUserId)}`,
+    limit: "1"
+  });
+  if (keyed[0]) return keyed[0];
+  const legacy = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select,
+    roblox_user_id: `eq.${normalizedUserId}`,
+    order: "updated_at.desc",
+    limit: "1"
+  });
+  return legacy[0] || null;
+}
+
+function oauthGrantKey(userId) {
+  return `${BIG_GAMES_GRANT_KEY}:${String(userId || "").trim()}`;
 }
 
 function bigGamesOAuthConfigured(env) {
@@ -237,6 +328,51 @@ function requireBigGamesOAuth(env) {
 
 function bigGamesRedirectUri(env) {
   return String(env.BIG_GAMES_REDIRECT_URI || "").trim();
+}
+
+function hasAdminAuthorization(request, env) {
+  const expected = String(env.INGEST_ADMIN_TOKEN || "");
+  return !!expected && (request.headers.get("authorization") || "") === `Bearer ${expected}`;
+}
+
+function validatedOAuthReturnUrl(value, env) {
+  const candidate = String(value || env.INVENTORY_OAUTH_RETURN_URL || "").trim();
+  if (!candidate) return "";
+  let parsed;
+  try { parsed = new URL(candidate); } catch { throw httpError(400, "The OAuth return_url is invalid."); }
+  const allowedOrigins = String(env.ALLOWED_ORIGIN || "https://c0ld-clan.com")
+    .split(",")
+    .map(origin => origin.trim())
+    .filter(Boolean);
+  const local = ["localhost", "127.0.0.1"].includes(parsed.hostname);
+  if (!local && !allowedOrigins.includes("*") && !allowedOrigins.includes(parsed.origin)) {
+    throw httpError(400, "The OAuth return_url origin is not allowed.");
+  }
+  return parsed.toString();
+}
+
+async function markOAuthStateUsed(env, stateHash) {
+  await supabaseUpdate(env, OAUTH_STATES_TABLE, { state_hash: `eq.${stateHash}` }, { used_at: new Date().toISOString() });
+}
+
+function oauthCompletion(pending, success, message, params = {}) {
+  if (pending?.return_url) {
+    const target = new URL(pending.return_url);
+    target.searchParams.set("inventory_oauth", success ? "connected" : "error");
+    target.searchParams.set("inventory_message", message);
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null && value !== "") target.searchParams.set(key, String(value));
+    return Response.redirect(target.toString(), 303);
+  }
+  return oauthHtml(success, message);
+}
+
+function authorizedInventoryAccount(raw) {
+  const data = raw?.data || raw || {};
+  const account = data.account || {};
+  return {
+    user_id: String(account.robloxUserId || account.roblox_user_id || account.userId || account.user_id || "").trim(),
+    username: String(account.username || account.name || "").trim()
+  };
 }
 
 function oauthHtml(success, message) {
@@ -350,7 +486,7 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const userId = String(user.user_id || DEFAULT_USER_ID).trim();
   const username = String(user.username || userId).trim();
 
-  const raw = await fetchInventory(env, username || userId, { forceRefresh: options.force === true });
+  const raw = options.rawInventory || await fetchInventory(env, { user_id: userId, username }, { forceRefresh: options.force === true });
   const rawItems = extractInventoryItems(raw);
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
@@ -584,8 +720,10 @@ function compactDiffRow(row) {
   return { item_key: row.item_key, item_class: row.item_class, item_category: row.item_category, item_id: row.item_id, display_name: row.display_name, variant: row.variant, before: row.before, after: row.after, delta: row.delta, rap: row.rap, icon: row.icon };
 }
 
-async function fetchInventory(env, usernameOrId, options = {}) {
-  const grant = await getUsableOAuthGrant(env);
+async function fetchInventory(env, user, options = {}) {
+  const userId = String(user?.user_id || DEFAULT_USER_ID).trim();
+  const usernameOrId = String(user?.username || userId).trim();
+  const grant = await getUsableOAuthGrant(env, userId);
   if (grant) return fetchAuthorizedInventory(env, grant, options);
   return fetchPublicInventory(usernameOrId);
 }
@@ -600,9 +738,17 @@ function pickPreviousSnapshots(snapshots) {
 }
 
 async function fetchAuthorizedInventory(env, grant, options = {}) {
+  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
+  const payload = await fetchInventoryWithAccessToken(env, accessToken, options);
+  try {
+    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
+  } catch {}
+  return payload;
+}
+
+async function fetchInventoryWithAccessToken(env, accessToken, options = {}) {
   const url = new URL(env.BIG_GAMES_INVENTORY_URL || BIG_GAMES_INVENTORY_URL);
   if (options.forceRefresh) url.searchParams.set("refresh", "true");
-  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
   const res = await fetch(url.toString(), {
     headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
     cf: { cacheTtl: 0 }
@@ -613,9 +759,6 @@ async function fetchAuthorizedInventory(env, grant, options = {}) {
   if (res.status === 401) throw httpError(401, "Big Games authorization expired or was revoked. Run the OAuth authorization flow again.");
   if (res.status === 403) throw httpError(403, "Big Games token does not include the Inventory permission. Re-authorize the app.");
   if (!res.ok || payload.status === "error") throw httpError(502, `Big Games Player API inventory fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
-  try {
-    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${BIG_GAMES_GRANT_KEY}` }, { last_used_at: new Date().toISOString() });
-  } catch {}
   return payload;
 }
 

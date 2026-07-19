@@ -774,11 +774,22 @@ This value is a normal Worker variable; `SUPABASE_SERVICE_KEY` remains a secret.
 The Worker supports the official Big Games OAuth Player API. Configure
 `BIG_GAMES_CLIENT_ID`, `BIG_GAMES_REDIRECT_URI`, and the
 `BIG_GAMES_CLIENT_SECRET` secret, then apply
-`supabase/migrations/027_inventory_oauth.sql`. Start authorization with an
-admin-authenticated `POST /api/inventory/oauth/start`, open the returned
-`authorize_url`, and approve Inventory access. The callback securely exchanges
-the one-time code and stores only an encrypted access token. Check the result
-with `GET /api/inventory/oauth/status`.
+`supabase/migrations/027_inventory_oauth.sql` and
+`supabase/migrations/029_inventory_multi_account_oauth.sql`. Add every account
+that may authorize inventory access to `INVENTORY_USERS_JSON`. Start a specific
+authorization with `POST /api/inventory/oauth/start?user_id=463900811`, open
+the returned `authorize_url`, and approve Inventory access. Configured users
+may start their own consent flow from an allowed site origin; unconfigured
+accounts require the Worker administrator token. The callback verifies that
+the approving Roblox account matches the invitation and stores a separate
+encrypted grant for that user. Check one account with
+`GET /api/inventory/oauth/status?user_id=463900811`.
+
+The callback performs one immediate `refresh=true` inventory read and stores
+the first snapshot before returning to the initiating page. This deliberately
+bypasses the normal hourly timer and consumes one BIG Games refresh-quota slot.
+`league-inv-test.html` is the AgentP_0928 totals-only consent and verification
+page.
 
 After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
 `POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big
