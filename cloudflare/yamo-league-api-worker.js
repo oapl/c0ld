@@ -1673,7 +1673,7 @@ async function fetchLeaguePlayersApi(options = {}) {
   let lastError = null;
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 30, cacheEverything: true } });
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 300, cacheEverything: true } });
       const data = await readJsonResponse(res, url);
       if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
       return data;
@@ -1690,7 +1690,7 @@ async function fetchLeaguePlayerApi(userId, options = {}) {
   let lastError = null;
   for (const url of urls) {
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 30, cacheEverything: true } });
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 300, cacheEverything: true } });
       const data = await readJsonResponse(res, url);
       if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
       return data;

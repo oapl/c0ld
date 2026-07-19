@@ -19,7 +19,7 @@
 <main>
 <section class="hero"><h1>Solo Leaderboard</h1><p>Top individual contributors across every PS99 league.</p></section>
 <section class="cards">
-  <div class="card"><div class="label">Default View</div><div class="value">Top 500</div></div>
+  <div class="card"><div class="label">Refresh Interval</div><div class="value">5 Minutes</div></div>
   <div class="card"><div class="label">Players Loaded</div><div class="value" id="player-count">&mdash;</div></div>
   <div class="card"><div class="label">Last Checked</div><div class="value" id="last-checked">&mdash;</div></div>
 </section>
@@ -35,6 +35,7 @@
   const API="https://yamo-league-api-worker.opal-dde.workers.dev";
   const RUN_KEY="tap-heroes-part-2";
   const TOP_LIMIT=500;
+  const REFRESH_INTERVAL_MS=5*60*1000;
   const tbody=document.getElementById("tbody"),search=document.getElementById("search-input"),meta=document.getElementById("table-meta"),refresh=document.getElementById("refresh-btn");
   let timer=null,requestId=0;
   function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
@@ -71,6 +72,7 @@
   search.addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(load,350)});
   refresh.addEventListener("click",load);
   load();
+  setInterval(()=>{if(!document.hidden)load()},REFRESH_INTERVAL_MS);
 })();
 </script>
 </body>
