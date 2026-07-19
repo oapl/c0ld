@@ -4,7 +4,7 @@
 .notice { margin-bottom: 18px; padding: 13px 15px; border: 1px solid #30363d; border-left: 4px solid #58a6ff; border-radius: 8px; background: #111820; color: #c9d1d9; line-height: 1.45; }
 .notice.success { border-left-color: #3fb950; }
 .notice.error { border-left-color: #f85149; color: #ffb4ad; }
-.test-status-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.test-status-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .value-date { font-size: 16px; }
 .action-card { gap: 8px; }
 .action-card button { width: 100%; border-color: #ff7b72; color: #ff9b96; }
@@ -21,5 +21,5 @@
 .tracked-total strong { font-size: 20px; font-variant-numeric: tabular-nums; }
 .empty-state { padding: 18px; border-top: 1px solid #30363d; color: #8b949e; text-align: center; }
 .inventory-total-section.has-data .empty-state { display: none; }
-@media (max-width: 900px) { .test-status-cards { grid-template-columns: 1fr 1fr; } .action-card { grid-column: 1 / -1; } .pet-total-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .test-status-cards { grid-template-columns: 1fr 1fr; } .pet-total-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 650px) { .profile-link { width: 100%; margin-left: 0; text-align: center; } .test-status-cards, .pet-total-grid { grid-template-columns: 1fr; } .action-card { grid-column: auto; } }

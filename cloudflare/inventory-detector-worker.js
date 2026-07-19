@@ -41,6 +41,8 @@ export default {
         response = await handleOAuthCallback(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/status") {
         response = await handleOAuthStatus(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/summary") {
+        response = await handleOAuthSummary(env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -188,6 +190,34 @@ async function handleOAuthCallback(request, env) {
     return oauthCompletion(pending, false, "The approved token does not include Inventory access.");
   }
 
+  const targetUserId = String(pending.target_roblox_user_id || "").trim();
+  if (!targetUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "This approval is missing its target Roblox account. Start again.");
+  }
+  const authorizedAt = new Date();
+  const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
+  const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
+  const tokenAccount = authorizedInventoryAccount(null, token);
+  if (tokenAccount.user_id && tokenAccount.user_id !== targetUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `This invitation is for Roblox user ${targetUserId}, but a different account approved it.`);
+  }
+
+  // Persist a valid grant before the initial inventory read. BIG Games records the
+  // app as connected as soon as consent succeeds, and a transient read failure must
+  // not discard that consent or make every later manual retry fall back to public data.
+  await saveOAuthGrant(env, {
+    userId: targetUserId,
+    username: tokenAccount.username || pending.target_roblox_username || null,
+    token,
+    scopes,
+    authorizedAt,
+    expiresAt,
+    expiresIn,
+    identityVerified: tokenAccount.user_id === targetUserId
+  });
+
   let rawInventory;
   let forcedRefresh = pending.force_ingest !== false;
   try {
@@ -195,57 +225,47 @@ async function handleOAuthCallback(request, env) {
   } catch (forcedError) {
     if (!forcedRefresh) {
       await markOAuthStateUsed(env, stateHash);
-      return oauthCompletion(pending, false, `Inventory access was approved, but the first pull failed: ${forcedError?.message || forcedError}`);
+      return oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" });
     }
     try {
       rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: false });
       forcedRefresh = false;
     } catch (fallbackError) {
       await markOAuthStateUsed(env, stateHash);
-      return oauthCompletion(pending, false, `Inventory access was approved, but the first pull failed: ${fallbackError?.message || fallbackError}`);
+      return oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" });
     }
   }
-  const account = authorizedInventoryAccount(rawInventory);
-  const targetUserId = String(pending.target_roblox_user_id || "").trim();
-  if (!account.user_id) {
-    await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, false, "BIG Games did not identify the Roblox account attached to this approval.");
-  }
-  if (targetUserId && account.user_id !== targetUserId) {
+  const account = authorizedInventoryAccount(rawInventory, token);
+  if (account.user_id && account.user_id !== targetUserId) {
+    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${oauthGrantKey(targetUserId)}` });
     await markOAuthStateUsed(env, stateHash);
     return oauthCompletion(pending, false, `This invitation is for Roblox user ${targetUserId}, but a different account approved it.`);
   }
-
-  const authorizedAt = new Date();
-  const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
-  const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
-  await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
-    grant_key: oauthGrantKey(account.user_id),
-    roblox_user_id: Number(account.user_id),
-    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
-    token_type: token.token_type || "Bearer",
-    scope: scopes.join(" "),
-    authorized_at: authorizedAt.toISOString(),
-    expires_at: expiresAt,
-    last_used_at: null,
-    metadata: { expires_in: expiresIn, username: account.username || pending.target_roblox_username || null },
-    updated_at: authorizedAt.toISOString()
-  }], "grant_key");
+  await saveOAuthGrant(env, {
+    userId: targetUserId,
+    username: account.username || tokenAccount.username || pending.target_roblox_username || null,
+    token,
+    scopes,
+    authorizedAt,
+    expiresAt,
+    expiresIn,
+    identityVerified: account.user_id === targetUserId
+  });
   const user = {
-    user_id: account.user_id,
-    username: account.username || pending.target_roblox_username || account.user_id
+    user_id: targetUserId,
+    username: account.username || pending.target_roblox_username || targetUserId
   };
   let ingest;
   try {
     ingest = await ingestInventory(env, user, "oauth_callback", false, { force: true, rawInventory });
   } catch (error) {
     await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, false, `Access is connected, but the first inventory snapshot could not be saved: ${error?.message || error}`, { user_id: account.user_id });
+    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Use Pull Now to retry: ${error?.message || error}`, { user_id: targetUserId, connected: "1" });
   }
   await markOAuthStateUsed(env, stateHash);
 
   return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled.`, {
-    user_id: account.user_id,
+    user_id: targetUserId,
     pulled: "1",
     forced: forcedRefresh ? "1" : "0",
     snapshot_at: ingest.snapshot?.captured_at || ""
@@ -256,6 +276,31 @@ async function handleOAuthStatus(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID).trim();
   return json({ ok: true, user_id: userId, ...(await oauthStatus(env, userId)) });
+}
+
+async function handleOAuthSummary(env) {
+  requireSupabase(env);
+  const rows = await supabaseSelectAll(env, OAUTH_GRANTS_TABLE, {
+    select: "roblox_user_id,expires_at",
+    roblox_user_id: "not.is.null",
+    order: "authorized_at.desc"
+  }, 10000);
+  const now = Date.now();
+  const active = new Set();
+  const expired = new Set();
+  for (const row of rows) {
+    const userId = String(row.roblox_user_id || "").trim();
+    if (!userId) continue;
+    if (new Date(row.expires_at).getTime() > now) active.add(userId);
+    else expired.add(userId);
+  }
+  for (const userId of active) expired.delete(userId);
+  return json({
+    ok: true,
+    opted_in_players: active.size,
+    expired_approvals: expired.size,
+    counted_at: new Date(now).toISOString()
+  });
 }
 
 async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID) {
@@ -366,13 +411,68 @@ function oauthCompletion(pending, success, message, params = {}) {
   return oauthHtml(success, message);
 }
 
-function authorizedInventoryAccount(raw) {
+async function saveOAuthGrant(env, { userId, username, token, scopes, authorizedAt, expiresAt, expiresIn, identityVerified }) {
+  await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
+    grant_key: oauthGrantKey(userId),
+    roblox_user_id: Number(userId),
+    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
+    token_type: token.token_type || "Bearer",
+    scope: scopes.join(" "),
+    authorized_at: authorizedAt.toISOString(),
+    expires_at: expiresAt,
+    last_used_at: null,
+    metadata: {
+      expires_in: expiresIn,
+      username: username || null,
+      identity_verified: !!identityVerified
+    },
+    updated_at: new Date().toISOString()
+  }], "grant_key");
+}
+
+function authorizedInventoryAccount(raw, token = null) {
   const data = raw?.data || raw || {};
-  const account = data.account || {};
+  const tokenClaims = decodeJwtPayload(token?.access_token);
+  const candidates = [
+    data.account,
+    raw?.account,
+    data.user,
+    raw?.user,
+    data.player,
+    raw?.player,
+    data.robloxAccount,
+    raw?.robloxAccount,
+    data.roblox_account,
+    raw?.roblox_account,
+    token?.account,
+    token?.user,
+    token?.player,
+    tokenClaims
+  ].filter(value => value && typeof value === "object");
+  for (const account of candidates) {
+    const roblox = account.roblox || account.robloxAccount || account.roblox_account || {};
+    const userId = account.robloxUserId || account.roblox_user_id || roblox.userId || roblox.user_id || roblox.id || account.userId || account.user_id || "";
+    if (!userId) continue;
+    return {
+      user_id: String(userId).trim(),
+      username: String(account.robloxUsername || account.roblox_username || roblox.username || roblox.name || account.username || account.name || "").trim()
+    };
+  }
   return {
-    user_id: String(account.robloxUserId || account.roblox_user_id || account.userId || account.user_id || "").trim(),
-    username: String(account.username || account.name || "").trim()
+    user_id: "",
+    username: ""
   };
+}
+
+function decodeJwtPayload(accessToken) {
+  try {
+    const segment = String(accessToken || "").split(".")[1];
+    if (!segment) return null;
+    const normalized = segment.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(segment.length / 4) * 4, "=");
+    return JSON.parse(atob(normalized));
+  } catch {
+    return null;
+  }
 }
 
 function oauthHtml(success, message) {
@@ -942,6 +1042,7 @@ async function supabaseSelectAll(env, table, params, maxRows = 10000) { const ro
 async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("insert", text)); return text ? JSON.parse(text) : []; }
 async function supabaseUpsert(env, table, rows, conflict) { if (!rows.length) return []; const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); if (conflict) url.searchParams.set("on_conflict", conflict); const res = await fetch(url.toString(), { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("upsert", text)); return text ? JSON.parse(text) : []; }
 async function supabaseUpdate(env, table, filters, values) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(filters || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { method: "PATCH", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "return=minimal" }, body: JSON.stringify(values) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("update", text)); return true; }
+async function supabaseDelete(env, table, filters) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(filters || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { method: "DELETE", headers: { ...supabaseHeaders(env), prefer: "return=minimal" } }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("delete", text)); return true; }
 function supabaseFailureMessage(operation, text) { const detail = String(text || "").trim(); if (/error\s*code:\s*1016/i.test(detail)) return `Supabase ${operation} failed because SUPABASE_URL does not resolve (Cloudflare 1016). Update the Worker variable to the current Supabase Data API project URL.`; return `Supabase ${operation} failed: ${detail}`; }
 function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY; return { apikey: key, authorization: `Bearer ${key}` }; }
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }

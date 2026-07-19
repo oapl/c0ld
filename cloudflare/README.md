@@ -784,6 +784,8 @@ accounts require the Worker administrator token. The callback verifies that
 the approving Roblox account matches the invitation and stores a separate
 encrypted grant for that user. Check one account with
 `GET /api/inventory/oauth/status?user_id=463900811`.
+`GET /api/inventory/oauth/summary` returns only the number of active and expired
+saved approvals for the public opt-in counter; it does not expose account IDs.
 
 The callback performs one immediate `refresh=true` inventory read and stores
 the first snapshot before returning to the initiating page. This deliberately

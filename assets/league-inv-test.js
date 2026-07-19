@@ -12,6 +12,7 @@
   const elements={
     notice:document.getElementById("notice"),
     access:document.getElementById("access-status"),
+    optedIn:document.getElementById("opted-in-count"),
     snapshot:document.getElementById("snapshot-time"),
     connect:document.getElementById("connect-button"),
     refresh:document.getElementById("refresh-button"),
@@ -56,8 +57,19 @@
     elements.empty.textContent=message;
     elements.section.classList.remove("has-data");
   }
+  async function loadOptedInCount(){
+    try{
+      const summary=await request(`/api/inventory/oauth/summary?v=${Date.now()}`);
+      elements.optedIn.textContent=formatCount(summary.opted_in_players);
+      elements.optedIn.title=`${formatCount(summary.opted_in_players)} active saved approval${Number(summary.opted_in_players)===1?"":"s"}`;
+    }catch(error){
+      elements.optedIn.textContent="Unavailable";
+      elements.optedIn.title=error.message||String(error);
+    }
+  }
   async function load(){
     elements.refresh.disabled=true;
+    loadOptedInCount();
     try{
       const status=await request(`/api/inventory/oauth/status?user_id=${encodeURIComponent(USER.user_id)}&v=${Date.now()}`);
       connected=!!status.connected;
