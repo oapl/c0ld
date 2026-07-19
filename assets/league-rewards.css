@@ -205,7 +205,8 @@
 .pet-gains-view-switch button:hover { border-color: #6e7681; color: #e6edf3; }
 .pet-gains-view-switch button.active { border-color: #ff7b72; background: rgba(248, 81, 73, .12); color: #ff9b96; }
 #hourly-pet-connect { border-color: #ff7b72; color: #ff9b96; padding: 7px 10px; font-size: 12px; }
-#hourly-pet-connect.connected { border-color: #3fb950; color: #7ee787; }
+#hourly-pet-connect.connected { border-color: #3fb950; background: rgba(46,160,67,.16); color: #7ee787; box-shadow: inset 0 0 0 1px rgba(63,185,80,.12); }
+#hourly-pet-connect.connected:hover { border-color: #56d364; background: rgba(46,160,67,.24); color: #aff5b4; }
 #hourly-pet-connect:disabled { cursor: wait; opacity: .55; }
 #hourly-pet-connect-status.connected { color: #7ee787; }
 #hourly-pet-connect-status.error { color: #ff9b96; }

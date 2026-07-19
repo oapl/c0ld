@@ -69,11 +69,15 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const now = new Date();
-      for (const user of await trackedInventoryUsers(env)) {
-        if (!await inventoryScanIsDue(env, user, now)) continue;
+      const users = await trackedInventoryUsers(env);
+      const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
+      const results = await Promise.allSettled(users.map(async user => {
+        if (!await inventoryScanIsDue(env, user, now, { synchronized: true })) return { skipped: true, user };
         const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
-        if (!result.skipped && shouldPostHourly(now, env)) await postHourlyDiffIfNeeded(env, user);
-      }
+        if (!result.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) await postHourlyDiffIfNeeded(env, user);
+        return result;
+      }));
+      for (const result of results) if (result.status === "rejected") console.warn("Scheduled inventory scan failed", result.reason?.message || result.reason);
     })());
   }
 };
@@ -549,6 +553,7 @@ async function handleHourlySeries(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim();
   const hours = Math.max(1, Math.min(72, Number(url.searchParams.get("hours") || 24)));
+  const synchronizedOnly = parseBool(url.searchParams.get("synchronized")) === true;
   const snapshots = await getUserSnapshots(env, userId, Math.max(500, hours * 20));
   if (!snapshots.length) return json({ ok: false, message: "No inventory snapshots found." }, 404);
 
@@ -556,6 +561,7 @@ async function handleHourlySeries(request, env) {
   const latest = sorted[sorted.length - 1];
   const cutoff = new Date(new Date(latest.captured_at).getTime() - (hours + 1) * 3600000);
   const recent = sorted.filter(snapshot => new Date(snapshot.captured_at) >= cutoff);
+  const comparisonSnapshots = synchronizedOnly ? recent.filter(snapshot => snapshot.source === "schedule") : recent;
   const itemCache = new Map();
   const itemsFor = async snapshot => {
     if (!itemCache.has(snapshot.id)) itemCache.set(snapshot.id, getSnapshotItems(env, snapshot.id));
@@ -563,9 +569,9 @@ async function handleHourlySeries(request, env) {
   };
   const rows = [];
 
-  for (let i = 1; i < recent.length; i++) {
-    const start = recent[i - 1];
-    const end = recent[i];
+  for (let i = 1; i < comparisonSnapshots.length; i++) {
+    const start = comparisonSnapshots[i - 1];
+    const end = comparisonSnapshots[i];
     const [startItems, endItems] = await Promise.all([itemsFor(start), itemsFor(end)]);
     const diff = buildDiff(startItems, endItems);
     rows.push({
@@ -580,7 +586,7 @@ async function handleHourlySeries(request, env) {
     });
   }
 
-  return cacheJson({ ok: true, user_id: userId, hours, rows }, env);
+  return cacheJson({ ok: true, user_id: userId, hours, synchronized_only: synchronizedOnly, rows }, env);
 }
 
 async function ingestInventory(env, user, source, isBoundary, options = {}) {
@@ -843,7 +849,15 @@ function pickPreviousSnapshots(snapshots) {
 
 async function fetchAuthorizedInventory(env, grant, options = {}) {
   const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
-  const payload = await fetchInventoryWithAccessToken(env, accessToken, options);
+  let payload;
+  try {
+    payload = await fetchInventoryWithAccessToken(env, accessToken, options);
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    }
+    throw error;
+  }
   try {
     await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
   } catch {}
@@ -1103,7 +1117,7 @@ async function isCurrentLeagueMember(env, userId, leagueName, runKey) {
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
-async function inventoryScanIsDue(env, user, now = new Date()) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; return now.getTime() - new Date(latest.captured_at).getTime() >= inventoryMinFetchIntervalMinutes(env) * 60000; }
+async function inventoryScanIsDue(env, user, now = new Date(), options = {}) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; const latestTime = new Date(latest.captured_at).getTime(); if (options.synchronized && envBool(env.INVENTORY_SYNC_COHORT, true)) { if (now.getTime() - latestTime < 5 * 60000) return false; const intervalMs = 60 * 60000; const currentCohort = Math.floor(now.getTime() / intervalMs); const latestCohort = Math.floor(latestTime / intervalMs); return latest.source !== "schedule" || latestCohort < currentCohort; } return now.getTime() - latestTime >= inventoryMinFetchIntervalMinutes(env) * 60000; }
 function localDateString(date, env) { return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone(env), year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
 function localHourMinute(date, env) { const parts = new Intl.DateTimeFormat("en-US", { timeZone: timeZone(env), hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date); return { hour: Number(parts.find(p => p.type === "hour")?.value || 0), minute: Number(parts.find(p => p.type === "minute")?.value || 0) }; }
 function isMountainMidnight(date, env) { const { hour, minute } = localHourMinute(date, env); return hour === 0 && minute <= 10; }

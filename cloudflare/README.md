@@ -792,6 +792,10 @@ With `INVENTORY_LEAGUE_FEATURE=true` and
 `LEAGUE_API_BASE` may start consent from a league page without first being
 copied into `INVENTORY_USERS_JSON`. Scheduled scans include all active saved
 grants; `INVENTORY_USERS_JSON` remains the seed list for permanent/test users.
+`INVENTORY_SYNC_COHORT=true` launches due opted-in accounts from the same
+scheduled event and limits the public league comparison to schedule-to-schedule
+hourly windows. Approval-time and manual test snapshots remain stored, but are
+excluded from the fair hourly comparison.
 
 The callback performs one immediate `refresh=true` inventory read and stores
 the first snapshot before returning to the initiating page. This deliberately

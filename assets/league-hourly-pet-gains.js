@@ -18,6 +18,7 @@
 
   const INVENTORY_API="https://inventory-detector-worker.opal-dde.workers.dev";
   const LEAGUE_API="https://yamo-league-api-worker.opal-dde.workers.dev";
+  const CONNECTED_APPS_URL="https://db.biggames.io/settings/connected-apps";
   const HOURS=24;
   let requestVersion=0;
   let activeView="hourly";
@@ -133,8 +134,9 @@
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory access check failed");
       connected=!!data.connected;
-      connectButton.textContent=connected?"Reconnect Inventory":"Connect Inventory";
+      connectButton.textContent=connected?"Revoke Inventory Access":"Connect Inventory";
       connectButton.classList.toggle("connected",connected);
+      connectButton.title=connected?"Open BIG Games Connected Apps to revoke this authorization":"Approve inventory access for the selected member";
       connectStatus.className="meta"+(connected?" connected":"");
       connectStatus.textContent=connected?selectedName()+" is opted in":selectedName()+" has not opted in";
     }catch(error){
@@ -142,6 +144,7 @@
     }finally{connectButton.disabled=false}
   }
   async function connectSelected(){
+    if(connected){window.open(CONNECTED_APPS_URL,"_blank","noopener,noreferrer");return}
     const userId=String(memberSelect.value||"").trim();if(!userId)return;
     connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening the secure BIG Games approval page...";
     try{
@@ -149,7 +152,7 @@
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
       location.assign(data.authorize_url);
-    }catch(error){connectButton.disabled=false;connectButton.textContent=connected?"Reconnect Inventory":"Connect Inventory";connectStatus.className="meta error";connectStatus.textContent=error.message||String(error)}
+    }catch(error){connectButton.disabled=false;connectButton.textContent=connected?"Revoke Inventory Access":"Connect Inventory";connectStatus.className="meta error";connectStatus.textContent=error.message||String(error)}
   }
   function consumeOAuthResult(){
     const params=new URLSearchParams(location.search),result=params.get("inventory_oauth");if(!result)return;
@@ -167,7 +170,7 @@
       const url=new URL(INVENTORY_API+path);
       url.searchParams.set("user_id",String(userId));
       if(activeView==="totals")url.searchParams.set("include_items","1");
-      else url.searchParams.set("hours",String(HOURS));
+      else {url.searchParams.set("hours",String(HOURS));url.searchParams.set("synchronized","1")}
       url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"});
       const data=await response.json();
