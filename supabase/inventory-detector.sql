@@ -85,6 +85,10 @@ create table if not exists public.ps99_inventory_oauth_grants (
 create table if not exists public.ps99_inventory_oauth_states (
   state_hash text primary key,
   code_verifier_ciphertext text not null,
+  target_roblox_user_id bigint,
+  target_roblox_username text,
+  return_url text,
+  force_ingest boolean not null default true,
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),
   used_at timestamptz
@@ -92,6 +96,13 @@ create table if not exists public.ps99_inventory_oauth_states (
 
 create index if not exists idx_ps99_inventory_oauth_states_expiry
   on public.ps99_inventory_oauth_states (expires_at desc);
+
+create unique index if not exists idx_ps99_inventory_oauth_grants_user
+  on public.ps99_inventory_oauth_grants (roblox_user_id)
+  where roblox_user_id is not null;
+
+create index if not exists idx_ps99_inventory_oauth_states_target
+  on public.ps99_inventory_oauth_states (target_roblox_user_id, created_at desc);
 
 alter table public.ps99_inventory_oauth_grants enable row level security;
 alter table public.ps99_inventory_oauth_states enable row level security;

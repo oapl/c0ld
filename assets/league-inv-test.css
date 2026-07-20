@@ -1,0 +1,25 @@
+.inventory-test-hero { position: relative; }
+.account-mark { width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center; flex: 0 0 auto; background: #21262d; border: 1px solid #30363d; color: #ff9b96; font-weight: 800; letter-spacing: .04em; }
+.profile-link { margin-left: auto; border: 1px solid #30363d; border-radius: 6px; background: #0f141b; color: #e6edf3; padding: 9px 11px; font-size: 13px; }
+.notice { margin-bottom: 18px; padding: 13px 15px; border: 1px solid #30363d; border-left: 4px solid #58a6ff; border-radius: 8px; background: #111820; color: #c9d1d9; line-height: 1.45; }
+.notice.success { border-left-color: #3fb950; }
+.notice.error { border-left-color: #f85149; color: #ffb4ad; }
+.test-status-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.value-date { font-size: 16px; }
+.action-card { gap: 8px; }
+.action-card button { width: 100%; border-color: #ff7b72; color: #ff9b96; }
+.action-card button:hover:not(:disabled) { background: rgba(248, 81, 73, .12); }
+.action-card button:disabled { cursor: wait; opacity: .55; }
+.pet-total-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: #30363d; }
+.pet-total-card { min-height: 116px; display: grid; grid-template-columns: 32px minmax(0, 1fr); grid-template-rows: 1fr auto; gap: 8px 10px; padding: 18px; background: #161b22; }
+.pet-order { color: #6e7681; font-size: 12px; font-variant-numeric: tabular-nums; }
+.pet-name { color: #e6edf3; font-size: 15px; font-weight: 700; }
+.pet-power { margin-top: 4px; color: #8b949e; font-size: 11px; }
+.pet-total-card strong { grid-column: 1 / -1; text-align: right; color: #fff; font-size: 27px; font-variant-numeric: tabular-nums; }
+.tracked-total { padding: 15px 18px; display: flex; justify-content: flex-end; align-items: baseline; gap: 12px; border-top: 1px solid #30363d; }
+.tracked-total span { color: #8b949e; font-size: 13px; }
+.tracked-total strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.empty-state { padding: 18px; border-top: 1px solid #30363d; color: #8b949e; text-align: center; }
+.inventory-total-section.has-data .empty-state { display: none; }
+@media (max-width: 900px) { .test-status-cards { grid-template-columns: 1fr 1fr; } .pet-total-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 650px) { .profile-link { width: 100%; margin-left: 0; text-align: center; } .test-status-cards, .pet-total-grid { grid-template-columns: 1fr; } .action-card { grid-column: auto; } }

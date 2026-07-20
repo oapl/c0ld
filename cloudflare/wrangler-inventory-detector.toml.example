@@ -4,18 +4,23 @@ compatibility_date = "2026-07-17"
 
 [vars]
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
-INVENTORY_USERS_JSON = '[{"user_id":"109818","username":"Cinnamowopal"}]'
+INVENTORY_USERS_JSON = '[{"user_id":"109818","username":"Cinnamowopal"},{"user_id":"463900811","username":"AgentP_0928"}]'
 INVENTORY_TIME_ZONE = "America/Denver"
 INVENTORY_MIN_FETCH_INTERVAL_MINUTES = "55"
 INVENTORY_SKIP_DUPLICATE_SOURCE = "true"
 INVENTORY_REJECT_EMPTY = "true"
+INVENTORY_LEAGUE_FEATURE = "true"
+INVENTORY_AUTO_DISCOVER_MEMBERS = "true"
+INVENTORY_SYNC_COHORT = "true"
+LEAGUE_API_BASE = "https://yamo-league-api-worker.YOUR-SUBDOMAIN.workers.dev"
 BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_ME"
 BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
+INVENTORY_OAUTH_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
-# One collection per hour: 24 requests per day, below Big Games' displayed
-# 30-refresh daily allowance and well beyond the five-minute cooldown.
+# One scheduled collection per hour for every configured or actively opted-in
+# account. OAuth callback tests that request refresh=true are counted separately.
 [triggers]
 crons = ["17 * * * *"]
 

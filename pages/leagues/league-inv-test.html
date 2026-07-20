@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentP_0928 Inventory Test</title>
+<link rel="stylesheet" href="assets/league-page.css">
+<link rel="stylesheet" href="assets/league-inv-test.css">
+</head>
+<body>
+<header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu"><a href="index.html">Leaderboards</a><a href="c0ld-leagues.html">c0ld Leagues</a><a href="solo-leaderboard.html">Solo Leaderboard</a><a href="league-leaderboard.html">League Leaderboard</a></div></header>
+<main>
+  <section class="hero inventory-test-hero">
+    <div class="account-mark" aria-hidden="true">AG</div>
+    <div class="hero-copy"><h1>AgentP_0928 Inventory Test</h1><div class="meta">Roblox user 463900811 · totals only</div></div>
+    <a class="profile-link" href="https://www.roblox.com/users/463900811/profile" target="_blank" rel="noopener">Roblox Profile</a>
+  </section>
+
+  <div id="notice" class="notice" role="status" hidden></div>
+
+  <section class="cards test-status-cards">
+    <div class="card"><div class="label">App Access</div><div class="value" id="access-status">Checking...</div></div>
+    <div class="card"><div class="label">Players Opted In</div><div class="value" id="opted-in-count">Checking...</div></div>
+    <div class="card"><div class="label">Latest Snapshot</div><div class="value value-date" id="snapshot-time">-</div></div>
+    <div class="card action-card"><button id="connect-button" type="button" disabled>Connect BIG Games Inventory</button><div class="meta">Approval performs an immediate forced pull.</div></div>
+  </section>
+
+  <section class="section inventory-total-section">
+    <div class="section-header"><div><h2 class="section-title">Current Pet Totals</h2><div class="meta">Normal, Golden, Rainbow, and Shiny variants are combined</div></div><button id="refresh-button" type="button">Refresh</button></div>
+    <div class="pet-total-grid" id="pet-total-grid">
+      <article class="pet-total-card"><div class="pet-order">01</div><div><div class="pet-name">War Elephant</div><div class="pet-power">Lowest priority</div></div><strong id="pet-elephant">-</strong></article>
+      <article class="pet-total-card"><div class="pet-order">02</div><div><div class="pet-name">Warrior Jaguar</div><div class="pet-power">Priority two</div></div><strong id="pet-jaguar">-</strong></article>
+      <article class="pet-total-card"><div class="pet-order">03</div><div><div class="pet-name">Jewel Peacock</div><div class="pet-power">Priority three</div></div><strong id="pet-peacock">-</strong></article>
+      <article class="pet-total-card"><div class="pet-order">04</div><div><div class="pet-name">Genie Fox</div><div class="pet-power">Highest priority</div></div><strong id="pet-genie">-</strong></article>
+    </div>
+    <div class="tracked-total"><span>Tracked pets in inventory</span><strong id="tracked-total">-</strong></div>
+    <div class="empty-state" id="empty-state">Waiting for an authorized inventory snapshot.</div>
+  </section>
+</main>
+<script src="assets/league-inv-test.js"></script>
+<script src="assets/site-announcement.js"></script>
+</body>
+</html>

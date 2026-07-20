@@ -1,7 +1,9 @@
 const SNAPSHOT_TABLE = "ps99_league_snapshots";
 const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
-const DEFAULT_LEAGUE_RUN_KEY = "active";
+const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
+const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
+const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
@@ -21,9 +23,14 @@ const DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS = 2500;
 const DEFAULT_COLD_CLAN_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
 const DEFAULT_COLD_CLAN_CURRENT_TABLE = "c0ld_clan_current";
 const ROBLOX_BATCH_SIZE = 100;
+const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
 const FALSEY_ENV_VALUES = new Set(["false", "0", "no", "off"]);
+const DEFAULT_LEAGUE_POINTS_BLACKLIST_JSON = '{"leagues":[],"players":["Younes89755","1856284829"]}';
+const DEFAULT_LEAGUE_MILESTONE_RANKS = [1, 3, 15, 50, 100, 250, 2000];
+let publicVisibilityCacheRaw = null;
+let publicVisibilityCacheValue = null;
 
 export default {
   async fetch(request, env) {
@@ -33,7 +40,7 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_name: leagueName(env), league_names: leagueNames(env), league_run_key: leagueRunKey(env), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), c0ld_league_names: c0ldLeagueNames(env), alt_league_names: altLeagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)), league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -42,20 +49,31 @@ export default {
         response = await handleProfile(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues") {
         response = await handleTopLeagues(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/solo-leaderboard") {
+        response = await handleSoloLeaderboard(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/player-location") {
+        response = await handleLeaguePlayerLocation(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/leagues/milestones") {
+        response = await handleLeagueMilestones(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
+        requireLeagueCollectionEnabled(env);
         response = await handleTopLeaguesWindowIngest(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-overlap") {
+        requireLeagueCollectionEnabled(env);
         response = await handleC0ldLeagueOverlap(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/c0ld-discovered") {
         response = await handleC0ldDiscoveredLeagues(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/leagues/ingest-all") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeaguesIngest(env, "manual", runKeyParam(url));
       } else if (request.method === "POST" && (url.pathname === "/api/leagues/ingest" || url.pathname === "/api/ingest")) {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleIngest(env, "manual", url.searchParams.get("league"), runKeyParam(url));
       } else if (request.method === "POST" && url.pathname === "/api/leagues/top-leagues/ingest") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         const ingestLimit = clamp(Number(url.searchParams.get("limit") || topLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT);
         const ingestListName = topLeagueListNameForLimit(ingestLimit, env);
         const requestedPageSize = url.searchParams.get("page_size") || url.searchParams.get("pageSize");
@@ -69,7 +87,11 @@ export default {
         });
       } else if (request.method === "POST" && url.pathname === "/api/leagues/rank-windows/refresh") {
         requireAdmin(request, env);
+        requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeagueRankWindowRefresh(env, "manual:rank-window", runKeyParam(url));
+      } else if (request.method === "POST" && url.pathname === "/api/leagues/run/reset") {
+        requireAdmin(request, env);
+        response = await handleLeagueRunReset(env, runKeyParam(url));
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -81,6 +103,10 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    if (!leagueCollectionEnabled(env)) {
+      console.log("scheduled league collection skipped: LEAGUE_COLLECTION_ENABLED is false");
+      return;
+    }
     ctx.waitUntil((async () => {
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
@@ -112,8 +138,9 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
   const api = await fetchLeagueApi(requested);
   const league = api.data || api;
-  const summary = summarizeLeague(league, requested);
-  const memberRows = normalizeLeagueRows(league);
+  let summary = summarizeLeague(league, requested);
+  let memberRows = normalizeLeagueRows(league);
+  ({ summary, memberRows } = await normalizeTrackedLeagueForRun(env, runKey, summary, memberRows));
   const snapshotId = `league:${runKey}:${summary.league_name}:${fetchedAt}`;
 
   const dbRows = memberRows.map(row => ({
@@ -159,8 +186,9 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
     try {
       const api = await fetchLeagueApi(requested, { allowFallback: options.allowApiFallback !== false });
       const league = api.data || api;
-      const summary = summarizeLeague(league, requested);
-      const memberRows = normalizeLeagueRows(league);
+      let summary = summarizeLeague(league, requested);
+      let memberRows = normalizeLeagueRows(league);
+      ({ summary, memberRows } = await normalizeTrackedLeagueForRun(env, runKey, summary, memberRows));
       const snapshotId = `league:${runKey}:${summary.league_name}:${fetchedAt}`;
       const rows = memberRows.map(row => ({
         snapshot_id: snapshotId,
@@ -222,8 +250,9 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize, allowApiFallback: options.allowApiFallback !== false });
   const snapshotPrefix = listName === ALL_TOP_LEAGUES_NAME ? "all_top_leagues" : "top_leagues";
   const snapshotId = `${snapshotPrefix}:${runKey}:${fetchedAt}`;
+  const normalizedTopRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, top.rows, { recomputeRanks: true });
 
-  const dbRows = top.rows.map(row => topLeagueDbRow(row, {
+  const dbRows = normalizedTopRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source: `${source}:top-leagues`,
@@ -248,10 +277,12 @@ async function handleTopLeaguesWindowIngest(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 100);
   const topContext = await fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit);
   const rowsToPersist = topContext.persist_rows || topContext.rows || [];
+  const listName = topContext.list_name || topLeagueListNameForLimit(topLimit, env);
+  const responseRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, topContext.rows || [], { recomputeRanks: false });
 
   if (rowsToPersist.length) {
     await persistTopLeagueWindowRows(env, runKey, rowsToPersist, {
-      listName: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+      listName,
       fetchedAt: topContext.snapshot_at || new Date().toISOString(),
       source: "live:rank-baseline-window"
     });
@@ -261,13 +292,14 @@ async function handleTopLeaguesWindowIngest(request, env) {
     ok: true,
     generated_at: new Date().toISOString(),
     league_run_key: runKey,
-    league_name: topContext.list_name || topLeagueListNameForLimit(topLimit, env),
+    league_name: listName,
+    league_run_label: leagueRunLabel(env, runKey),
     snapshot_at: topContext.snapshot_at,
     offset,
     limit,
     top_leagues_requested: topLimit,
     rows_inserted: rowsToPersist.length,
-    rows: (topContext.rows || []).map(publicLeagueRow),
+    rows: responseRows.map(publicLeagueRow).filter(row => !isLeaguePubliclyHidden(env, row.league_name)),
     next_offset: offset + limit < topLimit ? offset + limit : null
   }, env);
 }
@@ -301,14 +333,14 @@ async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey
 
   for (const target of targets) {
     const topRow = topLeagueLookupRow(topLookup, target);
-    const topRank = toNumber(topRow?.rank);
+    const topRank = visibleLeagueRank(topRow?.rank);
     if (topRank !== null && topRank <= scheduledLimit) {
       skippedTop.push({ league_name: target.league_name, rank: topRank });
       continue;
     }
 
     const seedRow = topLeagueLookupRow(seedLookup, target);
-    const seedRank = toNumber(seedRow?.rank);
+    const seedRank = visibleLeagueRank(seedRow?.rank);
     if (seedRank === null) {
       missingSeed.push({ league_name: target.league_name, requested_name: target.requested_name, league_id: target.league_id });
       continue;
@@ -366,7 +398,8 @@ async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey
 
   const rows = [...rowsByUserId.values()].sort((a, b) => (a.rank || 999999) - (b.rank || 999999));
   const snapshotId = `rank_windows:${runKey}:${fetchedAt}`;
-  const dbRows = rows.map(row => topLeagueDbRow(row, {
+  const normalizedRows = await normalizeTopLeagueRowsForRun(env, runKey, ALL_TOP_LEAGUES_NAME, rows, { recomputeRanks: false });
+  const dbRows = normalizedRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source: `${source}:top-leagues`,
@@ -433,7 +466,8 @@ async function persistTopLeagueWindowRows(env, runKey, rows, options = {}) {
   const listName = options.listName || ALL_TOP_LEAGUES_NAME;
   const snapshotId = `top_league_window:${runKey}:${listName}:${fetchedAt}`;
   const source = `${options.source || "live-window"}:top-leagues`;
-  const dbRows = rows.map(row => topLeagueDbRow(row, {
+  const normalizedRows = await normalizeTopLeagueRowsForRun(env, runKey, listName, rows, { recomputeRanks: false });
+  const dbRows = normalizedRows.map(row => topLeagueDbRow(row, {
     snapshotId,
     fetchedAt,
     source,
@@ -517,6 +551,9 @@ async function handleCurrent(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
+  if (isLeaguePubliclyHidden(env, requested)) {
+    return cacheJson(hiddenLeaguePayload(env, runKey, requested), env);
+  }
   let rows = await supabaseSelect(env, CURRENT_TABLE, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     league_run_key: `eq.${runKey}`,
@@ -535,22 +572,31 @@ async function handleCurrent(request, env) {
   }
 
   const latest = latestMeta(rows);
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: requested, rows: [] }, env);
+  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: requested, rows: [] }, env);
 
   const [rowsWithGains, storedLeagueRank, liveLeagueRank] = await Promise.all([
     addGainFields(env, rows, latest),
     fetchStoredLeagueRank(env, runKey, requested, latest.league_id).catch(() => null),
-    boolParam(url.searchParams.get("rank_lookup"), true) ? fetchLeagueRank(requested).catch(() => null) : Promise.resolve(null)
+    boolParam(url.searchParams.get("rank_lookup"), true) && !shouldNormalizeLeagueRunPoints(env, runKey)
+      ? fetchLeagueRank(requested).catch(() => null)
+      : Promise.resolve(null)
   ]);
   const ids = rowsWithGains.map(row => row.user_id);
   const usernameMap = await resolveRobloxUsernames(ids, env).catch(() => new Map());
   const avatarMap = await resolveRobloxAvatarHeadshots(ids, env).catch(() => new Map());
+
+  const publicRows = rowsWithGains
+    .map(row => publicMemberRow(row, usernameMap, avatarMap))
+    .map(row => redactPublicMemberPoints(env, row));
 
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
+    league_run_label: leagueRunLabel(env, latest.league_run_key),
+    baseline_run_key: leagueBaselineRunKey(env, latest.league_run_key) || null,
+    points_are_run_only: shouldNormalizeLeagueRunPoints(env, latest.league_run_key),
     league_name: latest.league_name,
     league_id: latest.league_id,
     league_level: latest.league_level,
@@ -560,7 +606,7 @@ async function handleCurrent(request, env) {
     league_rank: storedLeagueRank ?? liveLeagueRank,
     source: "ps99-league-api-worker",
     snapshot_retention: "permanent",
-    rows: rowsWithGains.map(row => publicMemberRow(row, usernameMap, avatarMap))
+    rows: publicRows
   }, env);
 }
 
@@ -575,7 +621,7 @@ async function handleTopLeagues(request, env) {
 
   let latest = latestMeta(rows);
 
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_name: listName, rows: [] }, env);
+  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: listName, rows: [] }, env);
 
   const rowsWithGains = await addGainFields(env, rows, { ...latest, league_run_key: runKey, league_name: listName });
   const publicRows = rowsWithGains.map(row => {
@@ -585,20 +631,217 @@ async function handleTopLeagues(request, env) {
     return out;
   });
 
-  publicRows.slice()
+  publicRows.filter(row => row.total_points > 0 || row.projected_points_1h > 0)
     .sort((a, b) => b.projected_points_1h - a.projected_points_1h || a.rank - b.rank)
     .forEach((row, index) => { row.projected_rank_1h = index + 1; });
+  publicRows.filter(row => row.total_points <= 0 && row.projected_points_1h <= 0)
+    .forEach(row => { row.projected_rank_1h = null; });
 
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     league_run_key: latest.league_run_key,
+    league_run_label: leagueRunLabel(env, latest.league_run_key),
+    baseline_run_key: leagueBaselineRunKey(env, latest.league_run_key) || null,
+    points_are_run_only: shouldNormalizeLeagueRunPoints(env, latest.league_run_key),
     league_name: listName,
     offset,
     source: "ps99-league-api-worker",
     projection: "Projected rank uses current league points plus best available one-hour-equivalent gain.",
-    rows: publicRows
+    rows: publicRows.filter(row => !isLeaguePubliclyHidden(env, row.league_name))
+  }, env);
+}
+
+async function handleSoloLeaderboard(request, env) {
+  const url = new URL(request.url);
+  const query = String(url.searchParams.get("q") || url.searchParams.get("search") || "").trim();
+  const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 500);
+  const runKey = requestedRunKey(url, env);
+  const api = await fetchLeaguePlayersApi();
+  const livePlayers = leaguePlayersFromResponse(api)
+    .map(normalizeSoloLeaguePlayer)
+    .filter(row => row.user_id && row.league_name && !isLeaguePubliclyHidden(env, row.league_name))
+    .sort((a, b) => b.points - a.points || a.user_id - b.user_id);
+
+  livePlayers.forEach((row, index) => { row.rank = index + 1; });
+  const rowsByUser = new Map(livePlayers.map(row => [String(row.user_id), row]));
+
+  if (query) {
+    const storedRows = await fetchStoredSoloSearchRows(env, runKey).catch(err => {
+      console.warn("expanded solo leaderboard search unavailable", err?.message || String(err));
+      return [];
+    });
+    for (const row of storedRows) {
+      const id = String(row.user_id || "");
+      if (!id || rowsByUser.has(id) || isLeaguePubliclyHidden(env, row.league_name)) continue;
+      rowsByUser.set(id, {
+        rank: null,
+        user_id: toNumber(row.user_id),
+        username: String(row.display_name || "").trim(),
+        display_name: String(row.display_name || "").trim(),
+        league_name: String(row.league_name || "").trim(),
+        league_id: stringOrNull(row.league_id),
+        league_icon: stringOrNull(row.league_icon),
+        points: toNumber(row.points) || 0,
+        total_points: toNumber(row.points) || 0,
+        fetched_at: row.fetched_at || row.updated_at || null,
+        source: "stored-tracked-league"
+      });
+    }
+    const directUserId = await resolveRobloxUserIdForSearch(query).catch(() => null);
+    if (directUserId && !rowsByUser.has(String(directUserId))) {
+      const directApi = await fetchLeaguePlayerApi(directUserId).catch(() => null);
+      const directRow = directApi ? normalizeSoloLeaguePlayer(leaguePlayerFromResponse(directApi)) : null;
+      if (directRow?.user_id && directRow.league_name && !isLeaguePubliclyHidden(env, directRow.league_name)) {
+        rowsByUser.set(String(directRow.user_id), { ...directRow, rank: null, source: "big-games-direct-player" });
+      }
+    }
+  }
+
+  const allRows = [...rowsByUser.values()];
+  const usernameMap = await resolveRobloxUsernames(allRows.map(row => row.user_id), env).catch(() => new Map());
+  const normalizedRows = allRows.map(row => {
+    const resolved = String(usernameMap.get(toNumber(row.user_id)) || "").trim();
+    const existing = String(row.username || row.display_name || "").trim();
+    const username = resolved && !isFallbackUsername(resolved, row.user_id)
+      ? resolved
+      : (existing && !isFallbackUsername(existing, row.user_id) ? existing : `user_${row.user_id}`);
+    return redactPublicMemberPoints(env, { ...row, username, display_name: username });
+  });
+
+  const needle = query.toLowerCase();
+  const visibleRows = (query
+    ? normalizedRows.filter(row => [row.username, row.display_name, row.user_id, row.league_name, row.league_id]
+      .some(value => String(value || "").toLowerCase().includes(needle)))
+    : normalizedRows.slice(0, limit))
+    .sort((a, b) => {
+      const aRank = toNumber(a.rank), bRank = toNumber(b.rank);
+      if (aRank !== null && bRank !== null) return aRank - bRank;
+      if (aRank !== null) return -1;
+      if (bRank !== null) return 1;
+      return (toNumber(b.points) || 0) - (toNumber(a.points) || 0) || String(a.username || "").localeCompare(String(b.username || ""));
+    });
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    source: "big-games-public-league-players",
+    query: query || null,
+    top_limit: limit,
+    top_available: livePlayers.length,
+    search_scope: query ? "top-500-plus-direct-player-plus-stored-league-rosters" : "top-500",
+    rows: visibleRows
+  }, env);
+}
+
+async function handleLeaguePlayerLocation(request, env) {
+  const url = new URL(request.url);
+  const userId = toNumber(url.searchParams.get("user_id"));
+  if (!userId) throw httpError(400, "A Roblox user_id is required.");
+  const runKey = requestedRunKey(url, env);
+  let rows = [];
+  try {
+    rows = await supabaseSelect(env, CURRENT_TABLE, {
+      select: "fetched_at,updated_at,league_run_key,league_name,league_id,league_icon,user_id,display_name,points",
+      league_run_key: `eq.${runKey}`,
+      user_id: `eq.${userId}`,
+      order: "updated_at.desc",
+      limit: "25"
+    });
+  } catch (err) {
+    console.warn("stored league player location unavailable", err?.message || String(err));
+  }
+  const stored = rows.find(row => !isAggregateLeagueListName(row.league_name) && !isLeaguePubliclyHidden(env, row.league_name));
+  if (stored) {
+    return cacheJson({ ok: true, found: true, user_id: userId, league_run_key: runKey, league_name: stored.league_name, league_id: stored.league_id || null, source: "stored-current-roster" }, env);
+  }
+
+  const directApi = await fetchLeaguePlayerApi(userId).catch(() => null);
+  const live = directApi ? normalizeSoloLeaguePlayer(leaguePlayerFromResponse(directApi)) : null;
+  return cacheJson(live?.user_id && live.league_name && !isLeaguePubliclyHidden(env, live.league_name)
+    ? { ok: true, found: true, user_id: userId, league_run_key: runKey, league_name: live.league_name, league_id: live.league_id || null, source: "big-games-direct-player" }
+    : { ok: true, found: false, user_id: userId, league_run_key: runKey, league_name: null, source: "not-in-stored-rosters-or-current-league-player-api" }, env);
+}
+
+async function fetchStoredSoloSearchRows(env, runKey) {
+  requireSupabase(env);
+  const rows = [];
+  const excluded = [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME, COLD_DISCOVERED_LEAGUES_NAME].map(postgrestFilterText).join(",");
+  for (let offset = 0; offset < 10000; offset += 1000) {
+    const page = await supabaseSelect(env, CURRENT_TABLE, {
+      select: "fetched_at,updated_at,league_run_key,league_name,league_id,league_icon,user_id,display_name,points",
+      league_run_key: `eq.${runKey}`,
+      league_name: `not.in.(${excluded})`,
+      order: "points.desc",
+      limit: "1000",
+      offset: String(offset)
+    });
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  const byUser = new Map();
+  for (const row of rows) {
+    const id = String(row.user_id || "");
+    const existing = byUser.get(id);
+    if (!existing || new Date(row.updated_at || row.fetched_at || 0) > new Date(existing.updated_at || existing.fetched_at || 0)) byUser.set(id, row);
+  }
+  return [...byUser.values()];
+}
+
+async function handleLeagueMilestones(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const runKey = requestedTopLeaguesRunKey(url, env);
+  const requestedRanks = String(url.searchParams.get("ranks") || "")
+    .split(",")
+    .map(toNumber)
+    .filter(rank => Number.isInteger(rank) && rank > 0 && rank <= MAX_TOP_LEAGUES_LIMIT);
+  const ranks = [...new Set(requestedRanks.length ? requestedRanks : DEFAULT_LEAGUE_MILESTONE_RANKS)].sort((a, b) => a - b);
+  const rankFilter = `in.(${ranks.join(",")})`;
+  const select = "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league";
+  const readList = listName => supabaseSelect(env, CURRENT_TABLE, {
+    select,
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${listName}`,
+    rank: rankFilter,
+    order: "rank.asc",
+    limit: String(ranks.length * 2)
+  });
+
+  const [allRows, topRows] = await Promise.all([
+    readList(ALL_TOP_LEAGUES_NAME),
+    ranks.some(rank => rank <= DEFAULT_TOP_LEAGUES_LIMIT) ? readList(TOP_LEAGUES_NAME) : Promise.resolve([])
+  ]);
+  const byRank = new Map();
+  for (const row of [...allRows, ...topRows]) {
+    const rank = toNumber(row.rank);
+    if (!rank) continue;
+    const existing = byRank.get(rank);
+    if (!existing || new Date(row.fetched_at || 0) > new Date(existing.fetched_at || 0)) byRank.set(rank, row);
+  }
+  const snapshotAt = [...allRows, ...topRows]
+    .map(row => row.fetched_at)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: snapshotAt,
+    league_run_key: runKey,
+    rows: ranks.map(rank => {
+      const row = byRank.get(rank);
+      const hidden = row && isLeaguePubliclyHidden(env, row.display_name);
+      return {
+        rank,
+        available: Boolean(row && !hidden),
+        points: row && !hidden ? (toNumber(row.points) || 0) : null
+      };
+    })
   }, env);
 }
 
@@ -621,6 +864,7 @@ async function handleC0ldDiscoveredLeagues(request, env) {
     console.warn("c0ld discovered top league enrichment failed", err?.message || String(err));
     return rowsWithGains.map(publicDiscoveredLeagueRow);
   });
+  const visibleRows = filterPublicOverlapRows(env, publicRows);
 
   return cacheJson({
     ok: true,
@@ -628,7 +872,7 @@ async function handleC0ldDiscoveredLeagues(request, env) {
     snapshot_at: latest?.fetched_at || null,
     league_run_key: runKey,
     league_name: COLD_DISCOVERED_LEAGUES_NAME,
-    rows: publicRows
+    rows: visibleRows
   }, env);
 }
 
@@ -712,7 +956,9 @@ async function handleC0ldLeagueOverlap(request, env) {
     });
   }
 
-  const batch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
+  const rawBatch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
+  const topListName = topContext.list_name || topLeagueListNameForLimit(topLimit, env);
+  const batch = await normalizeTopLeagueRowsForRun(env, runKey, topListName, rawBatch, { recomputeRanks: false });
   const persistRows = liveScan ? (topContext.persist_rows || (topContext.source === "live-window" ? batch : [])) : [];
   if (persistRows.length) {
     await persistTopLeagueWindowRows(env, runKey, persistRows, {
@@ -721,7 +967,7 @@ async function handleC0ldLeagueOverlap(request, env) {
       source: "live:overlap-window"
     }).catch(err => console.warn("persist live overlap top league rows failed", err?.message || String(err)));
   }
-  const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, row, clanMembers));
+  const scanned = await mapLimit(batch, concurrency, row => scanLeagueForClanMembers(env, runKey, row, clanMembers));
   const matchedRows = scanned
     .filter(row => row.matches.length)
     .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
@@ -734,6 +980,7 @@ async function handleC0ldLeagueOverlap(request, env) {
       return 0;
     })
     : 0;
+  const visibleMatchedRows = filterPublicOverlapRows(env, matchedRows);
 
   return cacheJson({
     ok: true,
@@ -753,10 +1000,10 @@ async function handleC0ldLeagueOverlap(request, env) {
       ? (batch.length && offset + batch.length < topLimit ? offset + batch.length : null)
       : (offset + batchLimit < Math.min(topContext.rows.length, topLimit) ? offset + batchLimit : null),
     scanned_count: batch.length,
-    matched_count: matchedRows.length,
+    matched_count: visibleMatchedRows.length,
     discovered_upserted: discoveredUpserted,
-    scan_errors: scanned.filter(row => row.error).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
-    rows: matchedRows
+    scan_errors: scanned.filter(row => row.error && !isLeaguePubliclyHidden(env, row.league_name)).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
+    rows: visibleMatchedRows
   }, env);
 }
 
@@ -765,6 +1012,9 @@ async function handleHistory(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
+  if (isLeaguePubliclyHidden(env, requested)) {
+    return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: url.searchParams.get("hours") || 24, rows: [], public_visibility: "hidden" }, env);
+  }
   const userId = url.searchParams.get("user_id");
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const hoursParam = url.searchParams.get("hours");
@@ -781,7 +1031,18 @@ async function handleHistory(request, env) {
   }
   if (userId) params.user_id = `eq.${userId}`;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
-  return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows }, env);
+  let visibleRows;
+  if (isAggregateLeagueListName(requested)) {
+    visibleRows = rows.filter(row => !isLeaguePubliclyHidden(env, row.display_name));
+  } else {
+    const ids = [...new Set(rows.map(row => toNumber(row.user_id)).filter(Boolean))];
+    const usernameMap = ids.length ? await resolveRobloxUsernames(ids, env).catch(() => new Map()) : new Map();
+    visibleRows = rows.map(row => {
+      const username = displayUsername(row, usernameMap);
+      return redactPublicMemberPoints(env, { ...row, username, display_name: username }, username);
+    });
+  }
+  return cacheJson({ ok: true, generated_at: new Date().toISOString(), league_run_key: runKey, league_name: requested, hours: hoursParam || 24, rows: visibleRows }, env);
 }
 
 async function handleProfile(request, env) {
@@ -804,9 +1065,13 @@ async function handleProfile(request, env) {
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
   const rows = await fetchLeagueProfileRows(env, params, limit);
-  const summaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(rows, env)
+  const usernameMap = await resolveRobloxUsernames([userId], env).catch(() => new Map());
+  const resolvedUsername = usernameMap.get(userId) || null;
+  const visibleRows = rows.filter(row => !isLeaguePubliclyHidden(env, row.league_name));
+  const rawSummaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(visibleRows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
+  const summaries = rawSummaries.map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
   const latest = summaries[0] || null;
 
   return cacheJson({
@@ -815,7 +1080,7 @@ async function handleProfile(request, env) {
     user_id: userId,
     username: latest?.display_name || null,
     profile_url: `https://www.roblox.com/users/${userId}/profile`,
-    rows_scanned: rows.length,
+    rows_scanned: visibleRows.length,
     rows: summaries
   }, env);
 }
@@ -1323,7 +1588,7 @@ async function fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit
   };
 }
 
-async function scanLeagueForClanMembers(env, topRow, clanMembers) {
+async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
   const publicRow = publicLeagueRow(topRow);
   let leaguePayload = normalizeRawLeague(topRow.raw_league);
   let rosterSource = hasLeagueRoster(leaguePayload) ? "stored-top-row" : "live-detail";
@@ -1339,7 +1604,9 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
     }
   }
 
-  const leagueMembers = normalizeLeagueRows(leaguePayload);
+  let leagueSummary = summarizeLeague(leaguePayload, publicRow.league_name);
+  let leagueMembers = normalizeLeagueRows(leaguePayload);
+  ({ summary: leagueSummary, memberRows: leagueMembers } = await normalizeTrackedLeagueForRun(env, runKey, leagueSummary, leagueMembers));
   const matches = leagueMembers
     .map(member => ({ member, clan: clanMembers.get(String(member.user_id)) }))
     .filter(item => item.clan)
@@ -1358,6 +1625,8 @@ async function scanLeagueForClanMembers(env, topRow, clanMembers) {
 
   return {
     ...publicRow,
+    total_points: leagueSummary.league_points,
+    points: leagueSummary.league_points,
     c0ld_member_count: matches.length,
     c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
     roster_source: rosterSource,
@@ -1398,6 +1667,67 @@ async function fetchLeagueListApi(page = 1, pageSize = 100, options = {}) {
   throw httpError(502, `Big Games leagues API failed: ${lastError?.message || "unknown error"}`);
 }
 
+async function fetchLeaguePlayersApi(options = {}) {
+  const primary = "https://ps99.biggamesapi.io/v1/leagues/players";
+  const urls = options.allowFallback === false ? [primary] : [primary, "https://biggamesapi.io/v1/leagues/players"];
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 300, cacheEverything: true } });
+      const data = await readJsonResponse(res, url);
+      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+      return data;
+    } catch (err) { lastError = err; }
+  }
+  throw httpError(502, `Big Games league players API failed: ${lastError?.message || "unknown error"}`);
+}
+
+async function fetchLeaguePlayerApi(userId, options = {}) {
+  const id = toNumber(userId);
+  if (!id) throw httpError(400, "A Roblox user_id is required.");
+  const primary = `https://ps99.biggamesapi.io/v1/leagues/players/${id}`;
+  const urls = options.allowFallback === false ? [primary] : [primary, `https://biggamesapi.io/v1/leagues/players/${id}`];
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 300, cacheEverything: true } });
+      const data = await readJsonResponse(res, url);
+      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+      return data;
+    } catch (err) { lastError = err; }
+  }
+  throw httpError(502, `Big Games league player API failed for ${id}: ${lastError?.message || "unknown error"}`);
+}
+
+function leaguePlayersFromResponse(api) {
+  const root = api?.data || api || {};
+  return firstArray(root.players, root.Players, root.rows, root.Rows);
+}
+
+function leaguePlayerFromResponse(api) {
+  const root = api?.data || api || {};
+  return root.player || root.Player || root;
+}
+
+function normalizeSoloLeaguePlayer(item, index = 0) {
+  const league = item?.League || item?.league || {};
+  const userId = getUserId(item);
+  const existingName = getDisplayName(item, userId);
+  return {
+    rank: index + 1,
+    user_id: userId,
+    username: existingName,
+    display_name: existingName,
+    league_name: String(firstDefined(league.Name, league.name, item?.LeagueName, item?.leagueName) || "").trim(),
+    league_id: stringOrNull(firstDefined(league.ID, league.Id, league.id, item?.LeagueID, item?.leagueId)),
+    league_icon: stringOrNull(firstDefined(league.Icon, league.icon)),
+    points: toNumber(firstDefined(item?.Points, item?.points, item?.TotalPoints, item?.totalPoints)) || 0,
+    total_points: toNumber(firstDefined(item?.Points, item?.points, item?.TotalPoints, item?.totalPoints)) || 0,
+    fetched_at: parseTimestamp(firstDefined(item?.Timestamp, item?.timestamp)) || new Date().toISOString(),
+    source: "live-top-500"
+  };
+}
+
 async function readJsonResponse(res, url) {
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
@@ -1423,38 +1753,38 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
   for (const label of labels) {
     if (id) {
       const byId = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         league_id: `eq.${id}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const rank = toNumber(byId[0]?.rank);
+      const rank = (toNumber(byId[0]?.points) || 0) > 0 ? visibleLeagueRank(byId[0]?.rank) : null;
       if (rank !== null) return rank;
     }
 
     if (name) {
       const byName = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         display_name: `eq.${name}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const exactRank = toNumber(byName[0]?.rank);
+      const exactRank = (toNumber(byName[0]?.points) || 0) > 0 ? visibleLeagueRank(byName[0]?.rank) : null;
       if (exactRank !== null) return exactRank;
 
       const byLooseName = await supabaseSelect(env, CURRENT_TABLE, {
-        select: "rank,fetched_at,display_name,league_id",
+        select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
         display_name: `ilike.${name}`,
         order: "fetched_at.desc",
         limit: "1"
       });
-      const looseRank = toNumber(byLooseName[0]?.rank);
+      const looseRank = (toNumber(byLooseName[0]?.points) || 0) > 0 ? visibleLeagueRank(byLooseName[0]?.rank) : null;
       if (looseRank !== null) return looseRank;
     }
   }
@@ -1793,21 +2123,68 @@ function normalizeLeagueRows(league) {
   return rows;
 }
 
+async function resolveRobloxUserIdForSearch(value) {
+  const query = String(value || "").trim();
+  if (!query) return null;
+  if (/^\d+$/.test(query)) return toNumber(query);
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(query)) return null;
+  const response = await fetch("https://users.roblox.com/v1/usernames/users", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" },
+    body: JSON.stringify({ usernames: [query], excludeBannedUsers: false })
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const exact = firstArray(data?.data).find(user => String(user?.requestedUsername || user?.name || "").toLowerCase() === query.toLowerCase());
+  return toNumber(exact?.id);
+}
+
 async function resolveRobloxUsernames(userIds, env) {
   const shouldLookup = String(env.ROBLOX_USERNAME_LOOKUPS || "true").toLowerCase() !== "false";
   const result = new Map();
   const ids = [...new Set(userIds.map(Number).filter(Boolean))];
   for (const id of ids) result.set(id, `user_${id}`);
   if (!shouldLookup || !ids.length) return result;
+  const cacheHours = clamp(Number(env.ROBLOX_USERNAME_CACHE_HOURS || 168), 1, 24 * 365);
+  const staleBefore = Date.now() - cacheHours * 3600000;
+  const freshCachedIds = new Set();
+  try {
+    for (const batch of chunk(ids, 250)) {
+      const cached = await supabaseSelect(env, USER_LOOKUP_CACHE_TABLE, { select: "user_id,username,updated_at", user_id: `in.(${batch.join(",")})`, limit: String(batch.length) });
+      for (const row of cached) {
+        const id = toNumber(row.user_id), username = String(row.username || "").trim();
+        if (!id || isFallbackUsername(username, id)) continue;
+        result.set(id, username);
+        if (new Date(row.updated_at || 0).getTime() >= staleBefore) freshCachedIds.add(id);
+      }
+    }
+  } catch {}
+
   const lookupBatch = async batch => {
-    try {
-      const res = await fetch("https://users.roblox.com/v1/users", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" }, body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }) });
-      if (!res.ok) return;
-      const data = await res.json();
-      for (const user of data.data || []) { const id = toNumber(user.id); if (id && user.name) result.set(id, String(user.name)); }
-    } catch {}
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const res = await fetch("https://users.roblox.com/v1/users", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "yamo-league-api-worker" }, body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }) });
+        if (!res.ok) {
+          if (attempt < 3 && (res.status === 429 || res.status >= 500)) { const retryAfter = Number(res.headers.get("retry-after") || 0); await sleep(Math.max(retryAfter * 1000, 250 * attempt)); continue; }
+          return;
+        }
+        const data = await res.json(), cacheRows = [];
+        for (const user of data.data || []) {
+          const id = toNumber(user.id);
+          if (!id || !user.name) continue;
+          const username = String(user.name);
+          result.set(id, username);
+          cacheRows.push({ user_id: id, username, display_name: user.displayName || null, updated_at: new Date().toISOString() });
+        }
+        if (cacheRows.length) await supabaseUpsert(env, USER_LOOKUP_CACHE_TABLE, cacheRows, "user_id").catch(() => {});
+        return;
+      } catch {
+        if (attempt < 3) await sleep(250 * attempt);
+      }
+    }
   };
-  await Promise.all(chunk(ids, ROBLOX_BATCH_SIZE).map(lookupBatch));
+  const needsLookup = ids.filter(id => !freshCachedIds.has(id));
+  for (const batch of chunk(needsLookup, ROBLOX_BATCH_SIZE)) await lookupBatch(batch);
   return result;
 }
 
@@ -1835,13 +2212,21 @@ async function resolveRobloxAvatarHeadshots(userIds, env) {
 function publicMemberRow(row, usernameMap, avatarMap) {
   const id = toNumber(row.user_id);
   const name = displayUsername(row, usernameMap);
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, user_id: id, username: name, display_name: name, avatar_url: avatarMap.get(id) || avatarMap.get(String(id)) || null, total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, last_contribution_at: row.last_contribution_at || null, permission_level: row.permission_level ?? null, role: row.role || "Member", join_time: row.join_time || null, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+}
+
+function visibleLeagueRank(value) {
+  const rank = toNumber(value);
+  return rank !== null && rank > 0 && rank <= MAX_TOP_LEAGUES_LIMIT ? rank : null;
 }
 
 function publicLeagueRow(row) {
   const raw = row.raw_league || {};
   const name = String(firstDefined(raw.Name, raw.name, raw.LeagueName, raw.leagueName, row.display_name) || "").trim();
-  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank: toNumber(row.rank), previous_rank_5m: row.previous_rank_5m, rank_move_5m: row.rank_move_5m, synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: toNumber(row.points) || 0, points: toNumber(row.points) || 0, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
+  const points = toNumber(row.points) || 0;
+  const rank = points > 0 ? visibleLeagueRank(row.rank) : null;
+  const previousRank = points > 0 ? visibleLeagueRank(row.previous_rank_5m) : null;
+  return { fetched_at: row.fetched_at, league_run_key: row.league_run_key, rank, previous_rank_5m: previousRank, rank_move_5m: rank && previousRank ? previousRank - rank : null, synthetic_id: toNumber(row.user_id), league_name: name, display_name: name, league_id: stringOrNull(firstDefined(raw.ID, raw.Id, raw.id, row.league_id)), league_icon: stringOrNull(firstDefined(raw.Icon, raw.icon, row.league_icon)), total_points: points, points, gain_5m: row.gain_5m, gain_1h: row.gain_1h, gain_6h: row.gain_6h, gain_12h: row.gain_12h, gain_24h: row.gain_24h };
 }
 
 function publicDiscoveredLeagueRow(row) {
@@ -2201,13 +2586,192 @@ async function supabaseFetch(env, table, options = {}) {
   return text ? JSON.parse(text) : [];
 }
 
+async function handleLeagueRunReset(env, requestedRunKey) {
+  requireSupabase(env);
+  const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  if (!runKey || runKey === baselineRunKey || runKey.toLowerCase() === "active") {
+    throw httpError(400, "Refusing to reset the baseline or legacy active league run.");
+  }
+
+  await supabaseDelete(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}` });
+  await supabaseDelete(env, SNAPSHOT_TABLE, { league_run_key: `eq.${runKey}` });
+  await supabaseDelete(env, INACTIVITY_ALERT_TABLE, { league_run_key: `eq.${runKey}` }).catch(err => {
+    console.warn("league inactivity reset skipped", err?.message || String(err));
+  });
+
+  return json({
+    ok: true,
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    baseline_run_key: baselineRunKey || null,
+    message: "League run rows cleared. The next ingest will store run-only points."
+  }, 200);
+}
+
+function leagueBaselineRunKey(env, runKey) {
+  const current = normalizeRunKey(runKey || leagueRunKey(env));
+  const configured = String(env.LEAGUE_BASELINE_RUN_KEY || env.LEAGUE_PREVIOUS_RUN_KEY || DEFAULT_LEAGUE_BASELINE_RUN_KEY).trim();
+  if (!configured) return "";
+  const baseline = normalizeRunKey(configured);
+  return baseline === current ? "" : baseline;
+}
+
+function shouldNormalizeLeagueRunPoints(env, runKey) {
+  const enabled = !FALSEY_ENV_VALUES.has(String(env.LEAGUE_NORMALIZE_POINTS_FROM_BASELINE || "true").trim().toLowerCase());
+  return enabled && Boolean(leagueBaselineRunKey(env, runKey));
+}
+
+function runOnlyPointState(currentValue, baselineValue, resetPreviouslyDetected = false) {
+  const current = Math.max(0, toNumber(currentValue) || 0);
+  const baseline = toNumber(baselineValue);
+  if (baseline === null || baseline < 0) return { points: current, resetDetected: Boolean(resetPreviouslyDetected) };
+  const resetDetected = Boolean(resetPreviouslyDetected) || current < baseline;
+  return { points: resetDetected ? current : Math.max(0, current - baseline), resetDetected };
+}
+
+function withRunOnlyPointFields(value, points, runKey, resetDetected) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value || {};
+  const out = { ...value };
+  for (const field of ["Points", "points", "TotalPoints", "totalPoints", "total_points", "Score", "score", "Value", "value"]) {
+    if (Object.prototype.hasOwnProperty.call(out, field)) out[field] = points;
+  }
+  out._run_points_normalized = true;
+  out._run_key = runKey;
+  out._run_baseline_reset_detected = Boolean(resetDetected);
+  return out;
+}
+
+function runPointMetadata(value, runKey) {
+  const raw = normalizeRawLeague(value);
+  return {
+    normalized: raw._run_points_normalized === true && String(raw._run_key || "") === String(runKey || ""),
+    resetDetected: raw._run_baseline_reset_detected === true
+  };
+}
+
+async function normalizeTrackedLeagueForRun(env, runKey, summary, memberRows) {
+  if (!shouldNormalizeLeagueRunPoints(env, runKey)) return { summary, memberRows };
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  const select = "fetched_at,league_run_key,league_name,league_points,user_id,points";
+  let baselineRows = await supabaseSelect(env, CURRENT_TABLE, {
+    select,
+    league_run_key: `eq.${baselineRunKey}`,
+    league_name: `eq.${summary.league_name}`,
+    order: "rank.asc",
+    limit: "500"
+  });
+  if (!baselineRows.length) {
+    baselineRows = await supabaseSelect(env, CURRENT_TABLE, {
+      select,
+      league_run_key: `eq.${baselineRunKey}`,
+      league_name: `ilike.${summary.league_name}`,
+      order: "rank.asc",
+      limit: "500"
+    });
+  }
+  if (!baselineRows.length) return { summary, memberRows };
+
+  const currentRunRows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "fetched_at,league_run_key,league_name,user_id,raw_contribution,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `ilike.${summary.league_name}`,
+    order: "rank.asc",
+    limit: "500"
+  }).catch(() => []);
+
+  const baselineByUser = new Map(baselineRows.map(row => [String(row.user_id), toNumber(row.points) || 0]));
+  const currentMetadataByUser = new Map(currentRunRows.map(row => [String(row.user_id), runPointMetadata(row.raw_contribution, runKey)]));
+  const baselineLeaguePoints = toNumber(latestMeta(baselineRows)?.league_points);
+  const priorLeagueMetadata = runPointMetadata(latestMeta(currentRunRows)?.raw_league || currentRunRows[0]?.raw_league, runKey);
+  const leagueState = runOnlyPointState(summary.league_points, baselineLeaguePoints, priorLeagueMetadata.resetDetected);
+  const normalizedSummary = {
+    ...summary,
+    league_points: leagueState.points,
+    raw_league: withRunOnlyPointFields(summary.raw_league, leagueState.points, runKey, leagueState.resetDetected)
+  };
+  const normalizedRows = memberRows.map(row => {
+    const priorMetadata = currentMetadataByUser.get(String(row.user_id));
+    const state = runOnlyPointState(row.points, baselineByUser.get(String(row.user_id)), priorMetadata?.resetDetected);
+    return {
+      ...row,
+      points: state.points,
+      raw_member: withRunOnlyPointFields(row.raw_member, state.points, runKey, state.resetDetected),
+      raw_contribution: withRunOnlyPointFields(row.raw_contribution, state.points, runKey, state.resetDetected)
+    };
+  });
+  normalizedRows.sort((a, b) => (b.points - a.points) || String(a.display_name || "").localeCompare(String(b.display_name || "")));
+  normalizedRows.forEach((row, index) => { row.rank = index + 1; });
+  return { summary: normalizedSummary, memberRows: normalizedRows };
+}
+
+async function normalizeTopLeagueRowsForRun(env, runKey, listName, rows, options = {}) {
+  if (!rows?.length || !shouldNormalizeLeagueRunPoints(env, runKey)) return rows || [];
+  if (rows.every(row => runPointMetadata(row.raw_league, runKey).normalized)) return rows;
+  const baselineRunKey = leagueBaselineRunKey(env, runKey);
+  const names = rows.map(row => row.league_name).filter(Boolean);
+  const fetchComparableRows = targetRunKey => rows.length > 250
+    ? fetchStoredTopLeagueRows(env, targetRunKey, listName, Math.min(MAX_TOP_LEAGUES_LIMIT, Math.max(rows.length, 1000)))
+    : fetchStoredTopLeagueRowsByNames(env, targetRunKey, listName, names, Math.max(rows.length * 2, 100));
+  const [baselineRows, currentRunRows] = await Promise.all([
+    fetchComparableRows(baselineRunKey),
+    fetchComparableRows(runKey).catch(() => [])
+  ]);
+  const baselineByIdentity = new Map();
+  for (const row of baselineRows) {
+    for (const identity of [row.league_id, row.user_id, row.display_name]) {
+      const normalized = key(identity);
+      if (normalized) baselineByIdentity.set(normalized, toNumber(row.points) || 0);
+    }
+  }
+  const currentMetadataByIdentity = new Map();
+  for (const row of currentRunRows) {
+    const metadata = runPointMetadata(row.raw_league, runKey);
+    for (const identity of [row.league_id, row.user_id, row.display_name]) {
+      const normalized = key(identity);
+      if (normalized) currentMetadataByIdentity.set(normalized, metadata);
+    }
+  }
+
+  const normalizedRows = rows.map(row => {
+    const identities = [row.league_id, row.user_id, row.league_name].map(key).filter(Boolean);
+    const baseline = identities.map(identity => baselineByIdentity.get(identity)).find(value => value !== undefined);
+    const priorMetadata = identities.map(identity => currentMetadataByIdentity.get(identity)).find(Boolean);
+    const state = runOnlyPointState(row.points, baseline, priorMetadata?.resetDetected);
+    return { ...row, points: state.points, raw_league: withRunOnlyPointFields(row.raw_league, state.points, runKey, state.resetDetected) };
+  });
+
+  if (options.recomputeRanks !== false) {
+    normalizedRows.sort((a, b) => (b.points - a.points) || String(a.league_name || "").localeCompare(String(b.league_name || "")));
+    let rankedCount = 0;
+    let unrankedCount = 0;
+    for (const row of normalizedRows) {
+      if (row.points > 0) row.rank = ++rankedCount;
+      else row.rank = MAX_TOP_LEAGUES_LIMIT + (++unrankedCount);
+    }
+  }
+  return normalizedRows;
+}
+
 function stableLeagueUserId(value) { let h = 2166136261; const text = String(value || "unknown"); for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return 9000000000000 + h; }
 function requireSupabase(env) { if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw httpError(500, "SUPABASE_URL and SUPABASE_SERVICE_KEY are required"); }
 function requireAdmin(request, env) { const expected = String(env.INGEST_ADMIN_TOKEN || "").trim(); if (!expected) throw httpError(500, "INGEST_ADMIN_TOKEN is not configured"); const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim(); if (token !== expected) throw httpError(401, "Unauthorized"); }
+function leagueCollectionEnabled(env) { return String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase() === "true"; }
+function requireLeagueCollectionEnabled(env) { if (!leagueCollectionEnabled(env)) throw httpError(409, "League collection is disabled. Set LEAGUE_COLLECTION_ENABLED=true to activate it."); }
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
-function leagueNames(env) { const raw = String(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME); const names = raw.split(",").map(item => item.trim()).filter(Boolean); return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME]; }
+function csvLeagueNames(value) { return String(value || "").split(",").map(item => item.trim()).filter(Boolean); }
+function c0ldLeagueNames(env) { return [...new Set(csvLeagueNames(env.COLD_LEAGUE_NAMES))]; }
+function altLeagueNames(env) { return [...new Set(csvLeagueNames(env.ALT_LEAGUE_NAMES))]; }
+function leagueNames(env) {
+  const legacy = csvLeagueNames(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME);
+  const names = [...legacy, ...c0ldLeagueNames(env), ...altLeagueNames(env)];
+  return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME];
+}
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
-function leagueRunKey(env) { return normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function leagueRunKey(env) {
+  const configured = normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);
+  return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
+}
 function leagueProfilePeriodGapHours(env) { return clamp(Number(env.LEAGUE_PROFILE_PERIOD_GAP_HOURS || 36), 1, 24 * 30); }
 function leagueProfilePeriodKey(runKey, leagueNameValue, firstSnapshotAt) {
   const date = new Date(firstSnapshotAt || 0);
@@ -2278,9 +2842,13 @@ function leagueRunLabel(env, runKey) {
     if (updateNumber) return `Update ${updateNumber}`;
   }
 
-  return key && key !== DEFAULT_LEAGUE_RUN_KEY ? key : "";
+  if (key === DEFAULT_LEAGUE_RUN_KEY) return DEFAULT_LEAGUE_RUN_LABEL;
+  return key || "";
 }
-function topLeaguesRunKey(env) { return normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY); }
+function topLeaguesRunKey(env) {
+  const configured = normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);
+  return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
+}
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
 function scheduledTopLeaguesLimit(env) { return clamp(Number(env.SCHEDULED_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_SCHEDULE_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, DEFAULT_TOP_LEAGUES_LIMIT); }
 function allTopLeaguesLimit(env) { return clamp(Number(env.ALL_TOP_LEAGUES_LIMIT || env.TOP_LEAGUES_ALL_LIMIT || DEFAULT_ALL_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
@@ -2314,6 +2882,94 @@ function toNumber(value) { if (value === null || value === undefined || value ==
 function stringOrNull(value) { const text = String(value ?? "").trim(); return text || null; }
 function postgrestFilterText(value) { return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`; }
 function parseJsonObject(raw) { if (!raw) return {}; try { const parsed = JSON.parse(raw); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } }
+function visibilityValues(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === "") return [];
+  return String(value).split(",").map(item => item.trim()).filter(Boolean);
+}
+function visibilityTokenSet(value) { return new Set(visibilityValues(value).map(key).filter(Boolean)); }
+function publicVisibilityConfig(env) {
+  const raw = String(env.LEAGUE_POINTS_BLACKLIST_JSON || env.LEAGUE_PUBLIC_BLACKLIST_JSON || env.LEAGUE_VISIBILITY_BLACKLIST_JSON || DEFAULT_LEAGUE_POINTS_BLACKLIST_JSON).trim();
+  if (raw === publicVisibilityCacheRaw && publicVisibilityCacheValue) return publicVisibilityCacheValue;
+  const parsed = parseJsonObject(raw);
+  const leagues = visibilityTokenSet(parsed.leagues || parsed.hidden_leagues || parsed.hiddenLeagues);
+  const players = new Set();
+  const configuredPlayers = parsed.players || parsed.hidden_players || parsed.hiddenPlayers || {};
+  if (Array.isArray(configuredPlayers) || typeof configuredPlayers === "string") {
+    for (const identity of visibilityTokenSet(configuredPlayers)) players.add(identity);
+  } else if (configuredPlayers && typeof configuredPlayers === "object") {
+    // Legacy per-league maps are intentionally flattened. Player point
+    // redaction follows the player into every league.
+    for (const values of Object.values(configuredPlayers)) {
+      for (const identity of visibilityTokenSet(values)) players.add(identity);
+    }
+  }
+  publicVisibilityCacheRaw = raw;
+  publicVisibilityCacheValue = { leagues, players };
+  return publicVisibilityCacheValue;
+}
+function isLeaguePubliclyHidden(env, leagueNameValue) {
+  const leagueKey = key(leagueNameValue);
+  return Boolean(leagueKey && publicVisibilityConfig(env).leagues.has(leagueKey));
+}
+function isLeaguePlayerPointsRedacted(env, row, aliases = []) {
+  const config = publicVisibilityConfig(env);
+  if (!config.players.size) return false;
+  const extra = Array.isArray(aliases) ? aliases : [aliases];
+  const identities = [
+    row?.user_id, row?.userId, row?.UserID, row?.id,
+    row?.username, row?.display_name, row?.DisplayName, row?.name,
+    ...extra
+  ].map(key).filter(Boolean);
+  return identities.some(identity => config.players.has(identity));
+}
+function redactPublicMemberPoints(env, row, aliases = []) {
+  if (!isLeaguePlayerPointsRedacted(env, row, aliases)) return row;
+  const {
+    total_points, points, clan_points, league_points,
+    gain_5m, gain_1h, gain_6h, gain_12h, gain_24h,
+    ...visible
+  } = row;
+  return {
+    ...visible,
+    points_redacted: true
+  };
+}
+function redactLeagueProfileSummary(env, row, aliases = []) {
+  if (!isLeaguePlayerPointsRedacted(env, row, aliases)) return row;
+  const { final_points, highest_points, ...visible } = row;
+  return { ...visible, points_redacted: true };
+}
+function isAggregateLeagueListName(value) {
+  const normalized = key(value);
+  return [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME, COLD_DISCOVERED_LEAGUES_NAME].some(name => key(name) === normalized);
+}
+function filterPublicOverlapRows(env, rows) {
+  return (rows || []).map(row => {
+    if (isLeaguePubliclyHidden(env, row?.league_name || row?.display_name)) return null;
+    if (!Array.isArray(row?.matches)) return row;
+    const matches = row.matches.map(member => redactPublicMemberPoints(env, member));
+    if (!matches.length) return null;
+    return {
+      ...row,
+      matches,
+      c0ld_member_count: matches.length,
+      c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points ?? member.points) || 0), 0)
+    };
+  }).filter(Boolean);
+}
+function hiddenLeaguePayload(env, runKey, leagueNameValue) {
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: null,
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    league_name: leagueNameValue,
+    public_visibility: "hidden",
+    rows: []
+  };
+}
 function c0ldMemberOverrides(env) {
   const raw = String(env.COLD_MEMBER_OVERRIDES_JSON || env.COLD_LEAGUES_MEMBER_OVERRIDES_JSON || "").trim();
   if (!raw) return [];
@@ -2332,7 +2988,7 @@ function clamp(value, min, max) { const n = Number(value); if (!Number.isFinite(
 function key(v) { return String(v || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function lname(r) { return String(firstDefined(r.Name, r.name, r.LeagueName, r.leagueName, "") || "").trim(); }
 function lpoints(r) { const n = Number(firstDefined(r.Points, r.points, r.TotalPoints, r.totalPoints, r.Score, r.score, 0)); return Number.isFinite(n) ? n : 0; }
-function isFallbackUsername(username, userId) { const text = String(username || "").trim(); const id = String(userId || "").trim(); return !text || (id && text === id) || /^user_\d+$/i.test(text); }
+function isFallbackUsername(username, userId) { const text = String(username || "").trim(); const id = String(userId || "").trim(); return !text || (id && text === id) || /^user[ _-]?\d+$/i.test(text); }
 function bestUsernameForOverlap(userId, ...values) { const names = values.map(value => String(value || "").trim()).filter(Boolean); return names.find(name => !isFallbackUsername(name, userId)) || names[0] || `user_${userId}`; }
 function displayUsername(row, usernameMap) { const id = toNumber(row.user_id); const existing = String(row.display_name || "").trim(); const resolved = id ? String(usernameMap.get(id) || "").trim() : ""; if (resolved && !isFallbackUsername(resolved, id)) return resolved; if (existing && !isFallbackUsername(existing, id)) return existing; return existing || (id ? `user_${id}` : ""); }
 function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }

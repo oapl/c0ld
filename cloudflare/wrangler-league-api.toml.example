@@ -4,10 +4,15 @@ compatibility_date = "2026-06-20"
 
 [vars]
 LEAGUE_NAME = "YAMO"
-# Change this when a new league run starts. Existing database rows are "legacy".
-LEAGUE_RUN_KEY = "active"
-# Optional display label for this league run, such as "Tap Heroes".
-LEAGUE_RUN_LABEL = ""
+# Master safety switch. Leave false until Tap Heroes Part 2 collection should begin.
+LEAGUE_COLLECTION_ENABLED = "false"
+# A new run key starts a clean collection period without deleting older league history.
+LEAGUE_RUN_KEY = "tap-heroes-part-2"
+LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
+# The previous run is used only as a subtraction baseline. Its totals are never
+# counted or stored as Tap Heroes Part 2 points.
+LEAGUE_BASELINE_RUN_KEY = "active"
+LEAGUE_NORMALIZE_POINTS_FROM_BASELINE = "true"
 # Optional per-run labels. Keys are LEAGUE_RUN_KEY values.
 LEAGUE_RUN_LABELS_JSON = ""
 PS99_UPDATE_THEME = ""
@@ -15,8 +20,15 @@ PS99_UPDATE_LABEL = ""
 PS99_UPDATE_NUMBER = ""
 # Comma-separated league list used for scheduled pulls.
 LEAGUE_NAMES = "NDCT,YAMO,GOATs,SNCLS,VPPPP,brrbr,3v4,SMSW,nfz,GOLD,ECTA,JIME,C0LD,COLD,2w4g,zee1,PERC,ENRQE,letto,vexly,Bol1i,CLOW,puhhh,grndd,KARAX,4ff,RAZ0,tre5,Phuny,FYNE,yuurr,zee2"
+# Optional leagues forced into the main c0ld Leagues table even without a current c0ld-member match.
+COLD_LEAGUE_NAMES = ""
+# Optional manually tracked leagues shown in the separate Alt Leagues table.
+ALT_LEAGUE_NAMES = ""
 SITE_ORIGINS = "https://oapl.github.io,*"
 PUBLIC_CACHE_SECONDS = "5"
+# Public-response visibility only. Collection and storage always remain complete.
+# Whole leagues are hidden; listed players remain visible but all their point fields are blank globally.
+LEAGUE_POINTS_BLACKLIST_JSON = "{\"leagues\":[],\"players\":[\"Younes89755\",\"1856284829\"]}"
 INGEST_LEAGUES = "true"
 INGEST_TOP_LEAGUES = "true"
 LEAGUE_INGEST_CONCURRENCY = "4"

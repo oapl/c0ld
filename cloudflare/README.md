@@ -646,6 +646,50 @@ clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
 `yamo-league-api-worker.js` powers the league pages, the Top 1000 leaderboard,
 and the c0ld league overlap page.
 
+`LEAGUE_COLLECTION_ENABLED` is the master collection switch and defaults to
+`false`. While it is false, scheduled scans, manual ingest requests, and the
+page-triggered live overlap/window scans are all blocked. Set it to `true` only
+when the configured league run should begin. `INGEST_LEAGUES`,
+`INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
+sub-switches once the master switch is enabled.
+
+The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
+`LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
+and current rows without deleting previous league history.
+
+BIG Games can continue returning the previous run's cumulative point counters
+after a new league begins. Set `LEAGUE_BASELINE_RUN_KEY="active"` and keep
+`LEAGUE_NORMALIZE_POINTS_FROM_BASELINE=true`. The Worker then stores only the
+increase above the previous run's final values. If BIG Games resets a counter
+to a lower value, that lower value is treated as the new run's real total.
+The baseline is used only during calculation; previous points are removed from
+the stored member, league, and raw point fields for the new run.
+
+`LEAGUE_POINTS_BLACKLIST_JSON` is a display-only blacklist. The Worker still
+collects and stores every configured league and member. A listed player remains
+visible in rosters, history, profiles, and overlap results, but all of their
+point totals and gain fields are omitted from public responses (and render as
+blank) in every league. A hidden whole league returns a successful empty
+current response so its page loads
+without data, and it is omitted from public league lists. For example, this
+redacts Younes's points globally while retaining all source data:
+
+```json
+{"leagues":[],"players":["Younes89755","1856284829"]}
+```
+
+Put a league name in `leagues` to hide its entire public dataset. Player IDs are
+recommended alongside usernames so a Roblox rename cannot bypass the global
+point redaction. The older `LEAGUE_PUBLIC_BLACKLIST_JSON` variable name remains
+accepted as a compatibility alias; legacy per-league player maps are flattened
+to global player redactions.
+
+If the new run was ingested before baseline normalization was deployed, pause
+collection, run `supabase/reset_tap_heroes_part_2_league.sql`, deploy the
+updated Worker, and re-enable collection. The same cleanup is also available
+through `POST /api/leagues/run/reset?run=tap-heroes-part-2` with the ingest
+administrator token. Neither cleanup path modifies the baseline or older runs.
+
 Run `supabase/migrations/026_league_player_history_index.sql` in the Supabase SQL
 Editor so cross-run player history lookups do not time out as the snapshot
 archive grows.
@@ -656,6 +700,9 @@ Useful endpoints:
 |---|---|
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
+| `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
+| `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
+| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 
@@ -693,9 +740,8 @@ project, not the old NONG Leaderboard project. Create the league tables in c0ld
 with `supabase/c0ld_league_tables_setup.sql`, then update the Worker's
 `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` to the c0ld project values.
 
-To move existing league history out of the old NONG Supabase project, pause the
-league Worker cron or set `INGEST_LEAGUES=false` and `INGEST_TOP_LEAGUES=false`,
-then run:
+To move existing league history out of the old NONG Supabase project, set
+`LEAGUE_COLLECTION_ENABLED=false`, then run:
 
 ```powershell
 .\scripts\migrate-league-data-to-c0ld.ps1 `
@@ -730,11 +776,33 @@ This value is a normal Worker variable; `SUPABASE_SERVICE_KEY` remains a secret.
 The Worker supports the official Big Games OAuth Player API. Configure
 `BIG_GAMES_CLIENT_ID`, `BIG_GAMES_REDIRECT_URI`, and the
 `BIG_GAMES_CLIENT_SECRET` secret, then apply
-`supabase/migrations/027_inventory_oauth.sql`. Start authorization with an
-admin-authenticated `POST /api/inventory/oauth/start`, open the returned
-`authorize_url`, and approve Inventory access. The callback securely exchanges
-the one-time code and stores only an encrypted access token. Check the result
-with `GET /api/inventory/oauth/status`.
+`supabase/migrations/027_inventory_oauth.sql` and
+`supabase/migrations/029_inventory_multi_account_oauth.sql`. Start open
+self-authorization with `POST /api/inventory/oauth/start?self=1`, open the
+returned `authorize_url`, and approve Inventory access. The callback derives
+the Roblox identity from the approved token/inventory response and stores a
+separate encrypted grant only for that approving user. Targeted invitations
+using `user_id=` remain available for configured users and verified league
+members. Check one account with
+`GET /api/inventory/oauth/status?user_id=463900811`.
+`GET /api/inventory/oauth/summary` returns only the number of active and expired
+saved approvals for the public opt-in counter; it does not expose account IDs.
+
+With `INVENTORY_LEAGUE_FEATURE=true` and
+`INVENTORY_AUTO_DISCOVER_MEMBERS=true`, every current member returned by
+`LEAGUE_API_BASE` may start consent from a league page without first being
+copied into `INVENTORY_USERS_JSON`. Scheduled scans include all active saved
+grants; `INVENTORY_USERS_JSON` remains the seed list for permanent/test users.
+`INVENTORY_SYNC_COHORT=true` launches due opted-in accounts from the same
+scheduled event and limits the public league comparison to schedule-to-schedule
+hourly windows. Approval-time and manual test snapshots remain stored, but are
+excluded from the fair hourly comparison.
+
+The callback performs one immediate `refresh=true` inventory read and stores
+the first snapshot before returning to the initiating page. This deliberately
+bypasses the normal hourly timer and consumes one BIG Games refresh-quota slot.
+`league-inv-test.html` is the AgentP_0928 totals-only consent and verification
+page.
 
 After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
 `POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big

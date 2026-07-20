@@ -121,7 +121,7 @@ th{color:var(--muted);font-size:13px;font-weight:500;text-align:left;cursor:poin
 
 <script>
 const API="https://yamo-league-api-worker.opal-dde.workers.dev";
-const RUN_KEY="active";
+const RUN_KEY="tap-heroes-part-2";
 const TARGET_LEAGUES=["YAMO1","YAMO2","YAMO3","YAMO4","YAMO5","YAMO6","YAMO7","YAMO8","YAMO9","1YAMO","2YAMO","3YAMO"];
 let rows=[],sortKey="rank",sortAsc=true,loading=false,lastSnapshot=null,lastSource="";
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}

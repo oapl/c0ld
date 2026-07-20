@@ -8,6 +8,7 @@ const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
+const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
@@ -36,12 +37,13 @@ export default {
           big_games_oauth_expires_at: oauth.expires_at
         });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/oauth/start") {
-        requireAdmin(request, env);
-        response = await handleOAuthStart(env);
+        response = await handleOAuthStart(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/callback") {
         response = await handleOAuthCallback(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/status") {
-        response = json({ ok: true, ...(await oauthStatus(env)) });
+        response = await handleOAuthStatus(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/summary") {
+        response = await handleOAuthSummary(env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -67,18 +69,39 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const now = new Date();
-      for (const user of configuredUsers(env)) {
-        if (!await inventoryScanIsDue(env, user, now)) continue;
+      const users = await trackedInventoryUsers(env);
+      const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
+      const results = await Promise.allSettled(users.map(async user => {
+        if (!await inventoryScanIsDue(env, user, now, { synchronized: true })) return { skipped: true, user };
         const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
-        if (!result.skipped && shouldPostHourly(now, env)) await postHourlyDiffIfNeeded(env, user);
-      }
+        if (!result.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) await postHourlyDiffIfNeeded(env, user);
+        return result;
+      }));
+      for (const result of results) if (result.status === "rejected") console.warn("Scheduled inventory scan failed", result.reason?.message || result.reason);
     })());
   }
 };
 
-async function handleOAuthStart(env) {
+async function handleOAuthStart(request, env) {
   requireSupabase(env);
   requireBigGamesOAuth(env);
+
+  const url = new URL(request.url);
+  const selfAuthorization = envBool(url.searchParams.get("self"), false);
+  const requestedUserId = selfAuthorization ? "" : String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || "").trim();
+  const configuredUser = requestedUserId ? configuredUsers(env).find(user => String(user.user_id) === requestedUserId) : null;
+  const leagueMember = requestedUserId && !configuredUser && envBool(env.INVENTORY_LEAGUE_FEATURE, true) && envBool(env.INVENTORY_AUTO_DISCOVER_MEMBERS, true)
+    ? await isCurrentLeagueMember(env, requestedUserId, url.searchParams.get("league"), url.searchParams.get("run"))
+    : null;
+  if (!selfAuthorization && !requestedUserId) throw httpError(400, "A Roblox user_id is required.");
+  if (!selfAuthorization && !configuredUser && !leagueMember && !hasAdminAuthorization(request, env)) {
+    throw httpError(403, "This Roblox account is not a current member of the selected tracked league.");
+  }
+  const targetUser = {
+    user_id: requestedUserId || null,
+    username: String(url.searchParams.get("username") || configuredUser?.username || leagueMember?.username || requestedUserId || "").trim() || null
+  };
+  const returnUrl = validatedOAuthReturnUrl(url.searchParams.get("return_url"), env);
 
   const state = randomBase64Url(32);
   const verifier = randomBase64Url(64);
@@ -91,7 +114,11 @@ async function handleOAuthStart(env) {
     code_verifier_ciphertext: await sealSecret(verifier, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier"),
     expires_at: expiresAt,
     created_at: now.toISOString(),
-    used_at: null
+    used_at: null,
+    target_roblox_user_id: targetUser.user_id ? Number(targetUser.user_id) : null,
+    target_roblox_username: targetUser.username,
+    return_url: returnUrl || null,
+    force_ingest: true
   }], "state_hash");
 
   const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
@@ -104,6 +131,9 @@ async function handleOAuthStart(env) {
 
   return json({
     ok: true,
+    user_id: targetUser.user_id,
+    username: targetUser.username,
+    self_authorization: selfAuthorization,
     authorize_url: authorizeUrl.toString(),
     expires_at: expiresAt,
     message: "Open authorize_url and approve access within 10 minutes."
@@ -114,16 +144,13 @@ async function handleOAuthCallback(request, env) {
   requireSupabase(env);
   requireBigGamesOAuth(env);
   const url = new URL(request.url);
-  const oauthError = url.searchParams.get("error");
-  if (oauthError) return oauthHtml(false, `Big Games authorization was denied: ${oauthError}`);
-
   const code = String(url.searchParams.get("code") || "");
   const state = String(url.searchParams.get("state") || "");
-  if (!code || !state) return oauthHtml(false, "The callback did not include both code and state.");
+  if (!state) return oauthHtml(false, "The callback did not include an authorization state.");
 
   const stateHash = await sha256Base64Url(state);
   const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
-    select: "state_hash,code_verifier_ciphertext,expires_at,used_at",
+    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest",
     state_hash: `eq.${stateHash}`,
     limit: "1"
   });
@@ -131,6 +158,12 @@ async function handleOAuthCallback(request, env) {
   if (!pending || pending.used_at || new Date(pending.expires_at).getTime() <= Date.now()) {
     return oauthHtml(false, "This authorization link is invalid, expired, or was already used. Start again.");
   }
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Big Games authorization was denied: ${oauthError}`);
+  }
+  if (!code) return oauthCompletion(pending, false, "The callback did not include an authorization code.");
 
   const verifier = await openSecret(pending.code_verifier_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier");
   const body = new URLSearchParams({
@@ -151,46 +184,152 @@ async function handleOAuthCallback(request, env) {
   });
   const tokenText = await tokenResponse.text();
   let token;
-  try { token = JSON.parse(tokenText); } catch { return oauthHtml(false, `Big Games returned a non-JSON token response (${tokenResponse.status}).`); }
+  try { token = JSON.parse(tokenText); } catch {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Big Games returned a non-JSON token response (${tokenResponse.status}).`);
+  }
   if (!tokenResponse.ok || !token.access_token) {
     const message = token?.error_description || token?.error?.message || token?.error || `HTTP ${tokenResponse.status}`;
-    return oauthHtml(false, `Token exchange failed: ${message}`);
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `Token exchange failed: ${message}`);
   }
 
   const scopes = String(token.scope || BIG_GAMES_INVENTORY_SCOPE).split(/\s+/).filter(Boolean);
-  if (!scopes.includes(BIG_GAMES_INVENTORY_SCOPE)) return oauthHtml(false, "The approved token does not include Inventory access.");
+  if (!scopes.includes(BIG_GAMES_INVENTORY_SCOPE)) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "The approved token does not include Inventory access.");
+  }
+
   const authorizedAt = new Date();
   const expiresIn = Math.max(60, Number(token.expires_in || 2592000));
   const expiresAt = new Date(authorizedAt.getTime() + expiresIn * 1000).toISOString();
-  await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
-    grant_key: BIG_GAMES_GRANT_KEY,
-    roblox_user_id: Number(configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID),
-    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
-    token_type: token.token_type || "Bearer",
-    scope: scopes.join(" "),
-    authorized_at: authorizedAt.toISOString(),
-    expires_at: expiresAt,
-    last_used_at: null,
-    metadata: { expires_in: expiresIn },
-    updated_at: authorizedAt.toISOString()
-  }], "grant_key");
-  await supabaseUpdate(env, OAUTH_STATES_TABLE, { state_hash: `eq.${stateHash}` }, { used_at: authorizedAt.toISOString() });
+  const tokenAccount = authorizedInventoryAccount(null, token);
+  const invitedUserId = String(pending.target_roblox_user_id || "").trim();
+  let targetUserId = invitedUserId || tokenAccount.user_id;
+  if (invitedUserId && tokenAccount.user_id && tokenAccount.user_id !== invitedUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`);
+  }
 
-  return oauthHtml(true, `Inventory access is connected through ${formatDateTime(expiresAt)}. You can close this tab.`);
+  // Persist a valid grant before the initial inventory read. BIG Games records the
+  // app as connected as soon as consent succeeds, and a transient read failure must
+  // not discard that consent or make every later manual retry fall back to public data.
+  if (targetUserId) {
+    await saveOAuthGrant(env, {
+      userId: targetUserId,
+      username: tokenAccount.username || pending.target_roblox_username || null,
+      token,
+      scopes,
+      authorizedAt,
+      expiresAt,
+      expiresIn,
+      identityVerified: tokenAccount.user_id === targetUserId
+    });
+  }
+
+  let rawInventory;
+  let forcedRefresh = pending.force_ingest !== false;
+  try {
+    rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: forcedRefresh });
+  } catch (forcedError) {
+    if (!forcedRefresh) {
+      await markOAuthStateUsed(env, stateHash);
+      return targetUserId
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" })
+        : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${forcedError?.message || forcedError}`);
+    }
+    try {
+      rawInventory = await fetchInventoryWithAccessToken(env, token.access_token, { forceRefresh: false });
+      forcedRefresh = false;
+    } catch (fallbackError) {
+      await markOAuthStateUsed(env, stateHash);
+      return targetUserId
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" })
+        : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${fallbackError?.message || fallbackError}`);
+    }
+  }
+  const account = authorizedInventoryAccount(rawInventory, token);
+  if (!targetUserId) targetUserId = account.user_id;
+  if (!targetUserId) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "Authorization succeeded, but BIG Games did not identify the approving Roblox account.");
+  }
+  if (account.user_id && account.user_id !== targetUserId) {
+    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${oauthGrantKey(targetUserId)}` });
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, invitedUserId
+      ? `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`
+      : "The approving Roblox identity did not match the inventory account returned by BIG Games.");
+  }
+  await saveOAuthGrant(env, {
+    userId: targetUserId,
+    username: account.username || tokenAccount.username || pending.target_roblox_username || null,
+    token,
+    scopes,
+    authorizedAt,
+    expiresAt,
+    expiresIn,
+    identityVerified: account.user_id === targetUserId
+  });
+  const user = {
+    user_id: targetUserId,
+    username: account.username || pending.target_roblox_username || targetUserId
+  };
+  let ingest;
+  try {
+    ingest = await ingestInventory(env, user, "oauth_callback", false, { force: true, rawInventory });
+  } catch (error) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Use Pull Now to retry: ${error?.message || error}`, { user_id: targetUserId, connected: "1" });
+  }
+  await markOAuthStateUsed(env, stateHash);
+
+  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled.`, {
+    user_id: targetUserId,
+    pulled: "1",
+    forced: forcedRefresh ? "1" : "0",
+    snapshot_at: ingest.snapshot?.captured_at || ""
+  });
 }
 
-async function oauthStatus(env) {
+async function handleOAuthStatus(request, env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID).trim();
+  return json({ ok: true, user_id: userId, ...(await oauthStatus(env, userId)) });
+}
+
+async function handleOAuthSummary(env) {
+  requireSupabase(env);
+  const rows = await supabaseSelectAll(env, OAUTH_GRANTS_TABLE, {
+    select: "roblox_user_id,expires_at",
+    roblox_user_id: "not.is.null",
+    order: "authorized_at.desc"
+  }, 10000);
+  const now = Date.now();
+  const active = new Set();
+  const expired = new Set();
+  for (const row of rows) {
+    const userId = String(row.roblox_user_id || "").trim();
+    if (!userId) continue;
+    if (new Date(row.expires_at).getTime() > now) active.add(userId);
+    else expired.add(userId);
+  }
+  for (const userId of active) expired.delete(userId);
+  return json({
+    ok: true,
+    opted_in_players: active.size,
+    expired_approvals: expired.size,
+    counted_at: new Date(now).toISOString()
+  });
+}
+
+async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID) {
   const configured = bigGamesOAuthConfigured(env);
   if (!configured || !supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) {
     return { configured, connected: false, expires_at: null };
   }
   try {
-    const rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
-      select: "grant_key,scope,authorized_at,expires_at,last_used_at",
-      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
-      limit: "1"
-    });
-    const grant = rows[0];
+    const grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at");
     const connected = !!grant && new Date(grant.expires_at).getTime() > Date.now();
     return {
       configured,
@@ -206,25 +345,42 @@ async function oauthStatus(env) {
   }
 }
 
-async function getUsableOAuthGrant(env) {
+async function getUsableOAuthGrant(env, userId) {
   if (!bigGamesOAuthConfigured(env) || !supabaseUrl(env)) return null;
-  let rows;
+  let grant;
   try {
-    rows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
-      select: "grant_key,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at",
-      grant_key: `eq.${BIG_GAMES_GRANT_KEY}`,
-      limit: "1"
-    });
+    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at");
   } catch (error) {
     if (/does not exist|schema cache|PGRST205/i.test(error?.message || "")) return null;
     throw error;
   }
-  const grant = rows[0];
   if (!grant) return null;
   if (new Date(grant.expires_at).getTime() <= Date.now()) {
-    throw httpError(401, "Big Games authorization expired. Run /api/inventory/oauth/start again.");
+    throw httpError(401, `Big Games authorization expired for Roblox user ${userId}. Run the OAuth authorization flow again.`);
   }
   return grant;
+}
+
+async function findOAuthGrant(env, userId, select) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return null;
+  const keyed = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select,
+    grant_key: `eq.${oauthGrantKey(normalizedUserId)}`,
+    limit: "1"
+  });
+  if (keyed[0]) return keyed[0];
+  const legacy = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select,
+    roblox_user_id: `eq.${normalizedUserId}`,
+    order: "updated_at.desc",
+    limit: "1"
+  });
+  return legacy[0] || null;
+}
+
+function oauthGrantKey(userId) {
+  return `${BIG_GAMES_GRANT_KEY}:${String(userId || "").trim()}`;
 }
 
 function bigGamesOAuthConfigured(env) {
@@ -237,6 +393,108 @@ function requireBigGamesOAuth(env) {
 
 function bigGamesRedirectUri(env) {
   return String(env.BIG_GAMES_REDIRECT_URI || "").trim();
+}
+
+function hasAdminAuthorization(request, env) {
+  const expected = String(env.INGEST_ADMIN_TOKEN || "");
+  return !!expected && (request.headers.get("authorization") || "") === `Bearer ${expected}`;
+}
+
+function validatedOAuthReturnUrl(value, env) {
+  const candidate = String(value || env.INVENTORY_OAUTH_RETURN_URL || "").trim();
+  if (!candidate) return "";
+  let parsed;
+  try { parsed = new URL(candidate); } catch { throw httpError(400, "The OAuth return_url is invalid."); }
+  const allowedOrigins = String(env.ALLOWED_ORIGIN || "https://c0ld-clan.com")
+    .split(",")
+    .map(origin => origin.trim())
+    .filter(Boolean);
+  const local = ["localhost", "127.0.0.1"].includes(parsed.hostname);
+  if (!local && !allowedOrigins.includes("*") && !allowedOrigins.includes(parsed.origin)) {
+    throw httpError(400, "The OAuth return_url origin is not allowed.");
+  }
+  return parsed.toString();
+}
+
+async function markOAuthStateUsed(env, stateHash) {
+  await supabaseUpdate(env, OAUTH_STATES_TABLE, { state_hash: `eq.${stateHash}` }, { used_at: new Date().toISOString() });
+}
+
+function oauthCompletion(pending, success, message, params = {}) {
+  if (pending?.return_url) {
+    const target = new URL(pending.return_url);
+    target.searchParams.set("inventory_oauth", success ? "connected" : "error");
+    target.searchParams.set("inventory_message", message);
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null && value !== "") target.searchParams.set(key, String(value));
+    return Response.redirect(target.toString(), 303);
+  }
+  return oauthHtml(success, message);
+}
+
+async function saveOAuthGrant(env, { userId, username, token, scopes, authorizedAt, expiresAt, expiresIn, identityVerified }) {
+  await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
+    grant_key: oauthGrantKey(userId),
+    roblox_user_id: Number(userId),
+    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
+    token_type: token.token_type || "Bearer",
+    scope: scopes.join(" "),
+    authorized_at: authorizedAt.toISOString(),
+    expires_at: expiresAt,
+    last_used_at: null,
+    metadata: {
+      expires_in: expiresIn,
+      username: username || null,
+      identity_verified: !!identityVerified
+    },
+    updated_at: new Date().toISOString()
+  }], "grant_key");
+}
+
+function authorizedInventoryAccount(raw, token = null) {
+  const data = raw?.data || raw || {};
+  const tokenClaims = decodeJwtPayload(token?.access_token);
+  const candidates = [
+    data.account,
+    raw?.account,
+    data.user,
+    raw?.user,
+    data.player,
+    raw?.player,
+    data.robloxAccount,
+    raw?.robloxAccount,
+    data.roblox_account,
+    raw?.roblox_account,
+    token?.account,
+    token?.user,
+    token?.player,
+    token,
+    tokenClaims
+  ].filter(value => value && typeof value === "object");
+  for (const account of candidates) {
+    const roblox = account.roblox || account.robloxAccount || account.roblox_account || {};
+    const userId = account.robloxUserId || account.roblox_user_id || account.robloxId || account.roblox_id || roblox.userId || roblox.user_id || roblox.id || account.userId || account.user_id || account.sub || "";
+    const normalizedUserId = String(userId || "").trim();
+    if (!/^\d+$/.test(normalizedUserId)) continue;
+    return {
+      user_id: normalizedUserId,
+      username: String(account.robloxUsername || account.roblox_username || roblox.username || roblox.name || account.username || account.name || "").trim()
+    };
+  }
+  return {
+    user_id: "",
+    username: ""
+  };
+}
+
+function decodeJwtPayload(accessToken) {
+  try {
+    const segment = String(accessToken || "").split(".")[1];
+    if (!segment) return null;
+    const normalized = segment.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(segment.length / 4) * 4, "=");
+    return JSON.parse(atob(normalized));
+  } catch {
+    return null;
+  }
 }
 
 function oauthHtml(success, message) {
@@ -309,6 +567,7 @@ async function handleHourlySeries(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim();
   const hours = Math.max(1, Math.min(72, Number(url.searchParams.get("hours") || 24)));
+  const synchronizedOnly = parseBool(url.searchParams.get("synchronized")) === true;
   const snapshots = await getUserSnapshots(env, userId, Math.max(500, hours * 20));
   if (!snapshots.length) return json({ ok: false, message: "No inventory snapshots found." }, 404);
 
@@ -316,6 +575,7 @@ async function handleHourlySeries(request, env) {
   const latest = sorted[sorted.length - 1];
   const cutoff = new Date(new Date(latest.captured_at).getTime() - (hours + 1) * 3600000);
   const recent = sorted.filter(snapshot => new Date(snapshot.captured_at) >= cutoff);
+  const comparisonSnapshots = synchronizedOnly ? recent.filter(snapshot => snapshot.source === "schedule") : recent;
   const itemCache = new Map();
   const itemsFor = async snapshot => {
     if (!itemCache.has(snapshot.id)) itemCache.set(snapshot.id, getSnapshotItems(env, snapshot.id));
@@ -323,9 +583,9 @@ async function handleHourlySeries(request, env) {
   };
   const rows = [];
 
-  for (let i = 1; i < recent.length; i++) {
-    const start = recent[i - 1];
-    const end = recent[i];
+  for (let i = 1; i < comparisonSnapshots.length; i++) {
+    const start = comparisonSnapshots[i - 1];
+    const end = comparisonSnapshots[i];
     const [startItems, endItems] = await Promise.all([itemsFor(start), itemsFor(end)]);
     const diff = buildDiff(startItems, endItems);
     rows.push({
@@ -340,7 +600,7 @@ async function handleHourlySeries(request, env) {
     });
   }
 
-  return cacheJson({ ok: true, user_id: userId, hours, rows }, env);
+  return cacheJson({ ok: true, user_id: userId, hours, synchronized_only: synchronizedOnly, rows }, env);
 }
 
 async function ingestInventory(env, user, source, isBoundary, options = {}) {
@@ -350,7 +610,7 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const userId = String(user.user_id || DEFAULT_USER_ID).trim();
   const username = String(user.username || userId).trim();
 
-  const raw = await fetchInventory(env, username || userId, { forceRefresh: options.force === true });
+  const raw = options.rawInventory || await fetchInventory(env, { user_id: userId, username }, { forceRefresh: options.force === true });
   const rawItems = extractInventoryItems(raw);
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
@@ -584,8 +844,10 @@ function compactDiffRow(row) {
   return { item_key: row.item_key, item_class: row.item_class, item_category: row.item_category, item_id: row.item_id, display_name: row.display_name, variant: row.variant, before: row.before, after: row.after, delta: row.delta, rap: row.rap, icon: row.icon };
 }
 
-async function fetchInventory(env, usernameOrId, options = {}) {
-  const grant = await getUsableOAuthGrant(env);
+async function fetchInventory(env, user, options = {}) {
+  const userId = String(user?.user_id || DEFAULT_USER_ID).trim();
+  const usernameOrId = String(user?.username || userId).trim();
+  const grant = await getUsableOAuthGrant(env, userId);
   if (grant) return fetchAuthorizedInventory(env, grant, options);
   return fetchPublicInventory(usernameOrId);
 }
@@ -600,9 +862,25 @@ function pickPreviousSnapshots(snapshots) {
 }
 
 async function fetchAuthorizedInventory(env, grant, options = {}) {
+  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
+  let payload;
+  try {
+    payload = await fetchInventoryWithAccessToken(env, accessToken, options);
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    }
+    throw error;
+  }
+  try {
+    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
+  } catch {}
+  return payload;
+}
+
+async function fetchInventoryWithAccessToken(env, accessToken, options = {}) {
   const url = new URL(env.BIG_GAMES_INVENTORY_URL || BIG_GAMES_INVENTORY_URL);
   if (options.forceRefresh) url.searchParams.set("refresh", "true");
-  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
   const res = await fetch(url.toString(), {
     headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
     cf: { cacheTtl: 0 }
@@ -613,9 +891,6 @@ async function fetchAuthorizedInventory(env, grant, options = {}) {
   if (res.status === 401) throw httpError(401, "Big Games authorization expired or was revoked. Run the OAuth authorization flow again.");
   if (res.status === 403) throw httpError(403, "Big Games token does not include the Inventory permission. Re-authorize the app.");
   if (!res.ok || payload.status === "error") throw httpError(502, `Big Games Player API inventory fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
-  try {
-    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${BIG_GAMES_GRANT_KEY}` }, { last_used_at: new Date().toISOString() });
-  } catch {}
   return payload;
 }
 
@@ -799,16 +1074,64 @@ async function supabaseSelectAll(env, table, params, maxRows = 10000) { const ro
 async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("insert", text)); return text ? JSON.parse(text) : []; }
 async function supabaseUpsert(env, table, rows, conflict) { if (!rows.length) return []; const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); if (conflict) url.searchParams.set("on_conflict", conflict); const res = await fetch(url.toString(), { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("upsert", text)); return text ? JSON.parse(text) : []; }
 async function supabaseUpdate(env, table, filters, values) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(filters || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { method: "PATCH", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: "return=minimal" }, body: JSON.stringify(values) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("update", text)); return true; }
+async function supabaseDelete(env, table, filters) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(filters || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { method: "DELETE", headers: { ...supabaseHeaders(env), prefer: "return=minimal" } }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("delete", text)); return true; }
 function supabaseFailureMessage(operation, text) { const detail = String(text || "").trim(); if (/error\s*code:\s*1016/i.test(detail)) return `Supabase ${operation} failed because SUPABASE_URL does not resolve (Cloudflare 1016). Update the Worker variable to the current Supabase Data API project URL.`; return `Supabase ${operation} failed: ${detail}`; }
 function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY; return { apikey: key, authorization: `Bearer ${key}` }; }
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }
 function requireSupabase(env) { if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) throw httpError(500, "Missing Supabase environment variables."); }
 function requireAdmin(request, env) { const expected = env.INGEST_ADMIN_TOKEN; if (!expected) return; if ((request.headers.get("authorization") || "") !== `Bearer ${expected}`) throw httpError(401, "Unauthorized"); }
 function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
+async function trackedInventoryUsers(env) {
+  const users = new Map(configuredUsers(env).map(user => [String(user.user_id), user]));
+  if (!envBool(env.INVENTORY_LEAGUE_FEATURE, true) || !supabaseUrl(env)) return [...users.values()];
+  try {
+    const grants = await supabaseSelectAll(env, OAUTH_GRANTS_TABLE, {
+      select: "roblox_user_id,expires_at,metadata",
+      roblox_user_id: "not.is.null",
+      expires_at: `gt.${new Date().toISOString()}`,
+      order: "last_used_at.asc.nullsfirst"
+    }, 10000);
+    for (const grant of grants) {
+      const userId = String(grant.roblox_user_id || "").trim();
+      if (!userId) continue;
+      users.set(userId, {
+        user_id: userId,
+        username: String(grant.metadata?.username || users.get(userId)?.username || userId).trim()
+      });
+    }
+  } catch (error) {
+    console.warn("Connected inventory accounts could not be added to this scan", error?.message || error);
+  }
+  return [...users.values()];
+}
+async function isCurrentLeagueMember(env, userId, leagueName, runKey) {
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedLeague = String(leagueName || "").trim();
+  if (!normalizedUserId || !normalizedLeague) return null;
+  const endpoint = new URL(`${String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/+$/, "")}/api/leagues/current`);
+  endpoint.searchParams.set("league", normalizedLeague);
+  if (runKey) endpoint.searchParams.set("run", String(runKey));
+  endpoint.searchParams.set("rank_lookup", "false");
+  endpoint.searchParams.set("v", String(Date.now()));
+  try {
+    const response = await fetch(endpoint.toString(), { headers: { accept: "application/json" }, cf: { cacheTtl: 0 } });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const row = (payload.rows || []).find(member => String(member.user_id || "").trim() === normalizedUserId);
+    if (!row) return null;
+    return {
+      user_id: normalizedUserId,
+      username: String(row.username || row.display_name || normalizedUserId).trim(),
+      league: String(payload.league_name || normalizedLeague).trim()
+    };
+  } catch {
+    return null;
+  }
+}
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
-async function inventoryScanIsDue(env, user, now = new Date()) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; return now.getTime() - new Date(latest.captured_at).getTime() >= inventoryMinFetchIntervalMinutes(env) * 60000; }
+async function inventoryScanIsDue(env, user, now = new Date(), options = {}) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; const latestTime = new Date(latest.captured_at).getTime(); if (options.synchronized && envBool(env.INVENTORY_SYNC_COHORT, true)) { if (now.getTime() - latestTime < 5 * 60000) return false; const intervalMs = 60 * 60000; const currentCohort = Math.floor(now.getTime() / intervalMs); const latestCohort = Math.floor(latestTime / intervalMs); return latest.source !== "schedule" || latestCohort < currentCohort; } return now.getTime() - latestTime >= inventoryMinFetchIntervalMinutes(env) * 60000; }
 function localDateString(date, env) { return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone(env), year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
 function localHourMinute(date, env) { const parts = new Intl.DateTimeFormat("en-US", { timeZone: timeZone(env), hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date); return { hour: Number(parts.find(p => p.type === "hour")?.value || 0), minute: Number(parts.find(p => p.type === "minute")?.value || 0) }; }
 function isMountainMidnight(date, env) { const { hour, minute } = localHourMinute(date, env); return hour === 0 && minute <= 10; }
