@@ -10,8 +10,15 @@ const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
+const MESSAGE_FLAG_COMPONENTS_V2 = 1 << 15;
 const COMPONENT_TYPE_ACTION_ROW = 1;
 const COMPONENT_TYPE_BUTTON = 2;
+const COMPONENT_TYPE_SECTION = 9;
+const COMPONENT_TYPE_TEXT_DISPLAY = 10;
+const COMPONENT_TYPE_THUMBNAIL = 11;
+const COMPONENT_TYPE_MEDIA_GALLERY = 12;
+const COMPONENT_TYPE_SEPARATOR = 14;
+const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
@@ -317,13 +324,7 @@ async function completeLeagueInfoInteraction(interaction, env, leagueName, optio
   try {
     await editOriginalInteraction(interaction, await buildLeagueInfoMessage(leagueName, env, options));
   } catch (err) {
-    await editOriginalInteraction(interaction, {
-      content: `League lookup failed: ${err?.message || String(err)}`,
-      embeds: [],
-      components: [],
-      attachments: [],
-      allowed_mentions: { parse: [] }
-    }).catch(() => null);
+    await editOriginalInteraction(interaction, leagueInfoErrorMessage(err, env)).catch(() => null);
   }
 }
 
@@ -354,31 +355,48 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     : ["No member contributions found."];
 
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
-  const embed = {
-    title: `League ${displayLeagueName}`,
-    color: 0x58a6ff,
-    description: [
-      `Points: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
-      `Global Rank: ${rank(payload.league_rank)}`,
-      "",
-      "---------------------------------",
-      "",
-      "Contributions",
-      ...contributions
+  const snapshotAt = payload.snapshot_at || payload.fetched_at || payload.updated_at;
+  const leagueDetails = {
+    type: COMPONENT_TYPE_TEXT_DISPLAY,
+    content: [
+      `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
+      `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
+      `**Global Rank**: ${rank(payload.league_rank)}`,
+      `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`
     ].join("\n")
   };
-
   const thumbnailUrl = leagueIconUrl(payload.league_icon);
-  if (thumbnailUrl) {
-    embed.thumbnail = { url: thumbnailUrl };
-  }
+  const header = thumbnailUrl
+    ? {
+        type: COMPONENT_TYPE_SECTION,
+        components: [leagueDetails],
+        accessory: {
+          type: COMPONENT_TYPE_THUMBNAIL,
+          media: { url: thumbnailUrl },
+          description: `${displayLeagueName} league icon`
+        }
+      }
+    : leagueDetails;
+
+  const containerComponents = [
+    header,
+    { type: COMPONENT_TYPE_SEPARATOR },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `### Contributions\n${contributions.join("\n")}`
+    }
+  ];
 
   const message = {
-    content: "",
-    embeds: [embed],
-    components: leagueChartComponents(displayLeagueName, chartHours),
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0x58a6ff,
+        components: containerComponents
+      }
+    ],
     allowed_mentions: { parse: [] },
-    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
   };
 
   try {
@@ -386,14 +404,48 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours });
     if (chartBytes?.byteLength) {
       const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
-      embed.image = { url: `attachment://${filename}` };
+      containerComponents.push(
+        { type: COMPONENT_TYPE_SEPARATOR },
+        {
+          type: COMPONENT_TYPE_MEDIA_GALLERY,
+          items: [
+            {
+              media: { url: `attachment://${filename}` },
+              description: `${chartHours}-hour member growth chart for League ${displayLeagueName}`
+            }
+          ]
+        }
+      );
       message._file = { filename, contentType: "image/png", bytes: chartBytes };
     }
   } catch {
     // The command should still answer if the history chart cannot be rendered.
   }
 
+  containerComponents.push(...leagueChartComponents(displayLeagueName, chartHours));
+
   return message;
+}
+
+function leagueInfoErrorMessage(err, env) {
+  const message = truncateHistoryText(err?.message || String(err), 1500);
+  return {
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0xff6b6b,
+        components: [
+          {
+            type: COMPONENT_TYPE_TEXT_DISPLAY,
+            content: `## League lookup failed\n${escapeDiscordMarkdown(message)}`
+          }
+        ]
+      }
+    ],
+    attachments: [],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
+  };
 }
 
 function handleLeagueChartComponent(interaction, env, ctx) {
@@ -409,7 +461,60 @@ function handleLeagueChartComponent(interaction, env, ctx) {
   return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
 }
 
+const leagueRefreshesInFlight = new Map();
+
 async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
+  const initial = await readStoredLeaguePayload(leagueName, env);
+  const cached = initial.payload;
+  const needsRefresh = !cached || leaguePayloadAgeSeconds(cached) > leagueOnDemandMaxAgeSeconds(env);
+
+  if (!needsRefresh) {
+    return options.debug
+      ? { payload: cached, attempts: initial.attempts, refresh: null, cache_status: "fresh" }
+      : cached;
+  }
+
+  const refresh = await refreshLeagueOnDemand(leagueName, env).catch(err => ({
+    ok: false,
+    status: err?.status || 502,
+    message: err?.message || String(err)
+  }));
+
+  if (refresh.ok) {
+    const refreshed = await readStoredLeaguePayload(leagueName, env);
+    if (refreshed.payload) {
+      return options.debug
+        ? {
+            payload: refreshed.payload,
+            attempts: [...initial.attempts, ...refreshed.attempts],
+            refresh,
+            cache_status: cached ? "refreshed_stale" : "hydrated"
+          }
+        : refreshed.payload;
+    }
+    initial.attempts.push(...refreshed.attempts);
+  }
+
+  // A temporary upstream failure should not make previously stored league data unusable.
+  if (cached) {
+    return options.debug
+      ? { payload: cached, attempts: initial.attempts, refresh, cache_status: "stale_fallback" }
+      : cached;
+  }
+
+  const last = initial.attempts[initial.attempts.length - 1] || {};
+  const message = refresh.message
+    ? `Could not refresh League ${leagueName}: ${refresh.message}`
+    : last.message || `No stored league data found for ${leagueName}.`;
+  const err = httpError(refresh.status || last.status || 502, message);
+  err.attempts = initial.attempts.map(attempt => leagueAttemptSummary(attempt));
+  if (options.debug) {
+    return { payload: null, attempts: initial.attempts, refresh, cache_status: "miss", error: err };
+  }
+  throw err;
+}
+
+async function readStoredLeaguePayload(leagueName, env) {
   const attempts = [];
 
   for (const target of leagueApiTargets(env)) {
@@ -420,22 +525,66 @@ async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
 
     const result = await fetchLeagueCurrentAttempt(target, apiUrl);
     attempts.push(result);
-
     if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows) && result.payload.rows.length > 0) {
-      return options.debug ? { payload: result.payload, attempts } : result.payload;
+      return { payload: result.payload, attempts };
     }
   }
 
-  const emptyOk = attempts.find(attempt => attempt.response_ok && attempt.payload?.ok !== false && attempt.row_count === 0);
-  const last = attempts[attempts.length - 1] || {};
-  const message = emptyOk
-    ? `No stored league data found for ${leagueName}.`
-    : last.message || `League API failed (${last.status || "unknown"}).`;
-  const err = httpError(last.status || 502, message);
-  err.attempts = attempts.map(attempt => leagueAttemptSummary(attempt));
-  if (options.debug) {
-    return { payload: null, attempts, error: err };
+  return { payload: null, attempts };
+}
+
+function leagueOnDemandMaxAgeSeconds(env) {
+  const value = Number(env.LEAGUE_ON_DEMAND_MAX_AGE_SECONDS || 1800);
+  return Math.min(86400, Math.max(60, Number.isFinite(value) ? value : 1800));
+}
+
+function leaguePayloadAgeSeconds(payload) {
+  const timestamp = new Date(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at || 0).getTime();
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, (Date.now() - timestamp) / 1000);
+}
+
+function refreshLeagueOnDemand(leagueName, env) {
+  const key = String(leagueName || "").trim().toLowerCase();
+  const existing = leagueRefreshesInFlight.get(key);
+  if (existing) return existing;
+
+  const refresh = performLeagueOnDemandRefresh(leagueName, env)
+    .finally(() => leagueRefreshesInFlight.delete(key));
+  leagueRefreshesInFlight.set(key, refresh);
+  return refresh;
+}
+
+async function performLeagueOnDemandRefresh(leagueName, env) {
+  const token = String(env.LEAGUE_INGEST_ADMIN_TOKEN || "").trim();
+  if (!token) {
+    throw httpError(500, "LEAGUE_INGEST_ADMIN_TOKEN is not configured on the Discord Worker.");
   }
+
+  const attempts = [];
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/ingest", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    attempts.push(result);
+    if (result.response_ok && result.payload?.ok !== false) {
+      return {
+        ok: true,
+        source: result.source,
+        status: result.status,
+        league_name: result.payload?.league_name || leagueName,
+        rows_inserted: result.payload?.rows_inserted ?? null,
+        attempts: attempts.map(attempt => leagueAttemptSummary(attempt))
+      };
+    }
+  }
+
+  const last = attempts[attempts.length - 1] || {};
+  const err = httpError(last.status || 502, last.message || `League refresh failed for ${leagueName}.`);
+  err.attempts = attempts.map(attempt => leagueAttemptSummary(attempt));
   throw err;
 }
 
@@ -492,28 +641,48 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const fonts = await loadHistoryFonts();
   const width = 1600;
   const height = 720;
-  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 2);
+  const canvas = new HistoryPixelCanvas(width, height, [15, 20, 27, 255], 2);
   const color = chartColors();
   const members = leagueChartMembers(payload).slice(0, 4);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
   const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
 
-  chartPanel(canvas, 24, 24, width - 48, height - 48, color);
-  canvas.drawFontText(fonts.bold, `League ${historyCardText(displayLeagueName, 44)}`, 58, 56, 34, color.white, 560);
-  canvas.drawFontText(fonts.regular, `Hourly growth - last ${hours}h`, 60, 106, 18, color.muted, 520);
+  const panel = { x: 20, y: 20, w: width - 40, h: height - 40 };
+  canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
+  canvas.fillRect(panel.x, panel.y, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y + panel.h - 1, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y, 1, panel.h, color.line);
+  canvas.fillRect(panel.x + panel.w - 1, panel.y, 1, panel.h, color.line);
 
-  const plot = { x: 104, y: 168, w: 1440, h: 408 };
+  const title = `${hours}-Hour Member Growth`;
+  const updated = `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`;
+  const updatedWidth = canvas.measureFontText(fonts.regular, updated, 14);
+
+  canvas.drawFontText(fonts.bold, title, 42, 31, 34, color.white, 620);
+  canvas.drawFontText(fonts.regular, updated, panel.x + panel.w - updatedWidth - 22, 43, 14, color.muted, updatedWidth + 2);
+
+  const legend = series.slice(0, 4);
+  const legendLabels = legend.map(item => {
+    const gain = Math.max(0, Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0);
+    return `${historyCardText(item.name, 30)} (${shortNumber(gain)} / ${hours}h)`;
+  });
+  const legendGap = 34;
+  const legendWidths = legendLabels.map(label => Math.min(350, canvas.measureFontText(fonts.bold, label, 15) + 42));
+  const legendTotalWidth = legendWidths.reduce((sum, itemWidth) => sum + itemWidth, 0)
+    + legendGap * Math.max(0, legendWidths.length - 1);
+  let legendX = panel.x + Math.max(22, (panel.w - legendTotalWidth) / 2);
+  legend.forEach((item, index) => {
+    const itemWidth = legendWidths[index];
+    const name = canvas.fitFontText(fonts.bold, legendLabels[index], 15, itemWidth - 38);
+    canvas.fillRect(legendX, 91, 24, 4, item.color);
+    canvas.drawFontText(fonts.bold, name, legendX + 34, 79, 15, color.white, itemWidth - 38);
+    legendX += itemWidth + legendGap;
+  });
+
+  const plot = { x: 116, y: 116, w: 1438, h: 516 };
   canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
   canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
   canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
-
-  const legend = series.slice(0, 4);
-  legend.forEach((item, index) => {
-    const x = 700 + index * 215;
-    canvas.fillRect(x, 76, 34, 7, item.color);
-    canvas.drawFontText(fonts.bold, historyCardText(item.name, 20), x + 46, 62, 17, item.color, 150);
-    canvas.drawFontText(fonts.regular, `${shortNumber(Math.max(0, item.latestGain || 0))}/h`, x + 46, 91, 14, color.muted, 150);
-  });
 
   if (!series.some(item => item.points.length >= 1)) {
     canvas.drawFontText(fonts.regular, "Not enough stored hourly history to chart this league yet.", plot.x + 28, plot.y + 48, 20, color.muted, plot.w - 56);
@@ -532,10 +701,10 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const xFor = point => xForTime(point.t);
   const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / (yMax - yMin))) * plot.h;
   const lineOffsets = [
-    { x: -7, y: -12 },
-    { x: -2, y: -4 },
-    { x: 3, y: 4 },
-    { x: 8, y: 12 }
+    { x: 0, y: -6 },
+    { x: 0, y: -2 },
+    { x: 0, y: 2 },
+    { x: 0, y: 6 }
   ];
   const clampPlotX = value => Math.max(plot.x + 3, Math.min(plot.x + plot.w - 3, value));
   const clampPlotY = value => Math.max(plot.y + 3, Math.min(plot.y + plot.h - 3, value));
@@ -543,17 +712,30 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const visualXAt = (item, time) => clampPlotX(xForTime(time) + (item.visualOffsetX || 0));
   const visualYFor = (item, point) => clampPlotY(yFor(point) + (item.visualOffsetY || 0));
   const drawGrowthSegment = (x1, y1, x2, y2, lineColor) => {
-    chartDrawLine(canvas, x1, y1, x2, y2, [5, 8, 12, 255], 7);
-    chartDrawLine(canvas, x1, y1, x2, y2, lineColor, 4);
+    const ax = Math.round(x1);
+    const ay = Math.round(y1);
+    const bx = Math.round(x2);
+    const by = Math.round(y2);
+    const thickness = 2;
+    const half = Math.floor(thickness / 2);
+
+    if (Math.abs(bx - ax) >= Math.abs(by - ay)) {
+      const left = Math.min(ax, bx);
+      canvas.fillRect(left, ay - half, Math.max(1, Math.abs(bx - ax) + 1), thickness, lineColor);
+      return;
+    }
+
+    const top = Math.min(ay, by);
+    canvas.fillRect(ax - half, top, thickness, Math.max(1, Math.abs(by - ay) + 1), lineColor);
   };
 
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
     const value = yMax - (i / 4) * (yMax - yMin);
     const label = shortNumber(value);
-    const labelWidth = canvas.measureFontText(fonts.regular, label, 13);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
     canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
-    canvas.drawFontText(fonts.regular, label, Math.max(28, plot.x - labelWidth - 18), yy - 9, 14, color.muted, labelWidth + 8);
+    canvas.drawFontText(fonts.regular, label, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
   }
 
   const xTickCount = hours <= 1 ? 2 : Math.min(12, hours);
@@ -561,14 +743,14 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const xx = plot.x + (i / xTickCount) * plot.w;
     const tickTime = chartMinT + (i / xTickCount) * (chartMaxT - chartMinT);
     const tickLabel = hours <= 1 ? chartTimeOfDayAxisLabel(tickTime) : chartHourAxisLabel(tickTime);
-    const tickLabelWidth = canvas.measureFontText(fonts.regular, tickLabel, 13);
+    const tickLabelWidth = canvas.measureFontText(fonts.regular, tickLabel, 12);
     const tickLabelX = i === 0
       ? plot.x
       : i === xTickCount
         ? plot.x + plot.w - tickLabelWidth
         : Math.max(plot.x, Math.min(plot.x + plot.w - tickLabelWidth, xx - tickLabelWidth / 2));
     canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
-    canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 34, 13, color.muted, tickLabelWidth + 6);
+    canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 23, 12, color.muted, tickLabelWidth + 6);
   }
 
   series.forEach((item, seriesIndex) => {
@@ -591,19 +773,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
       }
     }
 
-    const last = item.points[item.points.length - 1];
-    if (last) {
-      const endpointX = visualXFor(item, last);
-      const endpointY = visualYFor(item, last);
-      const label = `${shortNumber(last.value)}/h`;
-      const labelWidth = Math.min(92, Math.max(48, canvas.measureFontText(fonts.bold, label, 12) + 10));
-      const labelX = Math.max(plot.x + 4, Math.min(plot.x + plot.w - labelWidth - 4, endpointX + 9));
-      const labelY = Math.max(plot.y + 4, Math.min(plot.y + plot.h - 20, endpointY - 10));
-      chartDrawBackedText(canvas, fonts.bold, label, labelX, labelY, 12, item.color, labelWidth, [13, 17, 23, 232]);
-    }
   });
-
-  canvas.drawFontText(fonts.regular, `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`, 58, height - 44, 16, color.muted, 620);
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
@@ -776,11 +946,13 @@ function leagueApiTargets(env) {
   return targets;
 }
 
-async function fetchLeagueCurrentAttempt(target, apiUrl) {
+async function fetchLeagueCurrentAttempt(target, apiUrl, options = {}) {
   const init = {
+    method: options.method || "GET",
     headers: {
       Accept: "application/json",
-      "User-Agent": "c0ld-Discord-League-Worker"
+      "User-Agent": "c0ld-Discord-League-Worker",
+      ...(options.headers || {})
     },
     cf: { cacheTtl: 0, cacheEverything: false }
   };

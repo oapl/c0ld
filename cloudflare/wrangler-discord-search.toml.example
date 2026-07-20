@@ -5,6 +5,8 @@ compatibility_date = "2026-07-14"
 [vars]
 CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
 LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev"
+# Missing or older league snapshots are refreshed on demand by /lg info.
+LEAGUE_ON_DEMAND_MAX_AGE_SECONDS = "1800"
 PROFILE_DATA_BASE = "https://c0ld-clan.com/Data/players"
 SITE_BASE_URL = "https://c0ld-clan.com"
 # Selects which global scan cache to read. This does not restrict search
@@ -40,3 +42,4 @@ service = "yamo-league-api-worker"
 # DISCORD_PUBLIC_KEY
 # DISCORD_BOT_TOKEN
 # REGISTER_ADMIN_TOKEN
+# LEAGUE_INGEST_ADMIN_TOKEN (must match the league Worker's INGEST_ADMIN_TOKEN)

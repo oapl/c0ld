@@ -653,6 +653,25 @@ when the configured league run should begin. `INGEST_LEAGUES`,
 `INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
 sub-switches once the master switch is enabled.
 
+Exact league collection uses two independent cadences while the Worker cron
+continues to run every five minutes:
+
+- Names in `LEAGUE_NAMES`, `COLD_LEAGUE_NAMES`, or `ALT_LEAGUE_NAMES` are the
+  configured c0ld league pool. `COLD_LEAGUE_REFRESH_MINUTES=15` refreshes them
+  at `:00`, `:15`, `:30`, and `:45`.
+- A successful one-off `/lg info` lookup stores that league in
+  `ps99_league_current`. Non-configured names in that table form the persistent
+  general-league pool. `GENERAL_LEAGUE_REFRESH_MINUTES=30` refreshes due names
+  at `:00` and `:30`.
+
+Set `GENERAL_LEAGUE_REFRESH_ENABLED=false` to disable the second pool.
+`GENERAL_LEAGUE_REFRESH_BATCH_SIZE` limits how many due general leagues run in
+one cycle, and `GENERAL_LEAGUE_REFRESH_CONCURRENCY` controls simultaneous exact
+BIG Games requests. On the Discord Worker,
+`LEAGUE_ON_DEMAND_MAX_AGE_SECONDS=1800` aligns lookup freshness with the
+30-minute general cadence. The 15-minute and 30-minute chart spacing comes from
+these stored snapshot times; no separate graph table or migration is required.
+
 The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
 `LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
 and current rows without deleting previous league history.
@@ -675,7 +694,7 @@ without data, and it is omitted from public league lists. For example, this
 redacts Younes's points globally while retaining all source data:
 
 ```json
-{"leagues":[],"players":["Younes89755","1856284829"]}
+{"leagues":[],"players":["Younes89755","1856284829","kessho02"]}
 ```
 
 Put a league name in `leagues` to hide its entire public dataset. Player IDs are

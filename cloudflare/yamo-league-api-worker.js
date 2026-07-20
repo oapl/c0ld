@@ -5,6 +5,11 @@ const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
 const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
 const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
+const DEFAULT_TRACKED_LEAGUE_REFRESH_MINUTES = 15;
+const DEFAULT_GENERAL_LEAGUE_REFRESH_MINUTES = 30;
+const DEFAULT_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 100;
+const DEFAULT_GENERAL_LEAGUE_REFRESH_CONCURRENCY = 4;
+const MAX_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 500;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
 const COLD_DISCOVERED_LEAGUES_NAME = "C0LD_DISCOVERED_LEAGUES";
@@ -27,7 +32,7 @@ const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const INACTIVITY_ALERT_TABLE = "ps99_league_inactivity_alerts";
 const INACTIVITY_ALERT_WINDOW_MINUTES = 5;
 const FALSEY_ENV_VALUES = new Set(["false", "0", "no", "off"]);
-const DEFAULT_LEAGUE_POINTS_BLACKLIST_JSON = '{"leagues":[],"players":["Younes89755","1856284829"]}';
+const DEFAULT_LEAGUE_POINTS_BLACKLIST_JSON = '{"leagues":[],"players":["Younes89755","1856284829","kessho02"]}';
 const DEFAULT_LEAGUE_MILESTONE_RANKS = [1, 3, 15, 50, 100, 250, 2000];
 let publicVisibilityCacheRaw = null;
 let publicVisibilityCacheValue = null;
@@ -40,7 +45,35 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "ps99-league-api", league_collection_enabled: leagueCollectionEnabled(env), league_name: leagueName(env), league_names: leagueNames(env), c0ld_league_names: c0ldLeagueNames(env), alt_league_names: altLeagueNames(env), league_run_key: leagueRunKey(env), league_run_label: leagueRunLabel(env, leagueRunKey(env)), league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)), league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)), snapshot_retention: "permanent", tracked_league_ingest_mode: "bulk", scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env), top_leagues: TOP_LEAGUES_NAME, top_leagues_limit: topLeaguesLimit(env), top_leagues_page_size: topLeaguesPageSize(env), top_leagues_page_delay_ms: topLeaguesPageDelayMs(env), all_top_leagues: ALL_TOP_LEAGUES_NAME, all_top_leagues_limit: allTopLeaguesLimit(env), all_top_leagues_page_size: allTopLeaguesPageSize(env), all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env) });
+        response = json({
+          ok: true,
+          service: "ps99-league-api",
+          league_collection_enabled: leagueCollectionEnabled(env),
+          league_name: leagueName(env),
+          league_names: leagueNames(env),
+          c0ld_league_names: c0ldLeagueNames(env),
+          alt_league_names: altLeagueNames(env),
+          league_run_key: leagueRunKey(env),
+          league_run_label: leagueRunLabel(env, leagueRunKey(env)),
+          league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)),
+          league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)),
+          snapshot_retention: "permanent",
+          tracked_league_ingest_mode: "bulk",
+          tracked_league_refresh_minutes: trackedLeagueRefreshMinutes(env),
+          general_league_refresh_enabled: generalLeagueRefreshEnabled(env),
+          general_league_refresh_minutes: generalLeagueRefreshMinutes(env),
+          general_league_refresh_batch_size: generalLeagueRefreshBatchSize(env),
+          general_league_refresh_concurrency: generalLeagueRefreshConcurrency(env),
+          scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env),
+          top_leagues: TOP_LEAGUES_NAME,
+          top_leagues_limit: topLeaguesLimit(env),
+          top_leagues_page_size: topLeaguesPageSize(env),
+          top_leagues_page_delay_ms: topLeaguesPageDelayMs(env),
+          all_top_leagues: ALL_TOP_LEAGUES_NAME,
+          all_top_leagues_limit: allTopLeaguesLimit(env),
+          all_top_leagues_page_size: allTopLeaguesPageSize(env),
+          all_top_leagues_page_delay_ms: allTopLeaguesPageDelayMs(env)
+        });
       } else if (request.method === "GET" && url.pathname === "/api/leagues/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/history") {
@@ -108,6 +141,32 @@ export default {
       return;
     }
     ctx.waitUntil((async () => {
+      const scheduledAt = scheduledEventTime(event);
+      const runKey = leagueRunKey(env);
+
+      if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
+        if (isScheduledCadenceDue(scheduledAt, trackedLeagueRefreshMinutes(env))) {
+          await handleTrackedLeaguesIngest(env, "schedule:tracked", runKey, { allowApiFallback: false })
+            .then(logScheduledLeagueIngest("tracked"))
+            .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
+        }
+
+        if (generalLeagueRefreshEnabled(env) && isScheduledCadenceDue(scheduledAt, generalLeagueRefreshMinutes(env))) {
+          const names = await generalLeagueNamesDueForRefresh(env, runKey, scheduledAt);
+          if (names.length) {
+            await handleTrackedLeaguesIngest(env, "schedule:general", runKey, {
+              names,
+              concurrency: generalLeagueRefreshConcurrency(env),
+              allowApiFallback: false
+            })
+              .then(logScheduledLeagueIngest("general"))
+              .catch(err => console.error("scheduled general league ingest failed", err?.message || String(err)));
+          } else {
+            console.log("scheduled general league ingest skipped: no leagues are due");
+          }
+        }
+      }
+
       if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
         await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
           listName: TOP_LEAGUES_NAME,
@@ -116,12 +175,6 @@ export default {
           pageDelayMs: topLeaguesPageDelayMs(env),
           allowApiFallback: false
         }).catch(err => console.error("scheduled top 1000 leagues ingest failed", err?.message || String(err)));
-      }
-      if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
-        await handleTrackedLeaguesIngest(env, "schedule", leagueRunKey(env), { allowApiFallback: false })
-          .then(response => response.clone().json().catch(() => ({})))
-          .then(payload => console.log("scheduled tracked league ingest complete", JSON.stringify(payload)))
-          .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
       }
       if (shouldRunTrackedRankWindowRefresh(env)) {
         await handleTrackedLeagueRankWindowRefresh(env, "schedule:rank-window", topLeaguesRunKey(env))
@@ -136,7 +189,7 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   const fetchedAt = new Date().toISOString();
   const requested = String(requestedLeague || leagueName(env)).trim() || leagueName(env);
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
-  const api = await fetchLeagueApi(requested);
+  const api = await fetchLeagueApi(requested, { env });
   const league = api.data || api;
   let summary = summarizeLeague(league, requested);
   let memberRows = normalizeLeagueRows(league);
@@ -180,11 +233,11 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
-  const names = leagueNames(env);
-  const concurrency = clamp(Number(env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 8), 1, 12);
+  const names = uniqueLeagueNames(Array.isArray(options.names) ? options.names : leagueNames(env));
+  const concurrency = clamp(Number(options.concurrency || env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 8), 1, 12);
   const results = await mapLimit(names, concurrency, async requested => {
     try {
-      const api = await fetchLeagueApi(requested, { allowFallback: options.allowApiFallback !== false });
+      const api = await fetchLeagueApi(requested, { env, allowFallback: options.allowApiFallback !== false });
       const league = api.data || api;
       let summary = summarizeLeague(league, requested);
       let memberRows = normalizeLeagueRows(league);
@@ -1596,7 +1649,7 @@ async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
 
   if (rosterSource === "live-detail") {
     try {
-      const api = await fetchLeagueApi(publicRow.league_name);
+      const api = await fetchLeagueApi(publicRow.league_name, { env });
       leaguePayload = api.data || api;
     } catch (err) {
       error = err?.message || String(err);
@@ -1641,14 +1694,57 @@ async function fetchLeagueApi(league, options = {}) {
   const urls = options.allowFallback === false ? [primary] : [primary, `https://biggamesapi.io/v1/leagues/${encodeURIComponent(league)}`];
   let lastError = null;
   for (const url of urls) {
-    try {
-      const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
-      const data = await readJsonResponse(res, url);
-      if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
-      return data;
-    } catch (err) { lastError = err; }
+    const attempts = leagueApiRetryAttempts(options.env);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "yamo-league-api-worker" }, cf: { cacheTtl: 0, cacheEverything: false } });
+        if (!res.ok && isRetryableLeagueApiStatus(res.status) && attempt < attempts) {
+          await sleep(leagueApiRetryDelayMs(res, attempt, options.env));
+          continue;
+        }
+        const data = await readJsonResponse(res, url);
+        if (data.status && data.status !== "ok") throw new Error(`API status ${data.status}`);
+        return data;
+      } catch (err) {
+        lastError = err;
+        if (attempt < attempts && isRetryableLeagueApiError(err)) {
+          await sleep(leagueApiRetryDelayMs(null, attempt, options.env));
+          continue;
+        }
+        break;
+      }
+    }
   }
   throw httpError(502, `Big Games league API failed for ${league}: ${lastError?.message || "unknown error"}`);
+}
+
+function leagueApiRetryAttempts(env) {
+  return clamp(Number(env?.LEAGUE_API_RETRY_ATTEMPTS || 4), 1, 8);
+}
+
+function leagueApiRetryBaseMs(env) {
+  return clamp(Number(env?.LEAGUE_API_RETRY_BASE_MS || 1500), 250, 30000);
+}
+
+function isRetryableLeagueApiStatus(status) {
+  return status === 429 || status === 408 || status >= 500;
+}
+
+function isRetryableLeagueApiError(err) {
+  const message = String(err?.message || err || "");
+  const statusMatch = message.match(/HTTP\s+(\d{3})/i);
+  if (!statusMatch) return true;
+  return isRetryableLeagueApiStatus(Number(statusMatch[1]));
+}
+
+function leagueApiRetryDelayMs(response, attempt, env) {
+  const retryAfter = Number(response?.headers?.get?.("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(retryAfter * 1000, 120000);
+  }
+  const exponential = leagueApiRetryBaseMs(env) * Math.pow(2, Math.max(0, attempt - 1));
+  const jitter = Math.floor(Math.random() * Math.max(100, exponential * 0.25));
+  return Math.min(exponential + jitter, 120000);
 }
 
 async function fetchLeagueListApi(page = 1, pageSize = 100, options = {}) {
@@ -2570,6 +2666,23 @@ async function deleteStaleCurrentLeagueRows(env, runKey, names, fetchedAt) {
   });
 }
 async function supabaseSelect(env, table, params = {}, options = {}) { return supabaseFetch(env, table, { method: "GET", params, paramRename: options.paramRename }); }
+async function supabaseSelectAll(env, table, params = {}, options = {}) {
+  const pageSize = clamp(Number(options.pageSize || 1000), 1, 1000);
+  const maxRows = clamp(Number(options.maxRows || 10000), pageSize, 100000);
+  const rows = [];
+
+  while (rows.length < maxRows) {
+    const page = await supabaseSelect(env, table, {
+      ...params,
+      limit: Math.min(pageSize, maxRows - rows.length),
+      offset: rows.length
+    }, options);
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
 async function supabaseInsert(env, table, rows) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", body: rows, headers: { Prefer: "return=minimal" } }); }
 async function supabaseUpsert(env, table, rows, conflictColumns) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", params: { on_conflict: conflictColumns }, body: rows, headers: { Prefer: "resolution=merge-duplicates,return=minimal" } }); }
 async function supabaseDelete(env, table, filters = {}) { return supabaseFetch(env, table, { method: "DELETE", params: filters, headers: { Prefer: "return=minimal" } }); }
@@ -2765,7 +2878,73 @@ function altLeagueNames(env) { return [...new Set(csvLeagueNames(env.ALT_LEAGUE_
 function leagueNames(env) {
   const legacy = csvLeagueNames(env.LEAGUE_NAMES || env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME);
   const names = [...legacy, ...c0ldLeagueNames(env), ...altLeagueNames(env)];
-  return names.length ? [...new Set(names)] : [DEFAULT_LEAGUE_NAME];
+  return names.length ? uniqueLeagueNames(names) : [DEFAULT_LEAGUE_NAME];
+}
+function uniqueLeagueNames(values) {
+  const names = new Map();
+  for (const value of values || []) {
+    const name = String(value || "").trim();
+    const normalized = key(name);
+    if (name && normalized && !names.has(normalized)) names.set(normalized, name);
+  }
+  return [...names.values()];
+}
+function trackedLeagueRefreshMinutes(env) {
+  return clamp(Number(env.COLD_LEAGUE_REFRESH_MINUTES || env.TRACKED_LEAGUE_REFRESH_MINUTES || DEFAULT_TRACKED_LEAGUE_REFRESH_MINUTES), 5, 1440);
+}
+function generalLeagueRefreshEnabled(env) {
+  return String(env.GENERAL_LEAGUE_REFRESH_ENABLED || "true").trim().toLowerCase() !== "false";
+}
+function generalLeagueRefreshMinutes(env) {
+  return clamp(Number(env.GENERAL_LEAGUE_REFRESH_MINUTES || DEFAULT_GENERAL_LEAGUE_REFRESH_MINUTES), 5, 1440);
+}
+function generalLeagueRefreshBatchSize(env) {
+  return clamp(Number(env.GENERAL_LEAGUE_REFRESH_BATCH_SIZE || DEFAULT_GENERAL_LEAGUE_REFRESH_BATCH_SIZE), 1, MAX_GENERAL_LEAGUE_REFRESH_BATCH_SIZE);
+}
+function generalLeagueRefreshConcurrency(env) {
+  return clamp(Number(env.GENERAL_LEAGUE_REFRESH_CONCURRENCY || DEFAULT_GENERAL_LEAGUE_REFRESH_CONCURRENCY), 1, 12);
+}
+function scheduledEventTime(event) {
+  const scheduledTime = Number(event?.scheduledTime);
+  return Number.isFinite(scheduledTime) && scheduledTime > 0 ? scheduledTime : Date.now();
+}
+function isScheduledCadenceDue(scheduledAt, cadenceMinutes) {
+  const minute = Math.floor(Number(scheduledAt) / 60000);
+  return Number.isFinite(minute) && minute % cadenceMinutes === 0;
+}
+function logScheduledLeagueIngest(kind) {
+  return response => response.clone().json().catch(() => ({}))
+    .then(payload => console.log(`scheduled ${kind} league ingest complete`, JSON.stringify(payload)));
+}
+async function generalLeagueNamesDueForRefresh(env, runKey, nowMs) {
+  const aggregateNames = [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME, COLD_DISCOVERED_LEAGUES_NAME];
+  const rows = await supabaseSelectAll(env, CURRENT_TABLE, {
+    select: "league_name,updated_at,fetched_at",
+    league_run_key: `eq.${runKey}`,
+    league_name: `not.in.(${aggregateNames.map(postgrestFilterText).join(",")})`,
+    order: "updated_at.asc.nullsfirst"
+  }, { maxRows: 50000 });
+  const configured = new Set(leagueNames(env).map(key));
+  const latestByLeague = new Map();
+
+  for (const row of rows) {
+    const name = String(row.league_name || "").trim();
+    const normalized = key(name);
+    if (!name || !normalized || configured.has(normalized) || isAggregateLeagueListName(name)) continue;
+    const updatedAt = Math.max(
+      new Date(row.updated_at || 0).getTime() || 0,
+      new Date(row.fetched_at || 0).getTime() || 0
+    );
+    const current = latestByLeague.get(normalized);
+    if (!current || updatedAt > current.updatedAt) latestByLeague.set(normalized, { name, updatedAt });
+  }
+
+  const dueBefore = Number(nowMs) - generalLeagueRefreshMinutes(env) * 60 * 1000;
+  return [...latestByLeague.values()]
+    .filter(item => item.updatedAt <= dueBefore)
+    .sort((a, b) => a.updatedAt - b.updatedAt || a.name.localeCompare(b.name))
+    .slice(0, generalLeagueRefreshBatchSize(env))
+    .map(item => item.name);
 }
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
 function leagueRunKey(env) {
