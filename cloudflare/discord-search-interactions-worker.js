@@ -14,6 +14,7 @@ const COMPONENT_TYPE_ACTION_ROW = 1;
 const COMPONENT_TYPE_BUTTON = 2;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
+const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
 const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
 const HISTORY_VIEW_LABELS = {
   clan: "Clan History",
@@ -102,6 +103,11 @@ export default {
         return await searchDebug(url, env);
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/lg-debug") {
+        requireAdmin(request, env);
+        return await lgDebug(url, env);
+      }
+
       if ((request.method === "POST" || request.method === "DELETE") && url.pathname === "/admin/delete-command") {
         requireAdmin(request, env);
         return await deleteCommand(url, env);
@@ -136,6 +142,10 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (interaction.type === INTERACTION_TYPE_MESSAGE_COMPONENT) {
+    if (parseLeagueChartCustomId(interaction.data?.custom_id)) {
+      return interactionJson(handleLeagueChartComponent(interaction, env, ctx));
+    }
+
     return interactionJson(handleHistoryComponent(interaction, env, ctx));
   }
 
@@ -303,9 +313,9 @@ async function buildSearchResponse(query, env) {
   };
 }
 
-async function completeLeagueInfoInteraction(interaction, env, leagueName) {
+async function completeLeagueInfoInteraction(interaction, env, leagueName, options = {}) {
   try {
-    await editOriginalInteraction(interaction, await buildLeagueInfoMessage(leagueName, env));
+    await editOriginalInteraction(interaction, await buildLeagueInfoMessage(leagueName, env, options));
   } catch (err) {
     await editOriginalInteraction(interaction, {
       content: `League lookup failed: ${err?.message || String(err)}`,
@@ -317,7 +327,8 @@ async function completeLeagueInfoInteraction(interaction, env, leagueName) {
   }
 }
 
-async function buildLeagueInfoMessage(leagueName, env) {
+async function buildLeagueInfoMessage(leagueName, env, options = {}) {
+  const chartHours = leagueChartHours(options.chartHours);
   const payload = await fetchLeagueCurrentPayload(leagueName, env);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const members = rows
@@ -362,39 +373,384 @@ async function buildLeagueInfoMessage(leagueName, env) {
     embed.thumbnail = { url: thumbnailUrl };
   }
 
-  return {
+  const message = {
     content: "",
     embeds: [embed],
+    components: leagueChartComponents(displayLeagueName, chartHours),
     allowed_mentions: { parse: [] },
     flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
   };
+
+  try {
+    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
+    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours });
+    if (chartBytes?.byteLength) {
+      const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
+      embed.image = { url: `attachment://${filename}` };
+      message._file = { filename, contentType: "image/png", bytes: chartBytes };
+    }
+  } catch {
+    // The command should still answer if the history chart cannot be rendered.
+  }
+
+  return message;
 }
 
-async function fetchLeagueCurrentPayload(leagueName, env) {
-  const apiBase = String(env.LEAGUE_API_BASE || "https://yamo-league-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
-  const apiUrl = leagueApiUrl(env, "/api/leagues/current", apiBase);
-  apiUrl.searchParams.set("league", leagueName);
-  apiUrl.searchParams.set("rank_lookup", "false");
-  apiUrl.searchParams.set("fresh", "1");
+function handleLeagueChartComponent(interaction, env, ctx) {
+  const state = parseLeagueChartCustomId(interaction.data?.custom_id);
+  if (!state) {
+    return messageResponse("That league chart control is no longer valid. Run `/lg info` again.", true);
+  }
 
-  const response = await fetchLeagueApi(env, apiUrl, {
+  ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, state.leagueName, {
+    chartHours: state.hours
+  }));
+
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
+  const attempts = [];
+
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/current", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    apiUrl.searchParams.set("rank_lookup", "false");
+    apiUrl.searchParams.set("fresh", "1");
+
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    attempts.push(result);
+
+    if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows) && result.payload.rows.length > 0) {
+      return options.debug ? { payload: result.payload, attempts } : result.payload;
+    }
+  }
+
+  const emptyOk = attempts.find(attempt => attempt.response_ok && attempt.payload?.ok !== false && attempt.row_count === 0);
+  const last = attempts[attempts.length - 1] || {};
+  const message = emptyOk
+    ? `No stored league data found for ${leagueName}.`
+    : last.message || `League API failed (${last.status || "unknown"}).`;
+  const err = httpError(last.status || 502, message);
+  err.attempts = attempts.map(attempt => leagueAttemptSummary(attempt));
+  if (options.debug) {
+    return { payload: null, attempts, error: err };
+  }
+  throw err;
+}
+
+function leagueChartHours(value) {
+  const number = Number(value);
+  return LEAGUE_CHART_HOURS.includes(number) ? number : 24;
+}
+
+function leagueChartComponents(leagueName, selectedHours) {
+  const safeLeague = encodeURIComponent(String(leagueName || "").trim()).slice(0, 72);
+  return [
+    {
+      type: COMPONENT_TYPE_ACTION_ROW,
+      components: LEAGUE_CHART_HOURS.map(hours => ({
+        type: COMPONENT_TYPE_BUTTON,
+        style: hours === selectedHours ? BUTTON_STYLE_PRIMARY : BUTTON_STYLE_SECONDARY,
+        label: `${hours}h`,
+        custom_id: `lgchart:${hours}:${safeLeague}`
+      }))
+    }
+  ];
+}
+
+function parseLeagueChartCustomId(value) {
+  const text = String(value || "");
+  const match = text.match(/^lgchart:(1|6|12|24):(.+)$/);
+  if (!match) return null;
+
+  return {
+    hours: leagueChartHours(match[1]),
+    leagueName: decodeURIComponent(match[2] || "").trim()
+  };
+}
+
+async function fetchLeagueHistoryPayload(leagueName, env, hours = 24) {
+  const historyHours = leagueChartHours(hours);
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/history", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    apiUrl.searchParams.set("hours", String(Math.max(3, historyHours + 2)));
+    apiUrl.searchParams.set("limit", "50000");
+
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows)) {
+      return result.payload;
+    }
+  }
+
+  return { rows: [] };
+}
+
+async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
+  const hours = leagueChartHours(options.hours);
+  const fonts = await loadHistoryFonts();
+  const width = 1600;
+  const height = 720;
+  const canvas = new HistoryPixelCanvas(width, height, [10, 15, 22, 255], 2);
+  const color = chartColors();
+  const members = leagueChartMembers(payload).slice(0, 4);
+  const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
+  const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
+
+  chartPanel(canvas, 24, 24, width - 48, height - 48, color);
+  canvas.drawFontText(fonts.bold, `League ${historyCardText(displayLeagueName, 44)}`, 58, 56, 34, color.white, 560);
+  canvas.drawFontText(fonts.regular, `Hourly growth · last ${hours}h`, 60, 106, 18, color.muted, 520);
+
+  const plot = { x: 104, y: 168, w: 1440, h: 424 };
+  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
+  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+
+  const legend = series.slice(0, 4);
+  legend.forEach((item, index) => {
+    const x = 700 + index * 215;
+    canvas.fillRect(x, 76, 34, 7, item.color);
+    canvas.drawFontText(fonts.bold, historyCardText(item.name, 20), x + 46, 62, 17, item.color, 150);
+    canvas.drawFontText(fonts.regular, `${shortNumber(Math.max(0, item.latestGain || 0))}/h`, x + 46, 91, 14, color.muted, 150);
+  });
+
+  if (!series.some(item => item.points.length >= 1)) {
+    canvas.drawFontText(fonts.regular, "Not enough stored hourly history to chart this league yet.", plot.x + 28, plot.y + 48, 20, color.muted, plot.w - 56);
+    return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+  }
+
+  const allPoints = series.flatMap(item => item.points);
+  const minT = Math.min(...allPoints.map(point => point.t));
+  const maxT = Math.max(...allPoints.map(point => point.t));
+  const chartMinT = maxT - hours * 60 * 60 * 1000;
+  const chartMaxT = maxT;
+  const maxYValue = Math.max(1, ...allPoints.map(point => point.value));
+  const yMin = 0;
+  const yMax = maxYValue + Math.max(1, maxYValue * 0.14);
+  const xFor = point => chartMaxT === chartMinT ? plot.x : plot.x + ((point.t - chartMinT) / (chartMaxT - chartMinT)) * plot.w;
+  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / (yMax - yMin))) * plot.h;
+
+  for (let i = 0; i <= 4; i += 1) {
+    const yy = plot.y + (i / 4) * plot.h;
+    const value = yMax - (i / 4) * (yMax - yMin);
+    const label = shortNumber(value);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 13);
+    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    canvas.drawFontText(fonts.regular, label, Math.max(28, plot.x - labelWidth - 18), yy - 9, 14, color.muted, labelWidth + 8);
+  }
+
+  const xTickCount = hours <= 1 ? 2 : Math.min(12, hours);
+  for (let i = 0; i <= xTickCount; i += 1) {
+    const xx = plot.x + (i / xTickCount) * plot.w;
+    const tickTime = chartMinT + (i / xTickCount) * (chartMaxT - chartMinT);
+    const tickLabel = hours <= 1 ? chartTimeOfDayAxisLabel(tickTime) : chartHourAxisLabel(tickTime);
+    const tickLabelWidth = canvas.measureFontText(fonts.regular, tickLabel, 13);
+    const tickLabelX = i === 0
+      ? plot.x
+      : i === xTickCount
+        ? plot.x + plot.w - tickLabelWidth
+        : Math.max(plot.x, Math.min(plot.x + plot.w - tickLabelWidth, xx - tickLabelWidth / 2));
+    canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
+    canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 34, 13, color.muted, tickLabelWidth + 6);
+  }
+
+  series.forEach(item => {
+    for (let index = 1; index < item.points.length; index += 1) {
+      const previous = item.points[index - 1];
+      const current = item.points[index];
+      if (current.breakBefore) continue;
+      chartDrawLine(canvas, xFor(previous), yFor(previous), xFor(current), yFor(previous), item.color, 3);
+      chartDrawLine(canvas, xFor(current), yFor(previous), xFor(current), yFor(current), item.color, 3);
+    }
+
+    item.points.forEach(point => chartFillCircle(canvas, xFor(point), yFor(point), 3, item.color));
+    const last = item.points[item.points.length - 1];
+    if (last) chartFillCircle(canvas, xFor(last), yFor(last), 6, item.color);
+  });
+
+  canvas.drawFontText(fonts.regular, `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`, 58, height - 56, 16, color.muted, 620);
+
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function leagueChartMembers(payload) {
+  return (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map(row => ({
+      row,
+      id: String(row.user_id || row.UserID || "").trim(),
+      name: leagueMemberName(row),
+      points: finiteNumber(row.total_points ?? row.points),
+      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
+    }))
+    .filter(item => item.id && item.points !== null)
+    .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)));
+}
+
+function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
+  const hours = leagueChartHours(options.hours);
+  const bucketMs = 60 * 60 * 1000;
+  const windowMs = hours * 60 * 60 * 1000;
+  const history = Array.isArray(historyRows) ? historyRows : [];
+  const currentAt = leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
+  const historyTimes = history.map(row => leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at)).filter(Number.isFinite);
+  const latest = Math.max(currentAt, ...historyTimes, Date.now() - bucketMs);
+  const end = Math.ceil(latest / bucketMs) * bucketMs;
+  const start = end - windowMs;
+  const buckets = Array.from({ length: Math.floor(windowMs / bucketMs) + 1 }, (_, index) => start + index * bucketMs);
+  const byUser = new Map();
+
+  for (const row of history) {
+    const id = String(row.user_id || row.UserID || "").trim();
+    const time = leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at);
+    const points = finiteNumber(row.total_points ?? row.points);
+    if (!id || !Number.isFinite(time) || points === null) continue;
+    if (!byUser.has(id)) byUser.set(id, []);
+    byUser.get(id).push({ time, points });
+  }
+
+  const colors = [
+    [255, 123, 114, 255],
+    [88, 166, 255, 255],
+    [126, 231, 135, 255],
+    [242, 204, 96, 255]
+  ];
+
+  return members.map((member, index) => {
+    const samples = [...(byUser.get(member.id) || []), { time: currentAt, points: member.points }]
+      .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
+      .sort((a, b) => a.time - b.time);
+    const points = [];
+    let sampleIndex = 0;
+    let lastValue = null;
+    let previousValue = null;
+    let hasBaseline = false;
+    let lastBucketWasGap = false;
+
+    for (const bucketEnd of buckets) {
+      while (sampleIndex < samples.length && samples[sampleIndex].time <= bucketEnd) {
+        lastValue = samples[sampleIndex].points;
+        sampleIndex += 1;
+      }
+
+      if (!hasBaseline) {
+        if (lastValue !== null) {
+          previousValue = lastValue;
+          hasBaseline = true;
+        }
+        lastBucketWasGap = true;
+        continue;
+      }
+
+      if (previousValue === null || lastValue === null) {
+        lastBucketWasGap = true;
+        continue;
+      }
+
+      const hourlyGain = Math.max(0, lastValue - previousValue);
+      points.push({ t: bucketEnd, value: hourlyGain, breakBefore: lastBucketWasGap });
+      previousValue = lastValue;
+      lastBucketWasGap = false;
+    }
+
+    const latestGain = points[points.length - 1]?.value ?? Math.max(0, member.gain1h || 0);
+
+    return {
+      id: member.id,
+      name: member.name,
+      color: colors[index % colors.length],
+      points,
+      latestGain,
+      gain: points.reduce((sum, point) => sum + Math.max(0, point.value || 0), 0)
+    };
+  });
+}
+
+function leagueChartTime(value) {
+  const ms = new Date(value || 0).getTime();
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+function leagueApiTargets(env) {
+  const defaultBase = "https://yamo-league-api-worker.opal-dde.workers.dev";
+  const bases = [...new Set([String(env.LEAGUE_API_BASE || "").trim(), defaultBase].filter(Boolean))]
+    .map(base => base.replace(/\/$/, ""));
+  const targets = [];
+
+  if (hasLeagueApiServiceBinding(env)) {
+    targets.push({
+      source: "service_binding",
+      base: "https://yamo-league-api-worker.service",
+      binding: env.LEAGUE_API_WORKER
+    });
+  }
+
+  for (const base of bases) {
+    targets.push({
+      source: base === defaultBase ? "default_public_url" : "configured_public_url",
+      base,
+      binding: null
+    });
+  }
+
+  return targets;
+}
+
+async function fetchLeagueCurrentAttempt(target, apiUrl) {
+  const init = {
     headers: {
       Accept: "application/json",
       "User-Agent": "c0ld-Discord-League-Worker"
     },
     cf: { cacheTtl: 0, cacheEverything: false }
-  });
-  const payload = await response.json().catch(() => ({}));
+  };
+  const request = new Request(apiUrl.toString(), init);
+  const response = target.binding
+    ? await target.binding.fetch(request)
+    : await fetch(request);
+  const text = await response.text();
+  const payload = parseJsonObject(text);
 
-  if (!response.ok || payload.ok === false) {
-    throw httpError(response.status || 502, payload.message || `League API failed (${response.status}).`);
+  return {
+    source: target.source,
+    api_url: apiUrl.toString(),
+    status: response.status,
+    response_ok: response.ok,
+    payload,
+    payload_ok: payload?.ok ?? null,
+    message: payload?.message || (!response.ok ? truncateText(text, 180) : null),
+    row_count: Array.isArray(payload?.rows) ? payload.rows.length : null,
+    league_name: payload?.league_name || null,
+    league_rank: payload?.league_rank ?? null
+  };
+}
+
+function parseJsonObject(text) {
+  try {
+    const parsed = JSON.parse(text || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
   }
+}
 
-  if (!Array.isArray(payload.rows) || payload.rows.length === 0) {
-    throw httpError(404, `No stored league data found for ${leagueName}.`);
-  }
+function truncateText(value, length) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > length ? `${text.slice(0, Math.max(0, length - 1))}…` : text;
+}
 
-  return payload;
+function leagueAttemptSummary(attempt) {
+  return {
+    source: attempt.source,
+    api_url: attempt.api_url,
+    status: attempt.status,
+    response_ok: attempt.response_ok,
+    payload_ok: attempt.payload_ok,
+    message: attempt.message,
+    row_count: attempt.row_count,
+    league_name: attempt.league_name,
+    league_rank: attempt.league_rank
+  };
 }
 
 function leagueMemberName(row) {
@@ -1474,6 +1830,18 @@ function chartTimeLabel(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "-";
   return date.toLocaleString("en-US", { timeZone: "America/Guatemala", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function chartHourAxisLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", hour: "numeric" });
+}
+
+function chartTimeOfDayAxisLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", hour: "numeric", minute: "2-digit" });
 }
 
 function chartFilenamePart(value) {
@@ -2913,6 +3281,40 @@ async function searchDebug(url, env) {
     fallback_status: result.fallbackStatus,
     row_found: Boolean(result.payload.row),
     row: result.payload.row || null
+  });
+}
+
+async function lgDebug(url, env) {
+  const leagueName = String(url.searchParams.get("league") || url.searchParams.get("name") || url.searchParams.get("q") || "").trim();
+  if (!leagueName) {
+    throw httpError(400, "Missing ?league=name.");
+  }
+
+  const result = await fetchLeagueCurrentPayload(leagueName, env, { debug: true });
+  return json({
+    ok: Boolean(result.payload),
+    configured: {
+      league_api_base: String(env.LEAGUE_API_BASE || "").trim() || "https://yamo-league-api-worker.opal-dde.workers.dev",
+      service_binding_enabled: hasLeagueApiServiceBinding(env),
+      target_count: leagueApiTargets(env).length
+    },
+    requested_league: leagueName,
+    error: result.error?.message || null,
+    attempts: result.attempts.map(attempt => leagueAttemptSummary(attempt)),
+    league: result.payload ? {
+      league_name: result.payload.league_name || null,
+      league_points: result.payload.league_points ?? null,
+      league_rank: result.payload.league_rank ?? null,
+      league_icon: result.payload.league_icon || null,
+      row_count: Array.isArray(result.payload.rows) ? result.payload.rows.length : 0,
+      top_contributions: (result.payload.rows || []).slice(0, 4).map(row => ({
+        rank: row.rank ?? null,
+        username: row.username || row.display_name || null,
+        user_id: row.user_id ?? null,
+        points: row.total_points ?? row.points ?? null,
+        gain_1h: row.gain_1h ?? null
+      }))
+    } : null
   });
 }
 
