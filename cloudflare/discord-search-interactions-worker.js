@@ -500,9 +500,9 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
 
   chartPanel(canvas, 24, 24, width - 48, height - 48, color);
   canvas.drawFontText(fonts.bold, `League ${historyCardText(displayLeagueName, 44)}`, 58, 56, 34, color.white, 560);
-  canvas.drawFontText(fonts.regular, `Hourly growth · last ${hours}h`, 60, 106, 18, color.muted, 520);
+  canvas.drawFontText(fonts.regular, `Hourly growth - last ${hours}h`, 60, 106, 18, color.muted, 520);
 
-  const plot = { x: 104, y: 168, w: 1440, h: 424 };
+  const plot = { x: 104, y: 168, w: 1440, h: 408 };
   canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
   canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
   canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
@@ -528,8 +528,24 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const maxYValue = Math.max(1, ...allPoints.map(point => point.value));
   const yMin = 0;
   const yMax = maxYValue + Math.max(1, maxYValue * 0.14);
-  const xFor = point => chartMaxT === chartMinT ? plot.x : plot.x + ((point.t - chartMinT) / (chartMaxT - chartMinT)) * plot.w;
+  const xForTime = time => chartMaxT === chartMinT ? plot.x : plot.x + ((time - chartMinT) / (chartMaxT - chartMinT)) * plot.w;
+  const xFor = point => xForTime(point.t);
   const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / (yMax - yMin))) * plot.h;
+  const lineOffsets = [
+    { x: -7, y: -12 },
+    { x: -2, y: -4 },
+    { x: 3, y: 4 },
+    { x: 8, y: 12 }
+  ];
+  const clampPlotX = value => Math.max(plot.x + 3, Math.min(plot.x + plot.w - 3, value));
+  const clampPlotY = value => Math.max(plot.y + 3, Math.min(plot.y + plot.h - 3, value));
+  const visualXFor = (item, point) => clampPlotX(xFor(point) + (item.visualOffsetX || 0));
+  const visualXAt = (item, time) => clampPlotX(xForTime(time) + (item.visualOffsetX || 0));
+  const visualYFor = (item, point) => clampPlotY(yFor(point) + (item.visualOffsetY || 0));
+  const drawGrowthSegment = (x1, y1, x2, y2, lineColor) => {
+    chartDrawLine(canvas, x1, y1, x2, y2, [5, 8, 12, 255], 7);
+    chartDrawLine(canvas, x1, y1, x2, y2, lineColor, 4);
+  };
 
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
@@ -555,23 +571,72 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 34, 13, color.muted, tickLabelWidth + 6);
   }
 
-  series.forEach(item => {
-    for (let index = 1; index < item.points.length; index += 1) {
-      const previous = item.points[index - 1];
+  series.forEach((item, seriesIndex) => {
+    const offset = lineOffsets[seriesIndex % lineOffsets.length];
+    item.visualOffsetX = offset.x;
+    item.visualOffsetY = offset.y;
+
+    for (let index = 0; index < item.points.length; index += 1) {
       const current = item.points[index];
-      if (current.breakBefore) continue;
-      chartDrawLine(canvas, xFor(previous), yFor(previous), xFor(current), yFor(previous), item.color, 3);
-      chartDrawLine(canvas, xFor(current), yFor(previous), xFor(current), yFor(current), item.color, 3);
+      const previous = item.points[index - 1] || null;
+      const startX = visualXAt(item, current.startT ?? Math.max(chartMinT, current.t - 60 * 60 * 1000));
+      const currentY = visualYFor(item, current);
+      const currentX = visualXFor(item, current);
+
+      drawGrowthSegment(startX, currentY, currentX, currentY, item.color);
+
+      if (previous && !current.breakBefore) {
+        const previousY = visualYFor(item, previous);
+        drawGrowthSegment(startX, previousY, startX, currentY, item.color);
+      }
     }
 
-    item.points.forEach(point => chartFillCircle(canvas, xFor(point), yFor(point), 3, item.color));
     const last = item.points[item.points.length - 1];
-    if (last) chartFillCircle(canvas, xFor(last), yFor(last), 6, item.color);
+    if (last) {
+      const endpointX = visualXFor(item, last);
+      const endpointY = visualYFor(item, last);
+      const label = `${shortNumber(last.value)}/h`;
+      const labelWidth = Math.min(92, Math.max(48, canvas.measureFontText(fonts.bold, label, 12) + 10));
+      const labelX = Math.max(plot.x + 4, Math.min(plot.x + plot.w - labelWidth - 4, endpointX + 9));
+      const labelY = Math.max(plot.y + 4, Math.min(plot.y + plot.h - 20, endpointY - 10));
+      chartDrawBackedText(canvas, fonts.bold, label, labelX, labelY, 12, item.color, labelWidth, [13, 17, 23, 232]);
+    }
   });
 
-  canvas.drawFontText(fonts.regular, `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`, 58, height - 56, 16, color.muted, 620);
+  canvas.drawFontText(fonts.regular, `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`, 58, height - 44, 16, color.muted, 620);
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function drawLeagueMemberGrowthSummary(canvas, fonts, series, hours, area, color) {
+  canvas.fillRect(area.x, area.y, area.w, area.h, [13, 19, 27, 245]);
+  canvas.fillRect(area.x, area.y, area.w, 1, color.line);
+  canvas.fillRect(area.x, area.y + area.h - 1, area.w, 1, color.line);
+  canvas.fillRect(area.x, area.y, 1, area.h, color.line);
+  canvas.fillRect(area.x + area.w - 1, area.y, 1, area.h, color.line);
+  canvas.drawFontText(fonts.bold, `Growth summary - last ${hours}h`, area.x + 18, area.y + 12, 16, color.white, 260);
+  canvas.drawFontText(fonts.regular, "Total change, current hourly rate, average hourly rate, and peak hour.", area.x + 18, area.y + 39, 12, color.muted, 520);
+
+  const cardGap = 14;
+  const cardY = area.y + 64;
+  const cardW = Math.floor((area.w - 36 - cardGap * 3) / 4);
+  const cardH = 38;
+
+  series.slice(0, 4).forEach((item, index) => {
+    const x = area.x + 18 + index * (cardW + cardGap);
+    const latest = item.latestGain || 0;
+    const total = Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0;
+    const avg = Number.isFinite(item.avgGain) ? item.avgGain : total / Math.max(1, hours);
+    const peak = Number.isFinite(item.peakGain) ? item.peakGain : 0;
+    canvas.fillRect(x, cardY, cardW, cardH, [9, 13, 19, 255]);
+    canvas.fillRect(x, cardY, 5, cardH, item.color);
+    canvas.fillRect(x, cardY + cardH - 1, cardW, 1, color.line);
+    canvas.drawFontText(fonts.bold, historyCardText(item.name, 18), x + 14, cardY + 5, 13, item.color, 118);
+    canvas.drawFontText(fonts.regular, `+${shortNumber(total)} total`, x + 142, cardY + 5, 12, color.white, 104);
+    canvas.drawFontText(fonts.regular, `${shortNumber(latest)}/h now`, x + 258, cardY + 5, 12, color.muted, 92);
+    canvas.drawFontText(fonts.regular, `${shortNumber(avg)}/h avg`, x + 14, cardY + 23, 11, color.muted, 92);
+    canvas.drawFontText(fonts.regular, `${shortNumber(peak)}/h peak`, x + 116, cardY + 23, 11, color.muted, 92);
+  });
 }
 
 function leagueChartMembers(payload) {
@@ -589,7 +654,8 @@ function leagueChartMembers(payload) {
 
 function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const bucketMs = 60 * 60 * 1000;
+  const bucketMs = 15 * 60 * 1000;
+  const hourlyWindowMs = 60 * 60 * 1000;
   const windowMs = hours * 60 * 60 * 1000;
   const history = Array.isArray(historyRows) ? historyRows : [];
   const currentAt = leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
@@ -621,39 +687,50 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
       .sort((a, b) => a.time - b.time);
     const points = [];
-    let sampleIndex = 0;
-    let lastValue = null;
-    let previousValue = null;
-    let hasBaseline = false;
+    let currentSampleIndex = 0;
+    let baselineSampleIndex = 0;
+    let lastCurrentSample = null;
+    let lastBaselineSample = null;
+    let previousCurrentValue = null;
     let lastBucketWasGap = false;
 
     for (const bucketEnd of buckets) {
-      while (sampleIndex < samples.length && samples[sampleIndex].time <= bucketEnd) {
-        lastValue = samples[sampleIndex].points;
-        sampleIndex += 1;
+      while (currentSampleIndex < samples.length && samples[currentSampleIndex].time <= bucketEnd) {
+        lastCurrentSample = samples[currentSampleIndex];
+        currentSampleIndex += 1;
       }
 
-      if (!hasBaseline) {
-        if (lastValue !== null) {
-          previousValue = lastValue;
-          hasBaseline = true;
-        }
+      const baselineTime = bucketEnd - hourlyWindowMs;
+      while (baselineSampleIndex < samples.length && samples[baselineSampleIndex].time <= baselineTime) {
+        lastBaselineSample = samples[baselineSampleIndex];
+        baselineSampleIndex += 1;
+      }
+
+      if (!lastCurrentSample || !lastBaselineSample) {
         lastBucketWasGap = true;
         continue;
       }
 
-      if (previousValue === null || lastValue === null) {
-        lastBucketWasGap = true;
-        continue;
-      }
-
-      const hourlyGain = Math.max(0, lastValue - previousValue);
-      points.push({ t: bucketEnd, value: hourlyGain, breakBefore: lastBucketWasGap });
-      previousValue = lastValue;
+      const hourlyGain = Math.max(0, lastCurrentSample.points - lastBaselineSample.points);
+      const intervalGain = previousCurrentValue === null
+        ? 0
+        : Math.max(0, lastCurrentSample.points - previousCurrentValue);
+      points.push({
+        t: bucketEnd,
+        startT: Math.max(start, bucketEnd - bucketMs),
+        value: hourlyGain,
+        intervalGain,
+        breakBefore: lastBucketWasGap
+      });
+      previousCurrentValue = lastCurrentSample.points;
       lastBucketWasGap = false;
     }
 
-    const latestGain = points[points.length - 1]?.value ?? Math.max(0, member.gain1h || 0);
+    const latestGain = member.gain1h !== null
+      ? Math.max(0, member.gain1h || 0)
+      : points[points.length - 1]?.value ?? 0;
+    const totalGain = points.reduce((sum, point) => sum + Math.max(0, point.intervalGain ?? point.value ?? 0), 0);
+    const peakGain = points.reduce((max, point) => Math.max(max, Math.max(0, point.value || 0)), 0);
 
     return {
       id: member.id,
@@ -661,7 +738,10 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       color: colors[index % colors.length],
       points,
       latestGain,
-      gain: points.reduce((sum, point) => sum + Math.max(0, point.value || 0), 0)
+      gain: totalGain,
+      totalGain,
+      avgGain: totalGain / Math.max(1, hours),
+      peakGain
     };
   });
 }
