@@ -128,7 +128,7 @@ const RUN_KEY="active";
 const REFRESH_INTERVAL_MS=5*60*1000;
 const LEAGUE_FETCH_CONCURRENCY=4;
 const LEAGUE_FETCH_STAGGER_MS=150;
-const CACHE_KEY="c0ld:tracked-leagues:v1";
+const CACHE_KEY="c0ld:tracked-leagues:v2";
 const TRACKED_LEAGUES=[
   {name:"NDCT",id:"6b1bc62843d449dfaca5071824981efd",rank:1},
   {name:"YAMO",id:"98144de6e8d6406a92b8599fe2fac4f8",rank:2},
@@ -209,7 +209,7 @@ function snapshotTime(data){const ms=new Date(data?.snapshot_at||0).getTime();re
 async function fetchTopLeagueSnapshot(limit,list){const url=new URL(API+"/api/leagues/top-leagues");url.searchParams.set("limit",String(limit));if(list)url.searchParams.set("list",list);addRun(url);return getJson(url)}
 function topLeagueMap(data){return new Map((data?.rows||[]).flatMap(row=>[[norm(row.league_name),row],[String(row.league_id||""),row]].filter(pair=>pair[0])))}
 async function fetchTopLeagueContext(){try{const [topData,allData]=await Promise.all([fetchTopLeagueSnapshot(1000,"top"),fetchTopLeagueSnapshot(1000,"all").catch(()=>null)]);return topLeagueMap(allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData)}catch{return new Map()}}
-async function fetchDiscoveredLeagues(){try{const url=new URL(API+"/api/leagues/c0ld-discovered");url.searchParams.set("limit","1000");addRun(url);const data=await getJson(url);return (data.rows||[]).map(discoveredLeagueRow)}catch{return []}}
+async function fetchDiscoveredLeagues(){try{const url=new URL(API+"/api/leagues/c0ld-discovered");url.searchParams.set("limit","1000");addRun(url);const data=await getJson(url);return (data.rows||[]).map(discoveredLeagueRow).filter(row=>trackedLeagueFor(row))}catch{return []}}
 function topRowFor(entry,topRows){return topRows.get(norm(entry.name))||topRows.get(String(entry.id||""))||null}
 function finiteOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function sumCurrentGain(current,key){const values=(current?.rows||[]).map(row=>finiteOrNull(row[key])).filter(value=>value!==null);if(!values.length)return null;return values.reduce((sum,value)=>sum+value,0)}
@@ -240,10 +240,8 @@ async function loadData(){
     if(!leagueRows.length)renderCached();
     setStatus("Refreshing stored c0ld leagues. Points refresh every 5 minutes; outside Top 1,000 ranks use seeded rank windows when that refresh runs.");
     const topRowsPromise=fetchTopLeagueContext();
-    const discoveredPromise=fetchDiscoveredLeagues();
     await Promise.all([loadKnownPlayers(),loadKnownC0ldMembers()]);
     const topRows=await topRowsPromise;
-    const discoveredRows=await discoveredPromise;
     const built=await mapLimit(TRACKED_LEAGUES,LEAGUE_FETCH_CONCURRENCY,async (entry,index)=>{
       try{
         if(index>0)await sleep(LEAGUE_FETCH_STAGGER_MS);
@@ -254,7 +252,7 @@ async function loadData(){
         return leagueBase(entry,null,topRowFor(entry,topRows));
       }
     });
-    leagueRows=mergeLeagueRows(built,discoveredRows).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
+    leagueRows=built.sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));
     lastUpdated=leagueRows.map(row=>row.snapshot_at).filter(Boolean).sort().pop()||null;
     memberRows=rankMembers(leagueRows.flatMap(row=>row.matches.map(member=>({...member,league_name:row.league_name,league_id:row.league_id,league_icon:row.league_icon,league_rank:row.rank}))));
     render();
