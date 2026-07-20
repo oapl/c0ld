@@ -82,6 +82,11 @@ export default {
         return await registerDuckCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-lg-command") {
+        requireAdmin(request, env);
+        return await registerLgCommand(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/commands") {
         requireAdmin(request, env);
         return await listCommands(url, env);
@@ -202,6 +207,27 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "lg") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "info") {
+      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+    }
+
+    const leagueName = getCommandOption(interaction, "name");
+    if (!leagueName) {
+      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+    }
+
+    ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, leagueName));
+
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
   if (commandName !== "search") {
     return interactionJson(messageResponse(`Unknown command: ${commandName || "none"}`));
   }
@@ -275,6 +301,114 @@ async function buildSearchResponse(query, env) {
       flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
     }
   };
+}
+
+async function completeLeagueInfoInteraction(interaction, env, leagueName) {
+  try {
+    await editOriginalInteraction(interaction, await buildLeagueInfoMessage(leagueName, env));
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `League lookup failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+async function buildLeagueInfoMessage(leagueName, env) {
+  const payload = await fetchLeagueCurrentPayload(leagueName, env);
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const members = rows
+    .map(row => ({
+      row,
+      name: leagueMemberName(row),
+      points: finiteNumber(row.total_points ?? row.points),
+      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
+    }))
+    .filter(item => item.points !== null)
+    .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)))
+    .slice(0, 4);
+
+  const leaguePoints = finiteNumber(payload.league_points)
+    ?? members.reduce((sum, item) => sum + Math.max(0, item.points || 0), 0);
+  const hourlyGain = rows
+    .map(row => finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain))
+    .filter(value => value !== null)
+    .reduce((sum, value) => sum + value, 0);
+
+  const contributions = members.length
+    ? members.map((item, index) => `#${index + 1} ${escapeDiscordMarkdown(item.name)} · ${shortNumber(item.points)} points · ${shortNumber(item.gain1h ?? 0)}/h`)
+    : ["No member contributions found."];
+
+  const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
+  const embed = {
+    title: `League ${displayLeagueName}`,
+    color: 0x58a6ff,
+    description: [
+      `Points: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
+      `Global Rank: ${rank(payload.league_rank)}`,
+      "",
+      "---------------------------------",
+      "",
+      "Contributions",
+      ...contributions
+    ].join("\n")
+  };
+
+  const thumbnailUrl = leagueIconUrl(payload.league_icon);
+  if (thumbnailUrl) {
+    embed.thumbnail = { url: thumbnailUrl };
+  }
+
+  return {
+    content: "",
+    embeds: [embed],
+    allowed_mentions: { parse: [] },
+    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+  };
+}
+
+async function fetchLeagueCurrentPayload(leagueName, env) {
+  const apiBase = String(env.LEAGUE_API_BASE || "https://yamo-league-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = leagueApiUrl(env, "/api/leagues/current", apiBase);
+  apiUrl.searchParams.set("league", leagueName);
+  apiUrl.searchParams.set("rank_lookup", "false");
+  apiUrl.searchParams.set("fresh", "1");
+
+  const response = await fetchLeagueApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-League-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `League API failed (${response.status}).`);
+  }
+
+  if (!Array.isArray(payload.rows) || payload.rows.length === 0) {
+    throw httpError(404, `No stored league data found for ${leagueName}.`);
+  }
+
+  return payload;
+}
+
+function leagueMemberName(row) {
+  return row.display_name || row.username || `user_${row.user_id}`;
+}
+
+function leagueIconUrl(icon) {
+  const text = String(icon || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+
+  const assetMatch = text.match(/rbxassetid:\/\/(\d+)/i);
+  const assetId = assetMatch ? assetMatch[1] : /^\d+$/.test(text) ? text : "";
+  return assetId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(assetId)}` : "";
 }
 
 function handleHistoryComponent(interaction, env, ctx) {
@@ -2398,6 +2532,10 @@ async function registerDuckCommand(url, env) {
   return registerCommand(url, env, duckCommandPayload());
 }
 
+async function registerLgCommand(url, env) {
+  return registerCommand(url, env, lgCommandPayload());
+}
+
 async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
@@ -2921,6 +3059,25 @@ async function fetchClanApi(env, url, init) {
   return fetch(request);
 }
 
+function leagueApiUrl(env, path, fallbackBase) {
+  const base = hasLeagueApiServiceBinding(env)
+    ? "https://yamo-league-api-worker.service"
+    : fallbackBase;
+  return new URL(path, base);
+}
+
+function hasLeagueApiServiceBinding(env) {
+  return Boolean(env?.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function");
+}
+
+async function fetchLeagueApi(env, url, init) {
+  const request = new Request(url.toString(), init);
+  if (hasLeagueApiServiceBinding(env)) {
+    return env.LEAGUE_API_WORKER.fetch(request);
+  }
+  return fetch(request);
+}
+
 async function fetchDiscordDebugEndpoint(env, path) {
   const res = await fetch(`${DISCORD_API_BASE}${path}`, {
     headers: discordBotHeaders(env)
@@ -3095,6 +3252,30 @@ function duckCommandPayload() {
   };
 }
 
+function lgCommandPayload() {
+  return {
+    name: "lg",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "League lookup tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "info",
+        description: "Show current league points, rank, and top contributions.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "League name, for example dezzz",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          }
+        ]
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -3171,9 +3352,21 @@ async function verifyDiscordRequest(request, env, body) {
 }
 
 function getCommandOption(interaction, name) {
-  const option = (interaction.data?.options || [])
-    .find(item => String(item?.name || "").toLowerCase() === name);
-  return String(option?.value || "").trim();
+  const targetName = String(name || "").toLowerCase();
+  const stack = [...(interaction.data?.options || [])];
+
+  while (stack.length) {
+    const option = stack.shift();
+    if (String(option?.name || "").toLowerCase() === targetName && option?.value !== undefined) {
+      return String(option.value || "").trim();
+    }
+
+    if (Array.isArray(option?.options)) {
+      stack.push(...option.options);
+    }
+  }
+
+  return "";
 }
 
 function getSubcommandName(interaction) {
@@ -3219,6 +3412,11 @@ function formatClanRank(row, run) {
 function positiveInteger(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+function finiteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function shortNumber(value) {
