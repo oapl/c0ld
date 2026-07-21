@@ -3,6 +3,9 @@
   const GOLD = "#d29922";
   const GOLD_SOFT = "rgba(210,153,34,.14)";
   const AUTH_LINK = ["auth.html", "Auth"];
+  const PUBLIC_TOOL_LINKS = [
+    ["loadout-optimizer.html", "Loadout Optimizer"]
+  ];
 
   const MENUS = [
     {
@@ -89,7 +92,7 @@
 
   function ensureAuthLink(root) {
     const menu = toolsMenu(root);
-    const list = menu?.querySelector(".lookup-menu-list");
+    const list = menu?.querySelector(".lookup-menu-list, .lookup-panel");
     if (!list || list.querySelector('a[href="auth.html"]')) return;
 
     const klass = buttonClass(root);
@@ -98,6 +101,25 @@
     link.href = AUTH_LINK[0];
     link.textContent = AUTH_LINK[1];
     list.appendChild(link);
+  }
+
+  function ensurePublicToolLinks(root) {
+    const menu = toolsMenu(root);
+    const list = menu?.querySelector(".lookup-menu-list, .lookup-panel");
+    if (!list) return;
+
+    const klass = buttonClass(root);
+    const authLink = list.querySelector('a[href="auth.html"]');
+    for (const [href, label] of PUBLIC_TOOL_LINKS) {
+      if (list.querySelector(`a[href="${href}"]`)) continue;
+
+      const link = document.createElement("a");
+      link.className = `${klass} ${currentFile() === href.toLowerCase() ? "active" : ""}`.trim();
+      link.href = href;
+      link.textContent = label;
+      if (authLink) list.insertBefore(link, authLink);
+      else list.appendChild(link);
+    }
   }
 
   function menuHasCurrentFile(menu) {
@@ -151,6 +173,7 @@
     if (!root || root.dataset.protectedMenusLoading === "1") return;
 
     consumeCallbackToken();
+    ensurePublicToolLinks(root);
     ensureAuthLink(root);
     root.querySelectorAll(".c0ld-protected-menu").forEach(menu => menu.remove());
     root.dataset.protectedMenusLoaded = "0";
