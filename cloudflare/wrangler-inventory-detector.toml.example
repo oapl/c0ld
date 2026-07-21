@@ -1,5 +1,5 @@
 name = "inventory-detector-worker"
-main = "inventory-detector-worker.js"
+main = "inventory-detector-worker-entry.js"
 compatibility_date = "2026-07-17"
 
 [vars]
