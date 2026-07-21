@@ -6,6 +6,7 @@ const OAUTH_STATES_TABLE = "ps99_inventory_oauth_states";
 const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
+const BIG_GAMES_PET_COLLECTION_URL = "https://ps99.biggamesapi.io/api/collection/Pets";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
@@ -14,7 +15,25 @@ const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
+const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
+const FEATURED_EVENT_PETS = [
+  { key: "elephant", name: "War Elephant" },
+  { key: "jaguar", name: "Warrior Jaguar" },
+  { key: "peacock", name: "Jewel Peacock" },
+  { key: "genie", name: "Genie Fox" }
+];
+const EVENT_PET_NAMES = [
+  "Caveman Bear", "Mammoth Elephant", "Bastet Cat", "Horus Falcon",
+  "Triumphant Eagle", "Legionary Bear", "Fenrir Wolf", "Druid Owl",
+  "Knight Corgi", "Crusader Dragon", "Temple Toucan", "Naga Cobra",
+  "War Elephant", "Warrior Jaguar", "Steppe Wolf", "Samurai Kitsune",
+  "Jewel Peacock", "Genie Fox"
+];
+
+let petCatalogCache = null;
+let petCatalogExpiresAt = 0;
+let petCatalogPromise = null;
 
 export default {
   async fetch(request, env) {
@@ -540,7 +559,15 @@ async function handleLatest(request, env) {
   if (!snapshot) return json({ ok: false, message: "No inventory snapshots found." }, 404);
   const includeItems = parseBool(url.searchParams.get("include_items")) !== false;
   const items = includeItems ? await getSnapshotItems(env, snapshot.id) : undefined;
-  return cacheJson({ ok: true, snapshot: lightSnapshot(snapshot), source: inventorySourceMeta(snapshot.raw), ...(includeItems ? { items } : {}) }, env);
+  const includeDamage = includeItems && parseBool(url.searchParams.get("include_damage")) === true;
+  const damageSummary = includeDamage ? await buildInventoryDamageSummary(items, env) : undefined;
+  return cacheJson({
+    ok: true,
+    snapshot: lightSnapshot(snapshot),
+    source: inventorySourceMeta(snapshot.raw),
+    ...(includeItems ? { items } : {}),
+    ...(includeDamage ? { damage_summary: damageSummary } : {})
+  }, env);
 }
 
 async function handleDiff(request, env) {
@@ -1068,6 +1095,244 @@ function normalizeStoredItem(item) {
     variant,
     icon: source.icon || null
   };
+}
+
+async function buildInventoryDamageSummary(items, env) {
+  const eventNames = new Map(EVENT_PET_NAMES.map(name => [normalizePetName(name), name]));
+  const featuredNames = new Map(FEATURED_EVENT_PETS.map(pet => [normalizePetName(pet.name), pet]));
+  const categories = new Map([
+    ["other", createDamageCategory("other", "Other")],
+    ...FEATURED_EVENT_PETS.map(pet => [pet.key, createDamageCategory(pet.key, pet.name)])
+  ]);
+
+  let catalog = { powers: new Map(), source: "unavailable", warning: null };
+  try {
+    catalog = await getPetPowerCatalog(env);
+  } catch (error) {
+    catalog.warning = error?.message || String(error);
+  }
+
+  const unresolved = new Set();
+  let usedItemPower = false;
+  let usedOverride = false;
+  let usedCatalog = false;
+  let exact = true;
+
+  for (const item of items || []) {
+    const normalizedName = normalizePetName(item?.display_name || item?.item_id);
+    if (!eventNames.has(normalizedName)) continue;
+
+    const quantity = Math.max(0, Math.floor(Number(itemCount(item)) || 0));
+    if (!quantity) continue;
+
+    const categoryKey = featuredNames.get(normalizedName)?.key || "other";
+    const category = categories.get(categoryKey);
+    category.count += quantity;
+
+    const resolved = resolveOwnedPetPower(item, normalizedName, catalog.powers);
+    if (!resolved || !(resolved.power > 0)) {
+      unresolved.add(eventNames.get(normalizedName));
+      category.unresolved.add(eventNames.get(normalizedName));
+      continue;
+    }
+
+    category.damage += resolved.power * quantity;
+    category.resolved_count += quantity;
+    exact = exact && resolved.exact;
+    usedItemPower = usedItemPower || resolved.source === "inventory";
+    usedOverride = usedOverride || resolved.source === "override";
+    usedCatalog = usedCatalog || resolved.source === "catalog";
+  }
+
+  const ordered = [categories.get("other"), ...FEATURED_EVENT_PETS.map(pet => categories.get(pet.key))];
+  const totalCount = ordered.reduce((sum, category) => sum + category.count, 0);
+  const totalDamage = ordered.reduce((sum, category) => sum + category.damage, 0);
+  const resolvedCount = ordered.reduce((sum, category) => sum + category.resolved_count, 0);
+  const complete = unresolved.size === 0;
+  const available = totalDamage > 0;
+  const source = [usedItemPower && "inventory", usedOverride && "override", usedCatalog && "BIG Games Pets catalog"].filter(Boolean).join(" + ") || catalog.source;
+  const message = !available
+    ? "Pet power is not available in the stored inventory or BIG Games Pets catalog. Set EVENT_PET_POWER_JSON to supply verified values."
+    : !complete
+      ? `Damage percentages cover ${resolvedCount.toLocaleString("en-US")} of ${totalCount.toLocaleString("en-US")} listed event pets; unresolved pets are excluded.`
+      : !exact
+        ? "Damage percentages use base pet power for variants without a variant-specific power value."
+        : null;
+
+  return {
+    available,
+    complete,
+    exact: available && complete && exact,
+    source,
+    total_count: totalCount,
+    resolved_count: resolvedCount,
+    total_damage: totalDamage,
+    unresolved_pets: [...unresolved],
+    warning: catalog.warning || null,
+    message,
+    categories: ordered.map(category => ({
+      key: category.key,
+      name: category.name,
+      count: category.count,
+      resolved_count: category.resolved_count,
+      damage: category.damage,
+      damage_percent: available ? (category.damage / totalDamage) * 100 : null,
+      unresolved_pets: [...category.unresolved]
+    }))
+  };
+}
+
+function createDamageCategory(key, name) {
+  return { key, name, count: 0, resolved_count: 0, damage: 0, unresolved: new Set() };
+}
+
+async function getPetPowerCatalog(env) {
+  const overrides = parsePetPowerOverrides(env.EVENT_PET_POWER_JSON);
+  const now = Date.now();
+  if (petCatalogCache && now < petCatalogExpiresAt) return mergePetPowerCatalog(petCatalogCache, overrides);
+  if (!petCatalogPromise) {
+    petCatalogPromise = (async () => {
+      const endpoint = String(env.BIG_GAMES_PET_COLLECTION_URL || BIG_GAMES_PET_COLLECTION_URL).trim();
+      const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`BIG Games Pets catalog failed (${response.status}).`);
+      const payload = text ? JSON.parse(text) : {};
+      const rows = Array.isArray(payload) ? payload : Array.isArray(payload.data) ? payload.data : [];
+      const powers = new Map();
+      for (const row of rows) {
+        const name = normalizePetName(row?.configName || row?.configData?.name || row?.name);
+        if (!name) continue;
+        const power = extractCatalogPower(row);
+        if (power) powers.set(name, power);
+      }
+      return { powers, source: "BIG Games Pets catalog", warning: null };
+    })();
+  }
+  try {
+    petCatalogCache = await petCatalogPromise;
+    const seconds = clampNumber(env.PET_CATALOG_CACHE_SECONDS, DEFAULT_PET_CATALOG_CACHE_SECONDS, 60, 86400);
+    petCatalogExpiresAt = Date.now() + seconds * 1000;
+  } catch (error) {
+    petCatalogCache = {
+      powers: new Map(),
+      source: "unavailable",
+      warning: error?.message || String(error)
+    };
+    petCatalogExpiresAt = Date.now() + 60 * 1000;
+  } finally {
+    petCatalogPromise = null;
+  }
+  return mergePetPowerCatalog(petCatalogCache, overrides);
+}
+
+function mergePetPowerCatalog(catalog, overrides) {
+  const powers = new Map(catalog?.powers || []);
+  for (const [name, value] of overrides) powers.set(name, { ...value, source: "override" });
+  return { powers, source: overrides.size ? `${catalog?.source || "unavailable"} + override` : catalog?.source || "unavailable", warning: catalog?.warning || null };
+}
+
+function parsePetPowerOverrides(raw) {
+  const powers = new Map();
+  if (!raw) return powers;
+  try {
+    const parsed = JSON.parse(String(raw));
+    for (const [name, value] of Object.entries(parsed || {})) {
+      const normalized = normalizePetName(name);
+      const power = normalizePowerRecord(value, "override");
+      if (normalized && power) powers.set(normalized, power);
+    }
+  } catch {}
+  return powers;
+}
+
+function resolveOwnedPetPower(item, normalizedName, catalogPowers) {
+  const direct = extractPowerValue(item);
+  if (direct > 0) return { power: direct, exact: true, source: "inventory" };
+
+  const catalog = catalogPowers.get(normalizedName);
+  if (catalog) return selectVariantPower(catalog, item, catalog.source || "catalog");
+  return null;
+}
+
+function extractCatalogPower(row) {
+  const base = extractPowerValue(row?.configData) || extractPowerValue(row);
+  const variants = {};
+  for (const [label, aliases] of Object.entries({
+    Normal: ["normalpower", "normaldamage", "normalstrength"],
+    Golden: ["goldenpower", "goldendamage", "goldenstrength", "goldpower", "golddamage", "goldstrength"],
+    Rainbow: ["rainbowpower", "rainbowdamage", "rainbowstrength"],
+    "Shiny Normal": ["shinypower", "shinydamage", "shinystrength", "shinynormalpower", "shinynormaldamage", "shinynormalstrength"],
+    "Shiny Golden": ["shinygoldenpower", "shinygoldendamage", "shinygoldenstrength"],
+    "Shiny Rainbow": ["shinyrainbowpower", "shinyrainbowdamage", "shinyrainbowstrength"]
+  })) {
+    const value = findNumericField(row?.configData || row, new Set(aliases));
+    if (value > 0) variants[label] = value;
+  }
+  return base > 0 || Object.keys(variants).length ? { base: base || null, variants, source: "catalog" } : null;
+}
+
+function normalizePowerRecord(value, source) {
+  const scalar = Number(value);
+  if (Number.isFinite(scalar) && scalar > 0) return { base: scalar, variants: {}, source };
+  if (!value || typeof value !== "object") return null;
+  const variants = {};
+  let base = null;
+  for (const [key, candidate] of Object.entries(value)) {
+    const number = Number(candidate);
+    if (!Number.isFinite(number) || number <= 0) continue;
+    const normalizedKey = normalizeVariantName(key);
+    if (normalizedKey === "Normal" || ["base", "power", "damage", "strength"].includes(String(key).toLowerCase())) base = number;
+    else variants[normalizedKey] = number;
+  }
+  return base || Object.keys(variants).length ? { base, variants, source } : null;
+}
+
+function selectVariantPower(record, item, source) {
+  const variant = normalizeVariantName(item?.variant || getVariant(item));
+  const exact = Number(record?.variants?.[variant]);
+  if (Number.isFinite(exact) && exact > 0) return { power: exact, exact: true, source };
+  const base = Number(record?.base);
+  if (Number.isFinite(base) && base > 0) return { power: base, exact: variant === "Normal", source };
+  return null;
+}
+
+function extractPowerValue(value) {
+  return findNumericField(value, new Set(["power", "basepower", "petpower", "damage", "basedamage", "petdamage", "strength", "basestrength", "petstrength"]));
+}
+
+function findNumericField(value, acceptedKeys, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 5) return 0;
+  for (const [key, candidate] of Object.entries(value)) {
+    const normalizedKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (acceptedKeys.has(normalizedKey)) {
+      const number = Number(candidate);
+      if (Number.isFinite(number) && number > 0) return number;
+    }
+  }
+  for (const candidate of Object.values(value)) {
+    const nested = findNumericField(candidate, acceptedKeys, depth + 1);
+    if (nested > 0) return nested;
+  }
+  return 0;
+}
+
+function normalizePetName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeVariantName(value) {
+  const normalized = String(value || "Normal").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (normalized.includes("shiny") && normalized.includes("rainbow")) return "Shiny Rainbow";
+  if (normalized.includes("shiny") && (normalized.includes("golden") || normalized.includes("gold"))) return "Shiny Golden";
+  if (normalized.includes("shiny")) return "Shiny Normal";
+  if (normalized.includes("rainbow")) return "Rainbow";
+  if (normalized.includes("golden") || normalized.includes("gold")) return "Golden";
+  return "Normal";
+}
+
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
 }
 async function supabaseSelect(env, table, params) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { headers: supabaseHeaders(env) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("select", text)); return text ? JSON.parse(text) : []; }
 async function supabaseSelectAll(env, table, params, maxRows = 10000) { const rows = []; const pageSize = 1000; for (let offset = 0; offset < maxRows; offset += pageSize) { const page = await supabaseSelect(env, table, { ...(params || {}), limit: String(Math.min(pageSize, maxRows - offset)), offset: String(offset) }); rows.push(...page); if (page.length < pageSize) break; } return rows; }

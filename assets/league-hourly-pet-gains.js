@@ -10,11 +10,11 @@
   const meta=document.getElementById("hourly-pet-gains-meta");
   const memberSelect=document.getElementById("hourly-pet-member-select");
   const title=document.getElementById("hourly-pet-gains-title");
-  const periodLabel=document.getElementById("hourly-pet-period-label");
+  const headRow=document.getElementById("hourly-pet-gains-head");
   const connectButton=document.getElementById("hourly-pet-connect");
   const connectStatus=document.getElementById("hourly-pet-connect-status");
   const viewButtons=[...document.querySelectorAll("[data-pet-view]")];
-  if(!section||!tbody||!meta||!memberSelect||!title||!periodLabel||!connectButton||!connectStatus)return;
+  if(!section||!tbody||!meta||!memberSelect||!title||!headRow||!connectButton||!connectStatus)return;
 
   const INVENTORY_API="https://inventory-detector-worker.opal-dde.workers.dev";
   const LEAGUE_API="https://yamo-league-api-worker.opal-dde.workers.dev";
@@ -31,6 +31,14 @@
     {key:"peacock",name:"Jewel Peacock"},
     {key:"genie",name:"Genie Fox"}
   ];
+  const TOTAL_COLUMNS=[{key:"other",name:"Other"},...PETS];
+  const EVENT_PET_NAMES=new Set([
+    "Caveman Bear","Mammoth Elephant","Bastet Cat","Horus Falcon",
+    "Triumphant Eagle","Legionary Bear","Fenrir Wolf","Druid Owl",
+    "Knight Corgi","Crusader Dragon","Temple Toucan","Naga Cobra",
+    "War Elephant","Warrior Jaguar","Steppe Wolf","Samurai Kitsune",
+    "Jewel Peacock","Genie Fox"
+  ].map(name=>name.toLowerCase()));
 
   function esc(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]))}
   function count(value){const number=Number(value);return Number.isFinite(number)&&number>0?Math.floor(number):0}
@@ -38,6 +46,12 @@
   function petName(row){return String(row?.item_id||row?.display_name||"").trim().toLowerCase()}
   function usableName(value,userId){const name=String(value||"").trim(),id=String(userId||"");return name&&name!==id&&!/^user[ _-]?\d+$/i.test(name)?name:""}
   function selectedName(){const option=memberSelect.selectedOptions?.[0];return option?.dataset?.name||option?.textContent||memberSelect.value}
+  function columnCount(){return activeView==="totals"?7:6}
+  function emptyRow(message){return '<tr><td colspan="'+columnCount()+'" class="empty">'+message+'</td></tr>'}
+  function renderHead(){
+    const columns=activeView==="totals"?TOTAL_COLUMNS:PETS;
+    headRow.innerHTML='<th id="hourly-pet-period-label">'+(activeView==="totals"?"Snapshot":"Hour")+'</th>'+columns.map(pet=>'<th class="numeric">'+esc(pet.name)+'</th>').join("")+'<th class="numeric">Total</th>';
+  }
   function leagueKey(value){return String(value||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
   function oauthReturnUrl(){const url=new URL(location.href);url.searchParams.delete("inventory_oauth");url.searchParams.delete("inventory_message");url.searchParams.delete("user_id");url.searchParams.delete("pulled");url.searchParams.delete("forced");url.searchParams.delete("snapshot_at");url.searchParams.delete("connected");return url.toString()}
   function hourLabel(row){
@@ -63,9 +77,8 @@
   function renderHourly(rows,username){
     const windows=(rows||[]).map(summarize).reverse();
     title.textContent="Hourly Pet Gains";
-    periodLabel.textContent="Hour";
     meta.textContent=username+" · "+windows.length+" completed hour"+(windows.length===1?"":"s")+" · variants combined";
-    if(!windows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No completed inventory hours are available yet.</td></tr>';return}
+    if(!windows.length){tbody.innerHTML=emptyRow("No completed inventory hours are available yet.");return}
     tbody.innerHTML=windows.map(row=>'<tr><td>'+esc(hourLabel(row))+'</td>'+PETS.map(pet=>gainCell(row.totals[pet.key])).join("")+gainCell(row.total,true)+'</tr>').join("");
   }
   function inventoryCount(value){
@@ -73,25 +86,35 @@
     return Number.isFinite(number)&&number>0?Math.floor(number):0;
   }
   function summarizeInventory(items){
-    const totals={elephant:0,jaguar:0,peacock:0,genie:0};
+    const totals={other:0,elephant:0,jaguar:0,peacock:0,genie:0};
     for(const item of items||[]){
       const name=petName(item),pet=PETS.find(candidate=>candidate.name.toLowerCase()===name);
       if(pet)totals[pet.key]+=inventoryCount(item.count??item.amount??item.quantity??item.qty);
+      else if(EVENT_PET_NAMES.has(name))totals.other+=inventoryCount(item.count??item.amount??item.quantity??item.qty);
     }
     return {totals,total:Object.values(totals).reduce((sum,value)=>sum+value,0)};
   }
-  function totalCell(value,total=false){
-    const number=inventoryCount(value),klass=number?"":"pet-zero";
-    return '<td class="numeric '+klass+(total?' pet-total':'')+'">'+esc(formatCount(number))+'</td>';
+  function totalCell(entry,total=false,damageAvailable=false,damageComplete=true){
+    const number=inventoryCount(entry?.count??entry),klass=number?"":"pet-zero";
+    const percent=Number(entry?.damage_percent);
+    const damage=damageAvailable&&Number.isFinite(percent)
+      ? '<div class="pet-damage-share'+(damageComplete?'':' partial')+'">'+esc(percent.toFixed(percent>=10?1:2))+'% damage'+(damageComplete?'':'*')+'</div>'
+      : '<div class="pet-damage-share unavailable">Damage unavailable</div>';
+    return '<td class="numeric '+klass+(total?' pet-total':'')+'"><div class="pet-count">'+esc(formatCount(number))+'</div>'+damage+'</td>';
   }
   function renderTotals(data,username){
-    const summary=summarizeInventory(data.items||[]);
+    const fallback=summarizeInventory(data.items||[]),damage=data.damage_summary||null;
+    const categoryMap=new Map((damage?.categories||[]).map(category=>[category.key,category]));
+    const categories=TOTAL_COLUMNS.map(column=>categoryMap.get(column.key)||{key:column.key,name:column.name,count:fallback.totals[column.key],damage_percent:null});
+    const summary={total:damage?.total_count??fallback.total,categories};
     const captured=new Date(data.snapshot?.captured_at||0);
     const stamp=Number.isNaN(captured.getTime())?"Latest snapshot":captured.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
     title.textContent="Inventory Pet Totals";
-    periodLabel.textContent="Snapshot";
-    meta.textContent=username+" · latest stored inventory · variants combined";
-    tbody.innerHTML='<tr><td>'+esc(stamp)+'</td>'+PETS.map(pet=>totalCell(summary.totals[pet.key])).join("")+totalCell(summary.total,true)+'</tr>';
+    const detail=damage?.message?" · "+damage.message:"";
+    meta.textContent=username+" · latest stored inventory · variants combined"+detail;
+    meta.title=damage?.source?"Damage source: "+damage.source:"";
+    const totalEntry={count:summary.total,damage_percent:damage?.available?100:null};
+    tbody.innerHTML='<tr><td>'+esc(stamp)+'</td>'+summary.categories.map(category=>totalCell(category,false,!!damage?.available,damage?.complete!==false)).join("")+totalCell(totalEntry,true,!!damage?.available,damage?.complete!==false)+'</tr>';
   }
   async function resolveRobloxNames(userIds){
     const names=new Map();
@@ -178,15 +201,16 @@
     return false;
   }
   async function load(userId=memberSelect.value){
-    if(!userId){meta.textContent="No league member selected";tbody.innerHTML='<tr><td colspan="6" class="empty">No league members are available.</td></tr>';return}
+    renderHead();
+    if(!userId){meta.textContent="No league member selected";tbody.innerHTML=emptyRow("No league members are available.");return}
     const version=++requestVersion,username=selectedName();
     meta.textContent="Loading "+username+"...";
-    tbody.innerHTML='<tr><td colspan="6" class="empty">Loading inventory data...</td></tr>';
+    tbody.innerHTML=emptyRow("Loading inventory data...");
     try{
       const path=activeView==="totals"?"/api/inventory/latest":"/api/inventory/hourly";
       const url=new URL(INVENTORY_API+path);
       url.searchParams.set("user_id",String(userId));
-      if(activeView==="totals")url.searchParams.set("include_items","1");
+      if(activeView==="totals"){url.searchParams.set("include_items","1");url.searchParams.set("include_damage","1")}
       else {url.searchParams.set("hours",String(HOURS));url.searchParams.set("synchronized","1")}
       url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"});
@@ -199,9 +223,8 @@
       if(version!==requestVersion)return;
       console.error("Pet inventory unavailable",error);
       title.textContent=activeView==="totals"?"Inventory Pet Totals":"Hourly Pet Gains";
-      periodLabel.textContent=activeView==="totals"?"Snapshot":"Hour";
       meta.textContent=username+" · no inventory history";
-      tbody.innerHTML='<tr><td colspan="6" class="empty">No inventory snapshots are available for '+esc(username)+' yet.</td></tr>';
+      tbody.innerHTML=emptyRow("No inventory snapshots are available for "+esc(username)+" yet.");
     }
   }
 
