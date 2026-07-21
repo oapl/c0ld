@@ -63,6 +63,8 @@ export default {
         response = await handleOAuthStatus(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/summary") {
         response = await handleOAuthSummary(env);
+      } else if (request.method === "POST" && url.pathname === "/api/inventory/retry") {
+        response = await handleInventoryRetry(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -254,7 +256,13 @@ async function handleOAuthCallback(request, env) {
     if (!forcedRefresh) {
       await markOAuthStateUsed(env, stateHash);
       return targetUserId
-        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" })
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Retry from the league page or wait for the next scheduled scan: ${forcedError?.message || forcedError}`, {
+            oauth_result: "connected_pending",
+            user_id: targetUserId,
+            connected: "1",
+            snapshot_ready: "0",
+            snapshot_state: "missing"
+          })
         : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${forcedError?.message || forcedError}`);
     }
     try {
@@ -263,7 +271,13 @@ async function handleOAuthCallback(request, env) {
     } catch (fallbackError) {
       await markOAuthStateUsed(env, stateHash);
       return targetUserId
-        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" })
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Retry from the league page or wait for the next scheduled scan: ${fallbackError?.message || fallbackError}`, {
+            oauth_result: "connected_pending",
+            user_id: targetUserId,
+            connected: "1",
+            snapshot_ready: "0",
+            snapshot_state: "missing"
+          })
         : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${fallbackError?.message || fallbackError}`);
     }
   }
@@ -299,14 +313,22 @@ async function handleOAuthCallback(request, env) {
     ingest = await ingestInventory(env, user, "oauth_callback", false, { force: true, rawInventory });
   } catch (error) {
     await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Use Pull Now to retry: ${error?.message || error}`, { user_id: targetUserId, connected: "1" });
+    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Retry from the league page or wait for the next scheduled scan: ${error?.message || error}`, {
+      oauth_result: "connected_pending",
+      user_id: targetUserId,
+      connected: "1",
+      snapshot_ready: "0",
+      snapshot_state: "missing"
+    });
   }
   await markOAuthStateUsed(env, stateHash);
 
-  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled.`, {
+  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled. Hourly gains will appear after two scheduled scans.`, {
     user_id: targetUserId,
     pulled: "1",
     forced: forcedRefresh ? "1" : "0",
+    snapshot_ready: "1",
+    snapshot_state: "ready",
     snapshot_at: ingest.snapshot?.captured_at || ""
   });
 }
@@ -314,7 +336,97 @@ async function handleOAuthCallback(request, env) {
 async function handleOAuthStatus(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID).trim();
-  return json({ ok: true, user_id: userId, ...(await oauthStatus(env, userId)) });
+  const access = await oauthStatus(env, userId);
+  const readiness = access.connected
+    ? await inventoryReadiness(env, userId)
+    : {
+        snapshot_ready: false,
+        snapshot_state: "disconnected",
+        snapshot_at: null,
+        snapshot_source: null,
+        hourly_ready: false,
+        hourly_rows: 0,
+        scheduled_snapshot_count: 0
+      };
+  return json({
+    ok: true,
+    user_id: userId,
+    ...access,
+    ...readiness,
+    connection_state: !access.connected ? "disconnected" : readiness.snapshot_ready ? "ready" : "pending_snapshot"
+  });
+}
+
+async function handleInventoryRetry(request, env) {
+  requireSupabase(env);
+  requireAllowedOrigin(request, env);
+
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("user_id") || "").trim();
+  if (!/^\d+$/.test(userId)) throw httpError(400, "A numeric Roblox user_id is required.");
+
+  const grant = await getUsableOAuthGrant(env, userId);
+  if (!grant) throw httpError(409, "Inventory authorization is not connected for this Roblox account.");
+
+  const before = await inventoryReadiness(env, userId);
+  if (before.snapshot_ready) {
+    return json({
+      ok: true,
+      skipped: true,
+      reason: "snapshot_already_exists",
+      user_id: userId,
+      ...before
+    });
+  }
+
+  const grantDetails = await findOAuthGrant(env, userId, "metadata");
+  const username = String(grantDetails?.metadata?.username || userId).trim();
+  const ingest = await ingestInventory(env, { user_id: userId, username }, "oauth_retry", false, { force: false });
+  const after = await inventoryReadiness(env, userId);
+  if (!after.snapshot_ready) throw httpError(502, "The inventory pull completed, but no readable snapshot was created.");
+
+  return json({
+    ok: true,
+    retried: true,
+    user_id: userId,
+    ingest,
+    ...after
+  });
+}
+
+async function inventoryReadiness(env, userId) {
+  requireSupabase(env);
+  const normalizedUserId = String(userId || "").trim();
+  const latest = await getLatestSnapshot(env, normalizedUserId);
+  if (!latest) {
+    return {
+      snapshot_ready: false,
+      snapshot_state: "missing",
+      snapshot_at: null,
+      snapshot_source: null,
+      hourly_ready: false,
+      hourly_rows: 0,
+      scheduled_snapshot_count: 0
+    };
+  }
+
+  const snapshots = await getUserSnapshots(env, normalizedUserId, 500);
+  const latestTime = new Date(latest.captured_at).getTime();
+  const cutoff = latestTime - 25 * 3600000;
+  const scheduled = sortAsc(snapshots).filter(snapshot =>
+    snapshot.source === "schedule" &&
+    new Date(snapshot.captured_at).getTime() >= cutoff
+  );
+
+  return {
+    snapshot_ready: true,
+    snapshot_state: "ready",
+    snapshot_at: latest.captured_at || null,
+    snapshot_source: latest.source || null,
+    hourly_ready: scheduled.length >= 2,
+    hourly_rows: Math.max(0, scheduled.length - 1),
+    scheduled_snapshot_count: scheduled.length
+  };
 }
 
 async function handleOAuthSummary(env) {
@@ -442,9 +554,13 @@ async function markOAuthStateUsed(env, stateHash) {
 function oauthCompletion(pending, success, message, params = {}) {
   if (pending?.return_url) {
     const target = new URL(pending.return_url);
-    target.searchParams.set("inventory_oauth", success ? "connected" : "error");
+    const oauthResult = String(params.oauth_result || (success ? "connected" : "error"));
+    target.searchParams.set("inventory_oauth", oauthResult);
     target.searchParams.set("inventory_message", message);
-    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null && value !== "") target.searchParams.set(key, String(value));
+    for (const [key, value] of Object.entries(params)) {
+      if (key === "oauth_result" || value === undefined || value === null || value === "") continue;
+      target.searchParams.set(key, String(value));
+    }
     return Response.redirect(target.toString(), 303);
   }
   return oauthHtml(success, message);
@@ -641,7 +757,8 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const rawItems = extractInventoryItems(raw);
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
-    throw httpError(502, "Big Games returned an empty inventory; snapshot was rejected to prevent a false inventory wipe.");
+    console.warn("Big Games inventory payload did not contain a recognized item array.", inventoryPayloadShape(raw));
+    throw httpError(502, "Big Games returned an empty or unrecognized inventory payload; snapshot was rejected to prevent a false inventory wipe.");
   }
 
   if (!options.force && envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true) && sourceMeta.fetched_at) {
@@ -938,6 +1055,33 @@ function extractInventoryItems(raw) {
   const candidates = [view?.data?.items, data?.inventory?.items, data?.items, raw?.items];
   for (const arr of candidates) if (Array.isArray(arr)) return arr;
   return findBestItemArray(raw);
+}
+
+function inventoryPayloadShape(raw) {
+  const data = raw?.data || raw;
+  const arrays = [];
+  collectArrayPaths(raw, "", arrays, 0);
+  return {
+    top_level_keys: raw && typeof raw === "object" ? Object.keys(raw).slice(0, 30) : [],
+    data_keys: data && typeof data === "object" ? Object.keys(data).slice(0, 30) : [],
+    recognized_inventory_available: data?.views?.inventory?.available ?? data?.inventory?.available ?? null,
+    array_paths: arrays.slice(0, 30)
+  };
+}
+
+function collectArrayPaths(value, path, output, depth) {
+  if (!value || typeof value !== "object" || depth > 5 || output.length >= 30) return;
+  if (Array.isArray(value)) {
+    output.push({ path: path || "$", length: value.length });
+    for (let index = 0; index < Math.min(value.length, 2); index++) {
+      collectArrayPaths(value[index], `${path}[${index}]`, output, depth + 1);
+    }
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectArrayPaths(child, path ? `${path}.${key}` : key, output, depth + 1);
+    if (output.length >= 30) break;
+  }
 }
 
 function inventorySourceMeta(raw) {
@@ -1345,6 +1489,16 @@ function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }
 function requireSupabase(env) { if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) throw httpError(500, "Missing Supabase environment variables."); }
 function requireAdmin(request, env) { const expected = env.INGEST_ADMIN_TOKEN; if (!expected) return; if ((request.headers.get("authorization") || "") !== `Bearer ${expected}`) throw httpError(401, "Unauthorized"); }
+function requireAllowedOrigin(request, env) {
+  const origin = String(request.headers.get("origin") || "").trim();
+  const allowed = String(env.ALLOWED_ORIGIN || "https://c0ld-clan.com")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (!origin || (!allowed.includes("*") && !allowed.includes(origin))) {
+    throw httpError(403, "This inventory retry origin is not allowed.");
+  }
+}
 function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
 async function trackedInventoryUsers(env) {
   const users = new Map(configuredUsers(env).map(user => [String(user.user_id), user]));
