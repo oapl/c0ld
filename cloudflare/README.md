@@ -202,6 +202,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
+| `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
+| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
+| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the persistent combined reward-cutoff Discord message. |
+| `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the reward-cutoff schedule interval. |
+| `REWARD_CUTOFFS_ROLE_ID` | Optional Discord role ID to mention when the persistent cutoff message is first created or updated. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
 | `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
 | `CLAN_ACTIVITY_CONCURRENCY` | Optional. Defaults to `8`; number of top-clan detail pulls to run at once during activity scans. |
@@ -281,6 +286,7 @@ The stop day and time come from the active battle metadata returned by the Big G
 | `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
 | `PS99_RESTARTS_WEBHOOK_URL` | Webhook for the `pet-sim-restarts` channel. |
 | `PS99_DEV_BLOG_WEBHOOK_URL` | Webhook for the `dev-blogs` channel. |
+| `REWARD_CUTOFFS_WEBHOOK_URL` | Webhook for the persistent combined player, clan, and league reward-cutoff message. |
 | `PS99_ALERT_WEBHOOK_URL` | Legacy fallback for PS99 update and restart alerts when their dedicated secrets are absent. |
 | `DISCORD_BOT_TOKEN` | Discord bot token. Required for CW_Bot message-link imports so the Worker can fetch the linked message. |
 | `OPENAI_API_KEY` | Optional OpenAI API key for CW_Bot image OCR. Store this as a secret. |
@@ -338,6 +344,7 @@ Useful endpoints:
 | `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
+| `/api/reward-cutoffs/post` | Protected `POST` endpoint that creates or edits the single combined Discord reward-cutoff message. Add `?force=1` to update it even when the calculated cutoffs are unchanged. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
 | `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
@@ -436,6 +443,29 @@ Replace `all` with `roblox-updates`, `ps99-updates`, `ps99-fflags`,
 `ps99-restarts`, or `ps99-dev-blogs` to test only one channel.
 
 Change `type=both` to `type=version` or `type=restart` to preview only one alert.
+
+### Persistent reward-cutoff post
+
+Run Supabase migration `031_reward_cutoff_alerts.sql`, add the
+`REWARD_CUTOFFS_WEBHOOK_URL` Worker secret, and deploy the clan Worker. The
+Worker stores the Discord message ID in `c0ld_reward_cutoff_alert_state` and
+edits that message whenever the player, clan, or league cutoff calculation
+changes. If the Discord message is deleted, the next refresh creates a
+replacement and stores its new ID.
+
+An optional `LEAGUE_API_WORKER` service binding targeting
+`yamo-league-api-worker` avoids an external HTTP hop for league milestones.
+Without it, `LEAGUE_API_BASE` is used.
+
+Create or force-refresh the persistent message manually:
+
+```powershell
+$token = "YOUR_INGEST_ADMIN_TOKEN"
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/reward-cutoffs/post?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
 
 To compare global-rank scan configs, deploy the Worker and run:
 

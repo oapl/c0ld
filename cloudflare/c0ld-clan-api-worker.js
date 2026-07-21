@@ -27,6 +27,7 @@ const ROBLOX_FFLAG_STATE_TABLE = "c0ld_roblox_fflag_state";
 const ROBLOX_FFLAG_EVENTS_TABLE = "c0ld_roblox_fflag_events";
 const PS99_DEV_BLOG_STATE_TABLE = "c0ld_ps99_dev_blog_state";
 const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
+const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -46,6 +47,10 @@ const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
+const DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES = 15;
+const DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
@@ -240,6 +245,11 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/ps99/alerts/test") {
         requireAdmin(request, env);
         response = await handlePs99AlertTest(env, url);
+      } else if (request.method === "POST" && url.pathname === "/api/reward-cutoffs/post") {
+        requireAdmin(request, env);
+        response = json(await postRewardCutoffAlert(env, { force: isForceRequest(url) }), 200, {
+          "Cache-Control": "no-store"
+        });
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -436,6 +446,13 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
 
   if (String(env.INGEST_PS99_DEV_BLOGS || "false").toLowerCase() === "true" && (force || shouldRunPs99DevBlogSchedule(env, scheduledAt))) {
     jobs.push({ label: "ps99-dev-blogs", run: () => handlePs99DevBlogIngest(env, "schedule", { force }) });
+  }
+
+  if (rewardCutoffAlertEnabled(env) && (force || shouldRunRewardCutoffSchedule(env, scheduledAt))) {
+    jobs.push({
+      label: "reward-cutoffs",
+      run: async () => json(await postRewardCutoffAlert(env, { force }), 200, { "Cache-Control": "no-store" })
+    });
   }
 
   for (const job of jobs) {
@@ -1149,6 +1166,242 @@ function rewardCutoffRanks(url, env, type) {
   return [...new Set(ranks)]
     .sort((a, b) => a - b)
     .slice(0, 20);
+}
+
+async function postRewardCutoffAlert(env, { force = false } = {}) {
+  requireSupabase(env);
+  const config = discordFeedConfig(env, "reward_cutoffs");
+  if (!config.configured) return emptyDiscordFeedResult(env, "reward_cutoffs", "webhook_not_configured");
+  if (!config.webhook_url) return emptyDiscordFeedResult(env, "reward_cutoffs", "invalid_webhook_url");
+
+  const dashboard = await buildRewardCutoffDashboard(env);
+  const payload = rewardCutoffDiscordPayload(dashboard);
+  const digest = await sha256Hex(stableJsonStringify({
+    players: dashboard.players?.cutoffs || [],
+    clans: dashboard.clans?.cutoffs || [],
+    leagues: dashboard.leagues?.cutoffs || []
+  }));
+  const stateRows = await supabaseSelect(env, REWARD_CUTOFF_ALERT_STATE_TABLE, {
+    select: "state_key,last_digest,last_message_id,last_posted_at,last_snapshot_at,updated_at",
+    state_key: "eq.main",
+    limit: "1"
+  });
+  const state = stateRows[0] || null;
+
+  if (!force && state?.last_digest === digest && state?.last_message_id) {
+    return {
+      ok: true,
+      configured: true,
+      posted: false,
+      updated: false,
+      skipped: true,
+      reason: "unchanged",
+      message_id: state.last_message_id,
+      digest
+    };
+  }
+
+  let alert = null;
+  if (state?.last_message_id) {
+    alert = await updateDiscordFeedMessage(env, "reward_cutoffs", state.last_message_id, payload);
+  }
+  if (!alert || alert.reason === "message_not_found") {
+    alert = await postDiscordFeedAlert(env, "reward_cutoffs", payload);
+  }
+  if (!alert.posted) return { ok: false, ...alert };
+
+  const now = new Date().toISOString();
+  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || now;
+  await supabaseUpsert(env, REWARD_CUTOFF_ALERT_STATE_TABLE, [{
+    state_key: "main",
+    last_digest: digest,
+    last_message_id: alert.message_id || state?.last_message_id || null,
+    last_posted_at: now,
+    last_snapshot_at: snapshotAt,
+    updated_at: now
+  }], "state_key");
+
+  return {
+    ok: true,
+    configured: true,
+    posted: true,
+    updated: Boolean(alert.updated),
+    created: !alert.updated,
+    message_id: alert.message_id || state?.last_message_id || null,
+    snapshot_at: snapshotAt,
+    digest,
+    dashboard
+  };
+}
+
+async function buildRewardCutoffDashboard(env) {
+  const baseUrl = "https://c0ld-clan-api-worker.service/api/reward-cutoffs";
+  const playerUrl = new URL(baseUrl);
+  playerUrl.searchParams.set("type", "players");
+  const clanUrl = new URL(baseUrl);
+  clanUrl.searchParams.set("type", "clans");
+  const playerRanks = rewardCutoffRanks(playerUrl, env, "players");
+  const clanRanks = rewardCutoffRanks(clanUrl, env, "clans");
+  const leagueRanks = leagueRewardCutoffRanks(env);
+  const [players, clans, leagues] = await Promise.all([
+    buildPlayerRewardCutoffs(playerUrl, env, playerRanks),
+    buildClanRewardCutoffs(clanUrl, env, clanRanks),
+    buildLeagueRewardCutoffs(env, leagueRanks)
+  ]);
+
+  return {
+    generated_at: new Date().toISOString(),
+    players,
+    clans,
+    leagues
+  };
+}
+
+async function buildLeagueRewardCutoffs(env, ranks) {
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
+  const attempts = [];
+  if (hasBinding) {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
+
+  let payload = null;
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/milestones`);
+    url.searchParams.set("ranks", ranks.join(","));
+    try {
+      const response = await attempt.fetcher(new Request(url.toString()));
+      const text = await response.text();
+      const parsed = parseJsonObject(text) || {};
+      if (response.ok && parsed.ok !== false) {
+        payload = parsed;
+        break;
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error && error.message ? error.message : String(error)}`;
+    }
+  }
+
+  if (!payload) {
+    throw httpError(502, `League reward cutoff API failed: ${lastFailure || "no endpoint was available"}`);
+  }
+  const byRank = new Map((Array.isArray(payload.rows) ? payload.rows : []).map(row => [toNumber(row.rank), row]));
+
+  return {
+    ok: true,
+    type: "leagues",
+    generated_at: payload.generated_at || new Date().toISOString(),
+    snapshot_at: payload.snapshot_at || null,
+    league_run_key: payload.league_run_key || null,
+    ranks,
+    cutoffs: ranks.map(rankValue => {
+      const row = byRank.get(rankValue);
+      return {
+        rank: rankValue,
+        label: leagueRewardRangeLabel(rankValue),
+        points: row && row.available !== false ? toNumber(row.points) : null,
+        available: Boolean(row && row.available !== false)
+      };
+    })
+  };
+}
+
+function leagueRewardCutoffRanks(env) {
+  const parsed = String(env.LEAGUE_REWARD_CUTOFF_RANKS || "")
+    .split(/[,\s]+/)
+    .map(value => Math.round(Number(value)))
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= 100000);
+  return [...new Set(parsed.length ? parsed : DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS)]
+    .sort((a, b) => a - b)
+    .slice(0, 20);
+}
+
+function rewardCutoffDiscordPayload(dashboard) {
+  const players = dashboard.players || {};
+  const clans = dashboard.clans || {};
+  const leagues = dashboard.leagues || {};
+  const eventName = players.event_name || players.display_name || clans.display_name || clans.battle || "Current event";
+  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at || new Date().toISOString();
+  const unix = Math.floor(new Date(snapshotAt).getTime() / 1000);
+  const divider = "────────────────────────";
+  const description = [
+    `**${eventName}** | Updated <t:${unix}:R>`,
+    "",
+    "**Global Player Leaderboard**",
+    ...rewardCutoffLines(players.cutoffs, playerRewardRangeLabel),
+    divider,
+    "**Clan Rewards**",
+    ...rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel),
+    divider,
+    "**League Rewards**",
+    ...rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel)
+  ].join("\n");
+
+  return {
+    embeds: [{
+      title: "Reward Cutoffs",
+      description: description.slice(0, 4096),
+      color: 0xff5f67,
+      timestamp: safeIso(snapshotAt) || new Date().toISOString()
+    }]
+  };
+}
+
+function rewardCutoffLines(cutoffs, labeler) {
+  const rows = Array.isArray(cutoffs) ? cutoffs : [];
+  return rows.length
+    ? rows.map(row => `**${labeler(toNumber(row.rank) || 0)}:** ${formatRewardCutoffPoints(row.points)}`)
+    : ["No cutoff data available."];
+}
+
+function playerRewardRangeLabel(rank) {
+  return `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function clanRewardRangeLabel(rank) {
+  const labels = {
+    1: "#1",
+    3: "#2-3",
+    10: "#4-10",
+    30: "Top 30",
+    50: "#11-50",
+    250: "#51-250",
+    500: "Top 500"
+  };
+  return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function leagueRewardRangeLabel(rank) {
+  const labels = {
+    1: "#1",
+    3: "#2-3",
+    15: "#4-15",
+    50: "#16-50",
+    100: "#51-100",
+    250: "#101-250",
+    2000: "#251-2000"
+  };
+  return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function formatRewardCutoffPoints(value) {
+  const points = toNumber(value);
+  return points === null ? "—" : `${Math.round(points).toLocaleString("en-US")} pts`;
+}
+
+function latestRewardCutoffSnapshot(dashboard) {
+  return [dashboard.players?.snapshot_at, dashboard.clans?.snapshot_at, dashboard.leagues?.snapshot_at]
+    .map(safeIso)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
 }
 
 async function handleGlobalRankStatus(request, env) {
@@ -6104,14 +6357,7 @@ async function postDiscordFeedAlert(env, feed, payload) {
   if (!config.webhook_url) return emptyDiscordFeedResult(env, feed, "invalid_webhook_url");
 
   const roleId = config.role_id;
-  const body = {
-    ...payload,
-    content: roleId ? `<@&${roleId}>` : (payload.content ?? null),
-    allowed_mentions: {
-      parse: [],
-      roles: roleId ? [roleId] : []
-    }
-  };
+  const body = discordFeedMessageBody(feed, payload, roleId);
   let lastError = "Discord webhook request failed.";
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -6164,6 +6410,141 @@ async function postDiscordFeedAlert(env, feed, payload) {
   };
 }
 
+async function updateDiscordFeedMessage(env, feed, messageId, payload) {
+  const config = discordFeedConfig(env, feed);
+  if (!config.configured) return emptyDiscordFeedResult(env, feed, "webhook_not_configured");
+  if (!config.webhook_url) return emptyDiscordFeedResult(env, feed, "invalid_webhook_url");
+  const webhookUrl = new URL(config.webhook_url);
+  webhookUrl.search = "";
+  webhookUrl.pathname = `${webhookUrl.pathname.replace(/\/$/, "")}/messages/${encodeURIComponent(messageId)}`;
+  webhookUrl.searchParams.set("wait", "true");
+  const body = discordFeedMessageBody(feed, payload, config.role_id);
+  let lastError = "Discord webhook message update failed.";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(webhookUrl.toString(), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const responseText = await response.text();
+      const responseBody = parseJsonObject(responseText) || {};
+      if (response.ok) {
+        return {
+          configured: true,
+          posted: true,
+          updated: true,
+          feed,
+          role_mentioned: Boolean(config.role_id),
+          message_id: stringOrNull(responseBody.id) || String(messageId)
+        };
+      }
+      if (response.status === 404) {
+        return {
+          configured: true,
+          posted: false,
+          updated: false,
+          feed,
+          reason: "message_not_found"
+        };
+      }
+      lastError = `Discord webhook update returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 300)}` : ""}`;
+      if (attempt < 3 && (response.status === 429 || response.status >= 500)) {
+        const retrySeconds = toNumber(responseBody.retry_after);
+        await sleep(response.status === 429 && retrySeconds !== null
+          ? clamp(retrySeconds * 1000, 500, 15000)
+          : attempt * 1000);
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err?.message || String(err);
+      if (attempt < 3) {
+        await sleep(attempt * 1000);
+        continue;
+      }
+    }
+  }
+
+  return {
+    configured: true,
+    posted: false,
+    updated: false,
+    feed,
+    reason: "webhook_update_failed",
+    error: lastError.slice(0, 500)
+  };
+}
+
+function discordFeedMessageBody(feed, payload, roleId) {
+  const styledPayload = styleDiscordFeedAlert(feed, payload);
+  return {
+    ...styledPayload,
+    content: roleId ? `<@&${roleId}>` : (styledPayload.content ?? null),
+    allowed_mentions: {
+      parse: [],
+      roles: roleId ? [roleId] : []
+    }
+  };
+}
+
+function styleDiscordFeedAlert(feed, payload = {}) {
+  const feedNames = {
+    roblox_updates: "Roblox Updates",
+    ps99_updates: "Pet Simulator 99 Updates",
+    ps99_fflags: "Pet Simulator 99 FFlags",
+    ps99_restarts: "Pet Simulator 99 Restarts",
+    ps99_dev_blogs: "Pet Simulator 99 Dev Blogs",
+    reward_cutoffs: "Reward Cutoffs"
+  };
+  const footerNotes = {
+    ps99_fflags: "Public Roblox client settings only",
+    ps99_dev_blogs: "Official BIG Games posts"
+  };
+  const alertTitles = {
+    roblox_updates: "Roblox Client Update",
+    ps99_updates: "Pet Simulator 99 Update",
+    ps99_fflags: "Pet Simulator 99 FFlag Change",
+    ps99_restarts: "Pet Simulator 99 Restart",
+    ps99_dev_blogs: "Pet Simulator 99 Dev Blog",
+    reward_cutoffs: "Reward Cutoffs"
+  };
+  const senderName = "Oapl's 3rd-Eye";
+  const feedName = feedNames[feed] || "Automated Alerts";
+  const footerText = [senderName, feedName, footerNotes[feed]].filter(Boolean).join(" | ");
+  const embeds = (Array.isArray(payload.embeds) ? payload.embeds : []).map(embed => {
+    const rawTitle = String(embed?.title || "").trim();
+    const isTest = /^\[TEST\]/i.test(rawTitle);
+    const cleanTitle = rawTitle.replace(/^\[TEST\]\s*/i, "").trim();
+    const alertTitle = alertTitles[feed] || cleanTitle || "Automated Alert";
+    const titleDetail = feed === "ps99_dev_blogs" && cleanTitle ? ` | ${cleanTitle}` : "";
+
+    return {
+      ...embed,
+      title: `${isTest ? "[TEST] " : ""}3rd-Eye Alert | ${alertTitle}${titleDetail}`.slice(0, 256),
+      color: 0xff5f67,
+      author: {
+        name: senderName
+      },
+      thumbnail: embed?.thumbnail || {
+        url: "https://i.imgur.com/aCHMjbP.png"
+      },
+      footer: {
+        text: footerText
+      },
+      timestamp: safeIso(embed?.timestamp) || new Date().toISOString()
+    };
+  });
+
+  return {
+    ...payload,
+    username: senderName,
+    avatar_url: "https://i.imgur.com/aCHMjbP.png",
+    embeds
+  };
+}
+
 function ps99AlertRuntimeConfig(env) {
   return {
     feeds: Object.fromEntries([
@@ -6171,7 +6552,8 @@ function ps99AlertRuntimeConfig(env) {
       "ps99_updates",
       "ps99_fflags",
       "ps99_restarts",
-      "ps99_dev_blogs"
+      "ps99_dev_blogs",
+      "reward_cutoffs"
     ].map(feed => {
       const config = discordFeedConfig(env, feed);
       return [feed, {
@@ -6203,7 +6585,8 @@ function discordFeedConfig(env, feed) {
     ps99_updates: [env.PS99_UPDATES_WEBHOOK_URL || legacyWebhook, env.PS99_UPDATES_ROLE_ID || legacyRole],
     ps99_fflags: [env.PS99_FFLAGS_WEBHOOK_URL, env.PS99_FFLAGS_ROLE_ID],
     ps99_restarts: [env.PS99_RESTARTS_WEBHOOK_URL || legacyWebhook, env.PS99_RESTARTS_ROLE_ID || legacyRole],
-    ps99_dev_blogs: [env.PS99_DEV_BLOG_WEBHOOK_URL, env.PS99_DEV_BLOG_ROLE_ID]
+    ps99_dev_blogs: [env.PS99_DEV_BLOG_WEBHOOK_URL, env.PS99_DEV_BLOG_ROLE_ID],
+    reward_cutoffs: [env.REWARD_CUTOFFS_WEBHOOK_URL, env.REWARD_CUTOFFS_ROLE_ID]
   };
   const definition = definitions[feed] || [null, null];
   const rawWebhook = String(definition[0] || "").trim();
@@ -11331,6 +11714,34 @@ function shouldRunPs99DevBlogSchedule(env, scheduledAt = null) {
   return shouldRunMinuteSchedule(
     ps99DevBlogScheduleMinutes(env),
     ps99DevBlogScheduleOffsetMinutes(env),
+    scheduledAt
+  );
+}
+
+function rewardCutoffAlertEnabled(env) {
+  return discordFeedConfig(env, "reward_cutoffs").configured;
+}
+
+function rewardCutoffScheduleMinutes(env) {
+  return clamp(
+    Number(env.REWARD_CUTOFFS_SCHEDULE_MINUTES || DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function rewardCutoffScheduleOffsetMinutes(env) {
+  const interval = rewardCutoffScheduleMinutes(env);
+  const value = env.REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES === undefined
+    ? DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES
+    : env.REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES;
+  return normalizedScheduleOffset(value, interval);
+}
+
+function shouldRunRewardCutoffSchedule(env, scheduledAt = null) {
+  return shouldRunMinuteSchedule(
+    rewardCutoffScheduleMinutes(env),
+    rewardCutoffScheduleOffsetMinutes(env),
     scheduledAt
   );
 }
