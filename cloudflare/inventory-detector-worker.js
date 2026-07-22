@@ -78,6 +78,8 @@ export default {
           timezone: timeZone(env),
           min_fetch_interval_minutes: inventoryMinFetchIntervalMinutes(env),
           skip_duplicate_source: envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true),
+          configured_inventory_items_path: String(env.BIG_GAMES_INVENTORY_ITEMS_PATH || "").trim() || null,
+          heuristic_inventory_selection: envBool(env.INVENTORY_ALLOW_HEURISTIC_ITEMS, false),
           supabase_configured: !!(supabaseUrl(env) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)),
           big_games_oauth_configured: bigGamesOAuthConfigured(env),
           big_games_oauth_connected: oauth.connected,
@@ -96,6 +98,9 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
+      } else if (request.method === "GET" && url.pathname === "/api/inventory/admin/source-debug") {
+        requireAdmin(request, env);
+        response = await handleInventorySourceDebug(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/post-hourly") {
         requireAdmin(request, env);
         response = await handlePostHourly(request, env);
@@ -687,6 +692,34 @@ async function handleIngest(request, env, source) {
   return json({ ok: true, ...result });
 }
 
+async function handleInventorySourceDebug(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const user = requestUser(url);
+  const query = String(url.searchParams.get("q") || "Genie Fox").trim();
+  const raw = await fetchInventory(env, user, {
+    forceRefresh: parseBool(url.searchParams.get("force")) === true
+  });
+  const selection = selectOwnedInventoryItems(raw, env);
+  const candidates = inventoryArrayCandidates(raw)
+    .map(candidate => summarizeInventoryCandidate(candidate.path, candidate.items, query))
+    .sort((a, b) => b.query_matches - a.query_matches || b.analysis.score - a.analysis.score || b.length - a.length)
+    .slice(0, 40);
+
+  return json({
+    ok: true,
+    user,
+    query,
+    source: inventorySourceMeta(raw),
+    payload_shape: inventoryPayloadShape(raw),
+    selected: summarizeInventoryCandidate(selection.path, selection.items, query, {
+      method: selection.method,
+      confidence: selection.confidence
+    }),
+    candidates
+  });
+}
+
 async function handlePostHourly(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -782,11 +815,12 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const username = String(user.username || userId).trim();
 
   const raw = options.rawInventory || await fetchInventory(env, { user_id: userId, username }, { forceRefresh: options.force === true });
-  const rawItems = extractInventoryItems(raw);
+  const inventorySelection = selectOwnedInventoryItems(raw, env);
+  const rawItems = inventorySelection.items;
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
-    console.warn("Big Games inventory payload did not contain a recognized item array.", inventoryPayloadShape(raw));
-    throw httpError(502, "Big Games returned an empty or unrecognized inventory payload; snapshot was rejected to prevent a false inventory wipe.");
+    console.warn("Big Games inventory payload did not contain a verified owned-item array.", inventoryPayloadShape(raw));
+    throw httpError(502, "Big Games returned no verified owned-inventory item array; snapshot was rejected to prevent catalog totals from being stored as owned pets.");
   }
 
   if (!options.force && envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true) && sourceMeta.fetched_at) {
@@ -811,7 +845,7 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
     is_boundary: !!isBoundary,
     boundary_label: isBoundary ? `midnight_${timeZone(env)}` : null,
     item_count: rawItems.length,
-    raw: inventorySnapshotMeta(raw)
+    raw: inventorySnapshotMeta(raw, inventorySelection)
   }], "representation");
 
   const snapshot = snapshotRows[0];
@@ -821,7 +855,15 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
     if (chunk.length) await supabaseInsert(env, ITEM_TABLE, chunk, "minimal");
   }
 
-  return { skipped: false, snapshot: lightSnapshot(snapshot), source: sourceMeta, raw_item_count: rawItems.length, item_count: itemRows.length };
+  return {
+    skipped: false,
+    snapshot: lightSnapshot(snapshot),
+    source: sourceMeta,
+    inventory_items_path: inventorySelection.path,
+    inventory_selection_method: inventorySelection.method,
+    raw_item_count: rawItems.length,
+    item_count: itemRows.length
+  };
 }
 
 async function postHourlyDiffIfNeeded(env, user, options = {}) {
@@ -1076,13 +1118,184 @@ async function fetchPublicInventory(usernameOrId) {
   return payload;
 }
 
-function extractInventoryItems(raw) {
+const INVENTORY_ITEM_PATHS = Object.freeze([
+  "data.views.inventory.data.items",
+  "data.views.inventory.items",
+  "views.inventory.data.items",
+  "views.inventory.items",
+  "data.account.inventory.items",
+  "account.inventory.items",
+  "data.inventory.data.items",
+  "inventory.data.items",
+  "data.inventory.items",
+  "inventory.items"
+]);
+
+const CATALOG_PATH_PATTERN = /(^|\.)(collection|collections|catalog|index|directory|config|database|exist|exists)(\.|$)/i;
+const CATALOG_ITEM_KEYS = Object.freeze(["collection", "collections", "exists", "goldenIcon", "rapApproximate", "existCount", "globalCount"]);
+
+function selectOwnedInventoryItems(raw, env) {
   const data = raw?.data || raw;
   const view = data?.views?.inventory;
-  if (view && view.available === false) return [];
-  const candidates = [view?.data?.items, data?.inventory?.items, data?.items, raw?.items];
-  for (const arr of candidates) if (Array.isArray(arr)) return arr;
-  return findBestItemArray(raw);
+  if (view && view.available === false) return { items: [], path: null, method: "inventory_unavailable", confidence: 1 };
+
+  const configuredPath = String(env.BIG_GAMES_INVENTORY_ITEMS_PATH || "").trim().replace(/^\$\.?/, "");
+  if (configuredPath) {
+    const configuredItems = valueAtPath(raw, configuredPath);
+    if (!Array.isArray(configuredItems)) {
+      throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH does not point to an array: ${configuredPath}`);
+    }
+    const analysis = analyzeInventoryArray(configuredPath, configuredItems);
+    if (analysis.catalog_like) {
+      throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH points to catalog/collection data, not owned inventory: ${configuredPath}`);
+    }
+    if (!analysis.owned_like) {
+      throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH does not contain recognizable owned item stacks: ${configuredPath}`);
+    }
+    return { items: configuredItems, path: configuredPath, method: "configured", confidence: analysis.score };
+  }
+
+  for (const path of INVENTORY_ITEM_PATHS) {
+    const items = valueAtPath(raw, path);
+    if (!Array.isArray(items)) continue;
+    const analysis = analyzeInventoryArray(path, items);
+    if (analysis.owned_like && !analysis.catalog_like) {
+      return { items, path, method: "recognized_path", confidence: analysis.score };
+    }
+  }
+
+  const candidates = inventoryArrayCandidates(raw)
+    .map(candidate => ({ ...candidate, analysis: analyzeInventoryArray(candidate.path, candidate.items) }))
+    .filter(candidate => candidate.analysis.owned_like && !candidate.analysis.catalog_like)
+    .sort((a, b) => b.analysis.score - a.analysis.score || b.items.length - a.items.length);
+
+  if (candidates.length && candidates[0].analysis.score >= 24) {
+    const selected = candidates[0];
+    return { items: selected.items, path: selected.path, method: "verified_shape", confidence: selected.analysis.score };
+  }
+
+  if (envBool(env.INVENTORY_ALLOW_HEURISTIC_ITEMS, false)) {
+    const legacy = findBestItemArray(raw);
+    if (legacy.items.length && !legacy.analysis.catalog_like) {
+      return { items: legacy.items, path: legacy.path, method: "legacy_heuristic", confidence: legacy.analysis.score };
+    }
+  }
+
+  return { items: [], path: null, method: "no_verified_owned_array", confidence: 0 };
+}
+
+function valueAtPath(value, path) {
+  return String(path || "").split(".").filter(Boolean).reduce((current, key) => current == null ? undefined : current[key], value);
+}
+
+function inventoryArrayCandidates(raw) {
+  const output = [];
+  const seen = new Set();
+  walk(raw, "", 0);
+  return output;
+
+  function walk(value, path, depth) {
+    if (!value || typeof value !== "object" || depth > 9 || output.length >= 400) return;
+    if (Array.isArray(value)) {
+      if (!seen.has(value)) {
+        seen.add(value);
+        output.push({ path: path || "$", items: value });
+      }
+      for (let index = 0; index < Math.min(value.length, 2); index++) walk(value[index], `${path}.${index}`, depth + 1);
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) walk(child, path ? `${path}.${key}` : key, depth + 1);
+  }
+}
+
+function analyzeInventoryArray(path, items) {
+  if (!Array.isArray(items) || !items.length) {
+    return { score: 0, owned_like: false, catalog_like: CATALOG_PATH_PATTERN.test(path), item_like_count: 0, catalog_signal_count: 0 };
+  }
+
+  const sample = items.filter(item => item && typeof item === "object" && !Array.isArray(item)).slice(0, 30);
+  let score = /inventory|owned|items|stacks/i.test(path) ? 8 : 0;
+  let itemLikeCount = 0;
+  let quantityCount = 0;
+  let stackCount = 0;
+  let catalogSignalCount = 0;
+
+  for (const item of sample) {
+    const keys = new Set(Object.keys(item));
+    const rawData = item.rawData && typeof item.rawData === "object" ? item.rawData : {};
+    const hasIdentity = item.id != null || item.itemId != null || item.configName != null || item.name != null || rawData.id != null;
+    const hasQuantity = ownedQuantityValue(item) != null;
+    const hasStack = item.stackKey != null || item.stack_key != null || Object.keys(rawData).length > 0;
+    const catalogSignals = CATALOG_ITEM_KEYS.reduce((total, key) => total + (keys.has(key) ? 1 : 0), 0);
+    if (hasIdentity) itemLikeCount += 1;
+    if (hasQuantity) quantityCount += 1;
+    if (hasStack) stackCount += 1;
+    if (catalogSignals >= 2) catalogSignalCount += 1;
+  }
+
+  score += itemLikeCount * 2 + quantityCount * 2 + stackCount;
+  const catalogLike = CATALOG_PATH_PATTERN.test(path) || (sample.length > 0 && catalogSignalCount >= Math.max(1, Math.ceil(sample.length * 0.25)));
+  if (catalogLike) score -= 100;
+  const ownedLike = sample.length > 0
+    && itemLikeCount >= Math.ceil(sample.length * 0.6)
+    && quantityCount >= Math.ceil(sample.length * 0.5)
+    && !catalogLike;
+  return {
+    score,
+    owned_like: ownedLike,
+    catalog_like: catalogLike,
+    item_like_count: itemLikeCount,
+    quantity_count: quantityCount,
+    stack_count: stackCount,
+    catalog_signal_count: catalogSignalCount,
+    sample_size: sample.length
+  };
+}
+
+function summarizeInventoryCandidate(path, items, query, selection = null) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const matches = normalizedQuery
+    ? safeItems.filter(item => inventoryItemName(item).toLowerCase() === normalizedQuery)
+    : [];
+  return {
+    path: path || null,
+    method: selection?.method || null,
+    confidence: selection?.confidence ?? null,
+    length: safeItems.length,
+    analysis: analyzeInventoryArray(path || "", safeItems),
+    query_matches: matches.length,
+    query_quantity: matches.reduce((total, item) => total + itemCount(item), 0),
+    query_samples: matches.slice(0, 10).map(compactInventoryItem)
+  };
+}
+
+function inventoryItemName(item) {
+  const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  let stack = {};
+  try { stack = JSON.parse(String(item?.stackKey || item?.stack_key || "{}")); } catch {}
+  return String(
+    item?.displayName
+    || item?.display_name
+    || item?.name
+    || item?.id
+    || item?.itemId
+    || item?.configName
+    || rawData.id
+    || stack.id
+    || ""
+  ).trim();
+}
+
+function compactInventoryItem(item) {
+  const keys = item && typeof item === "object" ? Object.keys(item) : [];
+  return {
+    name: inventoryItemName(item),
+    quantity: itemCount(item),
+    variant: getVariant(item),
+    top_keys: keys.slice(0, 30),
+    catalog_signals: CATALOG_ITEM_KEYS.filter(key => keys.includes(key))
+  };
 }
 
 function inventoryPayloadShape(raw) {
@@ -1139,7 +1352,7 @@ function inventorySourceMeta(raw) {
   };
 }
 
-function inventorySnapshotMeta(raw) {
+function inventorySnapshotMeta(raw, selection = null) {
   const data = raw?.data || raw || {};
   const account = data?.account || {};
   const source = inventorySourceMeta(raw);
@@ -1148,6 +1361,9 @@ function inventorySnapshotMeta(raw) {
     source_fetched_at: source.fetched_at,
     source_is_stale: source.is_stale,
     inventory_available: source.available,
+    inventory_items_path: selection?.path || null,
+    inventory_selection_method: selection?.method || null,
+    inventory_selection_confidence: selection?.confidence ?? null,
     refresh: source.refresh || null,
     account: {
       roblox_user_id: account.robloxUserId || account.roblox_user_id || null,
@@ -1158,32 +1374,20 @@ function inventorySnapshotMeta(raw) {
 }
 
 function findBestItemArray(obj, path = "") {
-  let best = { score: 0, arr: [] };
+  let best = { score: 0, items: [], path: null, analysis: { score: 0, catalog_like: false } };
   walk(obj, path);
-  return best.arr;
+  return best;
   function walk(value, p) {
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {
-      const score = scoreArray(p, value);
-      if (score > best.score) best = { score, arr: value };
+      const analysis = analyzeInventoryArray(p, value);
+      const score = analysis.score;
+      if (score > best.score) best = { score, items: value, path: p || "$", analysis };
       for (let i = 0; i < Math.min(value.length, 3); i++) walk(value[i], `${p}.${i}`);
       return;
     }
     for (const [k, v] of Object.entries(value)) walk(v, p ? `${p}.${k}` : k);
   }
-}
-
-function scoreArray(path, arr) {
-  if (!Array.isArray(arr) || !arr.length || typeof arr[0] !== "object") return 0;
-  let score = /inventory|items/i.test(path) ? 20 : 0;
-  for (const item of arr.slice(0, 15)) {
-    const keys = Object.keys(item || {}).map(k => k.toLowerCase());
-    if (keys.includes("id")) score += 4;
-    if (keys.includes("class")) score += 5;
-    if (keys.includes("count") || keys.includes("amount") || keys.includes("quantity")) score += 3;
-    if (keys.includes("stackkey") || keys.includes("stack_key")) score += 2;
-  }
-  return score;
 }
 
 function normalizeItemRow(item, snapshotId, userId, capturedAt, localDay) {
@@ -1219,7 +1423,39 @@ function stableJson(value) {
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-function itemCount(item) { const n = Number(item.count ?? item.amount ?? item.quantity ?? item.qty ?? 1); return Number.isFinite(n) ? n : 1; }
+function ownedQuantityValue(item) {
+  const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  let stack = {};
+  try { stack = JSON.parse(String(item?.stackKey || item?.stack_key || "{}")); } catch {}
+  const candidates = [
+    item?.ownedCount,
+    item?.owned_count,
+    rawData._am,
+    rawData.amount,
+    rawData.count,
+    rawData.quantity,
+    rawData.qty,
+    stack._am,
+    stack.amount,
+    stack.count,
+    stack.quantity,
+    stack.qty,
+    item?.amount,
+    item?.quantity,
+    item?.qty,
+    item?.count
+  ];
+  for (const value of candidates) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+  return null;
+}
+function itemCount(item) {
+  const count = ownedQuantityValue(item);
+  return count === null ? 1 : count;
+}
 function itemRap(item) { for (const v of [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap]) { const n = Number(v); if (Number.isFinite(n) && n > 0) return n; } return 0; }
 function getVariant(item) {
   let stack = {};
