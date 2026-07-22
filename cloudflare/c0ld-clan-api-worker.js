@@ -23,6 +23,11 @@ const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
 const ROBLOX_RELEASE_STATE_TABLE = "c0ld_roblox_release_state";
 const ROBLOX_RELEASE_EVENTS_TABLE = "c0ld_roblox_release_events";
+const ROBLOX_FFLAG_STATE_TABLE = "c0ld_roblox_fflag_state";
+const ROBLOX_FFLAG_EVENTS_TABLE = "c0ld_roblox_fflag_events";
+const PS99_DEV_BLOG_STATE_TABLE = "c0ld_ps99_dev_blog_state";
+const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
+const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -42,6 +47,10 @@ const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
+const DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES = 15;
+const DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
@@ -67,6 +76,10 @@ const DEFAULT_ROBLOX_RELEASE_CHANNEL = "live";
 const DEFAULT_ROBLOX_RELEASE_SCHEDULE_MINUTES = 5;
 const DEFAULT_ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_ROBLOX_RELEASE_HISTORY_LIMIT = 100;
+const DEFAULT_ROBLOX_FFLAG_SCHEDULE_MINUTES = 15;
+const DEFAULT_PS99_DEV_BLOG_SCHEDULE_MINUTES = 15;
+const DEFAULT_ROBLOX_FFLAGS_SOURCE_URL = "https://clientsettings.roblox.com/v2/settings/application/PCDesktopClient/channel/live";
+const DEFAULT_PS99_DEV_BLOG_FEED_URL = "https://www.biggames.io/post";
 const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 10;
 const DEFAULT_PS99_RESTART_BATCH_SIZE = 100;
 const DEFAULT_PS99_RESTART_PAGE_COUNT = 5;
@@ -187,6 +200,10 @@ export default {
         response = await handlePs99Versions(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/roblox/versions") {
         response = await handleRobloxReleasedVersions(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/roblox/fflags") {
+        response = await handleRobloxFflags(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/dev-blogs") {
+        response = await handlePs99DevBlogs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
         response = await handlePs99Restarts(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/ccu") {
@@ -216,12 +233,23 @@ export default {
         response = await handleRobloxReleasedVersionIngest(env, "manual", {
           force: isForceRequest(url)
         });
+      } else if (request.method === "POST" && url.pathname === "/api/roblox/fflags/ingest") {
+        requireAdmin(request, env);
+        response = await handleRobloxFflagIngest(env, "manual", { force: isForceRequest(url) });
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/dev-blogs/ingest") {
+        requireAdmin(request, env);
+        response = await handlePs99DevBlogIngest(env, "manual", { force: isForceRequest(url) });
       } else if (request.method === "POST" && url.pathname === "/api/ps99/restarts/ingest") {
         requireAdmin(request, env);
         response = await handlePs99RestartIngest(env, "manual");
       } else if (request.method === "POST" && url.pathname === "/api/ps99/alerts/test") {
         requireAdmin(request, env);
         response = await handlePs99AlertTest(env, url);
+      } else if (request.method === "POST" && url.pathname === "/api/reward-cutoffs/post") {
+        requireAdmin(request, env);
+        response = json(await postRewardCutoffAlert(env, { force: isForceRequest(url) }), 200, {
+          "Cache-Control": "no-store"
+        });
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
         requireAdmin(request, env);
         response = json({
@@ -258,6 +286,12 @@ export default {
       }
       if (String(env.INGEST_ROBLOX_RELEASE_VERSION_HISTORY || "false").toLowerCase() === "true" && shouldRunRobloxReleaseSchedule(env, scheduledAt)) {
         standaloneJobs.push(runScheduledStandaloneJob("roblox-release-version", () => handleRobloxReleasedVersionIngest(env, "schedule", { force: false })));
+      }
+      if (String(env.INGEST_ROBLOX_FFLAGS || "false").toLowerCase() === "true" && shouldRunRobloxFflagSchedule(env, scheduledAt)) {
+        standaloneJobs.push(runScheduledStandaloneJob("roblox-fflags", () => handleRobloxFflagIngest(env, "schedule", { force: false })));
+      }
+      if (String(env.INGEST_PS99_DEV_BLOGS || "false").toLowerCase() === "true" && shouldRunPs99DevBlogSchedule(env, scheduledAt)) {
+        standaloneJobs.push(runScheduledStandaloneJob("ps99-dev-blogs", () => handlePs99DevBlogIngest(env, "schedule", { force: false })));
       }
       if (standaloneJobs.length) ctx.waitUntil(Promise.allSettled(standaloneJobs));
       return;
@@ -404,6 +438,21 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
         run: () => handleRobloxReleasedVersionIngest(env, "schedule", { force })
       });
     }
+  }
+
+  if (String(env.INGEST_ROBLOX_FFLAGS || "false").toLowerCase() === "true" && (force || shouldRunRobloxFflagSchedule(env, scheduledAt))) {
+    jobs.push({ label: "roblox-fflags", run: () => handleRobloxFflagIngest(env, "schedule", { force }) });
+  }
+
+  if (String(env.INGEST_PS99_DEV_BLOGS || "false").toLowerCase() === "true" && (force || shouldRunPs99DevBlogSchedule(env, scheduledAt))) {
+    jobs.push({ label: "ps99-dev-blogs", run: () => handlePs99DevBlogIngest(env, "schedule", { force }) });
+  }
+
+  if (rewardCutoffAlertEnabled(env) && (force || shouldRunRewardCutoffSchedule(env, scheduledAt))) {
+    jobs.push({
+      label: "reward-cutoffs",
+      run: async () => json(await postRewardCutoffAlert(env, { force }), 200, { "Cache-Control": "no-store" })
+    });
   }
 
   for (const job of jobs) {
@@ -1117,6 +1166,242 @@ function rewardCutoffRanks(url, env, type) {
   return [...new Set(ranks)]
     .sort((a, b) => a - b)
     .slice(0, 20);
+}
+
+async function postRewardCutoffAlert(env, { force = false } = {}) {
+  requireSupabase(env);
+  const config = discordFeedConfig(env, "reward_cutoffs");
+  if (!config.configured) return emptyDiscordFeedResult(env, "reward_cutoffs", "webhook_not_configured");
+  if (!config.webhook_url) return emptyDiscordFeedResult(env, "reward_cutoffs", "invalid_webhook_url");
+
+  const dashboard = await buildRewardCutoffDashboard(env);
+  const payload = rewardCutoffDiscordPayload(dashboard);
+  const digest = await sha256Hex(stableJsonStringify({
+    players: dashboard.players?.cutoffs || [],
+    clans: dashboard.clans?.cutoffs || [],
+    leagues: dashboard.leagues?.cutoffs || []
+  }));
+  const stateRows = await supabaseSelect(env, REWARD_CUTOFF_ALERT_STATE_TABLE, {
+    select: "state_key,last_digest,last_message_id,last_posted_at,last_snapshot_at,updated_at",
+    state_key: "eq.main",
+    limit: "1"
+  });
+  const state = stateRows[0] || null;
+
+  if (!force && state?.last_digest === digest && state?.last_message_id) {
+    return {
+      ok: true,
+      configured: true,
+      posted: false,
+      updated: false,
+      skipped: true,
+      reason: "unchanged",
+      message_id: state.last_message_id,
+      digest
+    };
+  }
+
+  let alert = null;
+  if (state?.last_message_id) {
+    alert = await updateDiscordFeedMessage(env, "reward_cutoffs", state.last_message_id, payload);
+  }
+  if (!alert || alert.reason === "message_not_found") {
+    alert = await postDiscordFeedAlert(env, "reward_cutoffs", payload);
+  }
+  if (!alert.posted) return { ok: false, ...alert };
+
+  const now = new Date().toISOString();
+  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || now;
+  await supabaseUpsert(env, REWARD_CUTOFF_ALERT_STATE_TABLE, [{
+    state_key: "main",
+    last_digest: digest,
+    last_message_id: alert.message_id || state?.last_message_id || null,
+    last_posted_at: now,
+    last_snapshot_at: snapshotAt,
+    updated_at: now
+  }], "state_key");
+
+  return {
+    ok: true,
+    configured: true,
+    posted: true,
+    updated: Boolean(alert.updated),
+    created: !alert.updated,
+    message_id: alert.message_id || state?.last_message_id || null,
+    snapshot_at: snapshotAt,
+    digest,
+    dashboard
+  };
+}
+
+async function buildRewardCutoffDashboard(env) {
+  const baseUrl = "https://c0ld-clan-api-worker.service/api/reward-cutoffs";
+  const playerUrl = new URL(baseUrl);
+  playerUrl.searchParams.set("type", "players");
+  const clanUrl = new URL(baseUrl);
+  clanUrl.searchParams.set("type", "clans");
+  const playerRanks = rewardCutoffRanks(playerUrl, env, "players");
+  const clanRanks = rewardCutoffRanks(clanUrl, env, "clans");
+  const leagueRanks = leagueRewardCutoffRanks(env);
+  const [players, clans, leagues] = await Promise.all([
+    buildPlayerRewardCutoffs(playerUrl, env, playerRanks),
+    buildClanRewardCutoffs(clanUrl, env, clanRanks),
+    buildLeagueRewardCutoffs(env, leagueRanks)
+  ]);
+
+  return {
+    generated_at: new Date().toISOString(),
+    players,
+    clans,
+    leagues
+  };
+}
+
+async function buildLeagueRewardCutoffs(env, ranks) {
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
+  const attempts = [];
+  if (hasBinding) {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
+
+  let payload = null;
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/milestones`);
+    url.searchParams.set("ranks", ranks.join(","));
+    try {
+      const response = await attempt.fetcher(new Request(url.toString()));
+      const text = await response.text();
+      const parsed = parseJsonObject(text) || {};
+      if (response.ok && parsed.ok !== false) {
+        payload = parsed;
+        break;
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error && error.message ? error.message : String(error)}`;
+    }
+  }
+
+  if (!payload) {
+    throw httpError(502, `League reward cutoff API failed: ${lastFailure || "no endpoint was available"}`);
+  }
+  const byRank = new Map((Array.isArray(payload.rows) ? payload.rows : []).map(row => [toNumber(row.rank), row]));
+
+  return {
+    ok: true,
+    type: "leagues",
+    generated_at: payload.generated_at || new Date().toISOString(),
+    snapshot_at: payload.snapshot_at || null,
+    league_run_key: payload.league_run_key || null,
+    ranks,
+    cutoffs: ranks.map(rankValue => {
+      const row = byRank.get(rankValue);
+      return {
+        rank: rankValue,
+        label: leagueRewardRangeLabel(rankValue),
+        points: row && row.available !== false ? toNumber(row.points) : null,
+        available: Boolean(row && row.available !== false)
+      };
+    })
+  };
+}
+
+function leagueRewardCutoffRanks(env) {
+  const parsed = String(env.LEAGUE_REWARD_CUTOFF_RANKS || "")
+    .split(/[,\s]+/)
+    .map(value => Math.round(Number(value)))
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= 100000);
+  return [...new Set(parsed.length ? parsed : DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS)]
+    .sort((a, b) => a - b)
+    .slice(0, 20);
+}
+
+function rewardCutoffDiscordPayload(dashboard) {
+  const players = dashboard.players || {};
+  const clans = dashboard.clans || {};
+  const leagues = dashboard.leagues || {};
+  const eventName = players.event_name || players.display_name || clans.display_name || clans.battle || "Current event";
+  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at || new Date().toISOString();
+  const unix = Math.floor(new Date(snapshotAt).getTime() / 1000);
+  const divider = "────────────────────────";
+  const description = [
+    `**${eventName}** | Updated <t:${unix}:R>`,
+    "",
+    "**Global Player Leaderboard**",
+    ...rewardCutoffLines(players.cutoffs, playerRewardRangeLabel),
+    divider,
+    "**Clan Rewards**",
+    ...rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel),
+    divider,
+    "**League Rewards**",
+    ...rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel)
+  ].join("\n");
+
+  return {
+    embeds: [{
+      title: "Reward Cutoffs",
+      description: description.slice(0, 4096),
+      color: 0xff5f67,
+      timestamp: safeIso(snapshotAt) || new Date().toISOString()
+    }]
+  };
+}
+
+function rewardCutoffLines(cutoffs, labeler) {
+  const rows = Array.isArray(cutoffs) ? cutoffs : [];
+  return rows.length
+    ? rows.map(row => `**${labeler(toNumber(row.rank) || 0)}:** ${formatRewardCutoffPoints(row.points)}`)
+    : ["No cutoff data available."];
+}
+
+function playerRewardRangeLabel(rank) {
+  return `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function clanRewardRangeLabel(rank) {
+  const labels = {
+    1: "#1",
+    3: "#2-3",
+    10: "#4-10",
+    30: "Top 30",
+    50: "#11-50",
+    250: "#51-250",
+    500: "Top 500"
+  };
+  return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function leagueRewardRangeLabel(rank) {
+  const labels = {
+    1: "#1",
+    3: "#2-3",
+    15: "#4-15",
+    50: "#16-50",
+    100: "#51-100",
+    250: "#101-250",
+    2000: "#251-2000"
+  };
+  return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
+}
+
+function formatRewardCutoffPoints(value) {
+  const points = toNumber(value);
+  return points === null ? "—" : `${Math.round(points).toLocaleString("en-US")} pts`;
+}
+
+function latestRewardCutoffSnapshot(dashboard) {
+  return [dashboard.players?.snapshot_at, dashboard.clans?.snapshot_at, dashboard.leagues?.snapshot_at]
+    .map(safeIso)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
 }
 
 async function handleGlobalRankStatus(request, env) {
@@ -4522,7 +4807,7 @@ async function handlePs99VersionIngest(env, source, options = {}) {
   }));
   const placeRows = [];
   const eventRows = [];
-  let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_version_change" };
+  let webhookAlert = emptyDiscordFeedResult(env, "ps99_updates", "no_version_change");
 
   for (const place of places) {
     const placeId = toNumber(place.place_id || place.placeId);
@@ -4592,7 +4877,7 @@ async function handlePs99VersionIngest(env, source, options = {}) {
     const alertRows = eventRows.filter(row => (toNumber(row.previous_version) || 0) > 0);
     webhookAlert = alertRows.length
       ? await postPs99VersionAlert(env, alertRows, fetchedAt)
-      : { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "initial_version_baseline" };
+      : emptyDiscordFeedResult(env, "ps99_updates", "initial_version_baseline");
   }
 
   const newest = [...placeRows].sort((a, b) => (toNumber(b.latest_version) || 0) - (toNumber(a.latest_version) || 0))[0] || null;
@@ -4692,6 +4977,7 @@ async function handleRobloxReleasedVersionIngest(env, source, options = {}) {
   await supabaseUpsert(env, ROBLOX_RELEASE_STATE_TABLE, [stateRow], "channel,binary_type");
 
   let eventInserted = false;
+  let webhookAlert = emptyDiscordFeedResult(env, "roblox_updates", "no_version_change");
   if (changed && (currentVersion || clientVersionUpload)) {
     const eventKey = `${currentVersion || "unknown"}:${clientVersionUpload || "unknown"}`.replace(/[^a-zA-Z0-9_.:-]/g, "_");
     await supabaseUpsert(env, ROBLOX_RELEASE_EVENTS_TABLE, [{
@@ -4707,6 +4993,17 @@ async function handleRobloxReleasedVersionIngest(env, source, options = {}) {
       raw_version: latest.rawVersion || {}
     }], "event_id");
     eventInserted = true;
+    webhookAlert = existing
+      ? await postRobloxReleaseAlert(env, {
+        channel,
+        binary_type: binaryType,
+        previous_version: previousVersion,
+        current_version: currentVersion,
+        previous_client_version_upload: previousUpload,
+        current_client_version_upload: clientVersionUpload,
+        detected_at: fetchedAt
+      })
+      : emptyDiscordFeedResult(env, "roblox_updates", "initial_version_baseline");
   }
 
   return json({
@@ -4719,7 +5016,8 @@ async function handleRobloxReleasedVersionIngest(env, source, options = {}) {
     client_version_upload: clientVersionUpload,
     version_event_inserted: eventInserted,
     previous_version: previousVersion,
-    previous_client_version_upload: previousUpload
+    previous_client_version_upload: previousUpload,
+    webhook_alert: webhookAlert
   }, 202);
 }
 
@@ -4776,6 +5074,323 @@ function normalizeRobloxReleaseEventOutput(row) {
     source: row.source || null,
     created_at: row.created_at || null
   };
+}
+
+async function handleRobloxFflags(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const [states, events] = await Promise.all([
+    supabaseSelect(env, ROBLOX_FFLAG_STATE_TABLE, {
+      select: "scope_key,source_url,settings_hash,setting_count,checked_at,updated_at",
+      order: "checked_at.desc",
+      limit: "20"
+    }),
+    supabaseSelect(env, ROBLOX_FFLAG_EVENTS_TABLE, {
+      select: "event_id,scope_key,source_url,previous_hash,current_hash,added_keys,removed_keys,changed_keys,detected_at,source,created_at",
+      order: "detected_at.desc,id.desc",
+      limit: String(limit)
+    })
+  ]);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    note: "Tracks public Roblox client settings, not private Pet Simulator 99 server flags.",
+    states,
+    events
+  }, env, publicCacheSeconds(env, "ROBLOX_FFLAGS"));
+}
+
+async function handleRobloxFflagIngest(env, source, options = {}) {
+  requireSupabase(env);
+
+  const checkedAt = new Date().toISOString();
+  const sourceUrl = robloxFflagsSourceUrl(env);
+  const scopeKey = stringOrNull(env.ROBLOX_FFLAGS_SCOPE_KEY) || "pc-live";
+  const existing = (await supabaseSelect(env, ROBLOX_FFLAG_STATE_TABLE, {
+    select: "scope_key,source_url,settings_hash,settings,setting_count,checked_at",
+    scope_key: `eq.${scopeKey}`,
+    limit: "1"
+  }))[0] || null;
+  const payload = await fetchJsonWithRetry(sourceUrl, "Roblox public client settings", {
+    attempts: 3,
+    baseDelayMs: 1000
+  });
+  const settings = normalizeRobloxFflagSettings(payload);
+  const flatSettings = flattenJsonObject(settings);
+  const settingsHash = await sha256Hex(stableJsonStringify(settings));
+  const previousSettings = parseJsonObject(existing?.settings) || {};
+  const diff = diffFlatSettings(flattenJsonObject(previousSettings), flatSettings);
+  const changed = Boolean(existing?.settings_hash) && existing.settings_hash !== settingsHash;
+  let eventInserted = false;
+  let webhookAlert = emptyDiscordFeedResult(env, "ps99_fflags", "no_settings_change");
+
+  if (changed) {
+    const eventRow = {
+      event_id: `roblox-fflags:${scopeKey}:${settingsHash}`,
+      scope_key: scopeKey,
+      source_url: sourceUrl,
+      previous_hash: existing.settings_hash,
+      current_hash: settingsHash,
+      added_keys: diff.added,
+      removed_keys: diff.removed,
+      changed_keys: diff.changed,
+      detected_at: checkedAt,
+      source,
+      raw_settings: settings
+    };
+    await supabaseUpsert(env, ROBLOX_FFLAG_EVENTS_TABLE, [eventRow], "event_id");
+    eventInserted = true;
+    webhookAlert = await postRobloxFflagAlert(env, eventRow);
+  } else if (!existing) {
+    webhookAlert = emptyDiscordFeedResult(env, "ps99_fflags", "initial_settings_baseline");
+  }
+
+  await supabaseUpsert(env, ROBLOX_FFLAG_STATE_TABLE, [{
+    scope_key: scopeKey,
+    source_url: sourceUrl,
+    settings_hash: settingsHash,
+    settings,
+    setting_count: Object.keys(flatSettings).length,
+    checked_at: checkedAt,
+    updated_at: checkedAt
+  }], "scope_key");
+
+  return json({
+    ok: true,
+    source,
+    scope_key: scopeKey,
+    source_url: sourceUrl,
+    checked_at: checkedAt,
+    setting_count: Object.keys(flatSettings).length,
+    changed,
+    event_inserted: eventInserted,
+    diff_counts: {
+      added: diff.added.length,
+      removed: diff.removed.length,
+      changed: diff.changed.length
+    },
+    webhook_alert: webhookAlert,
+    note: "Public Roblox client settings only; private PS99 server flags are not exposed here."
+  }, 202);
+}
+
+async function handlePs99DevBlogs(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const [state, events] = await Promise.all([
+    supabaseSelect(env, PS99_DEV_BLOG_STATE_TABLE, {
+      select: "feed_key,feed_url,latest_post_id,latest_post_url,checked_at,updated_at",
+      feed_key: "eq.ps99",
+      limit: "1"
+    }),
+    supabaseSelect(env, PS99_DEV_BLOG_EVENTS_TABLE, {
+      select: "event_id,post_id,title,url,excerpt,image_url,published_at,detected_at,source,created_at",
+      order: "detected_at.desc,id.desc",
+      limit: String(limit)
+    })
+  ]);
+
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    source: "Official BIG Games posts",
+    state: state[0] || null,
+    events
+  }, env, publicCacheSeconds(env, "PS99_DEV_BLOGS"));
+}
+
+async function handlePs99DevBlogIngest(env, source, options = {}) {
+  requireSupabase(env);
+
+  const checkedAt = new Date().toISOString();
+  const feedUrl = ps99DevBlogFeedUrl(env);
+  const existing = (await supabaseSelect(env, PS99_DEV_BLOG_STATE_TABLE, {
+    select: "feed_key,latest_post_id,latest_post_url,checked_at",
+    feed_key: "eq.ps99",
+    limit: "1"
+  }))[0] || null;
+  const listingHtml = await fetchTextWithRetry(feedUrl, "BIG Games dev blog listing");
+  const postUrls = extractPs99DevBlogUrls(listingHtml, feedUrl).slice(0, 20);
+  if (!postUrls.length) throw httpError(502, "No PS99 update posts were found in the BIG Games listing.");
+  const previousPostId = stringOrNull(existing?.latest_post_id);
+  const postRefs = postUrls.map(url => ({ post_id: ps99DevBlogPostIdFromUrl(url), url }));
+  const latestRef = postRefs[0];
+  const latestHtml = await fetchTextWithRetry(latestRef.url, "BIG Games dev blog post");
+  const latestPost = parsePs99DevBlogPost(latestHtml, latestRef.url);
+  let newPosts = [];
+  let webhookResults = [];
+
+  if (previousPostId) {
+    const previousIndex = postRefs.findIndex(post => post.post_id === previousPostId);
+    const newRefs = (previousIndex >= 0 ? postRefs.slice(0, previousIndex) : postRefs.slice(0, 1)).reverse();
+    for (const postRef of newRefs) {
+      if (postRef.url === latestPost.url) {
+        newPosts.push(latestPost);
+        continue;
+      }
+      const html = await fetchTextWithRetry(postRef.url, "BIG Games dev blog post");
+      newPosts.push(parsePs99DevBlogPost(html, postRef.url));
+    }
+    for (const post of newPosts) {
+      await supabaseUpsert(env, PS99_DEV_BLOG_EVENTS_TABLE, [{
+        event_id: `ps99-dev-blog:${post.post_id}`,
+        post_id: post.post_id,
+        title: post.title,
+        url: post.url,
+        excerpt: post.excerpt,
+        image_url: post.image_url,
+        published_at: post.published_at,
+        detected_at: checkedAt,
+        source,
+        raw_post: post.raw_post
+      }], "event_id");
+      webhookResults.push(await postPs99DevBlogAlert(env, post));
+    }
+  }
+
+  await supabaseUpsert(env, PS99_DEV_BLOG_STATE_TABLE, [{
+    feed_key: "ps99",
+    feed_url: feedUrl,
+    latest_post_id: latestPost.post_id,
+    latest_post_url: latestPost.url,
+    checked_at: checkedAt,
+    updated_at: checkedAt
+  }], "feed_key");
+
+  return json({
+    ok: true,
+    source,
+    feed_url: feedUrl,
+    checked_at: checkedAt,
+    latest_post: latestPost,
+    new_post_count: newPosts.length,
+    baseline_created: !existing,
+    webhook_alerts: webhookResults
+  }, 202);
+}
+
+function ps99DevBlogPostIdFromUrl(value) {
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts[parts.length - 1] || url.pathname;
+  } catch {
+    return String(value || "").split(/[?#]/, 1)[0].split("/").filter(Boolean).pop() || String(value || "");
+  }
+}
+
+function normalizeRobloxFflagSettings(payload) {
+  const candidate = firstDefined(payload?.applicationSettings, payload?.settings, payload);
+  return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+}
+
+function stableJsonStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJsonStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function flattenJsonObject(value, prefix = "", output = {}) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const key of Object.keys(value).sort()) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      flattenJsonObject(value[key], path, output);
+    }
+  } else {
+    output[prefix || "value"] = value;
+  }
+  return output;
+}
+
+function diffFlatSettings(previous, current) {
+  const previousKeys = new Set(Object.keys(previous));
+  const currentKeys = new Set(Object.keys(current));
+  return {
+    added: [...currentKeys].filter(key => !previousKeys.has(key)).sort(),
+    removed: [...previousKeys].filter(key => !currentKeys.has(key)).sort(),
+    changed: [...currentKeys].filter(key => previousKeys.has(key) && stableJsonStringify(previous[key]) !== stableJsonStringify(current[key])).sort()
+  };
+}
+
+async function fetchTextWithRetry(url, label, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(String(url), {
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": "c0ld-Clan-API-Worker"
+        },
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+      const text = await response.text();
+      if (!response.ok) throw httpError(response.status, `${label} returned HTTP ${response.status}`);
+      return text;
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts) await sleep(attempt * 1000);
+    }
+  }
+  throw lastError || httpError(502, `${label} failed`);
+}
+
+function extractPs99DevBlogUrls(html, baseUrl) {
+  const urls = [];
+  const seen = new Set();
+  const pattern = /href=["']([^"']*\/post\/pet-simulator-99-update-[^"'#?]+)["']/gi;
+  let match;
+  while ((match = pattern.exec(String(html || "")))) {
+    try {
+      const url = new URL(decodeHtmlEntities(match[1]), baseUrl).toString();
+      if (!seen.has(url)) {
+        seen.add(url);
+        urls.push(url);
+      }
+    } catch {}
+  }
+  return urls;
+}
+
+function parsePs99DevBlogPost(html, url) {
+  const meta = name => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']*)["'][^>]*>`, "i"),
+      new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`, "i")
+    ];
+    for (const pattern of patterns) {
+      const match = String(html || "").match(pattern);
+      if (match) return decodeHtmlEntities(match[1]).trim();
+    }
+    return null;
+  };
+  const postUrl = meta("og:url") || url;
+  const postId = new URL(postUrl).pathname.split("/").filter(Boolean).pop() || postUrl;
+  return {
+    post_id: postId,
+    title: meta("og:title") || meta("twitter:title") || postId.replace(/-/g, " "),
+    url: postUrl,
+    excerpt: meta("og:description") || meta("description"),
+    image_url: meta("og:image") || meta("twitter:image"),
+    published_at: safeIso(meta("article:published_time")),
+    raw_post: { source_url: url }
+  };
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 async function fetchPs99WatchedPlaces(env, fetchedAt) {
@@ -5156,7 +5771,7 @@ async function handlePs99RestartIngest(env, source) {
   let eventRow = null;
   let suppressedRestart = null;
   let detectorNote = null;
-  let webhookAlert = { configured: Boolean(ps99AlertWebhookRaw(env)), posted: false, reason: "no_restart_detected" };
+  let webhookAlert = emptyDiscordFeedResult(env, "ps99_restarts", "no_restart_detected");
 
   if (batch.length < sampleSize) {
     status = "insufficient";
@@ -5395,6 +6010,82 @@ async function handlePs99RestartIngest(env, source) {
 }
 
 async function handlePs99AlertTest(env, url) {
+  const requestedFeed = String(url.searchParams.get("feed") || "").trim().toLowerCase();
+  if (requestedFeed) {
+    const aliases = {
+      "roblox-updates": "roblox_updates",
+      "ps99-updates": "ps99_updates",
+      "pet-sim-updates": "ps99_updates",
+      "ps99-fflags": "ps99_fflags",
+      "pet-sim-fflags-update": "ps99_fflags",
+      "ps99-restarts": "ps99_restarts",
+      "pet-sim-restarts": "ps99_restarts",
+      "ps99-dev-blogs": "ps99_dev_blogs",
+      "dev-blogs": "ps99_dev_blogs"
+    };
+    const feed = aliases[requestedFeed] || requestedFeed.replaceAll("-", "_");
+    const supported = ["roblox_updates", "ps99_updates", "ps99_fflags", "ps99_restarts", "ps99_dev_blogs"];
+    if (feed !== "all" && !supported.includes(feed)) {
+      throw httpError(400, `Use ?feed=${supported.join(", ")}, or all.`);
+    }
+
+    const testedAt = new Date().toISOString();
+    const feeds = feed === "all" ? supported : [feed];
+    const results = {};
+    for (const currentFeed of feeds) {
+      if (currentFeed === "roblox_updates") {
+        results[currentFeed] = await postRobloxReleaseAlert(env, {
+          previous_version: "version-test-before",
+          current_version: "version-test-after",
+          channel: "live",
+          binary_type: "WindowsPlayer",
+          detected_at: testedAt
+        });
+      } else if (currentFeed === "ps99_updates") {
+        results[currentFeed] = await postPs99VersionAlert(env, [{
+          place_id: ps99RootPlaceId(env),
+          place_name: "Pet Simulator 99",
+          previous_version: 1000,
+          current_version: 1001,
+          current_published_at: testedAt,
+          detected_at: testedAt
+        }], testedAt, { test: true });
+      } else if (currentFeed === "ps99_fflags") {
+        results[currentFeed] = await postRobloxFflagAlert(env, {
+          added_keys: ["FFlagC0ldAlertTest"],
+          removed_keys: [],
+          changed_keys: ["DFIntC0ldAlertTest"],
+          detected_at: testedAt
+        });
+      } else if (currentFeed === "ps99_restarts") {
+        results[currentFeed] = await postPs99RestartAlert(env, {
+          place_id: ps99RootPlaceId(env),
+          place_name: "Pet Simulator 99",
+          current_place_version: 1001,
+          detected_at: testedAt,
+          details: {}
+        }, { test: true });
+      } else if (currentFeed === "ps99_dev_blogs") {
+        results[currentFeed] = await postPs99DevBlogAlert(env, {
+          title: "[TEST] Pet Simulator 99 Dev Blog",
+          url: ps99DevBlogFeedUrl(env),
+          excerpt: "This is a webhook test. No new dev blog was detected.",
+          published_at: testedAt
+        });
+      }
+    }
+
+    const ok = Object.values(results).every(result => result?.posted === true);
+    return json({
+      ok,
+      test: true,
+      feed,
+      tested_at: testedAt,
+      alert_config: ps99AlertRuntimeConfig(env),
+      results
+    }, ok ? 200 : 502);
+  }
+
   requireSupabase(env);
 
   const type = String(url.searchParams.get("type") || "both").trim().toLowerCase();
@@ -5537,7 +6228,7 @@ async function postPs99VersionAlert(env, events, detectedAt, options = {}) {
   if (extraCount) sections.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
   const description = `${separator}\n\n${sections.join(`\n\n${separator}\n\n`)}\n\n${separator}`;
 
-  return postPs99DiscordAlert(env, {
+  return postDiscordFeedAlert(env, "ps99_updates", {
     content: null,
     username: "PS99 Alert Bot",
     attachments: [],
@@ -5576,7 +6267,7 @@ async function postPs99RestartAlert(env, event, options = {}) {
     `CCU (10 min before restart): ${ps99AlertCcu(details.ccu_10_minutes_before)}`
   ].join("\n");
 
-  return postPs99DiscordAlert(env, {
+  return postDiscordFeedAlert(env, "ps99_restarts", {
     content: null,
     username: "PS99 Alert Bot",
     attachments: [],
@@ -5594,26 +6285,84 @@ async function postPs99RestartAlert(env, event, options = {}) {
   });
 }
 
-async function postPs99DiscordAlert(env, payload) {
-  const configured = Boolean(ps99AlertWebhookRaw(env));
-  const webhookUrl = ps99AlertWebhookUrl(env);
-  if (!configured) return { configured: false, posted: false, reason: "webhook_not_configured" };
-  if (!webhookUrl) return { configured: true, posted: false, reason: "invalid_webhook_url" };
+async function postRobloxReleaseAlert(env, event) {
+  const previousVersion = escapeDiscordMarkdown(event.previous_version || event.previous_client_version_upload || "Unknown");
+  const currentVersion = escapeDiscordMarkdown(event.current_version || event.current_client_version_upload || "Unknown");
+  return postDiscordFeedAlert(env, "roblox_updates", {
+    username: "Roblox Update Monitor",
+    embeds: [{
+      title: "ROBLOX CLIENT UPDATE DETECTED",
+      description: [
+        `**Channel:** ${escapeDiscordMarkdown(event.channel || "live")}`,
+        `**Binary:** ${escapeDiscordMarkdown(event.binary_type || "Unknown")}`,
+        `**Version:** \`${previousVersion}\` -> \`${currentVersion}\``,
+        `**Detected:** ${discordTimestamp(event.detected_at, "R") || "Now"}`
+      ].join("\n"),
+      color: 0x00a2ff,
+      timestamp: safeIso(event.detected_at) || new Date().toISOString()
+    }]
+  });
+}
 
-  const roleId = ps99AlertRoleId(env);
-  const body = {
-    ...payload,
-    content: roleId ? `<@&${roleId}>` : (payload.content ?? null),
-    allowed_mentions: {
-      parse: [],
-      roles: roleId ? [roleId] : []
-    }
+async function postRobloxFflagAlert(env, event) {
+  const added = Array.isArray(event.added_keys) ? event.added_keys : [];
+  const removed = Array.isArray(event.removed_keys) ? event.removed_keys : [];
+  const changed = Array.isArray(event.changed_keys) ? event.changed_keys : [];
+  const keyLines = [
+    ...added.map(key => `+ ${key}`),
+    ...removed.map(key => `- ${key}`),
+    ...changed.map(key => `~ ${key}`)
+  ].slice(0, 18);
+  const total = added.length + removed.length + changed.length;
+  const remainder = Math.max(0, total - keyLines.length);
+  return postDiscordFeedAlert(env, "ps99_fflags", {
+    username: "Roblox Settings Monitor",
+    embeds: [{
+      title: "ROBLOX CLIENT SETTINGS CHANGED",
+      description: [
+        `**Added:** ${added.length}  **Removed:** ${removed.length}  **Changed:** ${changed.length}`,
+        keyLines.length ? `\n\`\`\`diff\n${keyLines.join("\n")}\n\`\`\`` : "",
+        remainder ? `*...and ${remainder} more changed setting${remainder === 1 ? "" : "s"}.*` : ""
+      ].filter(Boolean).join("\n"),
+      color: 0xf5a623,
+      footer: { text: "Public Roblox client settings only; not private PS99 server flags." },
+      timestamp: safeIso(event.detected_at) || new Date().toISOString()
+    }]
+  });
+}
+
+async function postPs99DevBlogAlert(env, post) {
+  const embed = {
+    title: post.title || "New Pet Simulator 99 post",
+    url: post.url,
+    description: String(post.excerpt || "A new official BIG Games Pet Simulator 99 post is available.").slice(0, 4096),
+    color: 0x42a5f5,
+    footer: { text: "Official BIG Games post" },
+    timestamp: safeIso(post.published_at) || new Date().toISOString()
   };
+  if (post.image_url) embed.image = { url: post.image_url };
+  return postDiscordFeedAlert(env, "ps99_dev_blogs", {
+    username: "PS99 Dev Blog Monitor",
+    embeds: [embed]
+  });
+}
+
+async function postPs99DiscordAlert(env, payload) {
+  return postDiscordFeedAlert(env, "ps99_updates", payload);
+}
+
+async function postDiscordFeedAlert(env, feed, payload) {
+  const config = discordFeedConfig(env, feed);
+  if (!config.configured) return emptyDiscordFeedResult(env, feed, "webhook_not_configured");
+  if (!config.webhook_url) return emptyDiscordFeedResult(env, feed, "invalid_webhook_url");
+
+  const roleId = config.role_id;
+  const body = discordFeedMessageBody(feed, payload, roleId);
   let lastError = "Discord webhook request failed.";
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(webhookUrl, {
+      const response = await fetch(config.webhook_url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -5625,6 +6374,7 @@ async function postPs99DiscordAlert(env, payload) {
         return {
           configured: true,
           posted: true,
+          feed,
           role_mentioned: Boolean(roleId),
           message_id: stringOrNull(responseBody.id)
         };
@@ -5653,19 +6403,224 @@ async function postPs99DiscordAlert(env, payload) {
   return {
     configured: true,
     posted: false,
+    feed,
     role_mentioned: false,
     reason: "webhook_request_failed",
     error: lastError.slice(0, 500)
   };
 }
 
-function ps99AlertRuntimeConfig(env) {
-  const rawWebhook = ps99AlertWebhookRaw(env);
+async function updateDiscordFeedMessage(env, feed, messageId, payload) {
+  const config = discordFeedConfig(env, feed);
+  if (!config.configured) return emptyDiscordFeedResult(env, feed, "webhook_not_configured");
+  if (!config.webhook_url) return emptyDiscordFeedResult(env, feed, "invalid_webhook_url");
+  const webhookUrl = new URL(config.webhook_url);
+  webhookUrl.search = "";
+  webhookUrl.pathname = `${webhookUrl.pathname.replace(/\/$/, "")}/messages/${encodeURIComponent(messageId)}`;
+  webhookUrl.searchParams.set("wait", "true");
+  const body = discordFeedMessageBody(feed, payload, config.role_id);
+  let lastError = "Discord webhook message update failed.";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(webhookUrl.toString(), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const responseText = await response.text();
+      const responseBody = parseJsonObject(responseText) || {};
+      if (response.ok) {
+        return {
+          configured: true,
+          posted: true,
+          updated: true,
+          feed,
+          role_mentioned: Boolean(config.role_id),
+          message_id: stringOrNull(responseBody.id) || String(messageId)
+        };
+      }
+      if (response.status === 404) {
+        return {
+          configured: true,
+          posted: false,
+          updated: false,
+          feed,
+          reason: "message_not_found"
+        };
+      }
+      lastError = `Discord webhook update returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 300)}` : ""}`;
+      if (attempt < 3 && (response.status === 429 || response.status >= 500)) {
+        const retrySeconds = toNumber(responseBody.retry_after);
+        await sleep(response.status === 429 && retrySeconds !== null
+          ? clamp(retrySeconds * 1000, 500, 15000)
+          : attempt * 1000);
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err?.message || String(err);
+      if (attempt < 3) {
+        await sleep(attempt * 1000);
+        continue;
+      }
+    }
+  }
+
   return {
-    webhook_configured: Boolean(rawWebhook),
-    webhook_valid: Boolean(ps99AlertWebhookUrl(env)),
-    role_id_configured: Boolean(ps99AlertRoleId(env))
+    configured: true,
+    posted: false,
+    updated: false,
+    feed,
+    reason: "webhook_update_failed",
+    error: lastError.slice(0, 500)
   };
+}
+
+function discordFeedMessageBody(feed, payload, roleId) {
+  const styledPayload = styleDiscordFeedAlert(feed, payload);
+  return {
+    ...styledPayload,
+    content: roleId ? `<@&${roleId}>` : (styledPayload.content ?? null),
+    allowed_mentions: {
+      parse: [],
+      roles: roleId ? [roleId] : []
+    }
+  };
+}
+
+function styleDiscordFeedAlert(feed, payload = {}) {
+  const feedNames = {
+    roblox_updates: "Roblox Updates",
+    ps99_updates: "Pet Simulator 99 Updates",
+    ps99_fflags: "Pet Simulator 99 FFlags",
+    ps99_restarts: "Pet Simulator 99 Restarts",
+    ps99_dev_blogs: "Pet Simulator 99 Dev Blogs",
+    reward_cutoffs: "Reward Cutoffs"
+  };
+  const footerNotes = {
+    ps99_fflags: "Public Roblox client settings only",
+    ps99_dev_blogs: "Official BIG Games posts"
+  };
+  const alertTitles = {
+    roblox_updates: "Roblox Client Update",
+    ps99_updates: "Pet Simulator 99 Update",
+    ps99_fflags: "Pet Simulator 99 FFlag Change",
+    ps99_restarts: "Pet Simulator 99 Restart",
+    ps99_dev_blogs: "Pet Simulator 99 Dev Blog",
+    reward_cutoffs: "Reward Cutoffs"
+  };
+  const senderName = "Oapl's 3rd-Eye";
+  const feedName = feedNames[feed] || "Automated Alerts";
+  const footerText = [senderName, feedName, footerNotes[feed]].filter(Boolean).join(" | ");
+  const embeds = (Array.isArray(payload.embeds) ? payload.embeds : []).map(embed => {
+    const rawTitle = String(embed?.title || "").trim();
+    const isTest = /^\[TEST\]/i.test(rawTitle);
+    const cleanTitle = rawTitle.replace(/^\[TEST\]\s*/i, "").trim();
+    const alertTitle = alertTitles[feed] || cleanTitle || "Automated Alert";
+    const titleDetail = feed === "ps99_dev_blogs" && cleanTitle ? ` | ${cleanTitle}` : "";
+
+    return {
+      ...embed,
+      title: `${isTest ? "[TEST] " : ""}3rd-Eye Alert | ${alertTitle}${titleDetail}`.slice(0, 256),
+      color: 0xff5f67,
+      author: {
+        name: senderName
+      },
+      thumbnail: embed?.thumbnail || {
+        url: "https://i.imgur.com/aCHMjbP.png"
+      },
+      footer: {
+        text: footerText
+      },
+      timestamp: safeIso(embed?.timestamp) || new Date().toISOString()
+    };
+  });
+
+  return {
+    ...payload,
+    username: senderName,
+    avatar_url: "https://i.imgur.com/aCHMjbP.png",
+    embeds
+  };
+}
+
+function ps99AlertRuntimeConfig(env) {
+  return {
+    feeds: Object.fromEntries([
+      "roblox_updates",
+      "ps99_updates",
+      "ps99_fflags",
+      "ps99_restarts",
+      "ps99_dev_blogs",
+      "reward_cutoffs"
+    ].map(feed => {
+      const config = discordFeedConfig(env, feed);
+      return [feed, {
+        webhook_configured: config.configured,
+        webhook_valid: Boolean(config.webhook_url),
+        role_id_configured: Boolean(config.role_id),
+        legacy_fallback: config.legacy_fallback
+      }];
+    }))
+  };
+}
+
+function emptyDiscordFeedResult(env, feed, reason) {
+  const config = discordFeedConfig(env, feed);
+  return {
+    feed,
+    configured: config.configured,
+    posted: false,
+    reason,
+    legacy_fallback: config.legacy_fallback
+  };
+}
+
+function discordFeedConfig(env, feed) {
+  const legacyWebhook = String(env.PS99_ALERT_WEBHOOK_URL || "").trim();
+  const legacyRole = String(env.PS99_ALERT_ROLE_ID || "").trim();
+  const definitions = {
+    roblox_updates: [env.ROBLOX_UPDATES_WEBHOOK_URL, env.ROBLOX_UPDATES_ROLE_ID],
+    ps99_updates: [env.PS99_UPDATES_WEBHOOK_URL || legacyWebhook, env.PS99_UPDATES_ROLE_ID || legacyRole],
+    ps99_fflags: [env.PS99_FFLAGS_WEBHOOK_URL, env.PS99_FFLAGS_ROLE_ID],
+    ps99_restarts: [env.PS99_RESTARTS_WEBHOOK_URL || legacyWebhook, env.PS99_RESTARTS_ROLE_ID || legacyRole],
+    ps99_dev_blogs: [env.PS99_DEV_BLOG_WEBHOOK_URL, env.PS99_DEV_BLOG_ROLE_ID],
+    reward_cutoffs: [env.REWARD_CUTOFFS_WEBHOOK_URL, env.REWARD_CUTOFFS_ROLE_ID]
+  };
+  const definition = definitions[feed] || [null, null];
+  const rawWebhook = String(definition[0] || "").trim();
+  const rawRole = String(definition[1] || "").trim();
+  const legacyFallback = Boolean(legacyWebhook && (
+    (feed === "ps99_updates" && !String(env.PS99_UPDATES_WEBHOOK_URL || "").trim())
+    || (feed === "ps99_restarts" && !String(env.PS99_RESTARTS_WEBHOOK_URL || "").trim())
+  ));
+  return {
+    feed,
+    configured: Boolean(rawWebhook),
+    webhook_url: validatedDiscordWebhookUrl(rawWebhook),
+    role_id: /^\d{5,30}$/.test(rawRole) ? rawRole : "",
+    legacy_fallback: legacyFallback
+  };
+}
+
+function validatedDiscordWebhookUrl(raw) {
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const isDiscordHost = host === "discord.com"
+      || host.endsWith(".discord.com")
+      || host === "discordapp.com"
+      || host.endsWith(".discordapp.com");
+    const isWebhookPath = /^\/api(?:\/v\d+)?\/webhooks\/\d+\/[^/]+\/?$/.test(url.pathname);
+    if (url.protocol !== "https:" || !isDiscordHost || !isWebhookPath) return "";
+    url.searchParams.set("wait", "true");
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function ps99AlertWebhookRaw(env) {
@@ -10712,6 +11667,92 @@ function shouldRunRobloxReleaseSchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
+  return minutesUntilOffset < 5;
+}
+
+function robloxFflagsSourceUrl(env) {
+  return stringOrNull(env.ROBLOX_FFLAGS_SOURCE_URL) || DEFAULT_ROBLOX_FFLAGS_SOURCE_URL;
+}
+
+function robloxFflagScheduleMinutes(env) {
+  return clamp(
+    Number(env.ROBLOX_FFLAG_SCHEDULE_MINUTES || DEFAULT_ROBLOX_FFLAG_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function robloxFflagScheduleOffsetMinutes(env) {
+  return normalizedScheduleOffset(env.ROBLOX_FFLAG_SCHEDULE_OFFSET_MINUTES || 0, robloxFflagScheduleMinutes(env));
+}
+
+function shouldRunRobloxFflagSchedule(env, scheduledAt = null) {
+  return shouldRunMinuteSchedule(
+    robloxFflagScheduleMinutes(env),
+    robloxFflagScheduleOffsetMinutes(env),
+    scheduledAt
+  );
+}
+
+function ps99DevBlogFeedUrl(env) {
+  return stringOrNull(env.PS99_DEV_BLOG_FEED_URL) || DEFAULT_PS99_DEV_BLOG_FEED_URL;
+}
+
+function ps99DevBlogScheduleMinutes(env) {
+  return clamp(
+    Number(env.PS99_DEV_BLOG_SCHEDULE_MINUTES || DEFAULT_PS99_DEV_BLOG_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function ps99DevBlogScheduleOffsetMinutes(env) {
+  return normalizedScheduleOffset(env.PS99_DEV_BLOG_SCHEDULE_OFFSET_MINUTES || 0, ps99DevBlogScheduleMinutes(env));
+}
+
+function shouldRunPs99DevBlogSchedule(env, scheduledAt = null) {
+  return shouldRunMinuteSchedule(
+    ps99DevBlogScheduleMinutes(env),
+    ps99DevBlogScheduleOffsetMinutes(env),
+    scheduledAt
+  );
+}
+
+function rewardCutoffAlertEnabled(env) {
+  return discordFeedConfig(env, "reward_cutoffs").configured;
+}
+
+function rewardCutoffScheduleMinutes(env) {
+  return clamp(
+    Number(env.REWARD_CUTOFFS_SCHEDULE_MINUTES || DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function rewardCutoffScheduleOffsetMinutes(env) {
+  const interval = rewardCutoffScheduleMinutes(env);
+  const value = env.REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES === undefined
+    ? DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES
+    : env.REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES;
+  return normalizedScheduleOffset(value, interval);
+}
+
+function shouldRunRewardCutoffSchedule(env, scheduledAt = null) {
+  return shouldRunMinuteSchedule(
+    rewardCutoffScheduleMinutes(env),
+    rewardCutoffScheduleOffsetMinutes(env),
+    scheduledAt
+  );
+}
+
+function shouldRunMinuteSchedule(interval, offset, scheduledAt = null) {
+  const now = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
+  const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minuteInInterval = minuteOfDay % interval;
+  const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
   return minutesUntilOffset < 5;
 }
 

@@ -202,6 +202,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
+| `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
+| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
+| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the persistent combined reward-cutoff Discord message. |
+| `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the reward-cutoff schedule interval. |
+| `REWARD_CUTOFFS_ROLE_ID` | Optional Discord role ID to mention when the persistent cutoff message is first created or updated. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
 | `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
 | `CLAN_ACTIVITY_CONCURRENCY` | Optional. Defaults to `8`; number of top-clan detail pulls to run at once during activity scans. |
@@ -223,6 +228,17 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `ROBLOX_RELEASE_SCHEDULE_MINUTES` | Optional. Defaults to `5`; controls how often scheduled Roblox release checks run. |
 | `ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the Roblox release schedule interval. |
 | `ROBLOX_RELEASE_VERSION_HISTORY_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/roblox/versions`. |
+| `INGEST_ROBLOX_FFLAGS` | Optional. Defaults to `false`. Set to `true` after migration `030` to detect changes in Roblox's public live PC client settings. |
+| `ROBLOX_FFLAGS_SOURCE_URL` | Optional. Public Roblox client-settings endpoint. Defaults to the live `PCDesktopClient` settings URL. This is not a private PS99 server-flag feed. |
+| `ROBLOX_FFLAGS_SCOPE_KEY` | Optional. Defaults to `pc-live`; stable key used for the stored settings baseline. |
+| `ROBLOX_FFLAG_SCHEDULE_MINUTES` | Optional. Defaults to `15`; controls how often public client settings are checked. |
+| `ROBLOX_FFLAG_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the FFlag schedule interval. |
+| `ROBLOX_FFLAGS_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/roblox/fflags`. |
+| `INGEST_PS99_DEV_BLOGS` | Optional. Defaults to `false`. Set to `true` after migration `030` to watch the official BIG Games post feed. |
+| `PS99_DEV_BLOG_FEED_URL` | Optional. Defaults to `https://www.biggames.io/post`. |
+| `PS99_DEV_BLOG_SCHEDULE_MINUTES` | Optional. Defaults to `15`; controls how often the official post feed is checked. |
+| `PS99_DEV_BLOG_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the dev-blog schedule interval. |
+| `PS99_DEV_BLOGS_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/dev-blogs`. |
 | `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `022` so PS99 restart detection keeps running every minute. |
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
 | `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
@@ -231,7 +247,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_RESTART_REQUIRE_VERSION_CORRELATION` | Optional. Defaults to `true`; suppresses server-turnover restart events unless they line up with a PS99 place version change or recent version event. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
-| `PS99_ALERT_ROLE_ID` | Optional Discord role ID to mention when a PS99 place update or confirmed restart is detected. |
+| `ROBLOX_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for Roblox client-release alerts. |
+| `PS99_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for PS99 place-version alerts. |
+| `PS99_FFLAGS_ROLE_ID` | Optional Discord role ID mentioned only for public client-settings changes. |
+| `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. |
+| `PS99_DEV_BLOG_ROLE_ID` | Optional Discord role ID mentioned only for official BIG Games post alerts. |
 | `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migration `025` to allow profile-page CW_Bot message-link imports. |
 | `CW_BOT_USER_ID` | Optional. Defaults to `1219229814150398003`; Discord user/app ID that imported messages must be authored by. |
 | `CW_BOT_IMPORT_GUILD_IDS` | Optional comma-separated allowlist of Discord server IDs accepted for CW_Bot imports. |
@@ -261,7 +281,13 @@ The stop day and time come from the active battle metadata returned by the Big G
 |---|---|
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
-| `PS99_ALERT_WEBHOOK_URL` | Discord webhook used for PS99 place-version and confirmed-restart alerts. Store this as a secret. |
+| `ROBLOX_UPDATES_WEBHOOK_URL` | Webhook for the `roblox-updates` channel. |
+| `PS99_UPDATES_WEBHOOK_URL` | Webhook for the `pet-sim-updates` channel. |
+| `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
+| `PS99_RESTARTS_WEBHOOK_URL` | Webhook for the `pet-sim-restarts` channel. |
+| `PS99_DEV_BLOG_WEBHOOK_URL` | Webhook for the `dev-blogs` channel. |
+| `REWARD_CUTOFFS_WEBHOOK_URL` | Webhook for the persistent combined player, clan, and league reward-cutoff message. |
+| `PS99_ALERT_WEBHOOK_URL` | Legacy fallback for PS99 update and restart alerts when their dedicated secrets are absent. |
 | `DISCORD_BOT_TOKEN` | Discord bot token. Required for CW_Bot message-link imports so the Worker can fetch the linked message. |
 | `OPENAI_API_KEY` | Optional OpenAI API key for CW_Bot image OCR. Store this as a secret. |
 
@@ -278,7 +304,9 @@ The Wrangler example includes:
 crons = ["*/5 * * * *", "* * * * *"]
 ```
 
-The five-minute grid continues the existing clan, activity, global-rank, PS99 version, and Roblox released-version jobs. The every-minute trigger always runs the lightweight PS99 restart detector and can also keep PS99/Roblox version checks alive on their configured schedules if the five-minute trigger is accidentally removed. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
+The five-minute grid continues the existing clan, activity, and global-rank jobs. The every-minute trigger owns the lightweight restart detector and dispatches PS99 versions, Roblox releases, public FFlags, and official BIG Games posts only when their configured schedule is due. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
+
+Each alert feed has its own webhook. The first successful FFlag and dev-blog poll stores a baseline without posting old items; only later changes create events and Discord messages. The FFlag collector watches publicly exposed Roblox client settings, so it can report client configuration changes but cannot see private PS99 server-side flags.
 
 Do not reduce the Cloudflare cron itself to only two runs per hour. If you set `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=0`, fresh scans start at `:00` and `:30`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans, and the battle-data cutoff guard prevents the `10:05` tick from queuing late battle pulls.
 
@@ -316,6 +344,7 @@ Useful endpoints:
 | `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
+| `/api/reward-cutoffs/post` | Protected `POST` endpoint that creates or edits the single combined Discord reward-cutoff message. Add `?force=1` to update it even when the calculated cutoffs are unchanged. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
 | `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
@@ -324,10 +353,15 @@ Useful endpoints:
 | `/api/ps99/versions` | Public PS99 place version catalog for `ps99-version-history.html`. |
 | `/api/roblox/versions/ingest` | Manual protected Roblox released-version ingest. `POST` only. |
 | `/api/roblox/versions` | Public Roblox released-version catalog for `roblox-version-history.html`. |
+| `/api/roblox/fflags/ingest` | Manual protected public Roblox client-settings observation. `POST` only. |
+| `/api/roblox/fflags` | Latest public client-settings baseline and detected changes. |
+| `/api/ps99/dev-blogs/ingest` | Manual protected official BIG Games post-feed observation. `POST` only. |
+| `/api/ps99/dev-blogs` | Latest official BIG Games post baseline and detected posts. |
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
 | `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
 | `/api/ps99/alerts/test?type=both` | Protected end-to-end preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; restart tests also publish a five-minute webpage audio-test signal without creating a confirmed restart-history record. `POST` only. |
+| `/api/ps99/alerts/test?feed=all` | Protected webhook-only test for all five dedicated alert destinations. Accepts `roblox-updates`, `ps99-updates`, `ps99-fflags`, `ps99-restarts`, `ps99-dev-blogs`, or `all`. `POST` only. |
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
@@ -358,6 +392,23 @@ Invoke-RestMethod -Method Post `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
+Run `supabase/migrations/030_update_alert_feeds.sql` before enabling FFlag and
+dev-blog collection. Then establish their baselines with:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/roblox/fflags/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/dev-blogs/ingest?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+These first calls intentionally do not send Discord alerts. They record the
+current public client settings and newest official BIG Games post so only new
+changes are announced afterward.
+
 To register the first ten-server restart sample after running migration `022`, run:
 
 ```powershell
@@ -379,7 +430,42 @@ Invoke-RestMethod -Method Post `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
+To verify every dedicated Discord channel immediately, without waiting for a
+real update or changing the stored baselines:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/ps99/alerts/test?feed=all" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Replace `all` with `roblox-updates`, `ps99-updates`, `ps99-fflags`,
+`ps99-restarts`, or `ps99-dev-blogs` to test only one channel.
+
 Change `type=both` to `type=version` or `type=restart` to preview only one alert.
+
+### Persistent reward-cutoff post
+
+Run Supabase migration `031_reward_cutoff_alerts.sql`, add the
+`REWARD_CUTOFFS_WEBHOOK_URL` Worker secret, and deploy the clan Worker. The
+Worker stores the Discord message ID in `c0ld_reward_cutoff_alert_state` and
+edits that message whenever the player, clan, or league cutoff calculation
+changes. If the Discord message is deleted, the next refresh creates a
+replacement and stores its new ID.
+
+An optional `LEAGUE_API_WORKER` service binding targeting
+`yamo-league-api-worker` avoids an external HTTP hop for league milestones.
+Without it, `LEAGUE_API_BASE` is used.
+
+Create or force-refresh the persistent message manually:
+
+```powershell
+$token = "YOUR_INGEST_ADMIN_TOKEN"
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/reward-cutoffs/post?force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
 
 To compare global-rank scan configs, deploy the Worker and run:
 
@@ -653,6 +739,25 @@ when the configured league run should begin. `INGEST_LEAGUES`,
 `INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
 sub-switches once the master switch is enabled.
 
+Exact league collection uses two independent cadences while the Worker cron
+continues to run every five minutes:
+
+- Names in `LEAGUE_NAMES`, `COLD_LEAGUE_NAMES`, or `ALT_LEAGUE_NAMES` are the
+  configured c0ld league pool. `COLD_LEAGUE_REFRESH_MINUTES=15` refreshes them
+  at `:00`, `:15`, `:30`, and `:45`.
+- A successful one-off `/lg info` lookup stores that league in
+  `ps99_league_current`. Non-configured names in that table form the persistent
+  general-league pool. `GENERAL_LEAGUE_REFRESH_MINUTES=30` refreshes due names
+  at `:00` and `:30`.
+
+Set `GENERAL_LEAGUE_REFRESH_ENABLED=false` to disable the second pool.
+`GENERAL_LEAGUE_REFRESH_BATCH_SIZE` limits how many due general leagues run in
+one cycle, and `GENERAL_LEAGUE_REFRESH_CONCURRENCY` controls simultaneous exact
+BIG Games requests. On the Discord Worker,
+`LEAGUE_ON_DEMAND_MAX_AGE_SECONDS=1800` aligns lookup freshness with the
+30-minute general cadence. The 15-minute and 30-minute chart spacing comes from
+these stored snapshot times; no separate graph table or migration is required.
+
 The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
 `LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
 and current rows without deleting previous league history.
@@ -675,7 +780,7 @@ without data, and it is omitted from public league lists. For example, this
 redacts Younes's points globally while retaining all source data:
 
 ```json
-{"leagues":[],"players":["Younes89755","1856284829"]}
+{"leagues":[],"players":["Younes89755","1856284829","kessho02"]}
 ```
 
 Put a league name in `leagues` to hide its entire public dataset. Player IDs are
@@ -803,6 +908,16 @@ the first snapshot before returning to the initiating page. This deliberately
 bypasses the normal hourly timer and consumes one BIG Games refresh-quota slot.
 `league-inv-test.html` is the AgentP_0928 totals-only consent and verification
 page.
+
+League inventory totals can also calculate each displayed event-pet group's
+share of total pet damage. The Worker first uses a power, damage, or strength
+field carried by the stored inventory, then checks the official Big Games
+`/api/collection/Pets` catalog. The hatch probabilities are never treated as
+damage. If that catalog does not expose a usable value, set the optional
+`EVENT_PET_POWER_JSON` Worker variable to verified base or variant values. Its
+shape is `{"War Elephant":{"Normal":100,"Golden":300}}`; the numbers here
+only demonstrate the format and are not game values. `PET_CATALOG_CACHE_SECONDS`
+controls the catalog cache and defaults to one hour.
 
 After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
 `POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big

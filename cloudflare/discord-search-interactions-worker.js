@@ -10,10 +10,18 @@ const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
+const MESSAGE_FLAG_COMPONENTS_V2 = 1 << 15;
 const COMPONENT_TYPE_ACTION_ROW = 1;
 const COMPONENT_TYPE_BUTTON = 2;
+const COMPONENT_TYPE_SECTION = 9;
+const COMPONENT_TYPE_TEXT_DISPLAY = 10;
+const COMPONENT_TYPE_THUMBNAIL = 11;
+const COMPONENT_TYPE_MEDIA_GALLERY = 12;
+const COMPONENT_TYPE_SEPARATOR = 14;
+const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
+const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
 const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
 const HISTORY_VIEW_LABELS = {
   clan: "Clan History",
@@ -82,6 +90,11 @@ export default {
         return await registerDuckCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-lg-command") {
+        requireAdmin(request, env);
+        return await registerLgCommand(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/commands") {
         requireAdmin(request, env);
         return await listCommands(url, env);
@@ -95,6 +108,11 @@ export default {
       if (request.method === "GET" && url.pathname === "/admin/search-debug") {
         requireAdmin(request, env);
         return await searchDebug(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/lg-debug") {
+        requireAdmin(request, env);
+        return await lgDebug(url, env);
       }
 
       if ((request.method === "POST" || request.method === "DELETE") && url.pathname === "/admin/delete-command") {
@@ -131,6 +149,10 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (interaction.type === INTERACTION_TYPE_MESSAGE_COMPONENT) {
+    if (parseLeagueChartCustomId(interaction.data?.custom_id)) {
+      return interactionJson(handleLeagueChartComponent(interaction, env, ctx));
+    }
+
     return interactionJson(handleHistoryComponent(interaction, env, ctx));
   }
 
@@ -193,6 +215,27 @@ async function handleInteraction(request, env, ctx) {
     }
 
     ctx.waitUntil(completeChartInteraction(interaction, env, commandName === "duck" ? "duck" : "clan"));
+
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "lg") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "info") {
+      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+    }
+
+    const leagueName = getCommandOption(interaction, "name");
+    if (!leagueName) {
+      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+    }
+
+    ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, leagueName));
 
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
@@ -275,6 +318,705 @@ async function buildSearchResponse(query, env) {
       flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
     }
   };
+}
+
+async function completeLeagueInfoInteraction(interaction, env, leagueName, options = {}) {
+  try {
+    await editOriginalInteraction(interaction, await buildLeagueInfoMessage(leagueName, env, options));
+  } catch (err) {
+    await editOriginalInteraction(interaction, leagueInfoErrorMessage(err, env)).catch(() => null);
+  }
+}
+
+async function buildLeagueInfoMessage(leagueName, env, options = {}) {
+  const chartHours = leagueChartHours(options.chartHours);
+  const payload = await fetchLeagueCurrentPayload(leagueName, env);
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const members = rows
+    .map(row => ({
+      row,
+      name: leagueMemberName(row),
+      points: finiteNumber(row.total_points ?? row.points),
+      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
+    }))
+    .filter(item => item.points !== null)
+    .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)))
+    .slice(0, 4);
+
+  const leaguePoints = finiteNumber(payload.league_points)
+    ?? members.reduce((sum, item) => sum + Math.max(0, item.points || 0), 0);
+  const hourlyGain = rows
+    .map(row => finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain))
+    .filter(value => value !== null)
+    .reduce((sum, value) => sum + value, 0);
+
+  const contributions = members.length
+    ? members.map((item, index) => `#${index + 1} ${escapeDiscordMarkdown(item.name)} · ${shortNumber(item.points)} points · ${shortNumber(item.gain1h ?? 0)}/h`)
+    : ["No member contributions found."];
+
+  const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
+  const snapshotAt = payload.snapshot_at || payload.fetched_at || payload.updated_at;
+  const leagueDetails = {
+    type: COMPONENT_TYPE_TEXT_DISPLAY,
+    content: [
+      `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
+      `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
+      `**Global Rank**: ${rank(payload.league_rank)}`,
+      `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`
+    ].join("\n")
+  };
+  const thumbnailUrl = leagueIconUrl(payload.league_icon);
+  const header = thumbnailUrl
+    ? {
+        type: COMPONENT_TYPE_SECTION,
+        components: [leagueDetails],
+        accessory: {
+          type: COMPONENT_TYPE_THUMBNAIL,
+          media: { url: thumbnailUrl },
+          description: `${displayLeagueName} league icon`
+        }
+      }
+    : leagueDetails;
+
+  const containerComponents = [
+    header,
+    { type: COMPONENT_TYPE_SEPARATOR },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `### Contributions\n${contributions.join("\n")}`
+    }
+  ];
+
+  const message = {
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0x58a6ff,
+        components: containerComponents
+      }
+    ],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
+  };
+
+  try {
+    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
+    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours });
+    if (chartBytes?.byteLength) {
+      const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
+      containerComponents.push(
+        { type: COMPONENT_TYPE_SEPARATOR },
+        {
+          type: COMPONENT_TYPE_MEDIA_GALLERY,
+          items: [
+            {
+              media: { url: `attachment://${filename}` },
+              description: `${chartHours}-hour member growth chart for League ${displayLeagueName}`
+            }
+          ]
+        }
+      );
+      message._file = { filename, contentType: "image/png", bytes: chartBytes };
+    }
+  } catch {
+    // The command should still answer if the history chart cannot be rendered.
+  }
+
+  containerComponents.push(...leagueChartComponents(displayLeagueName, chartHours));
+
+  return message;
+}
+
+function leagueInfoErrorMessage(err, env) {
+  const message = truncateHistoryText(err?.message || String(err), 1500);
+  return {
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0xff6b6b,
+        components: [
+          {
+            type: COMPONENT_TYPE_TEXT_DISPLAY,
+            content: `## League lookup failed\n${escapeDiscordMarkdown(message)}`
+          }
+        ]
+      }
+    ],
+    attachments: [],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
+  };
+}
+
+function handleLeagueChartComponent(interaction, env, ctx) {
+  const state = parseLeagueChartCustomId(interaction.data?.custom_id);
+  if (!state) {
+    return messageResponse("That league chart control is no longer valid. Run `/lg info` again.", true);
+  }
+
+  ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, state.leagueName, {
+    chartHours: state.hours
+  }));
+
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+const leagueRefreshesInFlight = new Map();
+
+async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
+  const initial = await readStoredLeaguePayload(leagueName, env);
+  const cached = initial.payload;
+  const needsRefresh = !cached || leaguePayloadAgeSeconds(cached) > leagueOnDemandMaxAgeSeconds(env);
+
+  if (!needsRefresh) {
+    return options.debug
+      ? { payload: cached, attempts: initial.attempts, refresh: null, cache_status: "fresh" }
+      : cached;
+  }
+
+  const refresh = await refreshLeagueOnDemand(leagueName, env).catch(err => ({
+    ok: false,
+    status: err?.status || 502,
+    message: err?.message || String(err)
+  }));
+
+  if (refresh.ok) {
+    const refreshed = await readStoredLeaguePayload(leagueName, env);
+    if (refreshed.payload) {
+      return options.debug
+        ? {
+            payload: refreshed.payload,
+            attempts: [...initial.attempts, ...refreshed.attempts],
+            refresh,
+            cache_status: cached ? "refreshed_stale" : "hydrated"
+          }
+        : refreshed.payload;
+    }
+    initial.attempts.push(...refreshed.attempts);
+  }
+
+  // A temporary upstream failure should not make previously stored league data unusable.
+  if (cached) {
+    return options.debug
+      ? { payload: cached, attempts: initial.attempts, refresh, cache_status: "stale_fallback" }
+      : cached;
+  }
+
+  const last = initial.attempts[initial.attempts.length - 1] || {};
+  const message = refresh.message
+    ? `Could not refresh League ${leagueName}: ${refresh.message}`
+    : last.message || `No stored league data found for ${leagueName}.`;
+  const err = httpError(refresh.status || last.status || 502, message);
+  err.attempts = initial.attempts.map(attempt => leagueAttemptSummary(attempt));
+  if (options.debug) {
+    return { payload: null, attempts: initial.attempts, refresh, cache_status: "miss", error: err };
+  }
+  throw err;
+}
+
+async function readStoredLeaguePayload(leagueName, env) {
+  const attempts = [];
+
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/current", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    apiUrl.searchParams.set("rank_lookup", "false");
+    apiUrl.searchParams.set("fresh", "1");
+
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    attempts.push(result);
+    if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows) && result.payload.rows.length > 0) {
+      return { payload: result.payload, attempts };
+    }
+  }
+
+  return { payload: null, attempts };
+}
+
+function leagueOnDemandMaxAgeSeconds(env) {
+  const value = Number(env.LEAGUE_ON_DEMAND_MAX_AGE_SECONDS || 1800);
+  return Math.min(86400, Math.max(60, Number.isFinite(value) ? value : 1800));
+}
+
+function leaguePayloadAgeSeconds(payload) {
+  const timestamp = new Date(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at || 0).getTime();
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, (Date.now() - timestamp) / 1000);
+}
+
+function refreshLeagueOnDemand(leagueName, env) {
+  const key = String(leagueName || "").trim().toLowerCase();
+  const existing = leagueRefreshesInFlight.get(key);
+  if (existing) return existing;
+
+  const refresh = performLeagueOnDemandRefresh(leagueName, env)
+    .finally(() => leagueRefreshesInFlight.delete(key));
+  leagueRefreshesInFlight.set(key, refresh);
+  return refresh;
+}
+
+async function performLeagueOnDemandRefresh(leagueName, env) {
+  const token = String(env.LEAGUE_INGEST_ADMIN_TOKEN || "").trim();
+  if (!token) {
+    throw httpError(500, "LEAGUE_INGEST_ADMIN_TOKEN is not configured on the Discord Worker.");
+  }
+
+  const attempts = [];
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/ingest", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    attempts.push(result);
+    if (result.response_ok && result.payload?.ok !== false) {
+      return {
+        ok: true,
+        source: result.source,
+        status: result.status,
+        league_name: result.payload?.league_name || leagueName,
+        rows_inserted: result.payload?.rows_inserted ?? null,
+        attempts: attempts.map(attempt => leagueAttemptSummary(attempt))
+      };
+    }
+  }
+
+  const last = attempts[attempts.length - 1] || {};
+  const err = httpError(last.status || 502, last.message || `League refresh failed for ${leagueName}.`);
+  err.attempts = attempts.map(attempt => leagueAttemptSummary(attempt));
+  throw err;
+}
+
+function leagueChartHours(value) {
+  const number = Number(value);
+  return LEAGUE_CHART_HOURS.includes(number) ? number : 24;
+}
+
+function leagueChartComponents(leagueName, selectedHours) {
+  const safeLeague = encodeURIComponent(String(leagueName || "").trim()).slice(0, 72);
+  return [
+    {
+      type: COMPONENT_TYPE_ACTION_ROW,
+      components: LEAGUE_CHART_HOURS.map(hours => ({
+        type: COMPONENT_TYPE_BUTTON,
+        style: hours === selectedHours ? BUTTON_STYLE_PRIMARY : BUTTON_STYLE_SECONDARY,
+        label: `${hours}h`,
+        custom_id: `lgchart:${hours}:${safeLeague}`
+      }))
+    }
+  ];
+}
+
+function parseLeagueChartCustomId(value) {
+  const text = String(value || "");
+  const match = text.match(/^lgchart:(1|6|12|24):(.+)$/);
+  if (!match) return null;
+
+  return {
+    hours: leagueChartHours(match[1]),
+    leagueName: decodeURIComponent(match[2] || "").trim()
+  };
+}
+
+async function fetchLeagueHistoryPayload(leagueName, env, hours = 24) {
+  const historyHours = leagueChartHours(hours);
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/history", target.base);
+    apiUrl.searchParams.set("league", leagueName);
+    apiUrl.searchParams.set("hours", String(Math.max(3, historyHours + 2)));
+    apiUrl.searchParams.set("limit", "50000");
+
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows)) {
+      return result.payload;
+    }
+  }
+
+  return { rows: [] };
+}
+
+async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
+  const hours = leagueChartHours(options.hours);
+  const fonts = await loadHistoryFonts();
+  const width = 1600;
+  const height = 720;
+  const canvas = new HistoryPixelCanvas(width, height, [15, 20, 27, 255], 2);
+  const color = chartColors();
+  const members = leagueChartMembers(payload).slice(0, 4);
+  const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
+  const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
+
+  const panel = { x: 20, y: 20, w: width - 40, h: height - 40 };
+  canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
+  canvas.fillRect(panel.x, panel.y, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y + panel.h - 1, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y, 1, panel.h, color.line);
+  canvas.fillRect(panel.x + panel.w - 1, panel.y, 1, panel.h, color.line);
+
+  const title = `${hours}-Hour Member Growth`;
+  const updated = `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`;
+  const updatedWidth = canvas.measureFontText(fonts.regular, updated, 14);
+
+  canvas.drawFontText(fonts.bold, title, 42, 31, 34, color.white, 620);
+  canvas.drawFontText(fonts.regular, updated, panel.x + panel.w - updatedWidth - 22, 43, 14, color.muted, updatedWidth + 2);
+
+  const legend = series.slice(0, 4);
+  const legendLabels = legend.map(item => {
+    const gain = Math.max(0, Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0);
+    return `${historyCardText(item.name, 30)} (${shortNumber(gain)} / ${hours}h)`;
+  });
+  const legendGap = 34;
+  const legendWidths = legendLabels.map(label => Math.min(350, canvas.measureFontText(fonts.bold, label, 15) + 42));
+  const legendTotalWidth = legendWidths.reduce((sum, itemWidth) => sum + itemWidth, 0)
+    + legendGap * Math.max(0, legendWidths.length - 1);
+  let legendX = panel.x + Math.max(22, (panel.w - legendTotalWidth) / 2);
+  legend.forEach((item, index) => {
+    const itemWidth = legendWidths[index];
+    const name = canvas.fitFontText(fonts.bold, legendLabels[index], 15, itemWidth - 38);
+    canvas.fillRect(legendX, 91, 24, 4, item.color);
+    canvas.drawFontText(fonts.bold, name, legendX + 34, 79, 15, color.white, itemWidth - 38);
+    legendX += itemWidth + legendGap;
+  });
+
+  const plot = { x: 116, y: 116, w: 1438, h: 516 };
+  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
+  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+
+  if (!series.some(item => item.points.length >= 1)) {
+    canvas.drawFontText(fonts.regular, "Not enough stored hourly history to chart this league yet.", plot.x + 28, plot.y + 48, 20, color.muted, plot.w - 56);
+    return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+  }
+
+  const allPoints = series.flatMap(item => item.points);
+  const minT = Math.min(...allPoints.map(point => point.t));
+  const maxT = Math.max(...allPoints.map(point => point.t));
+  const chartMinT = maxT - hours * 60 * 60 * 1000;
+  const chartMaxT = maxT;
+  const maxYValue = Math.max(1, ...allPoints.map(point => point.value));
+  const yMin = 0;
+  const yMax = maxYValue + Math.max(1, maxYValue * 0.14);
+  const xForTime = time => chartMaxT === chartMinT ? plot.x : plot.x + ((time - chartMinT) / (chartMaxT - chartMinT)) * plot.w;
+  const xFor = point => xForTime(point.t);
+  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / (yMax - yMin))) * plot.h;
+  const lineOffsets = [
+    { x: 0, y: -6 },
+    { x: 0, y: -2 },
+    { x: 0, y: 2 },
+    { x: 0, y: 6 }
+  ];
+  const clampPlotX = value => Math.max(plot.x + 3, Math.min(plot.x + plot.w - 3, value));
+  const clampPlotY = value => Math.max(plot.y + 3, Math.min(plot.y + plot.h - 3, value));
+  const visualXFor = (item, point) => clampPlotX(xFor(point) + (item.visualOffsetX || 0));
+  const visualXAt = (item, time) => clampPlotX(xForTime(time) + (item.visualOffsetX || 0));
+  const visualYFor = (item, point) => clampPlotY(yFor(point) + (item.visualOffsetY || 0));
+  const drawGrowthSegment = (x1, y1, x2, y2, lineColor) => {
+    const ax = Math.round(x1);
+    const ay = Math.round(y1);
+    const bx = Math.round(x2);
+    const by = Math.round(y2);
+    const thickness = 2;
+    const half = Math.floor(thickness / 2);
+
+    if (Math.abs(bx - ax) >= Math.abs(by - ay)) {
+      const left = Math.min(ax, bx);
+      canvas.fillRect(left, ay - half, Math.max(1, Math.abs(bx - ax) + 1), thickness, lineColor);
+      return;
+    }
+
+    const top = Math.min(ay, by);
+    canvas.fillRect(ax - half, top, thickness, Math.max(1, Math.abs(by - ay) + 1), lineColor);
+  };
+
+  for (let i = 0; i <= 4; i += 1) {
+    const yy = plot.y + (i / 4) * plot.h;
+    const value = yMax - (i / 4) * (yMax - yMin);
+    const label = shortNumber(value);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    canvas.drawFontText(fonts.regular, label, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
+  }
+
+  const xTickCount = hours <= 1 ? 2 : Math.min(12, hours);
+  for (let i = 0; i <= xTickCount; i += 1) {
+    const xx = plot.x + (i / xTickCount) * plot.w;
+    const tickTime = chartMinT + (i / xTickCount) * (chartMaxT - chartMinT);
+    const tickLabel = hours <= 1 ? chartTimeOfDayAxisLabel(tickTime) : chartHourAxisLabel(tickTime);
+    const tickLabelWidth = canvas.measureFontText(fonts.regular, tickLabel, 12);
+    const tickLabelX = i === 0
+      ? plot.x
+      : i === xTickCount
+        ? plot.x + plot.w - tickLabelWidth
+        : Math.max(plot.x, Math.min(plot.x + plot.w - tickLabelWidth, xx - tickLabelWidth / 2));
+    canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
+    canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 23, 12, color.muted, tickLabelWidth + 6);
+  }
+
+  series.forEach((item, seriesIndex) => {
+    const offset = lineOffsets[seriesIndex % lineOffsets.length];
+    item.visualOffsetX = offset.x;
+    item.visualOffsetY = offset.y;
+
+    for (let index = 0; index < item.points.length; index += 1) {
+      const current = item.points[index];
+      const previous = item.points[index - 1] || null;
+      const startX = visualXAt(item, current.startT ?? Math.max(chartMinT, current.t - 60 * 60 * 1000));
+      const currentY = visualYFor(item, current);
+      const currentX = visualXFor(item, current);
+
+      drawGrowthSegment(startX, currentY, currentX, currentY, item.color);
+
+      if (previous && !current.breakBefore) {
+        const previousY = visualYFor(item, previous);
+        drawGrowthSegment(startX, previousY, startX, currentY, item.color);
+      }
+    }
+
+  });
+
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function drawLeagueMemberGrowthSummary(canvas, fonts, series, hours, area, color) {
+  canvas.fillRect(area.x, area.y, area.w, area.h, [13, 19, 27, 245]);
+  canvas.fillRect(area.x, area.y, area.w, 1, color.line);
+  canvas.fillRect(area.x, area.y + area.h - 1, area.w, 1, color.line);
+  canvas.fillRect(area.x, area.y, 1, area.h, color.line);
+  canvas.fillRect(area.x + area.w - 1, area.y, 1, area.h, color.line);
+  canvas.drawFontText(fonts.bold, `Growth summary - last ${hours}h`, area.x + 18, area.y + 12, 16, color.white, 260);
+  canvas.drawFontText(fonts.regular, "Total change, current hourly rate, average hourly rate, and peak hour.", area.x + 18, area.y + 39, 12, color.muted, 520);
+
+  const cardGap = 14;
+  const cardY = area.y + 64;
+  const cardW = Math.floor((area.w - 36 - cardGap * 3) / 4);
+  const cardH = 38;
+
+  series.slice(0, 4).forEach((item, index) => {
+    const x = area.x + 18 + index * (cardW + cardGap);
+    const latest = item.latestGain || 0;
+    const total = Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0;
+    const avg = Number.isFinite(item.avgGain) ? item.avgGain : total / Math.max(1, hours);
+    const peak = Number.isFinite(item.peakGain) ? item.peakGain : 0;
+    canvas.fillRect(x, cardY, cardW, cardH, [9, 13, 19, 255]);
+    canvas.fillRect(x, cardY, 5, cardH, item.color);
+    canvas.fillRect(x, cardY + cardH - 1, cardW, 1, color.line);
+    canvas.drawFontText(fonts.bold, historyCardText(item.name, 18), x + 14, cardY + 5, 13, item.color, 118);
+    canvas.drawFontText(fonts.regular, `+${shortNumber(total)} total`, x + 142, cardY + 5, 12, color.white, 104);
+    canvas.drawFontText(fonts.regular, `${shortNumber(latest)}/h now`, x + 258, cardY + 5, 12, color.muted, 92);
+    canvas.drawFontText(fonts.regular, `${shortNumber(avg)}/h avg`, x + 14, cardY + 23, 11, color.muted, 92);
+    canvas.drawFontText(fonts.regular, `${shortNumber(peak)}/h peak`, x + 116, cardY + 23, 11, color.muted, 92);
+  });
+}
+
+function leagueChartMembers(payload) {
+  return (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map(row => ({
+      row,
+      id: String(row.user_id || row.UserID || "").trim(),
+      name: leagueMemberName(row),
+      points: finiteNumber(row.total_points ?? row.points),
+      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
+    }))
+    .filter(item => item.id && item.points !== null)
+    .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)));
+}
+
+function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
+  const hours = leagueChartHours(options.hours);
+  const bucketMs = 15 * 60 * 1000;
+  const hourlyWindowMs = 60 * 60 * 1000;
+  const windowMs = hours * 60 * 60 * 1000;
+  const history = Array.isArray(historyRows) ? historyRows : [];
+  const currentAt = leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
+  const historyTimes = history.map(row => leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at)).filter(Number.isFinite);
+  const latest = Math.max(currentAt, ...historyTimes, Date.now() - bucketMs);
+  const end = Math.ceil(latest / bucketMs) * bucketMs;
+  const start = end - windowMs;
+  const buckets = Array.from({ length: Math.floor(windowMs / bucketMs) + 1 }, (_, index) => start + index * bucketMs);
+  const byUser = new Map();
+
+  for (const row of history) {
+    const id = String(row.user_id || row.UserID || "").trim();
+    const time = leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at);
+    const points = finiteNumber(row.total_points ?? row.points);
+    if (!id || !Number.isFinite(time) || points === null) continue;
+    if (!byUser.has(id)) byUser.set(id, []);
+    byUser.get(id).push({ time, points });
+  }
+
+  const colors = [
+    [255, 123, 114, 255],
+    [88, 166, 255, 255],
+    [126, 231, 135, 255],
+    [242, 204, 96, 255]
+  ];
+
+  return members.map((member, index) => {
+    const samples = [...(byUser.get(member.id) || []), { time: currentAt, points: member.points }]
+      .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
+      .sort((a, b) => a.time - b.time);
+    const points = [];
+    let currentSampleIndex = 0;
+    let baselineSampleIndex = 0;
+    let lastCurrentSample = null;
+    let lastBaselineSample = null;
+    let previousCurrentValue = null;
+    let lastBucketWasGap = false;
+
+    for (const bucketEnd of buckets) {
+      while (currentSampleIndex < samples.length && samples[currentSampleIndex].time <= bucketEnd) {
+        lastCurrentSample = samples[currentSampleIndex];
+        currentSampleIndex += 1;
+      }
+
+      const baselineTime = bucketEnd - hourlyWindowMs;
+      while (baselineSampleIndex < samples.length && samples[baselineSampleIndex].time <= baselineTime) {
+        lastBaselineSample = samples[baselineSampleIndex];
+        baselineSampleIndex += 1;
+      }
+
+      if (!lastCurrentSample || !lastBaselineSample) {
+        lastBucketWasGap = true;
+        continue;
+      }
+
+      const hourlyGain = Math.max(0, lastCurrentSample.points - lastBaselineSample.points);
+      const intervalGain = previousCurrentValue === null
+        ? 0
+        : Math.max(0, lastCurrentSample.points - previousCurrentValue);
+      points.push({
+        t: bucketEnd,
+        startT: Math.max(start, bucketEnd - bucketMs),
+        value: hourlyGain,
+        intervalGain,
+        breakBefore: lastBucketWasGap
+      });
+      previousCurrentValue = lastCurrentSample.points;
+      lastBucketWasGap = false;
+    }
+
+    const latestGain = member.gain1h !== null
+      ? Math.max(0, member.gain1h || 0)
+      : points[points.length - 1]?.value ?? 0;
+    const totalGain = points.reduce((sum, point) => sum + Math.max(0, point.intervalGain ?? point.value ?? 0), 0);
+    const peakGain = points.reduce((max, point) => Math.max(max, Math.max(0, point.value || 0)), 0);
+
+    return {
+      id: member.id,
+      name: member.name,
+      color: colors[index % colors.length],
+      points,
+      latestGain,
+      gain: totalGain,
+      totalGain,
+      avgGain: totalGain / Math.max(1, hours),
+      peakGain
+    };
+  });
+}
+
+function leagueChartTime(value) {
+  const ms = new Date(value || 0).getTime();
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+function leagueApiTargets(env) {
+  const defaultBase = "https://yamo-league-api-worker.opal-dde.workers.dev";
+  const bases = [...new Set([String(env.LEAGUE_API_BASE || "").trim(), defaultBase].filter(Boolean))]
+    .map(base => base.replace(/\/$/, ""));
+  const targets = [];
+
+  if (hasLeagueApiServiceBinding(env)) {
+    targets.push({
+      source: "service_binding",
+      base: "https://yamo-league-api-worker.service",
+      binding: env.LEAGUE_API_WORKER
+    });
+  }
+
+  for (const base of bases) {
+    targets.push({
+      source: base === defaultBase ? "default_public_url" : "configured_public_url",
+      base,
+      binding: null
+    });
+  }
+
+  return targets;
+}
+
+async function fetchLeagueCurrentAttempt(target, apiUrl, options = {}) {
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-League-Worker",
+      ...(options.headers || {})
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  };
+  const request = new Request(apiUrl.toString(), init);
+  const response = target.binding
+    ? await target.binding.fetch(request)
+    : await fetch(request);
+  const text = await response.text();
+  const payload = parseJsonObject(text);
+
+  return {
+    source: target.source,
+    api_url: apiUrl.toString(),
+    status: response.status,
+    response_ok: response.ok,
+    payload,
+    payload_ok: payload?.ok ?? null,
+    message: payload?.message || (!response.ok ? truncateText(text, 180) : null),
+    row_count: Array.isArray(payload?.rows) ? payload.rows.length : null,
+    league_name: payload?.league_name || null,
+    league_rank: payload?.league_rank ?? null
+  };
+}
+
+function parseJsonObject(text) {
+  try {
+    const parsed = JSON.parse(text || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function truncateText(value, length) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > length ? `${text.slice(0, Math.max(0, length - 1))}…` : text;
+}
+
+function leagueAttemptSummary(attempt) {
+  return {
+    source: attempt.source,
+    api_url: attempt.api_url,
+    status: attempt.status,
+    response_ok: attempt.response_ok,
+    payload_ok: attempt.payload_ok,
+    message: attempt.message,
+    row_count: attempt.row_count,
+    league_name: attempt.league_name,
+    league_rank: attempt.league_rank
+  };
+}
+
+function leagueMemberName(row) {
+  return row.display_name || row.username || `user_${row.user_id}`;
+}
+
+function leagueIconUrl(icon) {
+  const text = String(icon || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+
+  const assetMatch = text.match(/rbxassetid:\/\/(\d+)/i);
+  const assetId = assetMatch ? assetMatch[1] : /^\d+$/.test(text) ? text : "";
+  return assetId ? `https://ps99.biggamesapi.io/image/${encodeURIComponent(assetId)}` : "";
 }
 
 function handleHistoryComponent(interaction, env, ctx) {
@@ -1342,6 +2084,18 @@ function chartTimeLabel(value) {
   return date.toLocaleString("en-US", { timeZone: "America/Guatemala", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function chartHourAxisLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", hour: "numeric" });
+}
+
+function chartTimeOfDayAxisLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("en-US", { timeZone: "America/Guatemala", hour: "numeric", minute: "2-digit" });
+}
+
 function chartFilenamePart(value) {
   return String(value || "current").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "current";
 }
@@ -2398,6 +3152,10 @@ async function registerDuckCommand(url, env) {
   return registerCommand(url, env, duckCommandPayload());
 }
 
+async function registerLgCommand(url, env) {
+  return registerCommand(url, env, lgCommandPayload());
+}
+
 async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
@@ -2778,6 +3536,40 @@ async function searchDebug(url, env) {
   });
 }
 
+async function lgDebug(url, env) {
+  const leagueName = String(url.searchParams.get("league") || url.searchParams.get("name") || url.searchParams.get("q") || "").trim();
+  if (!leagueName) {
+    throw httpError(400, "Missing ?league=name.");
+  }
+
+  const result = await fetchLeagueCurrentPayload(leagueName, env, { debug: true });
+  return json({
+    ok: Boolean(result.payload),
+    configured: {
+      league_api_base: String(env.LEAGUE_API_BASE || "").trim() || "https://yamo-league-api-worker.opal-dde.workers.dev",
+      service_binding_enabled: hasLeagueApiServiceBinding(env),
+      target_count: leagueApiTargets(env).length
+    },
+    requested_league: leagueName,
+    error: result.error?.message || null,
+    attempts: result.attempts.map(attempt => leagueAttemptSummary(attempt)),
+    league: result.payload ? {
+      league_name: result.payload.league_name || null,
+      league_points: result.payload.league_points ?? null,
+      league_rank: result.payload.league_rank ?? null,
+      league_icon: result.payload.league_icon || null,
+      row_count: Array.isArray(result.payload.rows) ? result.payload.rows.length : 0,
+      top_contributions: (result.payload.rows || []).slice(0, 4).map(row => ({
+        rank: row.rank ?? null,
+        username: row.username || row.display_name || null,
+        user_id: row.user_id ?? null,
+        points: row.total_points ?? row.points ?? null,
+        gain_1h: row.gain_1h ?? null
+      }))
+    } : null
+  });
+}
+
 async function fetchGlobalSearchPayload(query, env) {
   const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
@@ -2917,6 +3709,25 @@ async function fetchClanApi(env, url, init) {
   const request = new Request(url.toString(), init);
   if (hasClanApiServiceBinding(env)) {
     return env.CLAN_API_WORKER.fetch(request);
+  }
+  return fetch(request);
+}
+
+function leagueApiUrl(env, path, fallbackBase) {
+  const base = hasLeagueApiServiceBinding(env)
+    ? "https://yamo-league-api-worker.service"
+    : fallbackBase;
+  return new URL(path, base);
+}
+
+function hasLeagueApiServiceBinding(env) {
+  return Boolean(env?.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function");
+}
+
+async function fetchLeagueApi(env, url, init) {
+  const request = new Request(url.toString(), init);
+  if (hasLeagueApiServiceBinding(env)) {
+    return env.LEAGUE_API_WORKER.fetch(request);
   }
   return fetch(request);
 }
@@ -3095,6 +3906,30 @@ function duckCommandPayload() {
   };
 }
 
+function lgCommandPayload() {
+  return {
+    name: "lg",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "League lookup tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "info",
+        description: "Show current league points, rank, and top contributions.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "League name, for example dezzz",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          }
+        ]
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -3171,9 +4006,21 @@ async function verifyDiscordRequest(request, env, body) {
 }
 
 function getCommandOption(interaction, name) {
-  const option = (interaction.data?.options || [])
-    .find(item => String(item?.name || "").toLowerCase() === name);
-  return String(option?.value || "").trim();
+  const targetName = String(name || "").toLowerCase();
+  const stack = [...(interaction.data?.options || [])];
+
+  while (stack.length) {
+    const option = stack.shift();
+    if (String(option?.name || "").toLowerCase() === targetName && option?.value !== undefined) {
+      return String(option.value || "").trim();
+    }
+
+    if (Array.isArray(option?.options)) {
+      stack.push(...option.options);
+    }
+  }
+
+  return "";
 }
 
 function getSubcommandName(interaction) {
@@ -3219,6 +4066,11 @@ function formatClanRank(row, run) {
 function positiveInteger(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+function finiteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function shortNumber(value) {

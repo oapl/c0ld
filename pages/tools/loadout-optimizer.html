@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PS99 Loadout Optimizer</title>
+  <meta name="description" content="Build and compare PS99 enchant loadouts, egg odds, damage, and drop estimates." />
+  <link rel="stylesheet" href="assets/loadout-optimizer.css" />
+</head>
+<body>
+  <header>
+    <img class="brand-img" src="assets/c0ld-kitsune-logo.gif" alt="c0ld" />
+    <nav>
+      <a class="menu-btn" href="index.html">c0ld Leaderboard</a>
+      <a class="menu-btn" href="clans.html">Clans Leaderboard</a>
+      <a class="menu-btn" href="global-leaderboard.html">Global Leaderboard</a>
+      <details class="lookup-menu">
+        <summary class="menu-btn active">Tools</summary>
+        <div class="lookup-panel lookup-menu-list">
+          <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
+          <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
+          <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
+          <a class="menu-btn active" href="loadout-optimizer.html">Loadout Optimizer</a>
+          <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+          <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
+          <a class="menu-btn" href="duck-recap.html">Duck Recap</a>
+          <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
+          <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main>
+    <section class="tool-header">
+      <div>
+        <h1>Loadout Optimizer</h1>
+        <div class="muted">PS99 enchant, egg, damage, and drop modeling</div>
+      </div>
+      <div class="model-badge" id="model-badge">Planning model</div>
+    </section>
+
+    <div class="workspace">
+      <section class="section">
+        <div class="section-header">
+          <h2>Enchant Loadout</h2>
+          <div class="toolbar">
+            <label class="control-label">Slots
+              <input id="slot-count" type="number" min="1" max="9" step="1" value="9" />
+            </label>
+            <button class="btn" id="clear-loadout" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="slot-grid" id="loadout-slots" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <h2>Enchants</h2>
+          <span class="muted"><span id="catalog-count"></span> <span id="catalog-source"></span></span>
+        </div>
+        <div class="section-body">
+          <div class="catalog-controls">
+            <input id="enchant-search" type="search" placeholder="Search enchants..." autocomplete="off" />
+            <select id="category-filter" aria-label="Enchant category">
+              <option value="all">All categories</option>
+            </select>
+          </div>
+          <div class="catalog-grid" id="enchant-catalog"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="stats" aria-label="Loadout totals">
+      <div class="stat"><div class="stat-label">Damage Throughput</div><div class="stat-value" id="damage-total">1.00x</div><div class="stat-note">Expected modeled output</div></div>
+      <div class="stat"><div class="stat-label">Egg Luck</div><div class="stat-value" id="luck-total">+0%</div><div class="stat-note" id="luck-multiplier">1.00x odds weight</div></div>
+      <div class="stat"><div class="stat-label">Item Drops</div><div class="stat-value" id="drop-total">+0%</div><div class="stat-note" id="drop-multiplier">1.00x drop weight</div></div>
+      <div class="stat"><div class="stat-label">Attack Speed</div><div class="stat-value" id="speed-total">+0%</div><div class="stat-note">Before game caps</div></div>
+      <div class="stat"><div class="stat-label">Filled Slots</div><div class="stat-value" id="filled-slots">0 / 9</div><div class="stat-note">Normal and empowered</div></div>
+    </section>
+
+    <div class="calculator-view" role="group" aria-label="Calculator view">
+      <button class="btn active" type="button" data-calculator-view="combat">Combat</button>
+      <button class="btn" type="button" data-calculator-view="hatching">Hatching</button>
+      <button class="btn" type="button" data-calculator-view="farming">Farming</button>
+      <button class="btn" type="button" data-calculator-view="all">All</button>
+    </div>
+
+    <div class="calculator-grid" data-view-section="combat">
+      <section class="section">
+        <div class="section-header"><h2>Combat Inputs</h2></div>
+        <div class="section-body">
+          <div class="form-grid">
+            <label class="control-label">Base damage per hit<input id="base-damage" type="number" min="0" step="1" value="100" /></label>
+            <label class="control-label">Base critical chance %<input id="base-crit" type="number" min="0" max="100" step="1" value="0" readonly /></label>
+            <label class="control-label">Critical multiplier<input id="crit-multiplier" type="number" min="1" step="0.1" value="5" /></label>
+          </div>
+          <div class="input-note">PS99 starts at 0% critical chance. The 5x critical multiplier is an editable working value until verified against the current game scripts.</div>
+          <div class="comparison-list" id="combat-breakdown"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><h2>Copy Comparison</h2></div>
+        <div class="section-body">
+          <div class="comparison-list" id="copy-comparison"></div>
+        </div>
+        <div class="result-note">Repeated copies use the editable stack weights under Model Assumptions.</div>
+      </section>
+    </div>
+
+    <section class="section" data-view-section="hatching" style="margin-bottom:16px">
+      <div class="section-header">
+        <h2>Egg Hatching</h2>
+        <button class="btn" id="add-egg-tier" type="button">Add Tier</button>
+      </div>
+      <div class="section-body">
+        <div class="form-grid" style="margin-bottom:16px">
+          <label class="control-label">Hatches per roll<input id="hatches-per-roll" type="number" min="1" max="144" step="1" value="144" /></label>
+          <label class="control-label">Rolls per minute<input id="rolls-per-minute" type="number" min="0" step="0.1" value="1" /></label>
+          <label class="control-label">Cost per egg<input id="cost-per-egg" type="number" min="0" step="1" value="0" /></label>
+        </div>
+        <div id="egg-tier-editors"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead id="egg-results-head"></thead>
+          <tbody id="egg-results-body"></tbody>
+        </table>
+      </div>
+      <div class="result-note" id="egg-model-note"></div>
+    </section>
+
+    <section class="section" data-view-section="farming" style="margin-bottom:16px">
+      <div class="section-header"><h2>Last-Zone Drop Estimate</h2></div>
+      <div class="section-body">
+        <div class="form-grid">
+          <label class="control-label">Base breakables / minute<input id="breakables-per-minute" type="number" min="0" step="1" value="30" /></label>
+          <label class="control-label">Base drop odds (1 in N)<input id="base-drop-one-in" type="number" min="1" step="1" value="20" /></label>
+          <label class="control-label">Items per successful drop<input id="items-per-drop" type="number" min="0" step="0.1" value="1" /></label>
+          <label class="control-label">Value per drop<input id="value-per-drop" type="number" min="0" step="1" value="1" /></label>
+          <label class="control-label">Damage interaction<span class="check-control"><input id="damage-limited" type="checkbox" checked /> Damage-limited farming</span></label>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Duration</th><th>Breakables</th><th>Expected Drops</th><th>Drop Value</th><th>Currency-Weighted Value</th></tr></thead>
+          <tbody id="drop-results-body"></tbody>
+        </table>
+      </div>
+      <div class="result-note" id="drop-model-note"></div>
+    </section>
+
+    <details class="section" open>
+      <summary class="section-header"><h2>Model Assumptions</h2></summary>
+      <div class="section-body assumption-grid">
+        <div>
+          <h3>Diminishing Return Weights</h3>
+          <div class="copy-weights" id="copy-weights"></div>
+        </div>
+        <div>
+          <h3>Game Data JSON</h3>
+          <textarea class="model-editor" id="model-editor" spellcheck="false" aria-label="Game data JSON"></textarea>
+          <div class="button-row" style="margin-top:8px">
+            <button class="btn primary" id="apply-model" type="button">Apply JSON</button>
+            <button class="btn" id="export-model" type="button">Copy JSON</button>
+            <button class="btn" id="reset-model" type="button">Reset Planning Data</button>
+          </div>
+        </div>
+      </div>
+      <div class="result-note">Current enchant numbers are planning assumptions. Import exact enchant effects, egg odds, and stack weights extracted from the decompile before using the totals as authoritative game values.</div>
+    </details>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="assets/loadout-optimizer-data.js"></script>
+  <script src="assets/loadout-optimizer-math.js"></script>
+  <script src="assets/loadout-optimizer.js"></script>
+  <script src="assets/protected-menus.js"></script>
+</body>
+</html>

@@ -6,6 +6,7 @@ const OAUTH_STATES_TABLE = "ps99_inventory_oauth_states";
 const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
+const BIG_GAMES_PET_COLLECTION_URL = "https://ps99.biggamesapi.io/api/collection/Pets";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
@@ -14,7 +15,25 @@ const DEFAULT_USER_ID = "109818";
 const DEFAULT_USERNAME = "Cinnamowopal";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
+const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
+const FEATURED_EVENT_PETS = [
+  { key: "elephant", name: "War Elephant" },
+  { key: "jaguar", name: "Warrior Jaguar" },
+  { key: "peacock", name: "Jewel Peacock" },
+  { key: "genie", name: "Genie Fox" }
+];
+const EVENT_PET_NAMES = [
+  "Caveman Bear", "Mammoth Elephant", "Bastet Cat", "Horus Falcon",
+  "Triumphant Eagle", "Legionary Bear", "Fenrir Wolf", "Druid Owl",
+  "Knight Corgi", "Crusader Dragon", "Temple Toucan", "Naga Cobra",
+  "War Elephant", "Warrior Jaguar", "Steppe Wolf", "Samurai Kitsune",
+  "Jewel Peacock", "Genie Fox"
+];
+
+let petCatalogCache = null;
+let petCatalogExpiresAt = 0;
+let petCatalogPromise = null;
 
 export default {
   async fetch(request, env) {
@@ -44,6 +63,8 @@ export default {
         response = await handleOAuthStatus(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/summary") {
         response = await handleOAuthSummary(env);
+      } else if (request.method === "POST" && url.pathname === "/api/inventory/retry") {
+        response = await handleInventoryRetry(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/inventory/ingest") {
         requireAdmin(request, env);
         response = await handleIngest(request, env, "manual");
@@ -235,7 +256,13 @@ async function handleOAuthCallback(request, env) {
     if (!forcedRefresh) {
       await markOAuthStateUsed(env, stateHash);
       return targetUserId
-        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${forcedError?.message || forcedError}`, { user_id: targetUserId, connected: "1" })
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Retry from the league page or wait for the next scheduled scan: ${forcedError?.message || forcedError}`, {
+            oauth_result: "connected_pending",
+            user_id: targetUserId,
+            connected: "1",
+            snapshot_ready: "0",
+            snapshot_state: "missing"
+          })
         : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${forcedError?.message || forcedError}`);
     }
     try {
@@ -244,7 +271,13 @@ async function handleOAuthCallback(request, env) {
     } catch (fallbackError) {
       await markOAuthStateUsed(env, stateHash);
       return targetUserId
-        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Use Pull Now to retry: ${fallbackError?.message || fallbackError}`, { user_id: targetUserId, connected: "1" })
+        ? oauthCompletion(pending, true, `Inventory access is connected, but the first pull failed. Retry from the league page or wait for the next scheduled scan: ${fallbackError?.message || fallbackError}`, {
+            oauth_result: "connected_pending",
+            user_id: targetUserId,
+            connected: "1",
+            snapshot_ready: "0",
+            snapshot_state: "missing"
+          })
         : oauthCompletion(pending, false, `Authorization succeeded, but the approving Roblox account could not be identified because the first inventory read failed: ${fallbackError?.message || fallbackError}`);
     }
   }
@@ -280,14 +313,22 @@ async function handleOAuthCallback(request, env) {
     ingest = await ingestInventory(env, user, "oauth_callback", false, { force: true, rawInventory });
   } catch (error) {
     await markOAuthStateUsed(env, stateHash);
-    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Use Pull Now to retry: ${error?.message || error}`, { user_id: targetUserId, connected: "1" });
+    return oauthCompletion(pending, true, `Access is connected, but the first inventory snapshot could not be saved. Retry from the league page or wait for the next scheduled scan: ${error?.message || error}`, {
+      oauth_result: "connected_pending",
+      user_id: targetUserId,
+      connected: "1",
+      snapshot_ready: "0",
+      snapshot_state: "missing"
+    });
   }
   await markOAuthStateUsed(env, stateHash);
 
-  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled.`, {
+  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled. Hourly gains will appear after two scheduled scans.`, {
     user_id: targetUserId,
     pulled: "1",
     forced: forcedRefresh ? "1" : "0",
+    snapshot_ready: "1",
+    snapshot_state: "ready",
     snapshot_at: ingest.snapshot?.captured_at || ""
   });
 }
@@ -295,7 +336,97 @@ async function handleOAuthCallback(request, env) {
 async function handleOAuthStatus(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID).trim();
-  return json({ ok: true, user_id: userId, ...(await oauthStatus(env, userId)) });
+  const access = await oauthStatus(env, userId);
+  const readiness = access.connected
+    ? await inventoryReadiness(env, userId)
+    : {
+        snapshot_ready: false,
+        snapshot_state: "disconnected",
+        snapshot_at: null,
+        snapshot_source: null,
+        hourly_ready: false,
+        hourly_rows: 0,
+        scheduled_snapshot_count: 0
+      };
+  return json({
+    ok: true,
+    user_id: userId,
+    ...access,
+    ...readiness,
+    connection_state: !access.connected ? "disconnected" : readiness.snapshot_ready ? "ready" : "pending_snapshot"
+  });
+}
+
+async function handleInventoryRetry(request, env) {
+  requireSupabase(env);
+  requireAllowedOrigin(request, env);
+
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("user_id") || "").trim();
+  if (!/^\d+$/.test(userId)) throw httpError(400, "A numeric Roblox user_id is required.");
+
+  const grant = await getUsableOAuthGrant(env, userId);
+  if (!grant) throw httpError(409, "Inventory authorization is not connected for this Roblox account.");
+
+  const before = await inventoryReadiness(env, userId);
+  if (before.snapshot_ready) {
+    return json({
+      ok: true,
+      skipped: true,
+      reason: "snapshot_already_exists",
+      user_id: userId,
+      ...before
+    });
+  }
+
+  const grantDetails = await findOAuthGrant(env, userId, "metadata");
+  const username = String(grantDetails?.metadata?.username || userId).trim();
+  const ingest = await ingestInventory(env, { user_id: userId, username }, "oauth_retry", false, { force: false });
+  const after = await inventoryReadiness(env, userId);
+  if (!after.snapshot_ready) throw httpError(502, "The inventory pull completed, but no readable snapshot was created.");
+
+  return json({
+    ok: true,
+    retried: true,
+    user_id: userId,
+    ingest,
+    ...after
+  });
+}
+
+async function inventoryReadiness(env, userId) {
+  requireSupabase(env);
+  const normalizedUserId = String(userId || "").trim();
+  const latest = await getLatestSnapshot(env, normalizedUserId);
+  if (!latest) {
+    return {
+      snapshot_ready: false,
+      snapshot_state: "missing",
+      snapshot_at: null,
+      snapshot_source: null,
+      hourly_ready: false,
+      hourly_rows: 0,
+      scheduled_snapshot_count: 0
+    };
+  }
+
+  const snapshots = await getUserSnapshots(env, normalizedUserId, 500);
+  const latestTime = new Date(latest.captured_at).getTime();
+  const cutoff = latestTime - 25 * 3600000;
+  const scheduled = sortAsc(snapshots).filter(snapshot =>
+    snapshot.source === "schedule" &&
+    new Date(snapshot.captured_at).getTime() >= cutoff
+  );
+
+  return {
+    snapshot_ready: true,
+    snapshot_state: "ready",
+    snapshot_at: latest.captured_at || null,
+    snapshot_source: latest.source || null,
+    hourly_ready: scheduled.length >= 2,
+    hourly_rows: Math.max(0, scheduled.length - 1),
+    scheduled_snapshot_count: scheduled.length
+  };
 }
 
 async function handleOAuthSummary(env) {
@@ -423,9 +554,13 @@ async function markOAuthStateUsed(env, stateHash) {
 function oauthCompletion(pending, success, message, params = {}) {
   if (pending?.return_url) {
     const target = new URL(pending.return_url);
-    target.searchParams.set("inventory_oauth", success ? "connected" : "error");
+    const oauthResult = String(params.oauth_result || (success ? "connected" : "error"));
+    target.searchParams.set("inventory_oauth", oauthResult);
     target.searchParams.set("inventory_message", message);
-    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null && value !== "") target.searchParams.set(key, String(value));
+    for (const [key, value] of Object.entries(params)) {
+      if (key === "oauth_result" || value === undefined || value === null || value === "") continue;
+      target.searchParams.set(key, String(value));
+    }
     return Response.redirect(target.toString(), 303);
   }
   return oauthHtml(success, message);
@@ -540,7 +675,15 @@ async function handleLatest(request, env) {
   if (!snapshot) return json({ ok: false, message: "No inventory snapshots found." }, 404);
   const includeItems = parseBool(url.searchParams.get("include_items")) !== false;
   const items = includeItems ? await getSnapshotItems(env, snapshot.id) : undefined;
-  return cacheJson({ ok: true, snapshot: lightSnapshot(snapshot), source: inventorySourceMeta(snapshot.raw), ...(includeItems ? { items } : {}) }, env);
+  const includeDamage = includeItems && parseBool(url.searchParams.get("include_damage")) === true;
+  const damageSummary = includeDamage ? await buildInventoryDamageSummary(items, env) : undefined;
+  return cacheJson({
+    ok: true,
+    snapshot: lightSnapshot(snapshot),
+    source: inventorySourceMeta(snapshot.raw),
+    ...(includeItems ? { items } : {}),
+    ...(includeDamage ? { damage_summary: damageSummary } : {})
+  }, env);
 }
 
 async function handleDiff(request, env) {
@@ -614,7 +757,8 @@ async function ingestInventory(env, user, source, isBoundary, options = {}) {
   const rawItems = extractInventoryItems(raw);
   const sourceMeta = inventorySourceMeta(raw);
   if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
-    throw httpError(502, "Big Games returned an empty inventory; snapshot was rejected to prevent a false inventory wipe.");
+    console.warn("Big Games inventory payload did not contain a recognized item array.", inventoryPayloadShape(raw));
+    throw httpError(502, "Big Games returned an empty or unrecognized inventory payload; snapshot was rejected to prevent a false inventory wipe.");
   }
 
   if (!options.force && envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true) && sourceMeta.fetched_at) {
@@ -913,6 +1057,33 @@ function extractInventoryItems(raw) {
   return findBestItemArray(raw);
 }
 
+function inventoryPayloadShape(raw) {
+  const data = raw?.data || raw;
+  const arrays = [];
+  collectArrayPaths(raw, "", arrays, 0);
+  return {
+    top_level_keys: raw && typeof raw === "object" ? Object.keys(raw).slice(0, 30) : [],
+    data_keys: data && typeof data === "object" ? Object.keys(data).slice(0, 30) : [],
+    recognized_inventory_available: data?.views?.inventory?.available ?? data?.inventory?.available ?? null,
+    array_paths: arrays.slice(0, 30)
+  };
+}
+
+function collectArrayPaths(value, path, output, depth) {
+  if (!value || typeof value !== "object" || depth > 5 || output.length >= 30) return;
+  if (Array.isArray(value)) {
+    output.push({ path: path || "$", length: value.length });
+    for (let index = 0; index < Math.min(value.length, 2); index++) {
+      collectArrayPaths(value[index], `${path}[${index}]`, output, depth + 1);
+    }
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectArrayPaths(child, path ? `${path}.${key}` : key, output, depth + 1);
+    if (output.length >= 30) break;
+  }
+}
+
 function inventorySourceMeta(raw) {
   if (!raw || typeof raw !== "object") return { fetched_at: null, is_stale: null, available: null };
   if (raw.source_fetched_at || raw.source_is_stale !== undefined || raw.inventory_available !== undefined) {
@@ -1069,6 +1240,244 @@ function normalizeStoredItem(item) {
     icon: source.icon || null
   };
 }
+
+async function buildInventoryDamageSummary(items, env) {
+  const eventNames = new Map(EVENT_PET_NAMES.map(name => [normalizePetName(name), name]));
+  const featuredNames = new Map(FEATURED_EVENT_PETS.map(pet => [normalizePetName(pet.name), pet]));
+  const categories = new Map([
+    ["other", createDamageCategory("other", "Other")],
+    ...FEATURED_EVENT_PETS.map(pet => [pet.key, createDamageCategory(pet.key, pet.name)])
+  ]);
+
+  let catalog = { powers: new Map(), source: "unavailable", warning: null };
+  try {
+    catalog = await getPetPowerCatalog(env);
+  } catch (error) {
+    catalog.warning = error?.message || String(error);
+  }
+
+  const unresolved = new Set();
+  let usedItemPower = false;
+  let usedOverride = false;
+  let usedCatalog = false;
+  let exact = true;
+
+  for (const item of items || []) {
+    const normalizedName = normalizePetName(item?.display_name || item?.item_id);
+    if (!eventNames.has(normalizedName)) continue;
+
+    const quantity = Math.max(0, Math.floor(Number(itemCount(item)) || 0));
+    if (!quantity) continue;
+
+    const categoryKey = featuredNames.get(normalizedName)?.key || "other";
+    const category = categories.get(categoryKey);
+    category.count += quantity;
+
+    const resolved = resolveOwnedPetPower(item, normalizedName, catalog.powers);
+    if (!resolved || !(resolved.power > 0)) {
+      unresolved.add(eventNames.get(normalizedName));
+      category.unresolved.add(eventNames.get(normalizedName));
+      continue;
+    }
+
+    category.damage += resolved.power * quantity;
+    category.resolved_count += quantity;
+    exact = exact && resolved.exact;
+    usedItemPower = usedItemPower || resolved.source === "inventory";
+    usedOverride = usedOverride || resolved.source === "override";
+    usedCatalog = usedCatalog || resolved.source === "catalog";
+  }
+
+  const ordered = [categories.get("other"), ...FEATURED_EVENT_PETS.map(pet => categories.get(pet.key))];
+  const totalCount = ordered.reduce((sum, category) => sum + category.count, 0);
+  const totalDamage = ordered.reduce((sum, category) => sum + category.damage, 0);
+  const resolvedCount = ordered.reduce((sum, category) => sum + category.resolved_count, 0);
+  const complete = unresolved.size === 0;
+  const available = totalDamage > 0;
+  const source = [usedItemPower && "inventory", usedOverride && "override", usedCatalog && "BIG Games Pets catalog"].filter(Boolean).join(" + ") || catalog.source;
+  const message = !available
+    ? "Pet power is not available in the stored inventory or BIG Games Pets catalog. Set EVENT_PET_POWER_JSON to supply verified values."
+    : !complete
+      ? `Damage percentages cover ${resolvedCount.toLocaleString("en-US")} of ${totalCount.toLocaleString("en-US")} listed event pets; unresolved pets are excluded.`
+      : !exact
+        ? "Damage percentages use base pet power for variants without a variant-specific power value."
+        : null;
+
+  return {
+    available,
+    complete,
+    exact: available && complete && exact,
+    source,
+    total_count: totalCount,
+    resolved_count: resolvedCount,
+    total_damage: totalDamage,
+    unresolved_pets: [...unresolved],
+    warning: catalog.warning || null,
+    message,
+    categories: ordered.map(category => ({
+      key: category.key,
+      name: category.name,
+      count: category.count,
+      resolved_count: category.resolved_count,
+      damage: category.damage,
+      damage_percent: available ? (category.damage / totalDamage) * 100 : null,
+      unresolved_pets: [...category.unresolved]
+    }))
+  };
+}
+
+function createDamageCategory(key, name) {
+  return { key, name, count: 0, resolved_count: 0, damage: 0, unresolved: new Set() };
+}
+
+async function getPetPowerCatalog(env) {
+  const overrides = parsePetPowerOverrides(env.EVENT_PET_POWER_JSON);
+  const now = Date.now();
+  if (petCatalogCache && now < petCatalogExpiresAt) return mergePetPowerCatalog(petCatalogCache, overrides);
+  if (!petCatalogPromise) {
+    petCatalogPromise = (async () => {
+      const endpoint = String(env.BIG_GAMES_PET_COLLECTION_URL || BIG_GAMES_PET_COLLECTION_URL).trim();
+      const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`BIG Games Pets catalog failed (${response.status}).`);
+      const payload = text ? JSON.parse(text) : {};
+      const rows = Array.isArray(payload) ? payload : Array.isArray(payload.data) ? payload.data : [];
+      const powers = new Map();
+      for (const row of rows) {
+        const name = normalizePetName(row?.configName || row?.configData?.name || row?.name);
+        if (!name) continue;
+        const power = extractCatalogPower(row);
+        if (power) powers.set(name, power);
+      }
+      return { powers, source: "BIG Games Pets catalog", warning: null };
+    })();
+  }
+  try {
+    petCatalogCache = await petCatalogPromise;
+    const seconds = clampNumber(env.PET_CATALOG_CACHE_SECONDS, DEFAULT_PET_CATALOG_CACHE_SECONDS, 60, 86400);
+    petCatalogExpiresAt = Date.now() + seconds * 1000;
+  } catch (error) {
+    petCatalogCache = {
+      powers: new Map(),
+      source: "unavailable",
+      warning: error?.message || String(error)
+    };
+    petCatalogExpiresAt = Date.now() + 60 * 1000;
+  } finally {
+    petCatalogPromise = null;
+  }
+  return mergePetPowerCatalog(petCatalogCache, overrides);
+}
+
+function mergePetPowerCatalog(catalog, overrides) {
+  const powers = new Map(catalog?.powers || []);
+  for (const [name, value] of overrides) powers.set(name, { ...value, source: "override" });
+  return { powers, source: overrides.size ? `${catalog?.source || "unavailable"} + override` : catalog?.source || "unavailable", warning: catalog?.warning || null };
+}
+
+function parsePetPowerOverrides(raw) {
+  const powers = new Map();
+  if (!raw) return powers;
+  try {
+    const parsed = JSON.parse(String(raw));
+    for (const [name, value] of Object.entries(parsed || {})) {
+      const normalized = normalizePetName(name);
+      const power = normalizePowerRecord(value, "override");
+      if (normalized && power) powers.set(normalized, power);
+    }
+  } catch {}
+  return powers;
+}
+
+function resolveOwnedPetPower(item, normalizedName, catalogPowers) {
+  const direct = extractPowerValue(item);
+  if (direct > 0) return { power: direct, exact: true, source: "inventory" };
+
+  const catalog = catalogPowers.get(normalizedName);
+  if (catalog) return selectVariantPower(catalog, item, catalog.source || "catalog");
+  return null;
+}
+
+function extractCatalogPower(row) {
+  const base = extractPowerValue(row?.configData) || extractPowerValue(row);
+  const variants = {};
+  for (const [label, aliases] of Object.entries({
+    Normal: ["normalpower", "normaldamage", "normalstrength"],
+    Golden: ["goldenpower", "goldendamage", "goldenstrength", "goldpower", "golddamage", "goldstrength"],
+    Rainbow: ["rainbowpower", "rainbowdamage", "rainbowstrength"],
+    "Shiny Normal": ["shinypower", "shinydamage", "shinystrength", "shinynormalpower", "shinynormaldamage", "shinynormalstrength"],
+    "Shiny Golden": ["shinygoldenpower", "shinygoldendamage", "shinygoldenstrength"],
+    "Shiny Rainbow": ["shinyrainbowpower", "shinyrainbowdamage", "shinyrainbowstrength"]
+  })) {
+    const value = findNumericField(row?.configData || row, new Set(aliases));
+    if (value > 0) variants[label] = value;
+  }
+  return base > 0 || Object.keys(variants).length ? { base: base || null, variants, source: "catalog" } : null;
+}
+
+function normalizePowerRecord(value, source) {
+  const scalar = Number(value);
+  if (Number.isFinite(scalar) && scalar > 0) return { base: scalar, variants: {}, source };
+  if (!value || typeof value !== "object") return null;
+  const variants = {};
+  let base = null;
+  for (const [key, candidate] of Object.entries(value)) {
+    const number = Number(candidate);
+    if (!Number.isFinite(number) || number <= 0) continue;
+    const normalizedKey = normalizeVariantName(key);
+    if (normalizedKey === "Normal" || ["base", "power", "damage", "strength"].includes(String(key).toLowerCase())) base = number;
+    else variants[normalizedKey] = number;
+  }
+  return base || Object.keys(variants).length ? { base, variants, source } : null;
+}
+
+function selectVariantPower(record, item, source) {
+  const variant = normalizeVariantName(item?.variant || getVariant(item));
+  const exact = Number(record?.variants?.[variant]);
+  if (Number.isFinite(exact) && exact > 0) return { power: exact, exact: true, source };
+  const base = Number(record?.base);
+  if (Number.isFinite(base) && base > 0) return { power: base, exact: variant === "Normal", source };
+  return null;
+}
+
+function extractPowerValue(value) {
+  return findNumericField(value, new Set(["power", "basepower", "petpower", "damage", "basedamage", "petdamage", "strength", "basestrength", "petstrength"]));
+}
+
+function findNumericField(value, acceptedKeys, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 5) return 0;
+  for (const [key, candidate] of Object.entries(value)) {
+    const normalizedKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (acceptedKeys.has(normalizedKey)) {
+      const number = Number(candidate);
+      if (Number.isFinite(number) && number > 0) return number;
+    }
+  }
+  for (const candidate of Object.values(value)) {
+    const nested = findNumericField(candidate, acceptedKeys, depth + 1);
+    if (nested > 0) return nested;
+  }
+  return 0;
+}
+
+function normalizePetName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeVariantName(value) {
+  const normalized = String(value || "Normal").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (normalized.includes("shiny") && normalized.includes("rainbow")) return "Shiny Rainbow";
+  if (normalized.includes("shiny") && (normalized.includes("golden") || normalized.includes("gold"))) return "Shiny Golden";
+  if (normalized.includes("shiny")) return "Shiny Normal";
+  if (normalized.includes("rainbow")) return "Rainbow";
+  if (normalized.includes("golden") || normalized.includes("gold")) return "Golden";
+  return "Normal";
+}
+
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
 async function supabaseSelect(env, table, params) { const url = new URL(`${supabaseUrl(env)}/rest/v1/${table}`); Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v)); const res = await fetch(url.toString(), { headers: supabaseHeaders(env) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("select", text)); return text ? JSON.parse(text) : []; }
 async function supabaseSelectAll(env, table, params, maxRows = 10000) { const rows = []; const pageSize = 1000; for (let offset = 0; offset < maxRows; offset += pageSize) { const page = await supabaseSelect(env, table, { ...(params || {}), limit: String(Math.min(pageSize, maxRows - offset)), offset: String(offset) }); rows.push(...page); if (page.length < pageSize) break; } return rows; }
 async function supabaseInsert(env, table, rows, prefer = "representation") { if (!rows.length) return []; const res = await fetch(`${supabaseUrl(env)}/rest/v1/${table}`, { method: "POST", headers: { ...supabaseHeaders(env), "content-type": "application/json", prefer: `return=${prefer}` }, body: JSON.stringify(rows) }); const text = await res.text(); if (!res.ok) throw httpError(res.status, supabaseFailureMessage("insert", text)); return text ? JSON.parse(text) : []; }
@@ -1080,6 +1489,16 @@ function supabaseHeaders(env) { const key = env.SUPABASE_SERVICE_ROLE_KEY || env
 function supabaseUrl(env) { return String(env.SUPABASE_URL || "").replace(/\/+$/, ""); }
 function requireSupabase(env) { if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) throw httpError(500, "Missing Supabase environment variables."); }
 function requireAdmin(request, env) { const expected = env.INGEST_ADMIN_TOKEN; if (!expected) return; if ((request.headers.get("authorization") || "") !== `Bearer ${expected}`) throw httpError(401, "Unauthorized"); }
+function requireAllowedOrigin(request, env) {
+  const origin = String(request.headers.get("origin") || "").trim();
+  const allowed = String(env.ALLOWED_ORIGIN || "https://c0ld-clan.com")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (!origin || (!allowed.includes("*") && !allowed.includes(origin))) {
+    throw httpError(403, "This inventory retry origin is not allowed.");
+  }
+}
 function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
 async function trackedInventoryUsers(env) {
   const users = new Map(configuredUsers(env).map(user => [String(user.user_id), user]));

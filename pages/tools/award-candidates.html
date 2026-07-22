@@ -113,6 +113,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
     <div class="controls">
       <select id="battle-select"><option value="current">Current Battle</option></select>
       <button id="load-btn" type="button">Refresh</button>
+      <button id="full-btn" type="button">Full Analysis</button>
     </div>
   </section>
 
@@ -167,6 +168,7 @@ const els={
   error:document.getElementById("error"),
   battleSelect:document.getElementById("battle-select"),
   loadBtn:document.getElementById("load-btn"),
+  fullBtn:document.getElementById("full-btn"),
   battleCard:document.getElementById("battle-card"),
   playersCard:document.getElementById("players-card"),
   snapshotsCard:document.getElementById("snapshots-card"),
@@ -213,6 +215,19 @@ function showError(message){els.error.textContent=message;els.error.style.displa
 async function fetchJson(url,fallback){
   try{
     const response=await fetch(url,{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const data=await response.json();
+    if(data&&data.ok===false)throw new Error(data.message||"API error");
+    return data;
+  }catch(error){
+    if(arguments.length>1)return fallback;
+    throw error;
+  }
+}
+
+async function fetchJsonCached(url,fallback){
+  try{
+    const response=await fetch(url,{cache:"default"});
     if(!response.ok)throw new Error("HTTP "+response.status);
     const data=await response.json();
     if(data&&data.ok===false)throw new Error(data.message||"API error");
@@ -358,13 +373,20 @@ function battleHours(battle){
   return Math.max(24,Math.ceil((Date.now()-startTime)/(60*60*1000))+24);
 }
 
-async function fetchCurrent(selectedBattle){
+async function fetchCurrent(selectedBattle,options={}){
   const url=new URL(API+"/api/current");
   url.searchParams.set("clan",CLAN);
   url.searchParams.set("avatars","false");
   url.searchParams.set("downtime","false");
   if(selectedBattle&&selectedBattle!=="current")url.searchParams.set("battle",selectedBattle);
-  return fetchJson(url.toString(),{rows:[]});
+  return (options.cached?fetchJsonCached:fetchJson)(url.toString(),{rows:[]});
+}
+
+async function fetchAwardSummary(selectedBattle){
+  const url=new URL(API+"/api/home/awards");
+  url.searchParams.set("clan",CLAN);
+  if(selectedBattle&&selectedBattle!=="current")url.searchParams.set("battle",selectedBattle);
+  return fetchJsonCached(url.toString(),null);
 }
 
 async function fetchHistory(battle){
@@ -788,6 +810,103 @@ function improvedPointLift(stat,history){
   if(!previous||previous<=0)return 0;
   return clamp((stat.finalPoints-previous)/previous,0,2);
 }
+
+function summaryAwardStat(award,extra={}){
+  if(!award||typeof award!=="object")return null;
+  const points=finite(award.total_points??award.points??award.clan_points??award.global_points)??0;
+  const rank=finite(award.latest_rank??award.rank??award.clan_rank);
+  return {
+    user_id:award.user_id??null,
+    username:award.username||award.display_name||(award.user_id?("user_"+award.user_id):"Unknown player"),
+    avatar_url:award.avatar_url||null,
+    finalPoints:points,
+    totalGain:0,
+    finalRank:rank,
+    score:100,
+    ...extra
+  };
+}
+
+function summaryAwardDefinitions(summary){
+  const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
+  const mvp=summaryAwardStat(awards.mvp,{valueMs:Number(awards.mvp?.value_ms)||0});
+  const points=summaryAwardStat(awards.points,{finalPoints:Number(awards.points?.total_points)||0});
+  const sleeper=summaryAwardStat(awards.sleeper,{
+    firstRank:finite(awards.sleeper?.first_rank),
+    latestRank:finite(awards.sleeper?.latest_rank),
+    rankGain:finite(awards.sleeper?.gain),
+    percentage:finite(awards.sleeper?.percentage),
+    finalRank:finite(awards.sleeper?.latest_rank)
+  });
+  const downtime=summaryAwardStat(awards.downtime,{valueMs:Number(awards.downtime?.value_ms)||0});
+  const glasses=summaryAwardStat(awards.glasses,{rankChanges:finite(awards.glasses?.rank_changes)??0});
+  const lvp=summaryAwardStat(awards.lvp,{valueMs:Number(awards.lvp?.value_ms)||0});
+
+  return [
+    {
+      title:"MVP",
+      note:"Most observed time holding rank #1.",
+      weight:"server summary",
+      items:mvp?[mvp]:[],
+      metrics:stat=>[
+        {text:fmtDuration(stat.valueMs)+" at #1",tone:"good"},
+        {text:"calculated in Postgres"}
+      ]
+    },
+    {
+      title:"Point Leader",
+      note:"Most points in the selected battle.",
+      weight:"server summary",
+      items:points?[points]:[],
+      metrics:stat=>[
+        {text:shortNum(stat.finalPoints)+" pts",tone:"good"},
+        {text:"latest battle snapshot"}
+      ]
+    },
+    {
+      title:"Most Improved",
+      note:"Largest rank climb from first recorded rank to latest rank.",
+      weight:"server summary",
+      items:sleeper?[sleeper]:[],
+      metrics:stat=>[
+        {text:rankLabel(stat.firstRank)+" -> "+rankLabel(stat.latestRank),tone:"good"},
+        {text:"+"+(stat.rankGain||0)+" ranks",tone:"good"},
+        {text:(stat.percentage??0).toFixed(1)+"% climb"}
+      ]
+    },
+    {
+      title:"Biggest Thrower",
+      note:"Most accumulated time without a recorded point gain.",
+      weight:"server summary",
+      items:downtime?[downtime]:[],
+      metrics:stat=>[
+        {text:fmtDuration(stat.valueMs)+" idle",tone:"bad"},
+        {text:"no point-gain intervals"}
+      ]
+    },
+    {
+      title:"Gotta Catch 'em All",
+      note:"Most rank changes throughout the battle.",
+      weight:"server summary",
+      items:glasses?[glasses]:[],
+      metrics:stat=>[
+        {text:String(Math.trunc(stat.rankChanges||0))+" rank changes",tone:"warn"},
+        {text:"battle movement"}
+      ]
+    },
+    {
+      title:"Last Place Legend",
+      note:"Most observed time holding the lowest tracked clan rank.",
+      weight:"server summary",
+      items:lvp?[lvp]:[],
+      metrics:stat=>[
+        {text:fmtDuration(stat.valueMs)+" in last",tone:"bad"},
+        {text:"lowest rank exposure"}
+      ]
+    }
+  ];
+}
+
 function improvementProfile(stat,totalPlayers,maxCurrentRecovery,maxPoints){
   const history=historyOf(stat);
   const previousRank=finite(history.previousC0ldRank);
@@ -1015,6 +1134,27 @@ function renderCustom(stats){
   }).join("");
 }
 
+function renderCustomSummary(summary){
+  const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
+  const ideas=[
+    {title:"Point Crown",award:awards.points,metric:award=>shortNum(award.total_points)+" points"},
+    {title:"Rank Climber",award:awards.sleeper,metric:award=>"+"+(finite(award.gain)??0)+" ranks"},
+    {title:"Chaos Agent",award:awards.glasses,metric:award=>(finite(award.rank_changes)??0)+" rank changes"},
+    {title:"Idle Legend",award:awards.downtime,metric:award=>fmtDuration(Number(award.value_ms)||0)+" idle"},
+    {title:"Last Place Legend",award:awards.lvp,metric:award=>fmtDuration(Number(award.value_ms)||0)+" in last"}
+  ];
+  els.customMeta.textContent="Fast summary. Use Full Analysis for the older, deeper candidate scoring.";
+  els.customGrid.innerHTML=ideas.map(idea=>{
+    if(!idea.award)return '<div class="custom-card"><div class="custom-title">'+esc(idea.title)+'</div><div class="custom-metric">No candidate.</div></div>';
+    const stat=summaryAwardStat(idea.award);
+    return '<div class="custom-card">'+
+      '<div class="custom-title">'+esc(idea.title)+'</div>'+
+      '<div class="custom-player"><img src="'+esc(avatarFor(stat))+'" alt="" onerror="this.src=\''+FALLBACK_AVATAR+'\'"><a class="custom-name" href="'+esc(profileHref(stat))+'">'+esc(playerName(stat))+'</a></div>'+
+      '<div class="custom-metric">'+esc(idea.metric(idea.award))+'</div>'+
+    '</div>';
+  }).join("");
+}
+
 function milestoneRank(row){return finite(row?.global_rank)}
 function milestonePlayerName(row){return row?.username||row?.display_name||(row?.user_id?("user_"+row.user_id):"Unknown player")}
 function milestoneMemberList(rows){
@@ -1068,12 +1208,65 @@ function renderSummary(effectiveBattle,current,snapshots,stats){
   els.latestCard.textContent=fmtDate(latest);
 }
 
+function renderFastSummary(effectiveBattle,current,summary){
+  const battleRow=battles.find(row=>(row.battle||row.battle_key)===effectiveBattle);
+  els.battleCard.textContent=battleRow?.display_name||current?.display_name||current?.battle_display_name||summary?.battle||effectiveBattle;
+  const currentRows=Array.isArray(current?.rows)?current.rows:[];
+  els.playersCard.textContent=currentRows.length?currentRows.length.toLocaleString("en-US"):"-";
+  els.snapshotsCard.textContent=Number.isFinite(Number(summary?.snapshot_count))?Number(summary.snapshot_count).toLocaleString("en-US"):"-";
+  els.latestCard.textContent=fmtDate(summary?.source_snapshot_at||current?.snapshot_at||current?.generated_at);
+}
+
 async function loadCandidates(){
   if(loading)return;
   loading=true;
   showError("");
-  setStatus("Loading battle snapshots.");
+  setStatus("Loading award summary.");
   els.loadBtn.disabled=true;
+  els.fullBtn.disabled=true;
+  els.awardsGrid.innerHTML="";
+  els.customGrid.innerHTML="";
+  els.milestonesMeta.textContent="";
+  els.milestonesList.className="";
+  els.milestonesList.textContent="";
+  try{
+    const selected=els.battleSelect.value||"current";
+    const [current,summary]=await Promise.all([
+      fetchCurrent(selected,{cached:true}),
+      fetchAwardSummary(selected)
+    ]);
+    const effectiveBattle=selected==="current"?(summary?.battle||current.battle||battles[0]?.battle||"current"):selected;
+    if(!summary)throw new Error("No award summary was returned.");
+    renderFastSummary(effectiveBattle,current,summary);
+    renderAwards(summaryAwardDefinitions(summary));
+    renderCustomSummary(summary);
+    setStatus("Loaded fast award summary from "+(summary.source_snapshot_at?relativeTime(summary.source_snapshot_at):"latest snapshot")+".");
+    loadMilestones().catch(error=>console.warn("Milestones failed",error));
+    const url=new URL(location.href);
+    if(selected==="current")url.searchParams.delete("battle");else url.searchParams.set("battle",selected);
+    history.replaceState(null,"",url);
+  }catch(error){
+    console.error(error);
+    showError(error.message||String(error));
+    setStatus("Award summary load failed.");
+    els.awardsGrid.innerHTML="";
+    els.customGrid.innerHTML="";
+    els.milestonesList.className="message";
+    els.milestonesList.textContent="";
+  }finally{
+    els.loadBtn.disabled=false;
+    els.fullBtn.disabled=false;
+    loading=false;
+  }
+}
+
+async function loadFullCandidates(){
+  if(loading)return;
+  loading=true;
+  showError("");
+  setStatus("Loading full battle snapshots.");
+  els.loadBtn.disabled=true;
+  els.fullBtn.disabled=true;
   els.awardsGrid.innerHTML="";
   els.customGrid.innerHTML="";
   els.milestonesMeta.textContent="";
@@ -1109,12 +1302,14 @@ async function loadCandidates(){
     els.milestonesList.textContent="";
   }finally{
     els.loadBtn.disabled=false;
+    els.fullBtn.disabled=false;
     loading=false;
   }
 }
 
 els.loadBtn.addEventListener("click",loadCandidates);
 els.battleSelect.addEventListener("change",loadCandidates);
+els.fullBtn.addEventListener("click",loadFullCandidates);
 
 async function initPage(){
   await C0LD_PROTECTED.requirePage({
