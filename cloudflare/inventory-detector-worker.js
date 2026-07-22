@@ -30,6 +30,34 @@ const EVENT_PET_NAMES = [
   "War Elephant", "Warrior Jaguar", "Steppe Wolf", "Samurai Kitsune",
   "Jewel Peacock", "Genie Fox"
 ];
+const EVENT_PET_BASE_POWERS = Object.freeze({
+  "Caveman Bear": 3,
+  "Mammoth Elephant": 8,
+  "Bastet Cat": 14,
+  "Horus Falcon": 20,
+  "Triumphant Eagle": 100,
+  "Legionary Bear": 520,
+  "Fenrir Wolf": 2700,
+  "Druid Owl": 14000,
+  "Knight Corgi": 90000,
+  "Crusader Dragon": 600000,
+  "Steppe Wolf": 4000000,
+  "Samurai Kitsune": 32000000,
+  "Temple Toucan": 400000000,
+  "Naga Cobra": 5000000000,
+  "War Elephant": 65000000000,
+  "Warrior Jaguar": 850000000000,
+  "Jewel Peacock": 11000000000000,
+  "Genie Fox": 145000000000000
+});
+const PET_POWER_VARIANT_MULTIPLIERS = Object.freeze({
+  Normal: 1,
+  Golden: 2,
+  Rainbow: 4,
+  "Shiny Normal": 1.5,
+  "Shiny Golden": 3,
+  "Shiny Rainbow": 6
+});
 
 let petCatalogCache = null;
 let petCatalogExpiresAt = 0;
@@ -1259,6 +1287,7 @@ async function buildInventoryDamageSummary(items, env) {
   const unresolved = new Set();
   let usedItemPower = false;
   let usedOverride = false;
+  let usedDecompile = false;
   let usedCatalog = false;
   let exact = true;
 
@@ -1285,6 +1314,7 @@ async function buildInventoryDamageSummary(items, env) {
     exact = exact && resolved.exact;
     usedItemPower = usedItemPower || resolved.source === "inventory";
     usedOverride = usedOverride || resolved.source === "override";
+    usedDecompile = usedDecompile || resolved.source === "PS99 decompile";
     usedCatalog = usedCatalog || resolved.source === "catalog";
   }
 
@@ -1294,7 +1324,7 @@ async function buildInventoryDamageSummary(items, env) {
   const resolvedCount = ordered.reduce((sum, category) => sum + category.resolved_count, 0);
   const complete = unresolved.size === 0;
   const available = totalDamage > 0;
-  const source = [usedItemPower && "inventory", usedOverride && "override", usedCatalog && "BIG Games Pets catalog"].filter(Boolean).join(" + ") || catalog.source;
+  const source = [usedItemPower && "inventory", usedOverride && "override", usedDecompile && "PS99 decompile", usedCatalog && "BIG Games Pets catalog"].filter(Boolean).join(" + ") || catalog.source;
   const message = !available
     ? "Pet power is not available in the stored inventory or BIG Games Pets catalog. Set EVENT_PET_POWER_JSON to supply verified values."
     : !complete
@@ -1371,8 +1401,22 @@ async function getPetPowerCatalog(env) {
 
 function mergePetPowerCatalog(catalog, overrides) {
   const powers = new Map(catalog?.powers || []);
+  for (const [name, value] of builtInEventPetPowers()) powers.set(name, value);
   for (const [name, value] of overrides) powers.set(name, { ...value, source: "override" });
-  return { powers, source: overrides.size ? `${catalog?.source || "unavailable"} + override` : catalog?.source || "unavailable", warning: catalog?.warning || null };
+  const sources = [catalog?.source && catalog.source !== "unavailable" ? catalog.source : null, "PS99 decompile", overrides.size ? "override" : null].filter(Boolean);
+  return { powers, source: sources.join(" + "), warning: catalog?.warning || null };
+}
+
+function builtInEventPetPowers() {
+  const powers = new Map();
+  for (const [name, base] of Object.entries(EVENT_PET_BASE_POWERS)) {
+    const variants = {};
+    for (const [variant, multiplier] of Object.entries(PET_POWER_VARIANT_MULTIPLIERS)) {
+      variants[variant] = base * multiplier;
+    }
+    powers.set(normalizePetName(name), { base, variants, source: "PS99 decompile" });
+  }
+  return powers;
 }
 
 function parsePetPowerOverrides(raw) {
