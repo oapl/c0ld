@@ -134,9 +134,8 @@
     const summary={total:damage?.total_count??fallback.total,categories};
     const captured=new Date(data.snapshot?.captured_at||0);
     const stamp=Number.isNaN(captured.getTime())?"Latest snapshot":captured.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
-    title.textContent="Owned Event Pet Totals";
-    const detail=damage?.message?" · "+damage.message:"";
-    meta.textContent=username+" · all owned event pets, not Your Team · variants combined"+detail;
+    title.textContent="Inventory Totals";
+    meta.textContent="";
     meta.title=damage?.source?"Damage source: "+damage.source:"";
     const totalEntry={count:summary.total,damage_percent:damage?.available?100:null};
     tbody.innerHTML='<tr><td>'+esc(stamp)+'</td>'+summary.categories.map(category=>totalCell(category,false,!!damage?.available,damage?.complete!==false)).join("")+totalCell(totalEntry,true,!!damage?.available,damage?.complete!==false)+'</tr>';
@@ -315,7 +314,7 @@
       if(version!==requestVersion)return;
       console.error("Pet inventory unavailable",error);
       const message=error.message||String(error);
-      title.textContent=activeView==="totals"?"Owned Event Pet Totals":"Hourly Pet Gains";
+      title.textContent=activeView==="totals"?"Inventory Totals":"Hourly Pet Gains";
       meta.textContent=username+" · "+message;
       tbody.innerHTML=emptyRow(message);
     }
