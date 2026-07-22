@@ -149,11 +149,14 @@
       connected=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);
     }finally{connectButton.disabled=false}
   }
-  async function connectSelf(){
+  async function connectSelectedMember(){
     if(connected){window.open(CONNECTED_APPS_URL,"_blank","noopener,noreferrer");return}
-    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening the secure BIG Games approval page...";
+    const userId=String(memberSelect.value||"").trim();
+    const username=String(selectedName()||"").trim();
+    if(!userId){connectStatus.className="meta error";connectStatus.textContent="Select your Roblox account from the league roster first.";return}
+    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Connecting "+username+" through the secure BIG Games approval page...";
     try{
-      const params=new URLSearchParams({self:"1",league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
+      const params=new URLSearchParams({user_id:userId,username,league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
       location.assign(data.authorize_url);
@@ -216,7 +219,7 @@
     if(await consumeOAuthResult())return;
     await loadRoster();
     memberSelect.addEventListener("change",()=>load(memberSelect.value));
-    connectButton.addEventListener("click",connectSelf);
+    connectButton.addEventListener("click",connectSelectedMember);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
     loadAccessStatus();
     load(memberSelect.value);
