@@ -251,12 +251,12 @@
       connected=true;snapshotReady=false;snapshotState="missing";hourlyReady=false;applyConnectionUi(error.message||String(error));
     }
   }
-  async function connectSelected(){
-    if(connected&&!snapshotReady){await retryInventoryPull();return}
+  async function connectSelectedMember(){if(connected&&!snapshotReady){await retryInventoryPull();return}
     if(connected){window.open(CONNECTED_APPS_URL,"_blank","noopener,noreferrer");return}
-    const userId=selectedUserId(),username=selectedName();
-    if(!userId){applyConnectionUi("Select a league member before connecting inventory.");return}
-    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening BIG Games approval for "+username+". The signed-in Roblox account must match "+userId+".";
+    const userId=String(memberSelect.value||"").trim();
+    const username=String(selectedName()||"").trim();
+    if(!userId){connectStatus.className="meta error";connectStatus.textContent="Select your Roblox account from the league roster first.";return}
+    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Connecting "+username+" through the secure BIG Games approval page...";
     try{
       const params=new URLSearchParams({user_id:userId,username,league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
@@ -328,8 +328,8 @@
     section.hidden=false;
     if(await consumeOAuthResult())return;
     await loadRoster();
-    memberSelect.addEventListener("change",async()=>{await loadAccessStatus();load(memberSelect.value)});
-    connectButton.addEventListener("click",connectSelected);
+    memberSelect.addEventListener("change",()=>load(memberSelect.value));
+    connectButton.addEventListener("click",connectSelectedMember);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
     await loadAccessStatus();
     applyViewButtons();

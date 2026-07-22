@@ -882,13 +882,13 @@ The Worker supports the official Big Games OAuth Player API. Configure
 `BIG_GAMES_CLIENT_ID`, `BIG_GAMES_REDIRECT_URI`, and the
 `BIG_GAMES_CLIENT_SECRET` secret, then apply
 `supabase/migrations/027_inventory_oauth.sql` and
-`supabase/migrations/029_inventory_multi_account_oauth.sql`. Start open
-self-authorization with `POST /api/inventory/oauth/start?self=1`, open the
-returned `authorize_url`, and approve Inventory access. The callback derives
-the Roblox identity from the approved token/inventory response and stores a
-separate encrypted grant only for that approving user. Targeted invitations
-using `user_id=` remain available for configured users and verified league
-members. Check one account with
+`supabase/migrations/029_inventory_multi_account_oauth.sql`. League pages start
+authorization with the selected roster member's `user_id`, username, league,
+and run. This binds the one-time callback to that Roblox account even though
+the token response deliberately contains no player identity field. The member
+does not need to exist in `INVENTORY_USERS_JSON`; any current member returned
+by the League API may authorize. The callback stores a separate encrypted
+grant for that member. Check one account with
 `GET /api/inventory/oauth/status?user_id=463900811`.
 `GET /api/inventory/oauth/summary` returns only the number of active and expired
 saved approvals for the public opt-in counter; it does not expose account IDs.
