@@ -22,6 +22,7 @@
   const AUTH_USER_STORAGE_KEY="c0ld:inventory-authorized-user";
   const HOURS=24;
   let requestVersion=0;
+  let accessRequestVersion=0;
   let activeView="hourly";
   let connected=false;
   let snapshotReady=false;
@@ -133,9 +134,9 @@
     const summary={total:damage?.total_count??fallback.total,categories};
     const captured=new Date(data.snapshot?.captured_at||0);
     const stamp=Number.isNaN(captured.getTime())?"Latest snapshot":captured.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
-    title.textContent="Inventory Pet Totals";
+    title.textContent="Owned Event Pet Totals";
     const detail=damage?.message?" · "+damage.message:"";
-    meta.textContent=username+" · latest stored inventory · variants combined"+detail;
+    meta.textContent=username+" · all owned event pets, not Your Team · variants combined"+detail;
     meta.title=damage?.source?"Damage source: "+damage.source:"";
     const totalEntry={count:summary.total,damage_percent:damage?.available?100:null};
     tbody.innerHTML='<tr><td>'+esc(stamp)+'</td>'+summary.categories.map(category=>totalCell(category,false,!!damage?.available,damage?.complete!==false)).join("")+totalCell(totalEntry,true,!!damage?.available,damage?.complete!==false)+'</tr>';
@@ -210,7 +211,8 @@
     return {snapshot_ready:true,snapshot_state:"ready",hourly_ready:false};
   }
   async function loadAccessStatus(){
-    const userId=selectedUserId()||authorizedUserId;
+    const version=++accessRequestVersion;
+    const userId=selectedUserId();
     if(!userId){
       connected=false;snapshotReady=false;snapshotState="disconnected";hourlyReady=false;applyConnectionUi();return;
     }
@@ -221,17 +223,20 @@
       const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",userId);url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory access check failed");
+      if(version!==accessRequestVersion||userId!==selectedUserId())return;
       connected=!!data.connected;
       if(!connected){
         if(userId===authorizedUserId){localStorage.removeItem(AUTH_USER_STORAGE_KEY);authorizedUserId=""}
         snapshotReady=false;snapshotState="disconnected";hourlyReady=false;applyConnectionUi();return;
       }
       const state=data.snapshot_ready===undefined?await probeSnapshotState(userId):data;
+      if(version!==accessRequestVersion||userId!==selectedUserId())return;
       snapshotReady=!!state.snapshot_ready;
       snapshotState=String(state.snapshot_state|| (snapshotReady?"ready":"missing"));
       hourlyReady=!!state.hourly_ready;
       applyConnectionUi(state.snapshot_error||"");
     }catch(error){
+      if(version!==accessRequestVersion||userId!==selectedUserId())return;
       connected=false;snapshotReady=false;hourlyReady=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);connectButton.disabled=false;
     }
   }
@@ -312,7 +317,7 @@
       if(version!==requestVersion)return;
       console.error("Pet inventory unavailable",error);
       const message=error.message||String(error);
-      title.textContent=activeView==="totals"?"Inventory Pet Totals":"Hourly Pet Gains";
+      title.textContent=activeView==="totals"?"Owned Event Pet Totals":"Hourly Pet Gains";
       meta.textContent=username+" · "+message;
       tbody.innerHTML=emptyRow(message);
     }
@@ -324,16 +329,22 @@
     load(memberSelect.value);
   }
 
+  async function handleMemberChange(){
+    const userId=selectedUserId();
+    connected=false;snapshotReady=false;snapshotState="unknown";hourlyReady=false;
+    applyConnectionUi("Checking saved inventory access for "+selectedName()+"...");
+    await Promise.all([loadAccessStatus(),load(userId)]);
+  }
+
   async function init(){
     section.hidden=false;
     if(await consumeOAuthResult())return;
     await loadRoster();
-    memberSelect.addEventListener("change",()=>load(memberSelect.value));
+    memberSelect.addEventListener("change",handleMemberChange);
     connectButton.addEventListener("click",connectSelectedMember);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
-    await loadAccessStatus();
     applyViewButtons();
-    load(memberSelect.value);
+    await handleMemberChange();
   }
 
   init();
