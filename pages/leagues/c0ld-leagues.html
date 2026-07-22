@@ -101,13 +101,13 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     </div>
   </section>
   <section class="cards">
-    <div class="card"><div class="label">Top 3</div><div class="value" id="top3-count">-</div></div>
-    <div class="card"><div class="label">Top 10</div><div class="value" id="top10-count">-</div></div>
-    <div class="card"><div class="label">Top 100</div><div class="value" id="top100-count">-</div></div>
-    <div class="card"><div class="label">Top 250</div><div class="value" id="top250-count">-</div></div>
-    <div class="card"><div class="label">Top 500</div><div class="value" id="top500-count">-</div></div>
-    <div class="card"><div class="label">Top 1,000</div><div class="value" id="top1000-count">-</div></div>
-    <div class="card"><div class="label">Top 10,000</div><div class="value" id="top10000-count">-</div></div>
+    <div class="card" title="Reward ranks #1"><div class="label">Top 1</div><div class="value" id="top1-count">-</div></div>
+    <div class="card" title="Reward ranks #2-3"><div class="label">Top 3</div><div class="value" id="top3-count">-</div></div>
+    <div class="card" title="Reward ranks #4-15"><div class="label">Top 15</div><div class="value" id="top15-count">-</div></div>
+    <div class="card" title="Reward ranks #16-50"><div class="label">Top 50</div><div class="value" id="top50-count">-</div></div>
+    <div class="card" title="Reward ranks #51-100"><div class="label">Top 100</div><div class="value" id="top100-count">-</div></div>
+    <div class="card" title="Reward ranks #101-250"><div class="label">Top 250</div><div class="value" id="top250-count">-</div></div>
+    <div class="card" title="Reward ranks #251-2,000"><div class="label">Top 2,000</div><div class="value" id="top2000-count">-</div></div>
   </section>
   <section class="section">
     <div class="section-header">
@@ -201,7 +201,7 @@ function buildStoredLeague(entry,current,topRow=null){const matches=matchesFromC
 function tableHeaders(){const leagues='<tr><th data-sort="rank">Rank</th><th data-sort="league_name">League</th><th data-sort="points" class="numeric">Points</th><th data-sort="gain_1h" class="numeric">1 Hr</th><th data-sort="gain_6h" class="numeric">6 Hrs</th><th data-sort="gain_12h" class="numeric">12 Hrs</th><th data-sort="gain_24h" class="numeric">24 Hrs</th><th>c0ld Members</th></tr>';const members='<tr><th>Rank</th><th>Player</th><th>League</th><th class="numeric">Points</th><th class="numeric">1 Hr</th><th class="numeric">6 Hrs</th><th class="numeric">12 Hrs</th><th class="numeric">24 Hrs</th></tr>';document.getElementById("thead").innerHTML=getMode()==="members"?members:leagues;document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"||k==="username"}render()}))}
 function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=(getMode()==="members"?memberRows:leagueRows).slice();if(q)list=list.filter(row=>String(row.league_name||"").toLowerCase().includes(q)||String(row.username||"").toLowerCase().includes(q)||(row.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));if(getMode()==="members")return list.sort(scoreDesc);return list.sort(leaguePointsDesc)}
 function countRankRange(min,max){return leagueRows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
-function renderCards(){document.getElementById("top3-count").textContent=countRankRange(1,3).toLocaleString("en-US");document.getElementById("top10-count").textContent=countRankRange(4,10).toLocaleString("en-US");document.getElementById("top100-count").textContent=countRankRange(11,100).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(101,250).toLocaleString("en-US");document.getElementById("top500-count").textContent=countRankRange(251,500).toLocaleString("en-US");document.getElementById("top1000-count").textContent=countRankRange(501,1000).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(1001,10000).toLocaleString("en-US")}
+function renderCards(){const rewardBands=[["top1-count",1,1],["top3-count",2,3],["top15-count",4,15],["top50-count",16,50],["top100-count",51,100],["top250-count",101,250],["top2000-count",251,2000]];rewardBands.forEach(([id,min,max])=>{document.getElementById(id).textContent=countRankRange(min,max).toLocaleString("en-US")})}
 function renderMeta(){document.getElementById("table-meta").textContent=leagueRows.length+" leagues · "+memberRows.length+" c0ld members · Updated "+(lastUpdated?dt(lastUpdated):"-")}
 function leagueRowHtml(r,includeMembers=true){return '<tr><td class="rank">'+rankCell(r)+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="'+esc(leaguePage(r))+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.points))+'">'+esc(shortNum(r.points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td>'+(includeMembers?'<td><div class="members">'+memberPills(r.matches)+'</div></td>':'')+'</tr>'}
 function renderLeagues(list){const tbody=document.getElementById("tbody");if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No current c0ld-member leagues found yet.</td></tr>';return}tbody.innerHTML=list.map(row=>leagueRowHtml(row,true)).join("")}

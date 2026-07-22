@@ -175,31 +175,29 @@
       memberSelect.value=[...memberSelect.options].some(option=>option.value===previous)?previous:memberSelect.options[0].value;
     }catch(error){console.warn("League roster unavailable",error);memberSelect.innerHTML='<option value="">Roster unavailable</option>'}
   }
-  function applyConnectionUi(message=""){
+  function applyConnectionUi(){
     const userId=selectedUserId(),username=selectedName();
-    const accountLabel=username+(userId?" (Roblox "+userId+")":"");
+    const accountLabel=username+(userId?" (ID"+userId+")":"");
     connectButton.disabled=false;
     connectButton.classList.toggle("connected",connected);
     if(!connected){
       connectButton.textContent="Connect Your Inventory";
       connectButton.title="Authorize inventory for "+accountLabel;
       connectStatus.className="meta";
-      connectStatus.textContent=message||"Connect inventory for "+accountLabel+". Sign into this exact Roblox account at BIG Games before approving.";
+      connectStatus.innerHTML='<span class="inventory-auth-warning">Not authenticated.</span> Click \'Connect Your Inventory\' above to populate your data below.';
       return;
     }
     if(!snapshotReady){
       connectButton.textContent="Retry Inventory Pull";
       connectButton.title="Retry the first inventory snapshot without requesting a forced BIG Games refresh";
-      connectStatus.className="meta error";
-      connectStatus.textContent=message||accountLabel+" is authorized, but no inventory snapshot exists yet. Retry the inventory pull.";
+      connectStatus.className="meta connected";
+      connectStatus.textContent=accountLabel+" is connected. Totals and hourly gains are available.";
       return;
     }
     connectButton.textContent="Revoke Inventory Access";
     connectButton.title="Open BIG Games Connected Apps to revoke this authorization";
     connectStatus.className="meta connected";
-    connectStatus.textContent=message||(hourlyReady
-      ? accountLabel+" is connected. Totals and hourly gains are available."
-      : accountLabel+" is connected. Totals are ready; hourly gains appear after two scheduled scans.");
+    connectStatus.textContent=accountLabel+" is connected. Totals and hourly gains are available.";
   }
   async function probeSnapshotState(userId){
     const url=new URL(INVENTORY_API+"/api/inventory/latest");
@@ -237,7 +235,7 @@
       applyConnectionUi(state.snapshot_error||"");
     }catch(error){
       if(version!==accessRequestVersion||userId!==selectedUserId())return;
-      connected=false;snapshotReady=false;hourlyReady=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");connectStatus.className="meta error";connectStatus.textContent=error.message||String(error);connectButton.disabled=false;
+      connected=false;snapshotReady=false;hourlyReady=false;connectButton.textContent="Connect Your Inventory";connectButton.classList.remove("connected");applyConnectionUi();
     }
   }
   async function retryInventoryPull(){
@@ -250,10 +248,10 @@
       const data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory retry failed");
       connected=true;snapshotReady=!!data.snapshot_ready;snapshotState=String(data.snapshot_state||"ready");hourlyReady=!!data.hourly_ready;
-      activeView="totals";applyViewButtons();applyConnectionUi("Inventory snapshot saved. Totals are ready; hourly gains will appear after two scheduled scans.");
+      activeView="totals";applyViewButtons();applyConnectionUi();
       await load(userId);
     }catch(error){
-      connected=true;snapshotReady=false;snapshotState="missing";hourlyReady=false;applyConnectionUi(error.message||String(error));
+      connected=true;snapshotReady=false;snapshotState="missing";hourlyReady=false;applyConnectionUi();
     }
   }
   async function connectSelectedMember(){if(connected&&!snapshotReady){await retryInventoryPull();return}
@@ -267,7 +265,7 @@
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
       location.assign(data.authorize_url);
-    }catch(error){connectButton.disabled=false;applyConnectionUi(error.message||String(error))}
+    }catch(error){connectButton.disabled=false;applyConnectionUi()}
   }
   async function consumeOAuthResult(){
     const params=new URLSearchParams(location.search),result=params.get("inventory_oauth");if(!result)return false;
@@ -289,8 +287,8 @@
         }
       }catch(error){console.warn("Could not locate the authorized player's current league",error)}
     }
-    connectStatus.className="meta "+(connectedResult?(snapshotReady?"connected":"error"):"error");
-    connectStatus.textContent=params.get("inventory_message")||(connectedResult?(snapshotReady?"Inventory access connected and the first snapshot was saved.":"Inventory access connected, but the first snapshot is still missing."):"Inventory authorization failed.");
+    if(!connectedResult){connected=false;snapshotReady=false;snapshotState="disconnected";hourlyReady=false}
+    applyConnectionUi();
     history.replaceState({},document.title,oauthReturnUrl());
     return false;
   }
@@ -332,7 +330,7 @@
   async function handleMemberChange(){
     const userId=selectedUserId();
     connected=false;snapshotReady=false;snapshotState="unknown";hourlyReady=false;
-    applyConnectionUi("Checking saved inventory access for "+selectedName()+"...");
+    applyConnectionUi();
     await Promise.all([loadAccessStatus(),load(userId)]);
   }
 

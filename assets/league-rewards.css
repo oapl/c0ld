@@ -210,6 +210,7 @@
 #hourly-pet-connect:disabled { cursor: wait; opacity: .55; }
 #hourly-pet-connect-status.connected { color: #7ee787; }
 #hourly-pet-connect-status.error { color: #ff9b96; }
+#hourly-pet-connect-status .inventory-auth-warning { color: #ff7b72; font-weight: 700; }
 .hourly-pet-gains .table-wrap { max-height: 440px; overflow: auto; }
 .hourly-pet-gains-table thead th { position: sticky; top: 0; z-index: 1; background: #161b22; }
 .hourly-pet-gains-table th:first-child,
