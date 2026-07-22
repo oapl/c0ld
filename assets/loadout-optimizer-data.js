@@ -3,7 +3,7 @@
 
   const data = {
     version: "planning-v2",
-    modelLabel: "Planning model with official catalog enrichment",
+    modelLabel: "Planning model with bundled catalog and optional live enrichment",
     catalogEndpoint: "https://biggamesapi.io/api/collection/Enchants",
     copyWeights: [1, 0.68, 0.46, 0.32, 0.22, 0.15, 0.1, 0.07, 0.05],
     enchants: [

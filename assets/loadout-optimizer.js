@@ -227,7 +227,12 @@
     try {
       const response = await fetch(OFFICIAL_CATALOG_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Expected JSON catalog, received ${contentType || "an unknown content type"}`);
+      }
       const rows = catalogRows(await response.json());
+      if (!rows.length) throw new Error("The live catalog did not contain any enchant rows.");
       const knownNames = new Set(state.model.enchants.map(enchant => enchant.name.toLowerCase()));
       const additions = rows
         .map(officialEnchant)
@@ -245,10 +250,10 @@
         });
         rerenderModel();
       }
-      if (source) source.textContent = `BIG Games catalog · ${state.model.enchants.length} enchants`;
+      if (source) source.textContent = `BIG Games catalog + modeled data · ${state.model.enchants.length} enchants`;
     } catch (error) {
       console.warn("Could not refresh the BIG Games enchant catalog.", error);
-      if (source) source.textContent = `Bundled catalog · ${state.model.enchants.length} enchants`;
+      if (source) source.textContent = `Bundled catalog · ${state.model.enchants.length} enchants · live verification unavailable`;
     }
   }
 
