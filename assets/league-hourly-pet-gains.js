@@ -48,8 +48,9 @@
   function formatCount(value){return Number(value||0).toLocaleString("en-US")}
   function petName(row){return String(row?.item_id||row?.display_name||"").trim().toLowerCase()}
   function usableName(value,userId){const name=String(value||"").trim(),id=String(userId||"");return name&&name!==id&&!/^user[ _-]?\d+$/i.test(name)?name:""}
+  function selectedUserId(){return String(memberSelect.value||"").trim()}
   function selectedName(){const option=memberSelect.selectedOptions?.[0];return option?.dataset?.name||option?.textContent||memberSelect.value}
-  function selectedIsAuthorized(){return !!authorizedUserId&&String(memberSelect.value)===authorizedUserId}
+  function selectedIsAuthorized(){return connected}
   function columnCount(){return activeView==="totals"?7:6}
   function emptyRow(message){return '<tr><td colspan="'+columnCount()+'" class="empty">'+esc(message)+'</td></tr>'}
   function renderHead(){
@@ -174,32 +175,34 @@
     }catch(error){console.warn("League roster unavailable",error);memberSelect.innerHTML='<option value="">Roster unavailable</option>'}
   }
   function applyConnectionUi(message=""){
+    const userId=selectedUserId(),username=selectedName();
+    const accountLabel=username+(userId?" (Roblox "+userId+")":"");
     connectButton.disabled=false;
     connectButton.classList.toggle("connected",connected);
     if(!connected){
       connectButton.textContent="Connect Your Inventory";
-      connectButton.title="Authorize your own Roblox inventory";
+      connectButton.title="Authorize inventory for "+accountLabel;
       connectStatus.className="meta";
-      connectStatus.textContent=message||"Connect the Roblox account you are currently signed into at BIG Games.";
+      connectStatus.textContent=message||"Connect inventory for "+accountLabel+". Sign into this exact Roblox account at BIG Games before approving.";
       return;
     }
     if(!snapshotReady){
       connectButton.textContent="Retry Inventory Pull";
       connectButton.title="Retry the first inventory snapshot without requesting a forced BIG Games refresh";
       connectStatus.className="meta error";
-      connectStatus.textContent=message||"Authorization is saved, but no inventory snapshot exists yet. Retry the inventory pull.";
+      connectStatus.textContent=message||accountLabel+" is authorized, but no inventory snapshot exists yet. Retry the inventory pull.";
       return;
     }
     connectButton.textContent="Revoke Inventory Access";
     connectButton.title="Open BIG Games Connected Apps to revoke this authorization";
     connectStatus.className="meta connected";
     connectStatus.textContent=message||(hourlyReady
-      ? "Inventory connected. Totals and hourly gains are available."
-      : "Inventory connected. Totals are ready; hourly gains appear after two scheduled scans.");
+      ? accountLabel+" is connected. Totals and hourly gains are available."
+      : accountLabel+" is connected. Totals are ready; hourly gains appear after two scheduled scans.");
   }
-  async function probeSnapshotState(){
+  async function probeSnapshotState(userId){
     const url=new URL(INVENTORY_API+"/api/inventory/latest");
-    url.searchParams.set("user_id",authorizedUserId);url.searchParams.set("include_items","0");url.searchParams.set("v",Date.now());
+    url.searchParams.set("user_id",userId);url.searchParams.set("include_items","0");url.searchParams.set("v",Date.now());
     const response=await fetch(url,{cache:"no-store"});
     if(response.status===404)return {snapshot_ready:false,snapshot_state:"missing",hourly_ready:false};
     const data=await response.json().catch(()=>({}));
@@ -207,21 +210,23 @@
     return {snapshot_ready:true,snapshot_state:"ready",hourly_ready:false};
   }
   async function loadAccessStatus(){
-    if(!authorizedUserId){
+    const userId=selectedUserId()||authorizedUserId;
+    if(!userId){
       connected=false;snapshotReady=false;snapshotState="disconnected";hourlyReady=false;applyConnectionUi();return;
     }
     connectButton.disabled=true;
     connectStatus.className="meta";
-    connectStatus.textContent="Checking your saved inventory access...";
+    connectStatus.textContent="Checking saved inventory access for "+selectedName()+"...";
     try{
-      const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",authorizedUserId);url.searchParams.set("v",Date.now());
+      const url=new URL(INVENTORY_API+"/api/inventory/oauth/status");url.searchParams.set("user_id",userId);url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory access check failed");
       connected=!!data.connected;
       if(!connected){
-        localStorage.removeItem(AUTH_USER_STORAGE_KEY);authorizedUserId="";snapshotReady=false;snapshotState="disconnected";hourlyReady=false;applyConnectionUi();return;
+        if(userId===authorizedUserId){localStorage.removeItem(AUTH_USER_STORAGE_KEY);authorizedUserId=""}
+        snapshotReady=false;snapshotState="disconnected";hourlyReady=false;applyConnectionUi();return;
       }
-      const state=data.snapshot_ready===undefined?await probeSnapshotState():data;
+      const state=data.snapshot_ready===undefined?await probeSnapshotState(userId):data;
       snapshotReady=!!state.snapshot_ready;
       snapshotState=String(state.snapshot_state|| (snapshotReady?"ready":"missing"));
       hourlyReady=!!state.hourly_ready;
@@ -231,27 +236,29 @@
     }
   }
   async function retryInventoryPull(){
-    if(!authorizedUserId)return;
+    const userId=selectedUserId();
+    if(!userId)return;
     connectButton.disabled=true;connectButton.textContent="Retrying inventory...";connectStatus.className="meta";connectStatus.textContent="Retrying the first stored inventory snapshot...";
     try{
-      const url=new URL(INVENTORY_API+"/api/inventory/retry");url.searchParams.set("user_id",authorizedUserId);url.searchParams.set("v",Date.now());
+      const url=new URL(INVENTORY_API+"/api/inventory/retry");url.searchParams.set("user_id",userId);url.searchParams.set("v",Date.now());
       const response=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory retry failed");
       connected=true;snapshotReady=!!data.snapshot_ready;snapshotState=String(data.snapshot_state||"ready");hourlyReady=!!data.hourly_ready;
       activeView="totals";applyViewButtons();applyConnectionUi("Inventory snapshot saved. Totals are ready; hourly gains will appear after two scheduled scans.");
-      if([...memberSelect.options].some(option=>option.value===authorizedUserId))memberSelect.value=authorizedUserId;
-      await load(memberSelect.value||authorizedUserId);
+      await load(userId);
     }catch(error){
       connected=true;snapshotReady=false;snapshotState="missing";hourlyReady=false;applyConnectionUi(error.message||String(error));
     }
   }
-  async function connectSelf(){
+  async function connectSelected(){
     if(connected&&!snapshotReady){await retryInventoryPull();return}
     if(connected){window.open(CONNECTED_APPS_URL,"_blank","noopener,noreferrer");return}
-    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening the secure BIG Games approval page...";
+    const userId=selectedUserId(),username=selectedName();
+    if(!userId){applyConnectionUi("Select a league member before connecting inventory.");return}
+    connectButton.disabled=true;connectButton.textContent="Preparing approval...";connectStatus.className="meta";connectStatus.textContent="Opening BIG Games approval for "+username+". The signed-in Roblox account must match "+userId+".";
     try{
-      const params=new URLSearchParams({self:"1",league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
+      const params=new URLSearchParams({user_id:userId,username,league:String(config.apiLeague||config.league||""),run:String(config.run||""),return_url:oauthReturnUrl()});
       const response=await fetch(INVENTORY_API+"/api/inventory/oauth/start?"+params,{method:"POST",headers:{"content-type":"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.message||"Inventory approval could not be started");
       location.assign(data.authorize_url);
@@ -321,8 +328,8 @@
     section.hidden=false;
     if(await consumeOAuthResult())return;
     await loadRoster();
-    memberSelect.addEventListener("change",()=>load(memberSelect.value));
-    connectButton.addEventListener("click",connectSelf);
+    memberSelect.addEventListener("change",async()=>{await loadAccessStatus();load(memberSelect.value)});
+    connectButton.addEventListener("click",connectSelected);
     for(const button of viewButtons)button.addEventListener("click",()=>setView(button.dataset.petView));
     await loadAccessStatus();
     applyViewButtons();
