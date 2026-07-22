@@ -17,6 +17,7 @@ const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
 const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
+const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
   { key: "elephant", name: "War Elephant" },
   { key: "jaguar", name: "Warrior Jaguar" },
@@ -733,7 +734,7 @@ async function handleLatest(request, env) {
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim();
   const snapshot = await getLatestSnapshot(env, userId, { includeRaw: true });
-  if (!snapshot) return json({ ok: false, message: "No inventory snapshots found." }, 404);
+  if (!snapshot) return json({ ok: false, message: "No verified owned inventory snapshots found." }, 404);
   const includeItems = parseBool(url.searchParams.get("include_items")) !== false;
   const items = includeItems ? await getSnapshotItems(env, snapshot.id) : undefined;
   const includeDamage = includeItems && parseBool(url.searchParams.get("include_damage")) === true;
@@ -753,7 +754,7 @@ async function handleDiff(request, env) {
   const userId = String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim();
   const mode = String(url.searchParams.get("mode") || "daily").toLowerCase();
   const snapshots = await getUserSnapshots(env, userId, Number(url.searchParams.get("limit") || 500));
-  if (!snapshots.length) return json({ ok: false, message: "No inventory snapshots found." }, 404);
+  if (!snapshots.length) return json({ ok: false, message: "No verified owned inventory snapshots found." }, 404);
 
   const picked = ["previous", "latest", "snapshot"].includes(mode)
     ? pickPreviousSnapshots(snapshots)
@@ -773,7 +774,7 @@ async function handleHourlySeries(request, env) {
   const hours = Math.max(1, Math.min(72, Number(url.searchParams.get("hours") || 24)));
   const synchronizedOnly = parseBool(url.searchParams.get("synchronized")) === true;
   const snapshots = await getUserSnapshots(env, userId, Math.max(500, hours * 20));
-  if (!snapshots.length) return json({ ok: false, message: "No inventory snapshots found." }, 404);
+  if (!snapshots.length) return json({ ok: false, message: "No verified owned inventory snapshots found." }, 404);
 
   const sorted = sortAsc(snapshots);
   const latest = sorted[sorted.length - 1];
@@ -1471,6 +1472,7 @@ async function getUserSnapshots(env, userId, limit = 500) {
   return supabaseSelect(env, SNAPSHOT_TABLE, {
     select: SNAPSHOT_PUBLIC_SELECT,
     roblox_user_id: `eq.${userId}`,
+    "raw->>inventory_selection_method": `in.(${VERIFIED_INVENTORY_SELECTION_METHODS.join(",")})`,
     order: "captured_at.desc",
     limit: String(limit)
   });
@@ -1479,6 +1481,7 @@ async function getLatestSnapshot(env, userId, options = {}) {
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
     select: options.includeRaw ? `${SNAPSHOT_PUBLIC_SELECT},raw` : SNAPSHOT_PUBLIC_SELECT,
     roblox_user_id: `eq.${userId}`,
+    "raw->>inventory_selection_method": `in.(${VERIFIED_INVENTORY_SELECTION_METHODS.join(",")})`,
     order: "captured_at.desc",
     limit: "1"
   });
