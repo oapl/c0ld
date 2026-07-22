@@ -909,15 +909,15 @@ bypasses the normal hourly timer and consumes one BIG Games refresh-quota slot.
 `league-inv-test.html` is the AgentP_0928 totals-only consent and verification
 page.
 
-League inventory totals can also calculate each displayed event-pet group's
-share of total pet damage. The Worker first uses a power, damage, or strength
-field carried by the stored inventory, then checks the official Big Games
-`/api/collection/Pets` catalog. The hatch probabilities are never treated as
-damage. If that catalog does not expose a usable value, set the optional
-`EVENT_PET_POWER_JSON` Worker variable to verified base or variant values. Its
-shape is `{"War Elephant":{"Normal":100,"Golden":300}}`; the numbers here
-only demonstrate the format and are not game values. `PET_CATALOG_CACHE_SECONDS`
-controls the catalog cache and defaults to one hour.
+League inventory totals calculate each displayed event-pet group's share of
+total pet damage. The Worker first uses a power carried by inventory, then the
+official Big Games catalog, and finally the current event power table verified
+against the PS99 decompile. Normal, Golden, Rainbow, and Shiny variants use the
+game's current multipliers. Hatch probabilities are never treated as damage.
+The optional `EVENT_PET_POWER_JSON` Worker variable can override those defaults
+after a game rebalance. Its shape is
+`{"War Elephant":{"Normal":65000000000,"Golden":130000000000}}`.
+`PET_CATALOG_CACHE_SECONDS` controls the catalog cache and defaults to one hour.
 
 After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
 `POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big

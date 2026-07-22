@@ -1326,7 +1326,7 @@ async function buildInventoryDamageSummary(items, env) {
   const available = totalDamage > 0;
   const source = [usedItemPower && "inventory", usedOverride && "override", usedDecompile && "PS99 decompile", usedCatalog && "BIG Games Pets catalog"].filter(Boolean).join(" + ") || catalog.source;
   const message = !available
-    ? "Pet power is not available in the stored inventory or BIG Games Pets catalog. Set EVENT_PET_POWER_JSON to supply verified values."
+    ? "Pet power could not be resolved for the listed event pets. Update the built-in event table or set EVENT_PET_POWER_JSON with verified values."
     : !complete
       ? `Damage percentages cover ${resolvedCount.toLocaleString("en-US")} of ${totalCount.toLocaleString("en-US")} listed event pets; unresolved pets are excluded.`
       : !exact
@@ -1400,8 +1400,8 @@ async function getPetPowerCatalog(env) {
 }
 
 function mergePetPowerCatalog(catalog, overrides) {
-  const powers = new Map(catalog?.powers || []);
-  for (const [name, value] of builtInEventPetPowers()) powers.set(name, value);
+  const powers = builtInEventPetPowers();
+  for (const [name, value] of catalog?.powers || []) powers.set(name, value);
   for (const [name, value] of overrides) powers.set(name, { ...value, source: "override" });
   const sources = [catalog?.source && catalog.source !== "unavailable" ? catalog.source : null, "PS99 decompile", overrides.size ? "override" : null].filter(Boolean);
   return { powers, source: sources.join(" + "), warning: catalog?.warning || null };
