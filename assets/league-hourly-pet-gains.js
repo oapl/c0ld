@@ -102,7 +102,7 @@
       return;
     }
     hourlyReady=true;
-    meta.textContent=username+" · "+windows.length+" completed hour"+(windows.length===1?"":"s")+" · variants combined";
+    meta.textContent="";
     tbody.innerHTML=windows.map(row=>'<tr><td>'+esc(hourLabel(row))+'</td>'+PETS.map(pet=>gainCell(row.totals[pet.key])).join("")+gainCell(row.total,true)+'</tr>').join("");
   }
   function inventoryCount(value){
