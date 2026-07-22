@@ -57,7 +57,7 @@
   function calculateCombat(totals, inputs) {
     const baseDamage = Math.max(0, number(inputs?.baseDamage, 1));
     const baseCritChance = clamp(inputs?.baseCritChancePct, 0, 100);
-    const critMultiplier = Math.max(1, number(inputs?.critMultiplier, 2));
+    const critMultiplier = Math.max(1, number(inputs?.critMultiplier, 5));
     const effectiveCritChance = clamp(baseCritChance + number(totals?.critChancePct), 0, 100);
     const directMultiplier = 1 + number(totals?.damagePct) / 100;
     const critExpectedMultiplier = 1 + (effectiveCritChance / 100) * (critMultiplier - 1);

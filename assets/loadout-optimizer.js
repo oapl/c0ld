@@ -6,6 +6,8 @@
   if (!baseData || !math) return;
 
   const STORAGE_KEY = "c0ld.loadoutOptimizer.v1";
+  const MAX_SLOTS = 9;
+  const OFFICIAL_CATALOG_URL = baseData.catalogEndpoint || "https://biggamesapi.io/api/collection/Enchants";
   const EFFECT_LABELS = {
     damagePct: "damage",
     critChancePct: "critical chance",
@@ -24,10 +26,11 @@
     model: clone(baseData),
     slotCount: 9,
     loadout: Array.from({ length: 9 }, () => null),
+    activeView: "combat",
     inputs: {
       baseDamage: 100,
       baseCritChancePct: 0,
-      critMultiplier: 2,
+      critMultiplier: 5,
       hatchesPerRoll: 144,
       rollsPerMinute: 1,
       costPerEgg: 0,
@@ -150,8 +153,15 @@
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (!saved) return;
-      const model = normalizedModel(saved.model || baseData);
-      const slotCount = Math.round(math.clamp(saved.slotCount, 1, 12));
+      const savedModel = normalizedModel(saved.model || baseData);
+      const bundledModel = normalizedModel(baseData);
+      const existingNames = new Set(savedModel.enchants.map(item => item.name.toLowerCase()));
+      const model = normalizedModel({
+        ...savedModel,
+        copyWeights: bundledModel.copyWeights,
+        enchants: savedModel.enchants.concat(bundledModel.enchants.filter(item => !existingNames.has(item.name.toLowerCase())))
+      });
+      const slotCount = Math.round(math.clamp(saved.slotCount, 1, MAX_SLOTS));
       const validIds = new Set(model.enchants.map(enchant => enchant.id));
       const loadout = Array.from({ length: slotCount }, (_, index) => {
         const slot = saved.loadout?.[index];
@@ -169,6 +179,76 @@
     } catch (error) {
       console.warn("Could not load saved optimizer state.", error);
       state = defaultState();
+    }
+  }
+
+  function renderCalculatorView() {
+    const activeView = state.activeView || "combat";
+    document.querySelectorAll("[data-calculator-view]").forEach(button => {
+      button.classList.toggle("active", button.dataset.calculatorView === activeView);
+    });
+    document.querySelectorAll("[data-view-section]").forEach(section => {
+      section.classList.toggle("view-hidden", activeView !== "all" && section.dataset.viewSection !== activeView);
+    });
+  }
+
+  function catalogRows(payload) {
+    const candidates = [
+      payload?.data,
+      payload?.data?.data,
+      payload?.data?.items,
+      payload?.items,
+      payload?.collection,
+      payload
+    ];
+    return candidates.find(Array.isArray) || [];
+  }
+
+  function officialEnchant(row, index) {
+    const details = row?.configData || row?.data || row?.config || {};
+    const name = String(row?.configName || row?.name || row?.Name || details?.Name || details?.name || "").trim();
+    if (!name) return null;
+    const id = `official-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || index + 1}`;
+    return {
+      id,
+      name,
+      category: String(row?.category || row?.Category || details?.Category || "Other"),
+      stackGroup: id,
+      color: "#8b949e",
+      initials: name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase(),
+      normal: {},
+      empowered: {},
+      notes: "Official BIG Games catalog entry. Effect values are not modeled until verified from game data."
+    };
+  }
+
+  async function hydrateOfficialCatalog() {
+    const source = $("catalog-source");
+    try {
+      const response = await fetch(OFFICIAL_CATALOG_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rows = catalogRows(await response.json());
+      const knownNames = new Set(state.model.enchants.map(enchant => enchant.name.toLowerCase()));
+      const additions = rows
+        .map(officialEnchant)
+        .filter(Boolean)
+        .filter(enchant => {
+          const key = enchant.name.toLowerCase();
+          if (knownNames.has(key)) return false;
+          knownNames.add(key);
+          return true;
+        });
+      if (additions.length) {
+        state.model = normalizedModel({
+          ...state.model,
+          enchants: state.model.enchants.concat(additions)
+        });
+        rerenderModel();
+      }
+      if (source) source.textContent = `BIG Games catalog · ${state.model.enchants.length} enchants`;
+    } catch (error) {
+      console.warn("Could not refresh the BIG Games enchant catalog.", error);
+      if (source) source.textContent = `Bundled catalog · ${state.model.enchants.length} enchants`;
     }
   }
 
@@ -294,7 +374,7 @@
     return {
       baseDamage: finite($("base-damage").value, 100),
       baseCritChancePct: finite($("base-crit").value),
-      critMultiplier: finite($("crit-multiplier").value, 2),
+      critMultiplier: finite($("crit-multiplier").value, 5),
       hatchesPerRoll: finite($("hatches-per-roll").value, 144),
       rollsPerMinute: finite($("rolls-per-minute").value, 1),
       costPerEgg: finite($("cost-per-egg").value),
@@ -421,6 +501,14 @@
   }
 
   function bindEvents() {
+    document.querySelectorAll("[data-calculator-view]").forEach(button => {
+      button.addEventListener("click", () => {
+        state.activeView = button.dataset.calculatorView;
+        renderCalculatorView();
+        saveState();
+      });
+    });
+
     $("enchant-search").addEventListener("input", renderCatalog);
     $("category-filter").addEventListener("change", renderCatalog);
 
@@ -449,7 +537,7 @@
     });
 
     $("slot-count").addEventListener("change", event => {
-      const nextCount = Math.round(math.clamp(event.target.value, 1, 12));
+      const nextCount = Math.round(math.clamp(event.target.value, 1, MAX_SLOTS));
       state.slotCount = nextCount;
       state.loadout = Array.from({ length: nextCount }, (_, index) => state.loadout[index] || null);
       event.target.value = nextCount;
@@ -545,7 +633,9 @@
     renderEggEditors();
     renderModelEditor();
     bindEvents();
+    renderCalculatorView();
     recalculate();
+    hydrateOfficialCatalog();
   }
 
   init();

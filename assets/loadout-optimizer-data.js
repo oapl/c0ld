@@ -2,9 +2,10 @@
   "use strict";
 
   const data = {
-    version: "planning-v1",
-    modelLabel: "Planning model",
-    copyWeights: [1, 0.68, 0.46, 0.32, 0.22, 0.15, 0.1, 0.07, 0.05, 0.035, 0.025, 0.015],
+    version: "planning-v2",
+    modelLabel: "Planning model with official catalog enrichment",
+    catalogEndpoint: "https://biggamesapi.io/api/collection/Enchants",
+    copyWeights: [1, 0.68, 0.46, 0.32, 0.22, 0.15, 0.1, 0.07, 0.05],
     enchants: [
       {
         id: "strong-pets-ix",
@@ -146,6 +147,60 @@
       { id: "event", name: "Event Huge", oneIn: 1000000, strength: 2500, luckAffected: true }
     ]
   };
+
+  const tieredFamilies = [
+    ["Tap Power", "Damage"],
+    ["Strong Pets", "Damage"],
+    ["Criticals", "Damage"],
+    ["Treasure Hunter", "Drops"],
+    ["Coins", "Currency"],
+    ["Diamonds", "Currency"],
+    ["Lucky Eggs", "Luck"]
+  ];
+  const roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
+  const standalone = [
+    ["Swift Tap", "Damage"], ["Tap Teamwork", "Damage"], ["Speed I", "Damage"],
+    ["Speed II", "Damage"], ["Speed III", "Damage"], ["Speed IV", "Damage"],
+    ["Magnet I", "Utility"], ["Magnet II", "Utility"], ["Magnet III", "Utility"],
+    ["Super Magnet", "Utility"], ["Fortune", "Drops"], ["Fruity", "Hybrid"],
+    ["Shiny Hunter", "Luck"], ["Chest Mimic", "Drops"], ["Boss Chest Mimic", "Drops"],
+    ["Superior Chest Mimic", "Drops"], ["Mini Chest Fortune", "Drops"],
+    ["Massive Comet", "Drops"], ["Lucky Block", "Drops"], ["Boss Lucky Block", "Drops"],
+    ["Diamond Gift Hunter", "Drops"], ["Hidden Treasure", "Drops"],
+    ["Chest Breaker", "Damage"], ["Super Lightning", "Damage"], ["Lightning Orb", "Damage"],
+    ["Explosive", "Damage"], ["Fireworks", "Damage"], ["Happy Pets", "Damage"],
+    ["Corruption", "Damage"], ["Pet Surge", "Damage"], ["Coins Chest Mimic", "Drops"],
+    ["Diamond Chest Mimic", "Drops"], ["Party Time", "Drops"], ["Demonic", "Damage"],
+    ["Angellic", "Damage"], ["Midas Touch", "Currency"], ["Royalty", "Hybrid"],
+    ["Glittering", "Currency"], ["Agility", "Damage"], ["Strength", "Damage"],
+    ["Companion", "Damage"], ["Cartoon Coins", "Currency"], ["Tech Coins", "Currency"],
+    ["Fantasy Coins", "Currency"], ["Coins", "Currency"], ["Diamonds", "Currency"]
+  ];
+
+  function slug(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
+
+  function addCatalogStub(name, category) {
+    if (data.enchants.some(enchant => enchant.name.toLowerCase() === name.toLowerCase())) return;
+    const id = `catalog-${slug(name)}`;
+    data.enchants.push({
+      id,
+      name,
+      category,
+      stackGroup: id,
+      color: "#8b949e",
+      initials: name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase(),
+      normal: {},
+      empowered: {},
+      notes: "Catalog entry only. Add verified normal and empowered effects before using it in calculations."
+    });
+  }
+
+  tieredFamilies.forEach(([family, category]) => {
+    roman.forEach(tier => addCatalogStub(`${family} ${tier}`, category));
+  });
+  standalone.forEach(([name, category]) => addCatalogStub(name, category));
 
   root.C0LD_LOADOUT_DATA = data;
 })(typeof window !== "undefined" ? window : globalThis);

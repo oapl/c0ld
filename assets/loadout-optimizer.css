@@ -399,6 +399,26 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
   margin-bottom: 16px;
 }
 
+.calculator-view {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.calculator-view .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.input-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+[data-view-section].view-hidden { display: none; }
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

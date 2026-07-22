@@ -46,7 +46,7 @@
           <h2>Enchant Loadout</h2>
           <div class="toolbar">
             <label class="control-label">Slots
-              <input id="slot-count" type="number" min="1" max="12" step="1" value="9" />
+              <input id="slot-count" type="number" min="1" max="9" step="1" value="9" />
             </label>
             <button class="btn" id="clear-loadout" type="button">Clear</button>
           </div>
@@ -59,7 +59,7 @@
       <section class="section">
         <div class="section-header">
           <h2>Enchants</h2>
-          <span class="muted" id="catalog-count"></span>
+          <span class="muted"><span id="catalog-count"></span> <span id="catalog-source"></span></span>
         </div>
         <div class="section-body">
           <div class="catalog-controls">
@@ -81,15 +81,23 @@
       <div class="stat"><div class="stat-label">Filled Slots</div><div class="stat-value" id="filled-slots">0 / 9</div><div class="stat-note">Normal and empowered</div></div>
     </section>
 
-    <div class="calculator-grid">
+    <div class="calculator-view" role="group" aria-label="Calculator view">
+      <button class="btn active" type="button" data-calculator-view="combat">Combat</button>
+      <button class="btn" type="button" data-calculator-view="hatching">Hatching</button>
+      <button class="btn" type="button" data-calculator-view="farming">Farming</button>
+      <button class="btn" type="button" data-calculator-view="all">All</button>
+    </div>
+
+    <div class="calculator-grid" data-view-section="combat">
       <section class="section">
         <div class="section-header"><h2>Combat Inputs</h2></div>
         <div class="section-body">
           <div class="form-grid">
             <label class="control-label">Base damage per hit<input id="base-damage" type="number" min="0" step="1" value="100" /></label>
-            <label class="control-label">Base critical chance %<input id="base-crit" type="number" min="0" max="100" step="1" value="0" /></label>
-            <label class="control-label">Critical multiplier<input id="crit-multiplier" type="number" min="1" step="0.1" value="2" /></label>
+            <label class="control-label">Base critical chance %<input id="base-crit" type="number" min="0" max="100" step="1" value="0" readonly /></label>
+            <label class="control-label">Critical multiplier<input id="crit-multiplier" type="number" min="1" step="0.1" value="5" /></label>
           </div>
+          <div class="input-note">PS99 starts at 0% critical chance. The 5x critical multiplier is an editable working value until verified against the current game scripts.</div>
           <div class="comparison-list" id="combat-breakdown"></div>
         </div>
       </section>
@@ -103,7 +111,7 @@
       </section>
     </div>
 
-    <section class="section" style="margin-bottom:16px">
+    <section class="section" data-view-section="hatching" style="margin-bottom:16px">
       <div class="section-header">
         <h2>Egg Hatching</h2>
         <button class="btn" id="add-egg-tier" type="button">Add Tier</button>
@@ -125,7 +133,7 @@
       <div class="result-note" id="egg-model-note"></div>
     </section>
 
-    <section class="section" style="margin-bottom:16px">
+    <section class="section" data-view-section="farming" style="margin-bottom:16px">
       <div class="section-header"><h2>Last-Zone Drop Estimate</h2></div>
       <div class="section-body">
         <div class="form-grid">
