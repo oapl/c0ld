@@ -247,6 +247,14 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_DEV_BLOG_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the dev-blog schedule interval. |
 | `PS99_DEV_BLOGS_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/dev-blogs`. |
 | `INGEST_PS99_RESTARTS` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `022` so PS99 restart detection keeps running every minute. |
+| `PS99_RESTART_CONFIRMATION_MODE` | Defaults to `sentinel`. In this mode the public server list is supporting evidence only and cannot create an alert. `legacy` explicitly restores the old API-only behavior. |
+| `PS99_RESTART_SENTINEL_ENABLED` | Defaults to `true` when `PS99_RESTART_PROBE_TOKEN` exists. Set to `false` to pause direct-client confirmation without deleting observations. |
+| `PS99_RESTART_PROBE_QUORUM` | Defaults to `3`; live clients that must change server sessions within the configured window when a version change is correlated. |
+| `PS99_RESTART_PROBE_SAME_VERSION_QUORUM` | Defaults to `4`; stronger client quorum required for a restart with no place-version change. |
+| `PS99_RESTART_PROBE_MACHINE_QUORUM` | Defaults to `2`; distinct machines/VMs required so one computer or network failure cannot create an alert. |
+| `PS99_RESTART_PROBE_WINDOW_SECONDS` | Defaults to `600`; maximum rollout window containing the qualifying client transitions. |
+| `PS99_RESTART_PROBE_STALE_SECONDS` | Defaults to `120`; a client older than this is not counted as live evidence. |
+| `PS99_RESTART_PROBE_HISTORY_SECONDS` | Defaults to `1800`; observation history loaded when evaluating the latest transition for each client. |
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
 | `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
 | `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `10`; persistent high-occupancy public-server IDs used as the reference sample. |
@@ -288,6 +296,7 @@ The stop day and time come from the active battle metadata returned by the Big G
 |---|---|
 | `SUPABASE_SERVICE_KEY` | Supabase service role key. Required for table writes. |
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
+| `PS99_RESTART_PROBE_TOKEN` | A separate long random string shared only by the dedicated restart-sentinel reporters. |
 | `ROBLOX_UPDATES_WEBHOOK_URL` | Webhook for the `roblox-updates` channel. |
 | `PS99_UPDATES_WEBHOOK_URL` | Webhook for the `pet-sim-updates` channel. |
 | `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
@@ -298,11 +307,47 @@ The stop day and time come from the active battle metadata returned by the Big G
 | `VERSIONS_WEBHOOK_URL` | Optional fallback for the Versions post if no versions channel ID is configured. |
 | `PS99_ALERT_WEBHOOK_URL` | Legacy fallback for PS99 update and restart alerts when their dedicated secrets are absent. |
 | `DISCORD_BOT_TOKEN` | Discord bot token. Used for persistent channel posts, current-role checks, Discord commands, and CW_Bot message-link imports. |
+
+The five alert webhooks post a new Components V2 message for every real or test
+event. Each new post mentions its configured role, while earlier alerts remain
+in the channel as event history.
 | `OPENAI_API_KEY` | Optional OpenAI API key for CW_Bot image OCR. Store this as a secret. |
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
 
-The public Roblox server list does not include creation time or true per-server place version, and this Worker does not have a public direct "status by job ID" endpoint for PS99. The restart detector therefore pages through the public server list, matches persisted server IDs when they appear in those pages, refreshes individually missing IDs during normal churn, and only starts confirmation when all tracked IDs disappear together. The displayed sampled version is the known place version when the server ID was first registered; the detector intentionally preserves different sampled-version cohorts when they remain visible and seeds one current-version server when a new place version appears. By default, confirmed restart events also require correlation with a PS99 place version change so transient public-list misses are suppressed instead of recorded as restarts.
+The public Roblox server list does not include server creation time or a true
+per-server place version. More importantly, a tracked server disappearing from
+the pages fetched by this Worker does **not** prove that the server died. In the
+default `sentinel` mode, public-list turnover is recorded only as supporting
+evidence and is never allowed to create a restart alert.
+
+Strong confirmation comes from dedicated, otherwise-idle Roblox clients kept
+inside the PS99 root place. Each Windows reporter reads its own Roblox log and
+sends the directly observed server session, place, version when available, and
+heartbeat time. A normal update requires three live clients across at least two
+machines to move from distinct old sessions to distinct new sessions inside ten
+minutes and align with the current PS99 version. A same-version restart requires
+four clients. Every sentinel must have reported the old session recently, so
+starting a reporter after the fact cannot be mistaken for a transition.
+
+Apply `supabase/migrations/032_ps99_restart_sentinels.sql`, add the
+`PS99_RESTART_PROBE_TOKEN` Worker secret, and deploy the Worker before starting
+reporters. Use a different `ProbeId` for each Roblox client and keep each client
+in the root place:
+
+```powershell
+$env:PS99_RESTART_PROBE_TOKEN = "PASTE_THE_PROBE_SECRET"
+.\scripts\run-ps99-restart-sentinel.ps1 `
+  -ProbeId "home-vm-1" `
+  -MachineId "home-host"
+```
+
+When more than one Roblox client runs on a machine, pass that client's
+`-RobloxProcessId` and `-RobloxLogPath`. Tesseract OCR is optional:
+`-EnableVersionOcr` reads the bottom PS99 version strip, while the Worker still
+checks every transition against the stored current root-place version. The
+Discord restart alert includes the sentinel count, independent-machine count,
+old/new server diversity, transition span, and version result.
 
 ## Scheduled pulls
 
@@ -370,6 +415,7 @@ Useful endpoints:
 | `/api/ps99/dev-blogs` | Latest official BIG Games post baseline and detected posts. |
 | `/api/ps99/restarts/ingest` | Manual protected PS99 restart-detector observation. `POST` only. |
 | `/api/ps99/restarts` | Public PS99 restart detector state and confirmed event history for `ps99-restart-tracker.html`. |
+| `/api/ps99/restart-probes` | `POST` direct client observations with `PS99_RESTART_PROBE_TOKEN`; protected `GET` returns live evidence and the current quorum decision. |
 | `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
 | `/api/ps99/alerts/test?type=both` | Protected end-to-end preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; restart tests also publish a five-minute webpage audio-test signal without creating a confirmed restart-history record. `POST` only. |
 | `/api/ps99/alerts/test?feed=all` | Protected webhook-only test for all five dedicated alert destinations. Accepts `roblox-updates`, `ps99-updates`, `ps99-fflags`, `ps99-restarts`, `ps99-dev-blogs`, or `all`. `POST` only. |

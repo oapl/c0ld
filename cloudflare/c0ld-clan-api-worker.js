@@ -20,6 +20,8 @@ const PS99_PLACES_TABLE = "c0ld_ps99_places";
 const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
 const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
+const PS99_RESTART_PROBE_OBSERVATIONS_TABLE = "c0ld_ps99_restart_probe_observations";
+const PS99_RESTART_PROBE_STATE_TABLE = "c0ld_ps99_restart_probe_state";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
 const ROBLOX_RELEASE_STATE_TABLE = "c0ld_roblox_release_state";
 const ROBLOX_RELEASE_EVENTS_TABLE = "c0ld_roblox_release_events";
@@ -54,7 +56,7 @@ const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers
 const DEFAULT_ROBLOX_STATUS_API_URL = "https://api.status.io/1.0/status/59db90dbcdeb2f04dadcf16d";
 const DISCORD_ALERT_COLOR = 0x3498db;
 const DISCORD_ALERT_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/3e/PS99_Genie_Fox.png/revision/latest/scale-to-width/360?cb=20260718171435";
-const DISCORD_ALERT_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Updated:";
+const DISCORD_ALERT_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Last Updated:";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
@@ -91,6 +93,12 @@ const DEFAULT_PS99_RESTART_PAGE_COUNT = 5;
 const DEFAULT_PS99_RESTART_CONFIRMATIONS = 2;
 const DEFAULT_PS99_RESTART_COOLDOWN_MINUTES = 10;
 const DEFAULT_PS99_RESTART_HISTORY_LIMIT = 100;
+const DEFAULT_PS99_RESTART_PROBE_QUORUM = 3;
+const DEFAULT_PS99_RESTART_PROBE_SAME_VERSION_QUORUM = 4;
+const DEFAULT_PS99_RESTART_PROBE_MACHINE_QUORUM = 2;
+const DEFAULT_PS99_RESTART_PROBE_WINDOW_SECONDS = 600;
+const DEFAULT_PS99_RESTART_PROBE_STALE_SECONDS = 120;
+const DEFAULT_PS99_RESTART_PROBE_HISTORY_SECONDS = 1800;
 const PS99_RESTART_CRONS = new Set([
   "* * * * *",
   "*/1 * * * *"
@@ -219,6 +227,9 @@ export default {
         response = await handlePs99DevBlogs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
         response = await handlePs99Restarts(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/restart-probes") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartProbeStatus(env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/ccu") {
         response = await handlePs99Ccu(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
@@ -255,6 +266,9 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/ps99/restarts/ingest") {
         requireAdmin(request, env);
         response = await handlePs99RestartIngest(env, "manual");
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-probes") {
+        requirePs99RestartProbe(request, env);
+        response = await handlePs99RestartProbeIngest(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ps99/alerts/test") {
         requireAdmin(request, env);
         response = await handlePs99AlertTest(env, url);
@@ -1636,7 +1650,8 @@ async function buildRobloxStatusPersistentPost(env) {
   }));
   const activeMaintenance = Array.isArray(result.maintenance?.active) ? result.maintenance.active : [];
   const statusCode = toNumber(overall.status_code) ?? Math.max(100, ...groups.map(group => group.status_code || 100));
-  const overallStatus = stringOrNull(overall.status) || (statusCode <= 100 ? "Operational" : "Service issue");
+  const overallStatusRaw = stringOrNull(overall.status) || (statusCode <= 100 ? "Operational" : "Service issue");
+  const overallStatus = robloxStatusDisplayLabel(overallStatusRaw);
   const statusEmoji = statusCode <= 100 ? "🟢" : statusCode <= 300 ? "🟡" : "🔴";
   const affected = [];
   for (const group of groups) {
@@ -1648,13 +1663,14 @@ async function buildRobloxStatusPersistentPost(env) {
   }
   const checkedUnix = Math.floor(new Date(checkedAt).getTime() / 1000);
   const officialUpdated = safeIso(overall.updated) || groups.map(group => group.updated).filter(Boolean).sort().pop() || null;
-  const description = [
+  const summary = [
     `${statusEmoji} **${overallStatus}**`,
-    `Last checked: <t:${checkedUnix}:R>`,
-    "",
+    `Last Updated: <t:${checkedUnix}:R>`
+  ].join("\n");
+  const details = [
     ...(affected.length
       ? ["**Affected services**", ...affected.slice(0, 20).map(value => `• ${value}`)]
-      : groups.map(group => `**${group.name}:** ${group.status}`)),
+      : groups.map(group => `**${group.name}:** ${robloxStatusDisplayLabel(group.status)}`)),
     ...(incidents.length
       ? ["", "**Active incidents**", ...incidents.slice(0, 10).map(incident => `• ${incident.name} — ${incident.status}`)]
       : []),
@@ -1675,10 +1691,18 @@ async function buildRobloxStatusPersistentPost(env) {
     active_maintenance_count: activeMaintenance.length
   };
   return {
-    payload: persistentDiscordComponentPayload("🌐 ROBLOX Status", [description], checkedAt),
+    payload: persistentDiscordComponentPayload("🌐 ROBLOX Status", [details], checkedAt, {
+      headerSummary: summary,
+      headerSpacerLines: 1
+    }),
     digestSource,
     snapshotAt: checkedAt
   };
+}
+
+function robloxStatusDisplayLabel(value) {
+  const label = String(value || "").trim();
+  return /^operational$/i.test(label) ? "Online" : (label || "Unknown");
 }
 
 async function buildVersionsPersistentPost(env) {
@@ -1697,25 +1721,34 @@ async function buildVersionsPersistentPost(env) {
     })
   ]);
   const release = releaseStates[0] || null;
-  const normalizedPlaces = places.map(place => ({
-    place_id: toNumber(place.place_id),
-    place_name: stringOrNull(place.place_name) || `Place ${place.place_id}`,
-    root_place: Boolean(place.root_place),
-    version: toNumber(place.latest_version),
-    published_at: safeIso(place.latest_published_at),
-    checked_at: safeIso(place.latest_checked_at || place.updated_at)
-  }));
+  const normalizedPlaces = places
+    .map(place => ({
+      place_id: toNumber(place.place_id),
+      place_name: stringOrNull(place.place_name) || `Place ${place.place_id}`,
+      root_place: Boolean(place.root_place),
+      version: toNumber(place.latest_version),
+      published_at: safeIso(place.latest_published_at),
+      checked_at: safeIso(place.latest_checked_at || place.updated_at)
+    }))
+    .filter(place => !isHiddenPersistentVersionPlace(place))
+    .sort(comparePersistentVersionPlaces);
   const checkedAt = [
     safeIso(release?.last_checked_at || release?.updated_at),
     ...normalizedPlaces.map(place => place.checked_at)
   ].filter(Boolean).sort().pop() || new Date().toISOString();
   const checkedUnix = Math.floor(new Date(checkedAt).getTime() / 1000);
   const placeLines = normalizedPlaces.length
-    ? normalizedPlaces.map(place => {
+    ? normalizedPlaces.flatMap((place, index) => {
       const published = place.published_at
         ? ` — <t:${Math.floor(new Date(place.published_at).getTime() / 1000)}:R>`
         : "";
-      return `**${escapeDiscordMarkdown(place.place_name)}:** ${place.version ?? "Unknown"}${published}`;
+      const gap = index > 0 && persistentVersionPlaceGroup(place) !== persistentVersionPlaceGroup(normalizedPlaces[index - 1])
+        ? [""]
+        : [];
+      return [
+        ...gap,
+        `**${escapeDiscordMarkdown(persistentVersionPlaceName(place))}:** ${place.version ?? "Unknown"}${published}`
+      ];
     })
     : ["No tracked PS99 place versions are stored yet."];
   const ps99Section = [
@@ -1729,10 +1762,12 @@ async function buildVersionsPersistentPost(env) {
 
   return {
     payload: persistentDiscordComponentPayload("📥 Versions", [
-      `Last scanned: <t:${checkedUnix}:R>`,
       ps99Section,
       robloxSection
-    ], checkedAt),
+    ], checkedAt, {
+      headerSummary: `Last Updated: <t:${checkedUnix}:R>`,
+      headerSpacerLines: 2
+    }),
     digestSource: {
       checked_at: checkedAt,
       places: normalizedPlaces,
@@ -1747,6 +1782,46 @@ async function buildVersionsPersistentPost(env) {
     },
     snapshotAt: checkedAt
   };
+}
+
+function isHiddenPersistentVersionPlace(place) {
+  const name = normalizeText(place?.place_name);
+  return name === "holding" || name === "petsimulatortesting";
+}
+
+function persistentVersionPlaceName(place) {
+  if (place?.root_place || toNumber(place?.place_id) === 8737899170) {
+    return "👆 [TAP HEROES] Pet Simulator 99! 🔑";
+  }
+  return String(place?.place_name || `Place ${place?.place_id || ""}`).trim();
+}
+
+function persistentVersionPlaceOrder(place) {
+  if (place?.root_place || toNumber(place?.place_id) === 8737899170) return 0;
+  const name = normalizeText(place?.place_name);
+  if (name === "techworld") return 10;
+  if (name === "voidworld") return 20;
+  if (name === "fantasyworld") return 30;
+  if (name === "petsimulator99farming") return 40;
+  if (name === "petsimulator99fishing") return 50;
+  if (name === "tradingplaza") return 60;
+  if (name === "protradingplaza") return 70;
+  return 100;
+}
+
+function persistentVersionPlaceGroup(place) {
+  const order = persistentVersionPlaceOrder(place);
+  if (order === 0) return 0;
+  if (order <= 30) return 1;
+  if (order <= 50) return 2;
+  if (order <= 70) return 3;
+  return 4;
+}
+
+function comparePersistentVersionPlaces(a, b) {
+  const order = persistentVersionPlaceOrder(a) - persistentVersionPlaceOrder(b);
+  if (order) return order;
+  return String(a?.place_name || "").localeCompare(String(b?.place_name || ""));
 }
 
 async function buildRewardCutoffDashboard(env) {
@@ -1901,10 +1976,12 @@ function rewardCutoffDiscordPayload(dashboard) {
   const eventTimingLine = eventTiming
     ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
     : null;
-  const activeGlobalPlayers = eventMode === "league" ? leaguePlayers : players;
-  const globalLines = rewardCutoffLines(activeGlobalPlayers.cutoffs, playerRewardRangeLabel);
-  if (eventMode === "league" && activeGlobalPlayers.pool_is_partial) {
-    globalLines.push("-# The public League-player feed currently exposes the Top 500; deeper cutoffs remain unavailable until the full League roster crawl completes.");
+  const activeGlobalCutoffs = eventMode === "league"
+    ? mergeLeaguePlayerCutoffEstimates(leaguePlayers.cutoffs, players.cutoffs)
+    : players.cutoffs;
+  const globalLines = rewardCutoffLines(activeGlobalCutoffs, playerRewardRangeLabel);
+  if (eventMode === "league") {
+    globalLines.push("-# These numbers are estimates based on the scores of the top 35k players in Leagues.");
   }
   const rewardLines = eventMode === "clan"
     ? rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel)
@@ -1914,15 +1991,33 @@ function rewardCutoffDiscordPayload(dashboard) {
     : "Global Leaderboard (Leagues)";
   const rewardsLabel = eventMode === "clan" ? "Clan Rewards" : "League Rewards";
 
-  return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
-    [
+  const headerSummary = [
       `**${eventName}**`,
-      `Updated <t:${unix}:R>`,
-      eventTimingLine
-    ].filter(Boolean).join("\n"),
+      eventTimingLine,
+      `Last Updated: <t:${unix}:R>`
+    ].filter(Boolean).join("\n");
+
+  return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
     [`## ${globalLabel}`, ...globalLines].join("\n"),
     [`## ${rewardsLabel}`, ...rewardLines].join("\n")
-  ], snapshotAt);
+  ], snapshotAt, { headerSummary });
+}
+
+function mergeLeaguePlayerCutoffEstimates(liveCutoffs, estimatedCutoffs) {
+  const live = new Map((Array.isArray(liveCutoffs) ? liveCutoffs : [])
+    .map(row => [toNumber(row?.rank), row])
+    .filter(([rank]) => rank));
+  const estimates = new Map((Array.isArray(estimatedCutoffs) ? estimatedCutoffs : [])
+    .map(row => [toNumber(row?.rank), row])
+    .filter(([rank]) => rank));
+  const ranks = [...new Set([...live.keys(), ...estimates.keys()])].sort((a, b) => a - b);
+
+  return ranks.map(rank => {
+    const liveRow = live.get(rank);
+    const estimatedRow = estimates.get(rank);
+    if (toNumber(liveRow?.points) !== null) return liveRow;
+    return estimatedRow || liveRow || { rank, points: null, available: false };
+  });
 }
 
 function rewardCutoffEventMode(dashboard) {
@@ -1934,15 +2029,30 @@ function rewardCutoffEventMode(dashboard) {
   return "league";
 }
 
-function persistentDiscordComponentPayload(title, sections, timestamp) {
+function persistentDiscordComponentPayload(title, sections, timestamp, options = {}) {
   const iso = safeIso(timestamp) || new Date().toISOString();
   const unix = Math.floor(new Date(iso).getTime() / 1000);
+  const headerComponents = [{
+    type: 10,
+    content: `## ${String(title || "Automated Update").slice(0, 200)}`
+  }];
+  const headerSpacerLines = clamp(Number(options.headerSpacerLines) || 0, 0, 2);
+  if (headerSpacerLines) {
+    headerComponents.push({
+      type: 10,
+      content: Array.from({ length: headerSpacerLines }, () => "\u200B").join("\n")
+    });
+  }
+  const headerSummary = String(options.headerSummary || "").trim();
+  if (headerSummary.trim()) {
+    headerComponents.push({
+      type: 10,
+      content: headerSummary.slice(0, 4000)
+    });
+  }
   const body = [{
     type: 9,
-    components: [{
-      type: 10,
-      content: `## ${String(title || "Automated Update").slice(0, 200)}`
-    }],
+    components: headerComponents,
     accessory: {
       type: 11,
       media: { url: DISCORD_ALERT_THUMBNAIL_URL },
@@ -6283,7 +6393,7 @@ async function handlePs99Restarts(request, env) {
     500
   );
   const placeId = ps99RootPlaceId(env);
-  const [states, events, testAlerts] = await Promise.all([
+  const [states, events, testAlerts, probeStates] = await Promise.all([
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
       select: "place_id,universe_id,place_name,status,tracked_servers,candidate_servers,baseline_sampled_at,baseline_place_version,candidate_started_at,candidate_confirmations,candidate_place_version,last_batch_size,tracked_present,last_checked_at,last_restart_detected_at,cooldown_until,last_error,raw_snapshot,updated_at",
       place_id: `eq.${placeId}`,
@@ -6302,7 +6412,12 @@ async function handlePs99Restarts(request, env) {
       source: "eq.test",
       order: "detected_at.desc,id.desc",
       limit: "1"
-    })
+    }),
+    supabaseSelect(env, PS99_RESTART_PROBE_STATE_TABLE, {
+      select: "last_event_id,last_confirmed_at,cooldown_until,last_evaluation,updated_at",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }).catch(() => [])
   ]);
   const state = states[0] ? normalizePs99RestartStateOutput(states[0]) : null;
   const latestTestAlert = normalizePs99RestartTestSignal(testAlerts[0]?.details);
@@ -6315,10 +6430,605 @@ async function handlePs99Restarts(request, env) {
     place_name: state?.place_name || "Pet Simulator 99",
     detector: ps99RestartRuntimeConfig(env),
     state,
+    sentinel: normalizePs99RestartProbePublicState(probeStates[0]),
     latest_restart: events[0] ? normalizePs99RestartEventOutput(events[0]) : null,
     latest_test_alert: latestTestAlert,
     events: events.map(normalizePs99RestartEventOutput)
   }, env, publicCacheSeconds(env, "PS99_RESTART"));
+}
+
+function normalizePs99RestartProbePublicState(row) {
+  if (!row) return null;
+  const evaluation = parseJsonObject(row.last_evaluation) || {};
+  return {
+    last_event_id: row.last_event_id || null,
+    last_confirmed_at: safeIso(row.last_confirmed_at),
+    cooldown_until: safeIso(row.cooldown_until),
+    updated_at: safeIso(row.updated_at),
+    evaluation: {
+      evaluated_at: safeIso(evaluation.evaluated_at),
+      decision: evaluation.decision || null,
+      active_probe_count: toNumber(evaluation.active_probe_count) || 0,
+      changed_probe_count: toNumber(evaluation.changed_probe_count) || 0,
+      machine_count: toNumber(evaluation.machine_count) || 0,
+      probe_quorum: toNumber(evaluation.probe_quorum),
+      same_version_quorum: toNumber(evaluation.same_version_quorum),
+      machine_quorum: toNumber(evaluation.machine_quorum),
+      current_place_version: toNumber(evaluation.current_place_version),
+      would_confirm: Boolean(evaluation.would_confirm),
+      in_cooldown: Boolean(evaluation.in_cooldown)
+    }
+  };
+}
+
+async function handlePs99RestartProbeIngest(request, env) {
+  requireSupabase(env);
+
+  if (!ps99RestartSentinelEnabled(env)) {
+    throw httpError(409, "PS99 restart sentinel confirmation is disabled.");
+  }
+
+  const body = await readJsonRequest(request);
+  const inputs = Array.isArray(body?.observations) ? body.observations : [body];
+  if (!inputs.length || inputs.length > 25) {
+    throw httpError(400, "Send between 1 and 25 restart-probe observations.");
+  }
+
+  const receivedAt = new Date().toISOString();
+  const observations = [];
+  for (const input of inputs) {
+    observations.push(await normalizePs99RestartProbeObservationInput(input, env, receivedAt));
+  }
+
+  await supabaseUpsert(
+    env,
+    PS99_RESTART_PROBE_OBSERVATIONS_TABLE,
+    observations,
+    "observation_id"
+  );
+
+  const result = await evaluatePs99RestartProbeQuorum(env, receivedAt, {
+    allowConfirmation: true
+  });
+
+  return json({
+    ok: true,
+    accepted: observations.length,
+    received_at: receivedAt,
+    observations: observations.map(normalizePs99RestartProbeObservationOutput),
+    evaluation: result.evaluation,
+    restart_detected: result.restartDetected,
+    event_id: result.event?.event_id || null,
+    webhook_alert: result.webhookAlert
+  }, 202, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function handlePs99RestartProbeStatus(env) {
+  requireSupabase(env);
+
+  const evaluatedAt = new Date().toISOString();
+  const result = await evaluatePs99RestartProbeQuorum(env, evaluatedAt, {
+    allowConfirmation: false
+  });
+
+  return json({
+    ok: true,
+    generated_at: evaluatedAt,
+    detector: ps99RestartRuntimeConfig(env),
+    evaluation: result.evaluation
+  }, 200, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function normalizePs99RestartProbeObservationInput(input, env, receivedAt) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw httpError(400, "Each restart-probe observation must be a JSON object.");
+  }
+
+  const probeId = validatedPs99RestartProbeIdentifier(input.probe_id, "probe_id");
+  const machineId = validatedPs99RestartProbeIdentifier(input.machine_id, "machine_id");
+  const state = String(input.state || "connected").trim().toLowerCase();
+  if (!["connected", "teleporting", "disconnected", "unknown"].includes(state)) {
+    throw httpError(400, "state must be connected, teleporting, disconnected, or unknown.");
+  }
+
+  const placeId = Math.round(toNumber(input.place_id) || ps99RootPlaceId(env));
+  if (placeId !== ps99RootPlaceId(env)) {
+    throw httpError(400, `Sentinels must remain in the configured root place (${ps99RootPlaceId(env)}).`);
+  }
+
+  const universeId = Math.round(toNumber(input.universe_id) || ps99UniverseId(env));
+  if (universeId !== ps99UniverseId(env)) {
+    throw httpError(400, `Unexpected universe_id; expected ${ps99UniverseId(env)}.`);
+  }
+
+  const observedAt = safeIso(input.observed_at) || receivedAt;
+  const observedMs = isoToMs(observedAt);
+  const receivedMs = isoToMs(receivedAt);
+  if (observedMs === null || observedMs < receivedMs - 60 * 60000 || observedMs > receivedMs + 2 * 60000) {
+    throw httpError(400, "observed_at must be within the last hour and no more than two minutes in the future.");
+  }
+
+  const jobId = stringOrNull(input.job_id || input.server_id || input.server_key);
+  if (jobId && (jobId.length > 160 || !/^[A-Za-z0-9._:|/-]+$/.test(jobId))) {
+    throw httpError(400, "job_id contains unsupported characters or is too long.");
+  }
+  if (state === "connected" && !jobId) {
+    throw httpError(400, "A connected observation requires job_id.");
+  }
+
+  const placeVersionValue = toNumber(input.place_version);
+  const placeVersion = placeVersionValue === null
+    ? null
+    : Math.max(0, Math.round(placeVersionValue));
+  const robloxUserIdValue = toNumber(input.roblox_user_id);
+  const robloxUserId = robloxUserIdValue === null
+    ? null
+    : Math.max(1, Math.round(robloxUserIdValue));
+  const jobIdSource = String(input.job_id_source || "roblox_game_id").trim().toLowerCase().slice(0, 40);
+  const reporterVersion = String(input.reporter_version || "").trim().slice(0, 40) || null;
+  const observationId = `ps99-probe:${await sha256Hex(stableJsonStringify({
+    probe_id: probeId,
+    observed_at: observedAt,
+    place_id: placeId,
+    job_id: jobId,
+    state
+  }))}`;
+
+  return {
+    observation_id: observationId,
+    probe_id: probeId,
+    machine_id: machineId,
+    roblox_user_id: robloxUserId,
+    universe_id: universeId,
+    place_id: placeId,
+    job_id: jobId,
+    job_id_source: jobIdSource,
+    place_version: placeVersion,
+    state,
+    observed_at: observedAt,
+    received_at: receivedAt,
+    reporter_version: reporterVersion,
+    raw_observation: {
+      process_id: toNumber(input.process_id),
+      log_path_hash: stringOrNull(input.log_path_hash),
+      roblox_client_version: stringOrNull(input.roblox_client_version),
+      note: stringOrNull(input.note)
+    }
+  };
+}
+
+function validatedPs99RestartProbeIdentifier(value, fieldName) {
+  const text = String(value || "").trim();
+  if (!text || text.length > 80 || !/^[A-Za-z0-9._:-]+$/.test(text)) {
+    throw httpError(400, `${fieldName} is required and may contain letters, numbers, dots, colons, underscores, and hyphens.`);
+  }
+  return text;
+}
+
+async function evaluatePs99RestartProbeQuorum(env, evaluatedAt, options = {}) {
+  const placeId = ps99RootPlaceId(env);
+  const evaluatedMs = isoToMs(evaluatedAt) || Date.now();
+  const historyStart = new Date(
+    evaluatedMs - ps99RestartProbeHistorySeconds(env) * 1000
+  ).toISOString();
+  const [rows, stateRows, publicStateRows, versionContext] = await Promise.all([
+    supabaseSelect(env, PS99_RESTART_PROBE_OBSERVATIONS_TABLE, {
+      select: "observation_id,probe_id,machine_id,roblox_user_id,universe_id,place_id,job_id,job_id_source,place_version,state,observed_at,received_at,reporter_version,raw_observation",
+      place_id: `eq.${placeId}`,
+      observed_at: `gte.${historyStart}`,
+      order: "observed_at.asc,received_at.asc",
+      limit: "2000"
+    }),
+    supabaseSelect(env, PS99_RESTART_PROBE_STATE_TABLE, {
+      select: "place_id,universe_id,last_event_id,last_transition_digest,last_confirmed_at,cooldown_until,last_evaluation,updated_at",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }),
+    supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
+      select: "status,last_batch_size,tracked_present,last_checked_at,raw_snapshot",
+      place_id: `eq.${placeId}`,
+      limit: "1"
+    }).catch(() => []),
+    fetchPs99RestartVersionContext(env, placeId)
+  ]);
+
+  const previousState = stateRows[0] || {};
+  const publicState = publicStateRows[0] || {};
+  const evidence = summarizePs99RestartProbeEvidence(
+    rows,
+    evaluatedAt,
+    versionContext,
+    env
+  );
+  const publicSnapshot = parseJsonObject(publicState.raw_snapshot) || {};
+  const publicScanSupport = {
+    role: "supporting_only",
+    status: publicState.status || null,
+    last_checked_at: safeIso(publicState.last_checked_at),
+    tracked_present: toNumber(publicState.tracked_present),
+    observed_servers: toNumber(publicState.last_batch_size),
+    pages_fetched: toNumber(publicSnapshot.pages_fetched)
+  };
+  const cooldownMs = isoToMs(previousState.cooldown_until);
+  const inCooldown = cooldownMs !== null && cooldownMs > evaluatedMs;
+  const evaluation = {
+    evaluated_at: evaluatedAt,
+    confirmation_mode: ps99RestartConfirmationMode(env),
+    sentinel_enabled: ps99RestartSentinelEnabled(env),
+    probe_quorum: ps99RestartProbeQuorum(env),
+    same_version_quorum: ps99RestartProbeSameVersionQuorum(env),
+    machine_quorum: ps99RestartProbeMachineQuorum(env),
+    transition_window_seconds: ps99RestartProbeWindowSeconds(env),
+    stale_after_seconds: ps99RestartProbeStaleSeconds(env),
+    active_probe_count: evidence.activeProbes.length,
+    changed_probe_count: evidence.transitions.length,
+    machine_count: evidence.machineCount,
+    distinct_previous_jobs: evidence.distinctPreviousJobs,
+    distinct_current_jobs: evidence.distinctCurrentJobs,
+    version_observed_count: evidence.versionObservedCount,
+    version_aligned_count: evidence.versionAlignedCount,
+    version_conflict_count: evidence.versionConflictCount,
+    version_change_evidence: evidence.versionChangeEvidence,
+    same_version_restart: evidence.sameVersionRestart,
+    current_place_version: toNumber(versionContext.currentVersion),
+    version_event_detected_at: safeIso(versionContext.detectedAt),
+    candidate_started_at: evidence.candidateStartedAt,
+    transition_span_seconds: evidence.transitionSpanSeconds,
+    would_confirm: evidence.confirmed,
+    in_cooldown: inCooldown,
+    cooldown_until: safeIso(previousState.cooldown_until),
+    latest_probes: evidence.activeProbes,
+    transitions: evidence.transitions,
+    public_server_scan: publicScanSupport,
+    decision: evidence.confirmed
+      ? (inCooldown ? "confirmed_but_in_cooldown" : "confirmed")
+      : evidence.decision
+  };
+
+  let event = null;
+  let restartDetected = false;
+  let webhookAlert = emptyDiscordFeedResult(env, "ps99_restarts", "sentinel_quorum_not_met");
+  const allowConfirmation = options.allowConfirmation === true;
+
+  if (allowConfirmation && evidence.confirmed && !inCooldown) {
+    const candidateStart = evidence.candidateStartedAt || evaluatedAt;
+    const candidateStartMs = isoToMs(candidateStart) || evaluatedMs;
+    const candidateMinute = new Date(Math.floor(candidateStartMs / 60000) * 60000).toISOString();
+    const eventId = `ps99-restart:sentinel:${placeId}:${candidateMinute}`;
+    const transitionDigest = await sha256Hex(stableJsonStringify(
+      evidence.transitions.map(row => ({
+        probe_id: row.probe_id,
+        previous_job_id: row.previous_job_id,
+        current_job_id: row.current_job_id,
+        transitioned_at: row.transitioned_at
+      }))
+    ));
+    const cooldownUntil = new Date(
+      evaluatedMs + ps99RestartCooldownMinutes(env) * 60000
+    ).toISOString();
+    const previousRestartAt = safeIso(previousState.last_confirmed_at);
+    const ccuAtRestart = await fetchPs99CcuAtOrBefore(env, candidateStart, 10 * 60000)
+      .catch(() => null);
+    const tenMinutesBefore = new Date(candidateStartMs - 10 * 60000).toISOString();
+    const priorCcuSample = await fetchPs99CcuAtOrBefore(env, tenMinutesBefore, 5 * 60000)
+      .catch(() => null);
+    const previousVersions = evidence.transitions
+      .map(row => toNumber(row.previous_place_version))
+      .filter(value => value !== null);
+    const previousVersion = previousVersions.length
+      ? modeNumber(previousVersions)
+      : toNumber(versionContext.previousVersion);
+    const currentVersion = toNumber(versionContext.currentVersion)
+      ?? modeNumber(evidence.transitions
+        .map(row => toNumber(row.current_place_version))
+        .filter(value => value !== null));
+
+    event = {
+      event_id: eventId,
+      universe_id: ps99UniverseId(env),
+      place_id: placeId,
+      place_name: versionContext.placeName || "Pet Simulator 99",
+      candidate_started_at: candidateStart,
+      detected_at: evaluatedAt,
+      cooldown_until: cooldownUntil,
+      previous_place_version: previousVersion,
+      current_place_version: currentVersion,
+      version_correlated: evidence.versionChangeEvidence,
+      confidence: "confirmed",
+      previous_servers: evidence.transitions.map(row => ({
+        probe_id: row.probe_id,
+        machine_id: row.machine_id,
+        server_id: row.previous_job_id,
+        observed_place_version: row.previous_place_version,
+        last_seen_at: row.previous_observed_at
+      })),
+      replacement_servers: evidence.transitions.map(row => ({
+        probe_id: row.probe_id,
+        machine_id: row.machine_id,
+        server_id: row.current_job_id,
+        observed_place_version: row.current_place_version,
+        first_seen_at: row.transitioned_at
+      })),
+      reason: evidence.reason,
+      source: "sentinel",
+      details: {
+        confirmation_method: "sentinel_quorum",
+        probe_quorum: evidence.requiredQuorum,
+        probes_changed: evidence.transitions.length,
+        active_probes: evidence.activeProbes.length,
+        independent_machines: evidence.machineCount,
+        distinct_previous_jobs: evidence.distinctPreviousJobs,
+        distinct_current_jobs: evidence.distinctCurrentJobs,
+        transition_window_seconds: ps99RestartProbeWindowSeconds(env),
+        transition_span_seconds: evidence.transitionSpanSeconds,
+        version_observed_count: evidence.versionObservedCount,
+        version_aligned_count: evidence.versionAlignedCount,
+        version_conflict_count: evidence.versionConflictCount,
+        same_version_restart: evidence.sameVersionRestart,
+        version_event_detected_at: versionContext.detectedAt || null,
+        previous_restart_detected_at: previousRestartAt,
+        restart_place_version: currentVersion,
+        ccu_at_restart: toNumber(ccuAtRestart?.ccu),
+        ccu_at_restart_sampled_at: safeIso(ccuAtRestart?.sampled_at),
+        ccu_10_minutes_before: toNumber(priorCcuSample?.ccu),
+        ccu_10_minutes_before_sampled_at: safeIso(priorCcuSample?.sampled_at),
+        ccu_10_minutes_before_target_at: tenMinutesBefore,
+        public_server_scan: publicScanSupport,
+        sentinels: evidence.transitions
+      }
+    };
+
+    const inserted = await supabaseInsertIgnoreReturning(
+      env,
+      PS99_RESTART_EVENTS_TABLE,
+      [event],
+      "event_id"
+    );
+    restartDetected = inserted.length > 0;
+    if (restartDetected) {
+      webhookAlert = await postPs99RestartAlert(env, event);
+    } else {
+      webhookAlert = emptyDiscordFeedResult(env, "ps99_restarts", "restart_event_already_recorded");
+    }
+
+    await supabaseUpsert(env, PS99_RESTART_PROBE_STATE_TABLE, [{
+      place_id: placeId,
+      universe_id: ps99UniverseId(env),
+      last_event_id: eventId,
+      last_transition_digest: transitionDigest,
+      last_confirmed_at: restartDetected ? evaluatedAt : (previousRestartAt || evaluatedAt),
+      cooldown_until: cooldownUntil,
+      last_evaluation: {
+        ...evaluation,
+        decision: restartDetected ? "confirmed_and_alerted" : "duplicate_event_suppressed"
+      },
+      updated_at: evaluatedAt
+    }], "place_id");
+  } else if (allowConfirmation) {
+    await supabaseUpsert(env, PS99_RESTART_PROBE_STATE_TABLE, [{
+      place_id: placeId,
+      universe_id: ps99UniverseId(env),
+      last_event_id: previousState.last_event_id || null,
+      last_transition_digest: previousState.last_transition_digest || null,
+      last_confirmed_at: safeIso(previousState.last_confirmed_at),
+      cooldown_until: inCooldown ? safeIso(previousState.cooldown_until) : null,
+      last_evaluation: evaluation,
+      updated_at: evaluatedAt
+    }], "place_id");
+  }
+
+  return {
+    evaluation,
+    event,
+    restartDetected,
+    webhookAlert
+  };
+}
+
+function summarizePs99RestartProbeEvidence(rows, evaluatedAt, versionContext, env) {
+  const evaluatedMs = isoToMs(evaluatedAt) || Date.now();
+  const staleMs = ps99RestartProbeStaleSeconds(env) * 1000;
+  const windowMs = ps99RestartProbeWindowSeconds(env) * 1000;
+  const grouped = new Map();
+
+  for (const raw of rows || []) {
+    const row = normalizePs99RestartProbeObservationOutput(raw);
+    if (!row.probe_id || row.place_id !== ps99RootPlaceId(env)) continue;
+    if (!grouped.has(row.probe_id)) grouped.set(row.probe_id, []);
+    grouped.get(row.probe_id).push(row);
+  }
+
+  const activeProbes = [];
+  const transitions = [];
+  for (const [probeId, probeRows] of grouped.entries()) {
+    probeRows.sort((a, b) => (isoToMs(a.observed_at) || 0) - (isoToMs(b.observed_at) || 0));
+    const latestObservation = probeRows[probeRows.length - 1];
+    const latestMs = isoToMs(latestObservation?.observed_at);
+    const connectedRows = probeRows.filter(row => row.state === "connected" && row.job_id);
+    const latestConnected = connectedRows[connectedRows.length - 1];
+    const active = Boolean(
+      latestObservation
+      && latestConnected
+      && latestObservation.state === "connected"
+      && latestObservation.job_id === latestConnected.job_id
+      && latestMs !== null
+      && evaluatedMs - latestMs >= -2 * 60000
+      && evaluatedMs - latestMs <= staleMs
+    );
+
+    if (!active) continue;
+    activeProbes.push({
+      probe_id: probeId,
+      machine_id: latestConnected.machine_id,
+      roblox_user_id: latestConnected.roblox_user_id,
+      job_id: latestConnected.job_id,
+      job_id_source: latestConnected.job_id_source,
+      place_version: latestConnected.place_version,
+      observed_at: latestConnected.observed_at,
+      age_seconds: Math.max(0, Math.round((evaluatedMs - latestMs) / 1000))
+    });
+
+    let previousIndex = -1;
+    for (let index = connectedRows.length - 2; index >= 0; index -= 1) {
+      if (connectedRows[index].job_id !== latestConnected.job_id) {
+        previousIndex = index;
+        break;
+      }
+    }
+    if (previousIndex < 0) continue;
+
+    const previous = connectedRows[previousIndex];
+    const firstCurrent = connectedRows[previousIndex + 1];
+    const previousMs = isoToMs(previous.observed_at);
+    const transitionMs = isoToMs(firstCurrent.observed_at);
+    const transitionGapMs = previousMs === null || transitionMs === null
+      ? Number.POSITIVE_INFINITY
+      : transitionMs - previousMs;
+    const transitionAgeMs = transitionMs === null
+      ? Number.POSITIVE_INFINITY
+      : evaluatedMs - transitionMs;
+    if (
+      transitionGapMs < 0
+      || transitionGapMs > Math.max(staleMs * 2, 180000)
+      || transitionAgeMs < -2 * 60000
+      || transitionAgeMs > windowMs
+    ) {
+      continue;
+    }
+
+    transitions.push({
+      probe_id: probeId,
+      machine_id: latestConnected.machine_id,
+      roblox_user_id: latestConnected.roblox_user_id,
+      previous_job_id: previous.job_id,
+      current_job_id: latestConnected.job_id,
+      job_id_source: latestConnected.job_id_source,
+      previous_place_version: previous.place_version,
+      current_place_version: latestConnected.place_version,
+      previous_observed_at: previous.observed_at,
+      transitioned_at: firstCurrent.observed_at,
+      last_observed_at: latestConnected.observed_at,
+      transition_gap_seconds: Math.max(0, Math.round(transitionGapMs / 1000))
+    });
+  }
+
+  transitions.sort((a, b) => (isoToMs(a.transitioned_at) || 0) - (isoToMs(b.transitioned_at) || 0));
+  const transitionTimes = transitions
+    .map(row => isoToMs(row.transitioned_at))
+    .filter(value => value !== null);
+  const candidateStartedAt = transitionTimes.length
+    ? new Date(Math.min(...transitionTimes)).toISOString()
+    : null;
+  const transitionSpanSeconds = transitionTimes.length > 1
+    ? Math.round((Math.max(...transitionTimes) - Math.min(...transitionTimes)) / 1000)
+    : 0;
+  const machineCount = new Set(transitions.map(row => row.machine_id).filter(Boolean)).size;
+  const distinctPreviousJobs = new Set(transitions.map(row => row.previous_job_id).filter(Boolean)).size;
+  const distinctCurrentJobs = new Set(transitions.map(row => row.current_job_id).filter(Boolean)).size;
+  const currentVersion = toNumber(versionContext.currentVersion);
+  const versionsObserved = transitions
+    .map(row => toNumber(row.current_place_version))
+    .filter(value => value !== null);
+  const versionObservedCount = versionsObserved.length;
+  const versionAlignedCount = currentVersion === null
+    ? versionObservedCount
+    : versionsObserved.filter(value => value === currentVersion).length;
+  const versionConflictCount = currentVersion === null
+    ? 0
+    : versionsObserved.filter(value => value !== currentVersion).length;
+  const probeVersionChanged = transitions.some(row => (
+    toNumber(row.previous_place_version) !== null
+    && toNumber(row.current_place_version) !== null
+    && toNumber(row.previous_place_version) !== toNumber(row.current_place_version)
+  ));
+  const versionEventMs = isoToMs(versionContext.detectedAt);
+  const recentVersionEvent = versionEventMs !== null
+    && evaluatedMs - versionEventMs >= 0
+    && evaluatedMs - versionEventMs <= 30 * 60000;
+  const versionChangeEvidence = probeVersionChanged || recentVersionEvent;
+  const probeQuorum = ps99RestartProbeQuorum(env);
+  const sameVersionQuorum = ps99RestartProbeSameVersionQuorum(env);
+  const machineQuorum = ps99RestartProbeMachineQuorum(env);
+  const enoughDistinctServers = distinctPreviousJobs >= 2 && distinctCurrentJobs >= 2;
+  const versionsAgree = versionConflictCount === 0;
+  const standardConfirmed = transitions.length >= probeQuorum
+    && machineCount >= machineQuorum
+    && enoughDistinctServers
+    && versionsAgree
+    && versionChangeEvidence;
+  const sameVersionConfirmed = transitions.length >= sameVersionQuorum
+    && machineCount >= machineQuorum
+    && enoughDistinctServers
+    && versionsAgree
+    && !versionChangeEvidence;
+  const confirmed = standardConfirmed || sameVersionConfirmed;
+  const requiredQuorum = versionChangeEvidence ? probeQuorum : sameVersionQuorum;
+  let decision = "waiting_for_probe_transitions";
+  if (transitions.length >= requiredQuorum && machineCount < machineQuorum) {
+    decision = "waiting_for_independent_machines";
+  } else if (transitions.length >= requiredQuorum && !enoughDistinctServers) {
+    decision = "waiting_for_distinct_server_sessions";
+  } else if (versionConflictCount > 0) {
+    decision = "version_conflict";
+  } else if (transitions.length > 0 && transitions.length < requiredQuorum) {
+    decision = "waiting_for_quorum";
+  }
+  const reason = versionChangeEvidence
+    ? `${transitions.length} live sentinel clients across ${machineCount} machines changed server sessions within ${transitionSpanSeconds} seconds and aligned with the current PS99 place version.`
+    : `${transitions.length} live sentinel clients across ${machineCount} machines changed server sessions within ${transitionSpanSeconds} seconds at the same place version; the stronger same-version quorum was met.`;
+
+  return {
+    activeProbes,
+    transitions,
+    machineCount,
+    distinctPreviousJobs,
+    distinctCurrentJobs,
+    versionObservedCount,
+    versionAlignedCount,
+    versionConflictCount,
+    versionChangeEvidence,
+    sameVersionRestart: sameVersionConfirmed,
+    candidateStartedAt,
+    transitionSpanSeconds,
+    requiredQuorum,
+    confirmed,
+    decision,
+    reason
+  };
+}
+
+function normalizePs99RestartProbeObservationOutput(row) {
+  return {
+    observation_id: row.observation_id || null,
+    probe_id: row.probe_id || null,
+    machine_id: row.machine_id || null,
+    roblox_user_id: toNumber(row.roblox_user_id),
+    universe_id: toNumber(row.universe_id),
+    place_id: toNumber(row.place_id),
+    job_id: row.job_id || null,
+    job_id_source: row.job_id_source || null,
+    place_version: toNumber(row.place_version),
+    state: row.state || "unknown",
+    observed_at: safeIso(row.observed_at),
+    received_at: safeIso(row.received_at),
+    reporter_version: row.reporter_version || null
+  };
+}
+
+function modeNumber(values) {
+  const counts = new Map();
+  for (const value of values || []) {
+    const numeric = toNumber(value);
+    if (numeric === null) continue;
+    counts.set(numeric, (counts.get(numeric) || 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? null;
 }
 
 async function handlePs99Ccu(request, env) {
@@ -6358,6 +7068,7 @@ async function handlePs99RestartIngest(env, source) {
   const confirmationsRequired = ps99RestartConfirmations(env);
   const cooldownMinutes = ps99RestartCooldownMinutes(env);
   const requireVersionCorrelation = ps99RestartRequireVersionCorrelation(env);
+  const allowApiOnlyConfirmation = ps99RestartConfirmationMode(env) === "legacy";
   const [serverObservation, stateRows, versionContext, ccuObservation] = await Promise.all([
     fetchPs99PublicServerBatch(placeId, batchSize, pageCount),
     supabaseSelect(env, PS99_RESTART_STATE_TABLE, {
@@ -6464,9 +7175,11 @@ async function handlePs99RestartIngest(env, source) {
           || (recentVersionEventMs && checkedMs - recentVersionEventMs >= 0 && checkedMs - recentVersionEventMs <= 30 * 60000)
         );
 
-        if (requireVersionCorrelation && !versionCorrelated) {
+        if (!allowApiOnlyConfirmation || (requireVersionCorrelation && !versionCorrelated)) {
           suppressedRestart = {
-            reason: "candidate_turnover_without_version_correlation",
+            reason: allowApiOnlyConfirmation
+              ? "candidate_turnover_without_version_correlation"
+              : "public_server_turnover_is_supporting_evidence_only",
             candidate_started_at: candidateStart,
             confirmation_scans: candidateConfirmations,
             observed_servers: batch.length,
@@ -6475,7 +7188,9 @@ async function handlePs99RestartIngest(env, source) {
             current_place_version: currentVersion,
             version_event_detected_at: versionContext.detectedAt || null
           };
-          detectorNote = "Suppressed possible restart because public server turnover did not correlate with a PS99 place version change.";
+          detectorNote = allowApiOnlyConfirmation
+            ? "Suppressed possible restart because public server turnover did not correlate with a PS99 place version change."
+            : "Public server turnover was recorded as supporting evidence only. A sentinel quorum is required for a restart alert.";
           trackedServers = candidateServers.length === sampleSize
             ? candidateServers
             : samplePs99RestartServers(batch, sampleSize, checkedAt, currentVersion);
@@ -6846,33 +7561,23 @@ async function publishPs99RestartTestSignal(env, { placeId, placeName, testedAt,
 }
 
 async function postPs99VersionAlert(env, events, detectedAt, options = {}) {
-  const separator = "~~━━━━━━━━━━━~~";
   const sections = events.slice(0, 20).map(event => {
     const placeName = escapeDiscordMarkdown(event.place_name || `Place ${event.place_id}`);
     const previousVersion = ps99AlertVersion(event.previous_version);
     const currentVersion = ps99AlertVersion(event.current_version);
     const published = discordTimestamp(event.current_published_at, "R") || "Unknown";
-    return `**${placeName}**\nVersion: \`${previousVersion}\`  ➜  \`${currentVersion}\`\nPublished: ${published}`;
+    return `### ${placeName}\n**Version:** \`${previousVersion}\`  ➜  \`${currentVersion}\`\n**Published:** ${published}`;
   });
   const extraCount = Math.max(0, events.length - 20);
   if (extraCount) sections.push(`*...and ${extraCount} more place update${extraCount === 1 ? "" : "s"}.*`);
-  const description = `${separator}\n\n${sections.join(`\n\n${separator}\n\n`)}\n\n${separator}`;
+  const alertAt = safeIso(detectedAt) || new Date().toISOString();
+  const alertUnix = Math.floor(new Date(alertAt).getTime() / 1000);
+  const title = `${options.test ? "[TEST] " : ""}📥 Pet Simulator 99 Update`;
 
   return postDiscordFeedAlert(env, "ps99_updates", {
-    content: null,
-    username: "PS99 Alert Bot",
-    attachments: [],
-    embeds: [{
-      title: options.test ? "[TEST] PS99 UPDATE DETECTED" : "PS99 UPDATE DETECTED",
-      description: description.slice(0, 4096),
-      color: 0xff0000,
-      footer: {
-        text: "Auditing Accuracy • it's fucking CAINOVER"
-      },
-      thumbnail: {
-        url: "https://i.imgur.com/aCHMjbP.png"
-      }
-    }]
+    ...persistentDiscordComponentPayload(title, sections, alertAt, {
+      headerSummary: `${events.length} place update${events.length === 1 ? "" : "s"} detected\nLast Updated: <t:${alertUnix}:R>`
+    })
   });
 }
 
@@ -6887,50 +7592,63 @@ async function postPs99RestartAlert(env, event, options = {}) {
   const previousRestartAt = safeIso(details.previous_restart_detected_at);
   const restartVersion = details.restart_place_version ?? event.current_place_version;
   const currentVersion = event.current_place_version;
-  const description = [
-    "~~━━━━━━━━━━━~~",
-    `**${relativeTime}**`,
-    `Time Since Last Restart: ${ps99AlertElapsed(previousRestartAt, detectedAt)}`,
-    `Place Version @ restart: ${ps99AlertVersion(restartVersion)}`,
-    `Place Version Now: ${ps99AlertVersion(currentVersion)}`,
-    `CCU at restart: ${ps99AlertCcu(details.ccu_at_restart)}`,
-    `CCU (10 min before restart): ${ps99AlertCcu(details.ccu_10_minutes_before)}`
+  const confidence = escapeDiscordMarkdown(event?.confidence || details?.confidence || "Unrated");
+  const sentinelConfirmed = details.confirmation_method === "sentinel_quorum";
+  const title = `${options.test ? "[TEST] " : ""}🚨 Pet Simulator 99 Restart`;
+  const summary = [
+    `**Detected ${relativeTime}**`,
+    sentinelConfirmed
+      ? "Confidence: **CONFIRMED — live sentinel quorum**"
+      : `Confidence: **${confidence}**`
   ].join("\n");
+  const restartDetails = [
+    `**Time Since Last Restart:** ${ps99AlertElapsed(previousRestartAt, detectedAt)}`,
+    `**Place Version at Restart:** ${ps99AlertVersion(restartVersion)}`,
+    `**Current Place Version:** ${ps99AlertVersion(currentVersion)}`,
+    `**CCU at Restart:** ${ps99AlertCcu(details.ccu_at_restart)}`,
+    `**CCU 10 Minutes Before:** ${ps99AlertCcu(details.ccu_10_minutes_before)}`,
+    sentinelConfirmed ? "" : null,
+    sentinelConfirmed ? "### Confirmation Evidence" : null,
+    sentinelConfirmed
+      ? `**Sentinels Changed:** ${toNumber(details.probes_changed) || 0}/${toNumber(details.probe_quorum) || 0}`
+      : null,
+    sentinelConfirmed
+      ? `**Independent Machines:** ${toNumber(details.independent_machines) || 0}`
+      : null,
+    sentinelConfirmed
+      ? `**Distinct Old → New Servers:** ${toNumber(details.distinct_previous_jobs) || 0} → ${toNumber(details.distinct_current_jobs) || 0}`
+      : null,
+    sentinelConfirmed
+      ? `**Transition Window:** ${ps99AlertSeconds(details.transition_span_seconds)}`
+      : null,
+    sentinelConfirmed
+      ? `**Version Check:** ${toNumber(details.version_conflict_count) > 0
+        ? "Conflict detected"
+        : (details.same_version_restart ? "Stronger same-version quorum passed" : "Aligned with the PS99 update")}`
+      : null,
+    sentinelConfirmed
+      ? "-# Roblox's public server list was used only as supporting evidence."
+      : null
+  ].filter(value => value !== null).join("\n");
 
   return postDiscordFeedAlert(env, "ps99_restarts", {
-    content: null,
-    username: "PS99 Alert Bot",
-    attachments: [],
-    embeds: [{
-      title: options.test ? "[TEST] PS99 SERVER RESTART DETECTED" : "PS99 SERVER RESTART DETECTED",
-      description: description.slice(0, 4096),
-      color: 0xff0000,
-      footer: {
-        text: "Auditing Accuracy • it's fucking CAINOVER"
-      },
-      thumbnail: {
-        url: "https://i.imgur.com/aCHMjbP.png"
-      }
-    }]
+    ...persistentDiscordComponentPayload(title, [restartDetails], detectedAt, {
+      headerSummary: summary
+    })
   });
 }
 
 async function postRobloxReleaseAlert(env, event) {
   const previousVersion = escapeDiscordMarkdown(event.previous_version || event.previous_client_version_upload || "Unknown");
   const currentVersion = escapeDiscordMarkdown(event.current_version || event.current_client_version_upload || "Unknown");
+  const detectedAt = safeIso(event.detected_at) || new Date().toISOString();
+  const detectedUnix = Math.floor(new Date(detectedAt).getTime() / 1000);
   return postDiscordFeedAlert(env, "roblox_updates", {
-    username: "Roblox Update Monitor",
-    embeds: [{
-      title: "ROBLOX CLIENT UPDATE DETECTED",
-      description: [
-        `**Channel:** ${escapeDiscordMarkdown(event.channel || "live")}`,
-        `**Binary:** ${escapeDiscordMarkdown(event.binary_type || "Unknown")}`,
-        `**Version:** \`${previousVersion}\` -> \`${currentVersion}\``,
-        `**Detected:** ${discordTimestamp(event.detected_at, "R") || "Now"}`
-      ].join("\n"),
-      color: 0x00a2ff,
-      timestamp: safeIso(event.detected_at) || new Date().toISOString()
-    }]
+    ...persistentDiscordComponentPayload("🌐 ROBLOX Client Update", [
+      `### Windows Client\n**Version:** \`${previousVersion}\`  ➜  \`${currentVersion}\``
+    ], detectedAt, {
+      headerSummary: `Last Updated: <t:${detectedUnix}:R>`
+    })
   });
 }
 
@@ -6945,35 +7663,36 @@ async function postRobloxFflagAlert(env, event) {
   ].slice(0, 18);
   const total = added.length + removed.length + changed.length;
   const remainder = Math.max(0, total - keyLines.length);
+  const detectedAt = safeIso(event.detected_at) || new Date().toISOString();
+  const detectedUnix = Math.floor(new Date(detectedAt).getTime() / 1000);
+  const sections = [
+    [
+      `**Added:** ${added.length}  **Removed:** ${removed.length}  **Changed:** ${changed.length}`,
+      keyLines.length ? `\`\`\`diff\n${keyLines.join("\n")}\n\`\`\`` : "",
+      remainder ? `*...and ${remainder} more changed setting${remainder === 1 ? "" : "s"}.*` : ""
+    ].filter(Boolean).join("\n"),
+    "-# Public Roblox client settings only; these are not private PS99 server flags."
+  ];
   return postDiscordFeedAlert(env, "ps99_fflags", {
-    username: "Roblox Settings Monitor",
-    embeds: [{
-      title: "ROBLOX CLIENT SETTINGS CHANGED",
-      description: [
-        `**Added:** ${added.length}  **Removed:** ${removed.length}  **Changed:** ${changed.length}`,
-        keyLines.length ? `\n\`\`\`diff\n${keyLines.join("\n")}\n\`\`\`` : "",
-        remainder ? `*...and ${remainder} more changed setting${remainder === 1 ? "" : "s"}.*` : ""
-      ].filter(Boolean).join("\n"),
-      color: 0xf5a623,
-      footer: { text: "Public Roblox client settings only; not private PS99 server flags." },
-      timestamp: safeIso(event.detected_at) || new Date().toISOString()
-    }]
+    ...persistentDiscordComponentPayload("🚩 Pet Simulator 99 FFlag Change", sections, detectedAt, {
+      headerSummary: `Last Updated: <t:${detectedUnix}:R>`
+    })
   });
 }
 
 async function postPs99DevBlogAlert(env, post) {
-  const embed = {
-    title: post.title || "New Pet Simulator 99 post",
-    url: post.url,
-    description: String(post.excerpt || "A new official BIG Games Pet Simulator 99 post is available.").slice(0, 4096),
-    color: 0x42a5f5,
-    footer: { text: "Official BIG Games post" },
-    timestamp: safeIso(post.published_at) || new Date().toISOString()
-  };
-  if (post.image_url) embed.image = { url: post.image_url };
+  const publishedAt = safeIso(post.published_at) || new Date().toISOString();
+  const publishedUnix = Math.floor(new Date(publishedAt).getTime() / 1000);
+  const postTitle = escapeDiscordMarkdown(post.title || "New Pet Simulator 99 post");
+  const postUrl = safeHttpUrl(post.url);
+  const linkedTitle = postUrl ? `[${postTitle}](${postUrl})` : postTitle;
+  const excerpt = String(post.excerpt || "A new official BIG Games Pet Simulator 99 post is available.").slice(0, 3000);
   return postDiscordFeedAlert(env, "ps99_dev_blogs", {
-    username: "PS99 Dev Blog Monitor",
-    embeds: [embed]
+    ...persistentDiscordComponentPayload("📰 Pet Simulator 99 Dev Blog", [
+      `### ${linkedTitle}\n${excerpt}\n\n**Published:** <t:${publishedUnix}:R>\n-# Official BIG Games post`
+    ], publishedAt, {
+      headerSummary: `Last Updated: <t:${publishedUnix}:R>`
+    })
   });
 }
 
@@ -7376,40 +8095,62 @@ function styleDiscordFeedAlert(feed, payload = {}) {
     return { ...payload };
   }
   const alertTitles = {
-    roblox_updates: "Roblox Client Update",
-    ps99_updates: "Pet Simulator 99 Update",
-    ps99_fflags: "Pet Simulator 99 FFlag Change",
-    ps99_restarts: "Pet Simulator 99 Restart",
-    ps99_dev_blogs: "Pet Simulator 99 Dev Blog",
-    reward_cutoffs: "Reward Cutoffs",
+    roblox_updates: "🌐 ROBLOX Client Update",
+    ps99_updates: "📥 Pet Simulator 99 Update",
+    ps99_fflags: "🚩 Pet Simulator 99 FFlag Change",
+    ps99_restarts: "🚨 Pet Simulator 99 Restart",
+    ps99_dev_blogs: "📰 Pet Simulator 99 Dev Blog",
+    reward_cutoffs: "🏅 Reward Cutoffs",
     roblox_status: "🌐 ROBLOX Status",
     versions_status: "📥 Versions"
   };
-  const embeds = (Array.isArray(payload.embeds) ? payload.embeds : []).map(embed => {
-    const rawTitle = String(embed?.title || "").trim();
-    const isTest = /^\[TEST\]/i.test(rawTitle);
-    const cleanTitle = rawTitle.replace(/^\[TEST\]\s*/i, "").trim();
-    const alertTitle = alertTitles[feed] || cleanTitle || "Automated Alert";
-    const titleDetail = feed === "ps99_dev_blogs" && cleanTitle ? ` | ${cleanTitle}` : "";
+  const embeds = Array.isArray(payload.embeds) ? payload.embeds : [];
+  if (!embeds.length) return { ...payload };
 
-    return {
-      ...embed,
-      title: `${isTest ? "[TEST] " : ""}${alertTitle}${titleDetail}`.slice(0, 256),
-      color: DISCORD_ALERT_COLOR,
-      thumbnail: {
-        url: DISCORD_ALERT_THUMBNAIL_URL
-      },
-      footer: {
-        text: DISCORD_ALERT_FOOTER_TEXT
-      },
-      timestamp: safeIso(embed?.timestamp) || new Date().toISOString()
-    };
+  const firstEmbed = embeds[0] || {};
+  const rawTitle = String(firstEmbed.title || "").trim();
+  const isTest = /^\[TEST\]/i.test(rawTitle);
+  const cleanTitle = rawTitle.replace(/^\[TEST\]\s*/i, "").trim();
+  const titleDetail = feed === "ps99_dev_blogs" && cleanTitle ? ` | ${cleanTitle}` : "";
+  const title = `${isTest ? "[TEST] " : ""}${alertTitles[feed] || cleanTitle || "Automated Alert"}${titleDetail}`;
+  const timestamp = safeIso(firstEmbed.timestamp) || new Date().toISOString();
+  const unix = Math.floor(new Date(timestamp).getTime() / 1000);
+  const sections = [];
+
+  embeds.forEach(embed => {
+    const description = cleanLegacyDiscordAlertText(embed?.description);
+    if (description) sections.push(description);
+    (Array.isArray(embed?.fields) ? embed.fields : []).forEach(field => {
+      const name = String(field?.name || "").trim();
+      const value = String(field?.value || "").trim();
+      if (name || value) sections.push([name ? `### ${name}` : "", value].filter(Boolean).join("\n"));
+    });
   });
 
+  const { embeds: discardedEmbeds, content: discardedContent, flags: discardedFlags, components: discardedComponents, ...rest } = payload;
   return {
-    ...payload,
-    embeds
+    ...rest,
+    ...persistentDiscordComponentPayload(title, sections, timestamp, {
+      headerSummary: `Last Updated: <t:${unix}:R>`
+    })
   };
+}
+
+function cleanLegacyDiscordAlertText(value) {
+  return String(value || "")
+    .replace(/^\s*~~[━─—-]{3,}~~\s*$/gmu, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function isDiscordComponentsV2Payload(payload) {
@@ -7565,6 +8306,14 @@ function ps99AlertElapsed(previousAt, currentAt) {
     hours ? `${hours}h` : "",
     minutes ? `${minutes}m` : ""
   ].filter(Boolean).join(" ");
+}
+
+function ps99AlertSeconds(value) {
+  const seconds = Math.max(0, Math.round(toNumber(value) || 0));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 function discordTimestamp(value, style = "R") {
@@ -11387,6 +12136,27 @@ async function supabaseInsert(env, tableName, rows) {
   }
 }
 
+async function supabaseInsertIgnoreReturning(env, tableName, rows, onConflict) {
+  const url = supabaseUrl(env, tableName);
+  if (onConflict) url.searchParams.set("on_conflict", onConflict);
+
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: supabaseHeaders(env, {
+      Prefer: "resolution=ignore-duplicates,return=representation"
+    }),
+    body: JSON.stringify(rows)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw httpError(502, `Supabase insert failed for ${tableName} (${res.status}): ${text}`);
+  }
+
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+}
+
 async function supabaseInsertChunked(env, tableName, rows, size = 500) {
   const chunks = chunkValues(rows || [], clamp(Number(size || 500), 1, 1000));
 
@@ -11618,6 +12388,24 @@ function requireAdmin(request, env) {
 
   if (token !== env.INGEST_ADMIN_TOKEN) {
     throw httpError(401, "Invalid or missing ingest token.");
+  }
+}
+
+function requirePs99RestartProbe(request, env) {
+  if (!env.PS99_RESTART_PROBE_TOKEN) {
+    throw httpError(500, "Missing required Worker secret: PS99_RESTART_PROBE_TOKEN");
+  }
+
+  const header = request.headers.get("Authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1]
+    || request.headers.get("X-PS99-Restart-Probe-Token")
+    || "";
+  const accepted = token === env.PS99_RESTART_PROBE_TOKEN
+    || (env.INGEST_ADMIN_TOKEN && token === env.INGEST_ADMIN_TOKEN);
+
+  if (!accepted) {
+    throw httpError(401, "Invalid or missing restart-probe token.");
   }
 }
 
@@ -12429,6 +13217,7 @@ function robloxReleaseRuntimeConfig(env) {
 function ps99RestartRuntimeConfig(env) {
   return {
     ingest_ps99_restarts: ps99RestartEnabled(env),
+    confirmation_mode: ps99RestartConfirmationMode(env),
     universe_id: ps99UniverseId(env),
     place_id: ps99RootPlaceId(env),
     schedule_minutes: 1,
@@ -12438,17 +13227,87 @@ function ps99RestartRuntimeConfig(env) {
     confirmation_scans: ps99RestartConfirmations(env),
     cooldown_minutes: ps99RestartCooldownMinutes(env),
     require_version_correlation: ps99RestartRequireVersionCorrelation(env),
+    sentinel: {
+      enabled: ps99RestartSentinelEnabled(env),
+      probe_quorum: ps99RestartProbeQuorum(env),
+      same_version_quorum: ps99RestartProbeSameVersionQuorum(env),
+      machine_quorum: ps99RestartProbeMachineQuorum(env),
+      transition_window_seconds: ps99RestartProbeWindowSeconds(env),
+      stale_after_seconds: ps99RestartProbeStaleSeconds(env)
+    },
     ccu_monitoring: true,
     ccu_source: "Roblox universe playing count",
     ccu_used_for_detection: false,
     server_age_available: false,
     version_correlation: true,
-    observed_version_diversity: true
+    observed_version_diversity: true,
+    public_server_scan_role: ps99RestartConfirmationMode(env) === "legacy"
+      ? "legacy_confirmation"
+      : "supporting_evidence_only"
   };
 }
 
 function ps99RestartEnabled(env) {
   return String(env.INGEST_PS99_RESTARTS || "false").toLowerCase() === "true";
+}
+
+function ps99RestartConfirmationMode(env) {
+  const value = String(env.PS99_RESTART_CONFIRMATION_MODE || "sentinel").trim().toLowerCase();
+  return value === "legacy" ? "legacy" : "sentinel";
+}
+
+function ps99RestartSentinelEnabled(env) {
+  return Boolean(env.PS99_RESTART_PROBE_TOKEN)
+    && String(env.PS99_RESTART_SENTINEL_ENABLED || "true").toLowerCase() !== "false";
+}
+
+function ps99RestartProbeQuorum(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_QUORUM || DEFAULT_PS99_RESTART_PROBE_QUORUM),
+    2,
+    20
+  );
+}
+
+function ps99RestartProbeSameVersionQuorum(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_SAME_VERSION_QUORUM || DEFAULT_PS99_RESTART_PROBE_SAME_VERSION_QUORUM),
+    ps99RestartProbeQuorum(env),
+    20
+  );
+}
+
+function ps99RestartProbeMachineQuorum(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_MACHINE_QUORUM || DEFAULT_PS99_RESTART_PROBE_MACHINE_QUORUM),
+    1,
+    ps99RestartProbeSameVersionQuorum(env)
+  );
+}
+
+function ps99RestartProbeWindowSeconds(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_WINDOW_SECONDS || DEFAULT_PS99_RESTART_PROBE_WINDOW_SECONDS),
+    60,
+    1800
+  );
+}
+
+function ps99RestartProbeStaleSeconds(env) {
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_STALE_SECONDS || DEFAULT_PS99_RESTART_PROBE_STALE_SECONDS),
+    30,
+    600
+  );
+}
+
+function ps99RestartProbeHistorySeconds(env) {
+  const minimum = ps99RestartProbeWindowSeconds(env) + ps99RestartProbeStaleSeconds(env) * 2;
+  return clamp(
+    Number(env.PS99_RESTART_PROBE_HISTORY_SECONDS || DEFAULT_PS99_RESTART_PROBE_HISTORY_SECONDS),
+    minimum,
+    7200
+  );
 }
 
 function ps99RestartSampleSize(env) {
