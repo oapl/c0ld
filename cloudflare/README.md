@@ -629,7 +629,7 @@ Required Worker variables:
 | `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` and `/history` replies visible only to the user. |
-| `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`, such as `1489032328855556096,1501632370082840576`. Leave blank to allow everyone. |
+| `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`. Leave blank to allow everyone. |
 | `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
@@ -710,17 +710,11 @@ Use `guild_id` while testing because it usually appears immediately in that
 server. Omit `?guild_id=...` once you want a global command, but expect Discord's
 global command cache to take longer to appear.
 
-To hide `/search` from users without the c0ld/WMSY roles, open Discord
-**Server Settings > Integrations > Oapl's C0LD Bot > /search**. Disable
-`@everyone`, then allow only these role IDs:
+To hide `/search` from users, use `DISCORD_ALLOWED_ROLE_IDS` in your worker
+environment. If this variable is blank, `/search` and `/history` are open to
+everyone who can see the command.
 
-```text
-1489032328855556096
-1501632370082840576
-```
-
-The Worker also enforces `DISCORD_ALLOWED_ROLE_IDS`, so users without one of
-those roles are denied even if Discord still shows a cached command entry.
+By default in this repo, that variable is blank.
 
 List registered commands:
 

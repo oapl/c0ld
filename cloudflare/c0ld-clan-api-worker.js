@@ -1110,6 +1110,56 @@ async function fetchLeagueSoloLeaderboard(env, limit = 500) {
   throw httpError(502, `League player leaderboard API failed: ${lastFailure || "no endpoint was available"}`);
 }
 
+async function fetchLeagueMilestones(env, ranks) {
+  const requested = [...new Set(
+    (Array.isArray(ranks) ? ranks : [])
+      .map(rank => toNumber(rank))
+      .filter(rank => Number.isFinite(rank) && rank >= 1)
+      .map(rank => Math.round(rank))
+  )].sort((a, b) => a - b);
+  const rankList = requested.join(",");
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
+  const attempts = [];
+
+  if (hasBinding) {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
+
+  let payload = null;
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/milestones`);
+    if (rankList) url.searchParams.set("ranks", rankList);
+    try {
+      const response = await attempt.fetcher(new Request(url.toString()));
+      const text = await response.text();
+      const parsed = parseJsonObject(text) || {};
+      if (response.ok && parsed.ok !== false) {
+        payload = parsed;
+        break;
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error?.message || String(error)}`;
+    }
+  }
+
+  if (!payload) {
+    throw httpError(502, `League milestones API failed: ${lastFailure || "no endpoint was available"}`);
+  }
+
+  return {
+    payload,
+    ranks: requested
+  };
+}
+
 async function handleRewardCutoffs(request, env) {
   requireSupabase(env);
 
@@ -1237,6 +1287,23 @@ async function buildClanRewardCutoffs(url, env, ranks) {
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
   const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const latestClanBattleRun = !explicitBattle
+    ? await fetchLatestBattleRun(env, CLANS_BATTLE_RUN_CLAN_NAME).catch(() => null)
+    : null;
+  const activeClanBattle = (() => {
+    const runActive = parseBooleanish(latestClanBattleRun?.is_active);
+    if (runActive !== null) return runActive;
+
+    const battleEndedAt = safeIso(latestWithActiveMeta?.battle_ended_at);
+    if (battleEndedAt) {
+      const endedMs = new Date(battleEndedAt).getTime();
+      if (Number.isFinite(endedMs)) {
+        return endedMs > Date.now();
+      }
+    }
+
+    return null;
+  })();
   const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
   const liveCutoffs = !explicitBattle
     ? await fetchLiveClanRewardCutoffRows(env, ranks.filter(rankValue => !byRank.has(rankValue))).catch(() => new Map())
@@ -1261,6 +1328,7 @@ async function buildClanRewardCutoffs(url, env, ranks) {
       : null,
     battle_start_iso: latestWithActiveMeta?.battle_started_at || null,
     battle_end_iso: latestWithActiveMeta?.battle_ended_at || null,
+    battle_is_active: activeClanBattle,
     total_ranked: rows.length,
     available_rank_max: availableRankMax,
     ranks,
@@ -1857,12 +1925,12 @@ async function buildRewardCutoffDashboard(env) {
 }
 
 async function buildLeaguePlayerRewardCutoffs(env, ranks) {
-  const payload = await fetchLeagueSoloLeaderboard(env, 500);
+  const { payload } = await fetchLeagueMilestones(env, ranks);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  const byRank = new Map(rows.map((row, index) => [
-    toNumber(row.rank) || index + 1,
-    row
-  ]));
+  const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
+  const requested = [...new Set((Array.isArray(ranks) ? ranks : []).map(toNumber).filter(value => Number.isFinite(value) && value >= 1))].sort((a, b) => a - b);
+  const maxRequested = requested.length ? Math.max(...requested) : 0;
+  const maxAvailable = rows.reduce((max, row) => Math.max(max, toNumber(row.rank) || 0), 0);
   const snapshotAt = safeIso(
     payload.snapshot_at ||
     rows[0]?.fetched_at ||
@@ -1873,61 +1941,26 @@ async function buildLeaguePlayerRewardCutoffs(env, ranks) {
     ok: true,
     type: "players",
     pool_source: "leagues",
-    pool_is_partial: true,
+    pool_is_partial: maxRequested > 0 ? (maxRequested > maxAvailable || rows.some(row => row?.available === false)) : true,
     generated_at: payload.generated_at || new Date().toISOString(),
     snapshot_at: snapshotAt,
     league_run_key: payload.league_run_key || null,
     league_run_label: payload.league_run_label || payload.league_run_key || null,
-    total_global_players: Math.max(toNumber(payload.top_available) || 0, rows.length),
+    total_global_players: toNumber(payload.total_players) || toNumber(payload.top_available) || null,
     ranks,
     cutoffs: ranks.map(rankValue => {
-      const row = byRank.get(rankValue);
+      const row = byRank.get(toNumber(rankValue));
       return {
         rank: rankValue,
-        user_id: row ? toNumber(row.user_id) : null,
-        username: row ? stringOrNull(row.username || row.display_name) : null,
-        points: row ? toNumber(row.points ?? row.total_points) : null,
-        available: Boolean(row)
+        points: row && row.available !== false ? toNumber(row.points ?? row.total_points) : null,
+        available: Boolean(row && row.available !== false)
       };
     })
   };
 }
 
 async function buildLeagueRewardCutoffs(env, ranks) {
-  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
-  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
-  const attempts = [];
-  if (hasBinding) {
-    attempts.push({
-      name: "service binding",
-      base: "https://league-api-worker.service",
-      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
-    });
-  }
-  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
-
-  let payload = null;
-  let lastFailure = null;
-  for (const attempt of attempts) {
-    const url = new URL(`${attempt.base}/api/leagues/milestones`);
-    url.searchParams.set("ranks", ranks.join(","));
-    try {
-      const response = await attempt.fetcher(new Request(url.toString()));
-      const text = await response.text();
-      const parsed = parseJsonObject(text) || {};
-      if (response.ok && parsed.ok !== false) {
-        payload = parsed;
-        break;
-      }
-      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
-    } catch (error) {
-      lastFailure = `${attempt.name} failed: ${error && error.message ? error.message : String(error)}`;
-    }
-  }
-
-  if (!payload) {
-    throw httpError(502, `League reward cutoff API failed: ${lastFailure || "no endpoint was available"}`);
-  }
+  const { payload } = await fetchLeagueMilestones(env, ranks);
   const byRank = new Map((Array.isArray(payload.rows) ? payload.rows : []).map(row => [toNumber(row.rank), row]));
 
   return {
@@ -1962,34 +1995,44 @@ function leagueRewardCutoffRanks(env) {
 }
 
 function rewardCutoffDiscordPayload(dashboard) {
-  const players = dashboard.players || {};
   const leaguePlayers = dashboard.league_players || {};
   const clans = dashboard.clans || {};
   const leagues = dashboard.leagues || {};
-  const eventMode = rewardCutoffEventMode(dashboard);
-  const eventName = eventMode === "clan"
-    ? (players.event_name || players.display_name || clans.display_name || clans.battle || "Current Clan Battle")
-    : (leagues.league_run_label || leagues.league_run_key || "Current League");
-  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at || new Date().toISOString();
+  const clanCutoffRows = Array.isArray(clans.cutoffs) ? clans.cutoffs : [];
+  const clanCutoffRanks = Array.isArray(clans.ranks) ? clans.ranks : [];
+  const clanHasActiveBattle = rewardCutoffClanActive(clans);
+  const clanLines = clanHasActiveBattle
+    ? rewardCutoffLines(clanCutoffRows, clanRewardRangeLabel)
+    : rewardCutoffBlankLines(clanCutoffRanks, clanRewardRangeLabel);
+  const eventName = leagues.league_run_label
+    || leaguePlayers.league_run_label
+    || leagues.league_run_key
+    || leaguePlayers.league_run_key
+    || "Current League";
+  const snapshotAt = [
+    leaguePlayers.snapshot_at,
+    leagues.snapshot_at,
+    clans.snapshot_at
+  ]
+    .map(safeIso)
+    .filter(Boolean)
+    .sort()
+    .pop()
+    || dashboard.generated_at
+    || new Date().toISOString();
   const unix = Math.floor(new Date(snapshotAt).getTime() / 1000);
-  const eventTiming = eventMode === "clan" ? clans.battle_end_iso : leagues.league_end_at;
+  const eventTiming = safeIso(leagues.league_end_at || leagues.league_run_end_at);
   const eventTimingLine = eventTiming
     ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
     : null;
-  const activeGlobalCutoffs = eventMode === "league"
-    ? mergeLeaguePlayerCutoffEstimates(leaguePlayers.cutoffs, players.cutoffs)
-    : players.cutoffs;
-  const globalLines = rewardCutoffLines(activeGlobalCutoffs, playerRewardRangeLabel);
-  if (eventMode === "league") {
-    globalLines.push("-# These numbers are estimates based on the scores of the top 35k players in Leagues.");
+  const globalLines = rewardCutoffLines(leaguePlayers.cutoffs, playerRewardRangeLabel);
+  if (leaguePlayers.pool_is_partial) {
+    const totalPlayers = toNumber(leaguePlayers.total_global_players);
+    globalLines.push(totalPlayers
+      ? `-# Based on the latest ${Math.round(totalPlayers).toLocaleString("en-US")} League players currently available.`
+      : "-# Based on the latest League player leaderboard data currently available.");
   }
-  const rewardLines = eventMode === "clan"
-    ? rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel)
-    : rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel);
-  const globalLabel = eventMode === "clan"
-    ? "Global Leaderboard (Clan Battle)"
-    : "Global Leaderboard (Leagues)";
-  const rewardsLabel = eventMode === "clan" ? "Clan Rewards" : "League Rewards";
+  const leagueLines = rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel);
 
   const headerSummary = [
       `**${eventName}**`,
@@ -1998,35 +2041,10 @@ function rewardCutoffDiscordPayload(dashboard) {
     ].filter(Boolean).join("\n");
 
   return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
-    [`## ${globalLabel}`, ...globalLines].join("\n"),
-    [`## ${rewardsLabel}`, ...rewardLines].join("\n")
+    ["## Global Leaderboard (Leagues)", ...globalLines].join("\n"),
+    ["## Clan Rewards", ...clanLines].join("\n"),
+    ["## League Rewards", ...leagueLines].join("\n")
   ], snapshotAt, { headerSummary });
-}
-
-function mergeLeaguePlayerCutoffEstimates(liveCutoffs, estimatedCutoffs) {
-  const live = new Map((Array.isArray(liveCutoffs) ? liveCutoffs : [])
-    .map(row => [toNumber(row?.rank), row])
-    .filter(([rank]) => rank));
-  const estimates = new Map((Array.isArray(estimatedCutoffs) ? estimatedCutoffs : [])
-    .map(row => [toNumber(row?.rank), row])
-    .filter(([rank]) => rank));
-  const ranks = [...new Set([...live.keys(), ...estimates.keys()])].sort((a, b) => a - b);
-
-  return ranks.map(rank => {
-    const liveRow = live.get(rank);
-    const estimatedRow = estimates.get(rank);
-    if (toNumber(liveRow?.points) !== null) return liveRow;
-    return estimatedRow || liveRow || { rank, points: null, available: false };
-  });
-}
-
-function rewardCutoffEventMode(dashboard) {
-  const now = Date.now();
-  const clanEnd = new Date(dashboard?.clans?.battle_end_iso || 0).getTime();
-  const leagueEnd = new Date(dashboard?.leagues?.league_end_at || dashboard?.leagues?.league_run_end_at || 0).getTime();
-  if (Number.isFinite(clanEnd) && clanEnd > now) return "clan";
-  if (Number.isFinite(leagueEnd) && leagueEnd > now) return "league";
-  return "league";
 }
 
 function persistentDiscordComponentPayload(title, sections, timestamp, options = {}) {
@@ -2094,6 +2112,41 @@ function rewardCutoffLines(cutoffs, labeler) {
   return rows.length
     ? rows.map(row => `**${labeler(toNumber(row.rank) || 0)}:** ${formatRewardCutoffPoints(row.points)}`)
     : ["No cutoff data available."];
+}
+
+function rewardCutoffBlankLines(ranks, labeler) {
+  const values = Array.isArray(ranks) ? ranks : [];
+  return values.length
+    ? values.map(rank => `**${labeler(toNumber(rank) || 0)}:** —`)
+    : ["No active clan battle currently."];
+}
+
+function rewardCutoffClanActive(clans) {
+  const battleEndedAt = safeIso(clans?.battle_end_iso || clans?.battleEndedAt || clans?.battle_ended_at);
+  if (battleEndedAt) {
+    const endedMs = new Date(battleEndedAt).getTime();
+    if (Number.isFinite(endedMs)) {
+      return endedMs > Date.now();
+    }
+  }
+
+  const active = parseBooleanish(clans?.battle_is_active);
+  if (active !== null) {
+    return active;
+  }
+
+  return false;
+}
+
+async function fetchLatestBattleRun(env, clan) {
+  const rows = await supabaseSelect(env, BATTLE_RUNS_TABLE, {
+    select: "clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,first_seen_at,last_seen_at,latest_snapshot_id,latest_snapshot_at,is_active,updated_at",
+    clan_name: `eq.${clan}`,
+    order: "latest_snapshot_at.desc",
+    limit: "1"
+  });
+
+  return rows[0] || null;
 }
 
 function playerRewardRangeLabel(rank) {
@@ -13842,6 +13895,17 @@ function parseJsonArray(value) {
 function stringOrNull(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function parseBooleanish(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off", "n"].includes(normalized)) return false;
+
+  return null;
 }
 
 function toNumber(value) {

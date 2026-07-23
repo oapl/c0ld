@@ -27,6 +27,18 @@ $ErrorActionPreference = "Stop"
 
 $base = $WorkerUrl.TrimEnd("/")
 $Token = $Token.Trim()
+$adminBase = $base
+if ($adminBase -match "(?i)/discord/interactions$") {
+  $adminBase = $adminBase -replace "(?i)/discord/interactions$", ""
+}
+$adminBase = $adminBase.TrimEnd("/")
+
+# Keep a best-effort health probe target.
+$healthProbes = @("$adminBase/")
+if ($adminBase -ne $base) {
+  $healthProbes += "$base/"
+}
+
 $headers = @{
   Authorization = "Bearer $Token"
   "X-C0LD-Admin-Token" = $Token
@@ -59,7 +71,7 @@ function Invoke-C0ldDiscordWorker {
     [string]$Method = "GET"
   )
 
-  $uri = "$base$Path"
+  $uri = "$adminBase$Path"
   try {
     Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
   } catch {
@@ -83,7 +95,24 @@ function Invoke-C0ldDiscordWorker {
 }
 
 Write-Host "Checking Worker..." -ForegroundColor Cyan
-Invoke-RestMethod -Uri "$base/" | Format-List
+$workerCheckOk = $false
+foreach ($probe in $healthProbes) {
+  try {
+    $result = Invoke-RestMethod -Uri $probe
+    Write-Host "Worker check (via $probe):" -ForegroundColor Green
+    $result | Format-List
+    $workerCheckOk = $true
+    break
+  } catch {
+    if ($_ -notmatch '"ok":false') {
+      # ignore and try fallback in case of endpoint-specific 404
+    }
+  }
+}
+
+if (-not $workerCheckOk) {
+  throw "Worker check failed for $WorkerUrl. Try using the worker root URL (no /discord/interactions) or verify the service deployment is active."
+}
 
 if (-not $SkipDebug) {
   Write-Host "Checking Discord token/app/guild access..." -ForegroundColor Cyan
