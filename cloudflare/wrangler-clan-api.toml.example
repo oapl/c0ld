@@ -22,6 +22,9 @@ CLANS_CURRENT_CACHE_SECONDS = "60"
 GLOBAL_CURRENT_CACHE_SECONDS = "120"
 GLOBAL_LEADERBOARD_FAST_CACHE_SECONDS = "120"
 GLOBAL_LEADERBOARD_CACHE_SECONDS = "300"
+# auto = active Clan Battle crawl when one exists; otherwise live League Top 500.
+# Set to "clans" or "leagues" only to force a source during testing.
+GLOBAL_LEADERBOARD_SOURCE = "auto"
 # Optional. Leave blank/omit to keep archived battle snapshots indefinitely.
 # Set to a positive hour count only if you intentionally want rolling pruning.
 SNAPSHOT_RETENTION_HOURS = ""

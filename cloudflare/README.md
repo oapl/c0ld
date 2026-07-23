@@ -176,6 +176,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_CURRENT_CACHE_SECONDS` | Optional. Recommended `120`; cache `/api/global/current`. |
 | `GLOBAL_LEADERBOARD_FAST_CACHE_SECONDS` | Optional. Recommended `120`; cache the first fast `/api/global/leaderboard?gains=false` response. |
 | `GLOBAL_LEADERBOARD_CACHE_SECONDS` | Optional. Recommended `300`; cache the heavier global leaderboard response with gain columns. |
+| `GLOBAL_LEADERBOARD_SOURCE` | Optional. Defaults to `auto`: use the clan-derived global scan during an active Clan Battle, otherwise use the live BIG Games League-player Top 500. Set `clans` or `leagues` only to force a source while testing. The public League-player endpoint exposes 500 players, so the response marks that pool as partial rather than claiming it is the full 35–40K. |
 | `SNAPSHOT_RETENTION_HOURS` | Optional. Leave blank/omit to preserve archived battle snapshots. Set a positive hour count only if you intentionally want rolling pruning. |
 | `HISTORY_MAX_HOURS` | Optional. Defaults to `100000`; caps `/api/history` and `/api/clans/history` lookback requests. |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
@@ -204,9 +205,15 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
-| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the persistent combined reward-cutoff Discord message. |
-| `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the reward-cutoff schedule interval. |
-| `REWARD_CUTOFFS_ROLE_ID` | Optional Discord role ID to mention when the persistent cutoff message is first created or updated. |
+| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the three persistent Discord posts. |
+| `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the persistent-post schedule interval. |
+| `REWARD_CUTOFFS_CHANNEL_ID` | Discord channel ID for one combined post containing player, clan, and league reward cutoffs. |
+| `ROBLOX_STATUS_CHANNEL_ID` | Discord channel ID for the persistent official Roblox platform-status post. |
+| `VERSIONS_CHANNEL_ID` | Discord channel ID for the persistent PS99 place and Roblox client versions post. |
+| `REWARD_CUTOFFS_ROLE_ID` | Optional Discord role ID to mention on the combined cutoff post. |
+| `ROBLOX_STATUS_ROLE_ID` | Optional Discord role ID to mention on the Roblox Status post. |
+| `VERSIONS_ROLE_ID` | Optional Discord role ID to mention on the Versions post. |
+| `ROBLOX_STATUS_API_URL` | Optional override for the official Roblox Status.io JSON endpoint. |
 | `INGEST_CLAN_ACTIVITY` | Optional. Defaults to `false`. Set to `true` after running migration `019`. |
 | `CLAN_ACTIVITY_TOP_N` | Optional. Defaults to `100`; number of top clans to inspect for roster/activity changes. |
 | `CLAN_ACTIVITY_CONCURRENCY` | Optional. Defaults to `8`; number of top-clan detail pulls to run at once during activity scans. |
@@ -286,9 +293,11 @@ The stop day and time come from the active battle metadata returned by the Big G
 | `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
 | `PS99_RESTARTS_WEBHOOK_URL` | Webhook for the `pet-sim-restarts` channel. |
 | `PS99_DEV_BLOG_WEBHOOK_URL` | Webhook for the `dev-blogs` channel. |
-| `REWARD_CUTOFFS_WEBHOOK_URL` | Webhook for the persistent combined player, clan, and league reward-cutoff message. |
+| `REWARD_CUTOFFS_WEBHOOK_URL` | Optional fallback for the combined cutoff post if no cutoff channel ID is configured. |
+| `ROBLOX_STATUS_WEBHOOK_URL` | Optional fallback for the Roblox Status post if no status channel ID is configured. |
+| `VERSIONS_WEBHOOK_URL` | Optional fallback for the Versions post if no versions channel ID is configured. |
 | `PS99_ALERT_WEBHOOK_URL` | Legacy fallback for PS99 update and restart alerts when their dedicated secrets are absent. |
-| `DISCORD_BOT_TOKEN` | Discord bot token. Required for CW_Bot message-link imports so the Worker can fetch the linked message. |
+| `DISCORD_BOT_TOKEN` | Discord bot token. Used for persistent channel posts, current-role checks, Discord commands, and CW_Bot message-link imports. |
 | `OPENAI_API_KEY` | Optional OpenAI API key for CW_Bot image OCR. Store this as a secret. |
 
 The PS99 version collector does not require a Roblox cookie or Open Cloud key. It discovers places from the public universe-place catalog, finds the highest existing asset-delivery version, and uses the public asset `Updated` value as the publish timestamp. Verified lower-bound hints make the first PS99 scan fast; newly discovered places fall back to an exponential-and-binary version search.
@@ -339,12 +348,14 @@ Useful endpoints:
 | `/api/global/ingest` | Manual protected global rank scan. `POST` only. Scans ranked clans in chunks and resumes a running scan unless `?force=1` is used. |
 | `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
+| `/api/global/leaderboard` | Automatically serves the completed clan-derived global scan during a Clan Battle or the live public League-player Top 500 when no Clan Battle is active. Use `source=clans` or `source=leagues` only to override auto-detection while testing. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
 | `/api/external-history?user_id=123&source=cw_bot` | Approved external history rows for a player. Non-approved statuses require the admin token. |
 | `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
-| `/api/reward-cutoffs/post` | Protected `POST` endpoint that creates or edits the single combined Discord reward-cutoff message. Add `?force=1` to update it even when the calculated cutoffs are unchanged. |
+| `/api/persistent-posts/post` | Protected `POST` endpoint that creates or edits the combined Cutoffs, Roblox Status, and Versions posts. Add `?force=1`, and optionally `&type=cutoffs`, `&type=roblox-status`, or `&type=versions`. |
+| `/api/persistent-posts/status` | Protected `GET` endpoint that reports the three stored message IDs, channel IDs, message existence, and active refresh schedule. |
 | `/api/clans/activity/ingest` | Manual protected top-clan activity scan. `POST` only. Add `?force=1` for deliberate testing/backfill. |
 | `/api/clans/activity/summary` | Latest top-clan activity counters for `clans-activity.html`. |
 | `/api/clans/activity/detail?clan=c0ld` | One clan's current roster plus clan and rank activity feeds. |
@@ -444,28 +455,47 @@ Replace `all` with `roblox-updates`, `ps99-updates`, `ps99-fflags`,
 
 Change `type=both` to `type=version` or `type=restart` to preview only one alert.
 
-### Persistent reward-cutoff post
+### Persistent Discord posts
 
-Run Supabase migration `031_reward_cutoff_alerts.sql`, add the
-`REWARD_CUTOFFS_WEBHOOK_URL` Worker secret, and deploy the clan Worker. The
-Worker stores the Discord message ID in `c0ld_reward_cutoff_alert_state` and
-edits that message whenever the player, clan, or league cutoff calculation
-changes. If the Discord message is deleted, the next refresh creates a
-replacement and stores its new ID.
+Run Supabase migration `031_reward_cutoff_alerts.sql`, make sure the existing
+`DISCORD_BOT_TOKEN` secret belongs to a bot in the server, then add these three
+plain-text Worker variables: `REWARD_CUTOFFS_CHANNEL_ID`,
+`ROBLOX_STATUS_CHANNEL_ID`, and `VERSIONS_CHANNEL_ID`.
+The bot needs View Channel, Send Messages, and Read Message History in all three
+channels. These posts use Discord Components V2 containers and real gray
+separator components instead of typed divider characters. The Worker stores three independent message IDs
+in `c0ld_reward_cutoff_alert_state`: one combined player/clan/league cutoff
+post, one Roblox Status post, and one Versions post. It edits each message in
+place. If one Discord message is deleted, the next refresh recreates only that
+post. Dedicated webhook secrets (`REWARD_CUTOFFS_WEBHOOK_URL`,
+`ROBLOX_STATUS_WEBHOOK_URL`, and `VERSIONS_WEBHOOK_URL`) remain available as an
+optional fallback when the matching channel ID is absent.
+
+The existing clan Worker cron is sufficient; do not add a second cron just for
+this feature. The Worker checks the cutoff schedule whenever its normal cron
+runs. `REWARD_CUTOFFS_SCHEDULE_MINUTES` defaults to `15`. The health endpoint
+and protected status endpoint report the active schedule.
 
 An optional `LEAGUE_API_WORKER` service binding targeting
 `yamo-league-api-worker` avoids an external HTTP hop for league milestones.
 Without it, `LEAGUE_API_BASE` is used.
 
-Create or force-refresh the persistent message manually:
+Create or force-refresh all three persistent posts manually:
 
 ```powershell
 $token = "YOUR_INGEST_ADMIN_TOKEN"
 
 Invoke-RestMethod -Method Post `
-  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/reward-cutoffs/post?force=1" `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/persistent-posts/post?force=1" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
+
+Add `&type=cutoffs`, `&type=roblox-status`, or `&type=versions` to refresh only
+one post.
+Alternatively, paste the admin token into
+`scripts/post-discord-reward-cutoffs.ps1` and run that script. It verifies the
+three cutoff sources, creates or refreshes all three Discord posts, then
+confirms that each stored message still exists in its own channel.
 
 To compare global-rank scan configs, deploy the Worker and run:
 
@@ -807,13 +837,20 @@ Useful endpoints:
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
 | `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
 | `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
-| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards. |
+| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 
 The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
+
+`LEAGUE_RUN_END_AT` is the ISO timestamp for the current League ending. It is
+returned by `/api/health` and `/api/leagues/milestones`; historical or alternate
+run endings can be mapped with `LEAGUE_RUN_ENDS_JSON`. BIG Games' public
+`/v1/leagues` and `/v1/leagues/players` responses do not currently include an
+event-ending field, so this timestamp is owned by the League Worker rather than
+inferred from leaderboard rows.
 
 League profile snapshot reads are paginated internally in 1,000-row batches, so
 the requested profile limit is honored instead of silently stopping at

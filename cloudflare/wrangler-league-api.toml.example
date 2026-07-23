@@ -9,6 +9,8 @@ LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
 LEAGUE_RUN_KEY = "tap-heroes-part-2"
 LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
+# Current League end. Exposed by /api/health and /api/leagues/milestones.
+LEAGUE_RUN_END_AT = "2026-07-24T16:00:00Z"
 # The previous run is used only as a subtraction baseline. Its totals are never
 # counted or stored as Tap Heroes Part 2 points.
 LEAGUE_BASELINE_RUN_KEY = "active"

@@ -3,6 +3,7 @@ const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
 const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
+const DEFAULT_LEAGUE_RUN_END_AT = "2026-07-24T16:00:00Z";
 const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TRACKED_LEAGUE_REFRESH_MINUTES = 15;
@@ -55,6 +56,7 @@ export default {
           alt_league_names: altLeagueNames(env),
           league_run_key: leagueRunKey(env),
           league_run_label: leagueRunLabel(env, leagueRunKey(env)),
+          league_end_at: leagueRunEndAt(env, leagueRunKey(env)),
           league_baseline_run_key: leagueBaselineRunKey(env, leagueRunKey(env)),
           league_points_are_run_only: shouldNormalizeLeagueRunPoints(env, leagueRunKey(env)),
           snapshot_retention: "permanent",
@@ -886,6 +888,8 @@ async function handleLeagueMilestones(request, env) {
     generated_at: new Date().toISOString(),
     snapshot_at: snapshotAt,
     league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    league_end_at: leagueRunEndAt(env, runKey),
     rows: ranks.map(rank => {
       const row = byRank.get(rank);
       const hidden = row && isLeaguePubliclyHidden(env, row.display_name);
@@ -3023,6 +3027,18 @@ function leagueRunLabel(env, runKey) {
 
   if (key === DEFAULT_LEAGUE_RUN_KEY) return DEFAULT_LEAGUE_RUN_LABEL;
   return key || "";
+}
+function leagueRunEndAt(env, runKey) {
+  const key = normalizeRunKey(runKey || leagueRunKey(env));
+  const configured = parseJsonObject(env.LEAGUE_RUN_ENDS_JSON || env.LEAGUE_EVENT_ENDS_JSON);
+  const mapped = firstDefined(
+    configured[key],
+    configured[key.toLowerCase()],
+    key === leagueRunKey(env) ? env.LEAGUE_RUN_END_AT : null,
+    key === leagueRunKey(env) ? env.LEAGUE_END_AT : null,
+    key === DEFAULT_LEAGUE_RUN_KEY ? DEFAULT_LEAGUE_RUN_END_AT : null
+  );
+  return parseTimestamp(mapped);
 }
 function topLeaguesRunKey(env) {
   const configured = normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);

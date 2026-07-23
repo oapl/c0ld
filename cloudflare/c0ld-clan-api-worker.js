@@ -51,6 +51,11 @@ const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
 const DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES = 15;
 const DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
+const DEFAULT_ROBLOX_STATUS_API_URL = "https://api.status.io/1.0/status/59db90dbcdeb2f04dadcf16d";
+const DISCORD_ALERT_COLOR = 0x3498db;
+const DISCORD_ALERT_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/3e/PS99_Genie_Fox.png/revision/latest/scale-to-width/360?cb=20260718171435";
+const DISCORD_ALERT_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Updated:";
+const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
@@ -178,6 +183,14 @@ export default {
         response = await handleGlobalLeaderboard(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/reward-cutoffs") {
         response = await handleRewardCutoffs(request, env);
+      } else if (request.method === "GET" && (
+        url.pathname === "/api/persistent-posts/status"
+        || url.pathname === "/api/reward-cutoffs/status"
+      )) {
+        requireAdmin(request, env);
+        response = json(await persistentDiscordPostStatus(env), 200, {
+          "Cache-Control": "no-store"
+        });
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history/cwbot/missing") {
@@ -245,9 +258,15 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/ps99/alerts/test") {
         requireAdmin(request, env);
         response = await handlePs99AlertTest(env, url);
-      } else if (request.method === "POST" && url.pathname === "/api/reward-cutoffs/post") {
+      } else if (request.method === "POST" && (
+        url.pathname === "/api/persistent-posts/post"
+        || url.pathname === "/api/reward-cutoffs/post"
+      )) {
         requireAdmin(request, env);
-        response = json(await postRewardCutoffAlert(env, { force: isForceRequest(url) }), 200, {
+        response = json(await postPersistentDiscordMessages(env, {
+          force: isForceRequest(url),
+          type: url.searchParams.get("type")
+        }), 200, {
           "Cache-Control": "no-store"
         });
       } else if (request.method === "POST" && url.pathname === "/api/scheduled/run") {
@@ -448,10 +467,10 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
     jobs.push({ label: "ps99-dev-blogs", run: () => handlePs99DevBlogIngest(env, "schedule", { force }) });
   }
 
-  if (rewardCutoffAlertEnabled(env) && (force || shouldRunRewardCutoffSchedule(env, scheduledAt))) {
+  if (persistentDiscordPostsEnabled(env) && (force || shouldRunRewardCutoffSchedule(env, scheduledAt))) {
     jobs.push({
-      label: "reward-cutoffs",
-      run: async () => json(await postRewardCutoffAlert(env, { force }), 200, { "Cache-Control": "no-store" })
+      label: "persistent-discord-posts",
+      run: async () => json(await postPersistentDiscordMessages(env, { force }), 200, { "Cache-Control": "no-store" })
     });
   }
 
@@ -885,9 +904,14 @@ async function handleGlobalCurrent(request, env) {
 }
 
 async function handleGlobalLeaderboard(request, env) {
+  const url = new URL(request.url);
+  const sourceMode = await globalLeaderboardSourceMode(url, env);
+  if (sourceMode === "leagues") {
+    return handleLeagueGlobalLeaderboard(url, env);
+  }
+
   requireSupabase(env);
 
-  const url = new URL(request.url);
   const clan = url.searchParams.get("clan") || clanName(env);
   const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 1000);
   const includeAvatars = ["1", "true", "yes"].includes(String(url.searchParams.get("avatars") || "").toLowerCase());
@@ -898,6 +922,7 @@ async function handleGlobalLeaderboard(request, env) {
     return cacheJson({
       ok: false,
       message: "No completed global rank scan is available yet.",
+      source_mode: "clans",
       clan_name: clan,
       rows: []
     }, env);
@@ -940,6 +965,8 @@ async function handleGlobalLeaderboard(request, env) {
 
   return cacheJson({
     ok: true,
+    source_mode: "clans",
+    source_label: "Clan Battle",
     generated_at: new Date().toISOString(),
     clan_name: clan,
     snapshot_at: snapshotAt,
@@ -949,6 +976,124 @@ async function handleGlobalLeaderboard(request, env) {
     avatars_included: includeAvatars,
     rows: includeGains ? addGlobalLeaderboardProjectionFields(outputRows) : outputRows
   }, env, publicCacheSeconds(env, includeGains ? "GLOBAL_LEADERBOARD" : "GLOBAL_LEADERBOARD_FAST"));
+}
+
+async function globalLeaderboardSourceMode(url, env) {
+  const requested = String(
+    url.searchParams.get("source") ||
+    env.GLOBAL_LEADERBOARD_SOURCE ||
+    "auto"
+  ).trim().toLowerCase();
+  if (["league", "leagues"].includes(requested)) return "leagues";
+  if (["clan", "clans", "battle", "clan-battle"].includes(requested)) return "clans";
+
+  const activeBattle = await fetchActiveClanBattleMeta(env).catch(() => null);
+  if (!activeBattle) return "leagues";
+
+  const now = Date.now();
+  const startsAt = new Date(activeBattle.startedAt || 0).getTime();
+  const endsAt = new Date(activeBattle.endedAt || 0).getTime();
+  const hasStarted = !Number.isFinite(startsAt) || startsAt <= 0 || startsAt <= now;
+  const hasNotEnded = !Number.isFinite(endsAt) || endsAt <= 0 || endsAt > now;
+  return hasStarted && hasNotEnded ? "clans" : "leagues";
+}
+
+async function handleLeagueGlobalLeaderboard(url, env) {
+  const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 500);
+  const includeAvatars = ["1", "true", "yes"].includes(String(url.searchParams.get("avatars") || "").toLowerCase());
+  const payload = await fetchLeagueSoloLeaderboard(env, limit);
+  const sourceRows = Array.isArray(payload.rows) ? payload.rows.slice(0, limit) : [];
+  const avatarMap = includeAvatars
+    ? await resolveRobloxAvatarHeadshots(sourceRows.map(row => row.user_id), env).catch(() => new Map())
+    : new Map();
+  const snapshotAt = safeIso(
+    payload.snapshot_at ||
+    sourceRows[0]?.fetched_at ||
+    payload.generated_at
+  ) || new Date().toISOString();
+  const leagueLabel = String(
+    payload.league_run_label ||
+    payload.league_run_key ||
+    "Current League"
+  ).trim();
+  const rows = sourceRows.map((row, index) => ({
+    global_rank: toNumber(row.rank) || index + 1,
+    projected_rank: null,
+    projected_rank_1h: null,
+    projected_points_1h: null,
+    projection_basis: null,
+    clan: String(row.league_name || "").trim() || "Unlisted",
+    source_clan: String(row.league_name || "").trim() || "Unlisted",
+    user_id: toNumber(row.user_id),
+    username: String(row.username || row.display_name || `user_${row.user_id}`).trim(),
+    display_name: String(row.display_name || row.username || `user_${row.user_id}`).trim(),
+    avatar_url: avatarMap.get(String(row.user_id)) || null,
+    points: toNumber(row.points ?? row.total_points) || 0,
+    gain_5m: null,
+    gain_1h: null,
+    gain_12h: null,
+    gain_24h: null,
+    fetched_at: safeIso(row.fetched_at) || snapshotAt
+  }));
+  const topAvailable = Math.max(toNumber(payload.top_available) || 0, rows.length);
+  const run = {
+    run_key: `league:${payload.league_run_key || "current"}:${snapshotAt}`,
+    event_name: leagueLabel,
+    battle_display_name: leagueLabel,
+    battle_key: payload.league_run_key || null,
+    source_mode: "leagues",
+    started_at: null,
+    finished_at: snapshotAt
+  };
+
+  return cacheJson({
+    ok: true,
+    source_mode: "leagues",
+    source_label: "Leagues",
+    source: payload.source || "big-games-public-league-players",
+    generated_at: new Date().toISOString(),
+    snapshot_at: snapshotAt,
+    run,
+    total_global_players: topAvailable,
+    pool_is_partial: true,
+    pool_description: "The BIG Games public League player endpoint currently exposes the live Top 500.",
+    gains_included: false,
+    avatars_included: includeAvatars,
+    rows
+  }, env, publicCacheSeconds(env, "GLOBAL_LEADERBOARD_FAST"));
+}
+
+async function fetchLeagueSoloLeaderboard(env, limit = 500) {
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const attempts = [];
+  if (env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function") {
+    attempts.push({
+      name: "service binding",
+      url: `https://league-api-worker.service/api/leagues/solo-leaderboard?limit=${limit}`,
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({
+    name: "public endpoint",
+    url: `${externalBase}/api/leagues/solo-leaderboard?limit=${limit}`,
+    fetcher: request => fetch(request)
+  });
+
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.fetcher(new Request(attempt.url, {
+        headers: { Accept: "application/json" }
+      }));
+      const text = await response.text();
+      const parsed = parseJsonObject(text) || {};
+      if (response.ok && parsed.ok !== false && Array.isArray(parsed.rows)) return parsed;
+      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error?.message || String(error)}`;
+    }
+  }
+  throw httpError(502, `League player leaderboard API failed: ${lastFailure || "no endpoint was available"}`);
 }
 
 async function handleRewardCutoffs(request, env) {
@@ -991,6 +1136,7 @@ async function buildPlayerRewardCutoffs(url, env, ranks) {
   return {
     ok: true,
     type: "players",
+    pool_source: "clans",
     generated_at: new Date().toISOString(),
     clan_name: clan,
     snapshot_at: snapshotAt,
@@ -1168,52 +1314,237 @@ function rewardCutoffRanks(url, env, type) {
     .slice(0, 20);
 }
 
-async function postRewardCutoffAlert(env, { force = false } = {}) {
-  requireSupabase(env);
-  const config = discordFeedConfig(env, "reward_cutoffs");
-  if (!config.configured) return emptyDiscordFeedResult(env, "reward_cutoffs", "webhook_not_configured");
-  if (!config.webhook_url) return emptyDiscordFeedResult(env, "reward_cutoffs", "invalid_webhook_url");
+const PERSISTENT_DISCORD_TARGETS = {
+  cutoffs: {
+    feed: "reward_cutoffs",
+    stateKey: "main",
+    channelVariable: "REWARD_CUTOFFS_CHANNEL_ID"
+  },
+  roblox_status: {
+    feed: "roblox_status",
+    stateKey: "roblox_status",
+    channelVariable: "ROBLOX_STATUS_CHANNEL_ID"
+  },
+  versions: {
+    feed: "versions_status",
+    stateKey: "versions",
+    channelVariable: "VERSIONS_CHANNEL_ID"
+  }
+};
 
-  const dashboard = await buildRewardCutoffDashboard(env);
-  const payload = rewardCutoffDiscordPayload(dashboard);
+function persistentDiscordTargetTypes(type = null) {
+  const aliases = {
+    cutoff: "cutoffs",
+    rewards: "cutoffs",
+    "roblox-status": "roblox_status",
+    roblox: "roblox_status",
+    version: "versions"
+  };
+  const requested = String(type || "all").trim().toLowerCase();
+  const normalized = aliases[requested] || requested;
+  if (!normalized || normalized === "all") return Object.keys(PERSISTENT_DISCORD_TARGETS);
+  if (!PERSISTENT_DISCORD_TARGETS[normalized]) {
+    throw httpError(400, "Persistent post type must be cutoffs, roblox-status, versions, or all.");
+  }
+  return [normalized];
+}
+
+function persistentDiscordDeliveryConfig(env, type) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  if (!target) return { configured: false, valid: false, reason: "unknown_target" };
+  const feedConfig = discordFeedConfig(env, target.feed);
+  const rawChannelId = String(env[target.channelVariable] || "").trim();
+  const channelId = /^\d{5,30}$/.test(rawChannelId) ? rawChannelId : "";
+  const botToken = String(env.DISCORD_BOT_TOKEN || "").trim();
+
+  if (rawChannelId) {
+    return {
+      configured: true,
+      valid: Boolean(channelId && botToken),
+      reason: !channelId ? "invalid_channel_id" : (!botToken ? "discord_bot_token_missing" : null),
+      transport: "bot",
+      channel_id: channelId,
+      role_id: feedConfig.role_id,
+      webhook_url: ""
+    };
+  }
+
+  return {
+    configured: feedConfig.configured,
+    valid: Boolean(feedConfig.webhook_url),
+    reason: feedConfig.configured && !feedConfig.webhook_url ? "invalid_webhook_url" : null,
+    transport: feedConfig.configured ? "webhook" : null,
+    channel_id: "",
+    role_id: feedConfig.role_id,
+    webhook_url: feedConfig.webhook_url
+  };
+}
+
+async function postPersistentDiscordMessage(env, type, payload) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  const config = persistentDiscordDeliveryConfig(env, type);
+  return config.transport === "bot"
+    ? postDiscordBotChannelMessage(env, target.feed, config.channel_id, payload, config.role_id)
+    : postDiscordFeedAlert(env, target.feed, payload);
+}
+
+async function updatePersistentDiscordMessage(env, type, messageId, payload) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  const config = persistentDiscordDeliveryConfig(env, type);
+  return config.transport === "bot"
+    ? updateDiscordBotChannelMessage(env, target.feed, config.channel_id, messageId, payload, config.role_id)
+    : updateDiscordFeedMessage(env, target.feed, messageId, payload);
+}
+
+async function inspectPersistentDiscordMessage(env, type, messageId) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  const config = persistentDiscordDeliveryConfig(env, type);
+  return config.transport === "bot"
+    ? inspectDiscordBotChannelMessage(env, config.channel_id, messageId)
+    : inspectDiscordFeedMessage(env, target.feed, messageId);
+}
+
+async function deletePersistentDiscordMessage(env, type, messageId) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  const config = persistentDiscordDeliveryConfig(env, type);
+  return config.transport === "bot"
+    ? deleteDiscordBotChannelMessage(env, config.channel_id, messageId)
+    : deleteDiscordFeedMessage(env, target.feed, messageId);
+}
+
+async function postPersistentDiscordMessages(env, { force = false, type = null } = {}) {
+  requireSupabase(env);
+  const types = persistentDiscordTargetTypes(type);
+  const entries = await Promise.all(types.map(async targetType => {
+    try {
+      return [targetType, await postPersistentDiscordTarget(env, targetType, { force })];
+    } catch (error) {
+      return [targetType, {
+        ok: false,
+        type: targetType,
+        posted: false,
+        reason: "persistent_post_failed",
+        error: String(error?.message || error).slice(0, 1000)
+      }];
+    }
+  }));
+  return {
+    ok: entries.every(([, result]) => result.ok),
+    generated_at: new Date().toISOString(),
+    types,
+    results: Object.fromEntries(entries)
+  };
+}
+
+async function buildPersistentDiscordTarget(env, type) {
+  if (type === "cutoffs") {
+    const dashboard = await buildRewardCutoffDashboard(env);
+    return {
+      payload: rewardCutoffDiscordPayload(dashboard),
+      digestSource: dashboard,
+      snapshotAt: latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at
+    };
+  }
+  if (type === "roblox_status") return buildRobloxStatusPersistentPost(env);
+  if (type === "versions") return buildVersionsPersistentPost(env);
+  throw httpError(400, `Unsupported persistent Discord target: ${type}`);
+}
+
+async function postPersistentDiscordTarget(env, type, { force = false } = {}) {
+  const target = PERSISTENT_DISCORD_TARGETS[type];
+  const config = persistentDiscordDeliveryConfig(env, type);
+  if (!config.configured || !config.valid) {
+    return {
+      ok: false,
+      type,
+      configured: config.configured,
+      posted: false,
+      reason: config.reason || "channel_or_webhook_not_configured"
+    };
+  }
+
+  const built = await buildPersistentDiscordTarget(env, type);
+  const usesComponentsV2 = isDiscordComponentsV2Payload(built.payload);
   const digest = await sha256Hex(stableJsonStringify({
-    players: dashboard.players?.cutoffs || [],
-    clans: dashboard.clans?.cutoffs || [],
-    leagues: dashboard.leagues?.cutoffs || []
+    discord_layout_version: usesComponentsV2 ? 2 : 1,
+    data: built.digestSource
   }));
   const stateRows = await supabaseSelect(env, REWARD_CUTOFF_ALERT_STATE_TABLE, {
     select: "state_key,last_digest,last_message_id,last_posted_at,last_snapshot_at,updated_at",
-    state_key: "eq.main",
+    state_key: `eq.${target.stateKey}`,
     limit: "1"
   });
   const state = stateRows[0] || null;
 
-  if (!force && state?.last_digest === digest && state?.last_message_id) {
-    return {
-      ok: true,
-      configured: true,
-      posted: false,
-      updated: false,
-      skipped: true,
-      reason: "unchanged",
-      message_id: state.last_message_id,
-      digest
-    };
+  let storedMessageMissing = false;
+  let existing = null;
+  if (usesComponentsV2 && state?.last_message_id) {
+    existing = await inspectPersistentDiscordMessage(env, type, state.last_message_id);
+    if (existing.exists && !((toNumber(existing.flags) || 0) & DISCORD_COMPONENTS_V2_FLAG)) {
+      const removed = await deletePersistentDiscordMessage(env, type, state.last_message_id);
+      if (!removed.deleted) {
+        return {
+          ok: false,
+          type,
+          configured: true,
+          posted: false,
+          reason: removed.reason || "legacy_message_recreation_failed",
+          error: removed.error || null,
+          message_id: state.last_message_id
+        };
+      }
+      storedMessageMissing = true;
+    } else if (existing.reason === "message_not_found") {
+      storedMessageMissing = true;
+    }
+  }
+  if (!force && !storedMessageMissing && state?.last_digest === digest && state?.last_message_id) {
+    existing = existing || await inspectPersistentDiscordMessage(env, type, state.last_message_id);
+    if (existing.exists) {
+      return {
+        ok: true,
+        type,
+        configured: true,
+        posted: false,
+        updated: false,
+        skipped: true,
+        reason: "unchanged",
+        message_id: state.last_message_id,
+        message_exists: true,
+        digest
+      };
+    }
+    if (existing.reason !== "message_not_found") {
+      return {
+        ok: false,
+        type,
+        configured: true,
+        posted: false,
+        updated: false,
+        skipped: true,
+        reason: existing.reason || "message_verification_failed",
+        message_id: state.last_message_id,
+        message_exists: null,
+        error: existing.error || null,
+        digest
+      };
+    }
+    storedMessageMissing = true;
   }
 
   let alert = null;
-  if (state?.last_message_id) {
-    alert = await updateDiscordFeedMessage(env, "reward_cutoffs", state.last_message_id, payload);
+  if (state?.last_message_id && !storedMessageMissing) {
+    alert = await updatePersistentDiscordMessage(env, type, state.last_message_id, built.payload);
   }
   if (!alert || alert.reason === "message_not_found") {
-    alert = await postDiscordFeedAlert(env, "reward_cutoffs", payload);
+    alert = await postPersistentDiscordMessage(env, type, built.payload);
   }
-  if (!alert.posted) return { ok: false, ...alert };
+  if (!alert.posted) return { ok: false, type, ...alert };
 
   const now = new Date().toISOString();
-  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || now;
+  const snapshotAt = safeIso(built.snapshotAt) || now;
   await supabaseUpsert(env, REWARD_CUTOFF_ALERT_STATE_TABLE, [{
-    state_key: "main",
+    state_key: target.stateKey,
     last_digest: digest,
     last_message_id: alert.message_id || state?.last_message_id || null,
     last_posted_at: now,
@@ -1223,14 +1554,198 @@ async function postRewardCutoffAlert(env, { force = false } = {}) {
 
   return {
     ok: true,
+    type,
     configured: true,
     posted: true,
     updated: Boolean(alert.updated),
     created: !alert.updated,
     message_id: alert.message_id || state?.last_message_id || null,
     snapshot_at: snapshotAt,
-    digest,
-    dashboard
+    digest
+  };
+}
+
+async function persistentDiscordPostStatus(env) {
+  requireSupabase(env);
+  const entries = await Promise.all(Object.entries(PERSISTENT_DISCORD_TARGETS).map(async ([type, target]) => {
+    const config = persistentDiscordDeliveryConfig(env, type);
+    const stateRows = await supabaseSelect(env, REWARD_CUTOFF_ALERT_STATE_TABLE, {
+      select: "state_key,last_digest,last_message_id,last_posted_at,last_snapshot_at,updated_at",
+      state_key: `eq.${target.stateKey}`,
+      limit: "1"
+    });
+    const state = stateRows[0] || null;
+    const message = state?.last_message_id && config.valid
+      ? await inspectPersistentDiscordMessage(env, type, state.last_message_id)
+      : null;
+    return [type, {
+      configured: config.configured,
+      valid: config.valid,
+      transport: config.transport,
+      channel_id: config.channel_id || null,
+      webhook_valid: Boolean(config.webhook_url),
+      role_id_configured: Boolean(config.role_id),
+      state,
+      message
+    }];
+  }));
+
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    configured: entries.every(([, target]) => target.configured && target.valid),
+    schedule_minutes: rewardCutoffScheduleMinutes(env),
+    schedule_offset_minutes: rewardCutoffScheduleOffsetMinutes(env),
+    targets: Object.fromEntries(entries)
+  };
+}
+
+async function buildRobloxStatusPersistentPost(env) {
+  const checkedAt = new Date().toISOString();
+  const sourceUrl = stringOrNull(env.ROBLOX_STATUS_API_URL) || DEFAULT_ROBLOX_STATUS_API_URL;
+  const response = await fetch(sourceUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-clan-status-monitor/1.0"
+    }
+  });
+  const text = await response.text();
+  const parsed = parseJsonObject(text) || {};
+  if (!response.ok) {
+    throw httpError(502, `Roblox status API returned ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const result = parsed.result || parsed;
+  const overall = result.status_overall || {};
+  const groups = (Array.isArray(result.status) ? result.status : []).map(group => ({
+    name: stringOrNull(group?.name) || "Unknown",
+    status: stringOrNull(group?.status) || "Unknown",
+    status_code: toNumber(group?.status_code),
+    updated: safeIso(group?.updated),
+    services: (Array.isArray(group?.containers) ? group.containers : []).map(service => ({
+      name: stringOrNull(service?.name) || "Unknown",
+      status: stringOrNull(service?.status) || "Unknown",
+      status_code: toNumber(service?.status_code),
+      updated: safeIso(service?.updated)
+    }))
+  }));
+  const incidents = (Array.isArray(result.incidents) ? result.incidents : []).map(incident => ({
+    id: stringOrNull(incident?.id || incident?._id),
+    name: stringOrNull(incident?.name) || "Active incident",
+    status: stringOrNull(incident?.status) || "Active"
+  }));
+  const activeMaintenance = Array.isArray(result.maintenance?.active) ? result.maintenance.active : [];
+  const statusCode = toNumber(overall.status_code) ?? Math.max(100, ...groups.map(group => group.status_code || 100));
+  const overallStatus = stringOrNull(overall.status) || (statusCode <= 100 ? "Operational" : "Service issue");
+  const statusEmoji = statusCode <= 100 ? "🟢" : statusCode <= 300 ? "🟡" : "🔴";
+  const affected = [];
+  for (const group of groups) {
+    for (const service of group.services) {
+      if ((service.status_code ?? 100) > 100 || !/^operational$/i.test(service.status)) {
+        affected.push(`${group.name} / ${service.name}: ${service.status}`);
+      }
+    }
+  }
+  const checkedUnix = Math.floor(new Date(checkedAt).getTime() / 1000);
+  const officialUpdated = safeIso(overall.updated) || groups.map(group => group.updated).filter(Boolean).sort().pop() || null;
+  const description = [
+    `${statusEmoji} **${overallStatus}**`,
+    `Last checked: <t:${checkedUnix}:R>`,
+    "",
+    ...(affected.length
+      ? ["**Affected services**", ...affected.slice(0, 20).map(value => `• ${value}`)]
+      : groups.map(group => `**${group.name}:** ${group.status}`)),
+    ...(incidents.length
+      ? ["", "**Active incidents**", ...incidents.slice(0, 10).map(incident => `• ${incident.name} — ${incident.status}`)]
+      : []),
+    ...(activeMaintenance.length
+      ? ["", `**Active maintenance:** ${activeMaintenance.length}`]
+      : []),
+    "",
+    "[Official Roblox Status](https://status.roblox.com/)"
+  ].join("\n");
+
+  const digestSource = {
+    checked_at: checkedAt,
+    official_updated_at: officialUpdated,
+    overall_status: overallStatus,
+    status_code: statusCode,
+    groups,
+    incidents,
+    active_maintenance_count: activeMaintenance.length
+  };
+  return {
+    payload: persistentDiscordComponentPayload("🌐 ROBLOX Status", [description], checkedAt),
+    digestSource,
+    snapshotAt: checkedAt
+  };
+}
+
+async function buildVersionsPersistentPost(env) {
+  const [places, releaseStates] = await Promise.all([
+    supabaseSelect(env, PS99_PLACES_TABLE, {
+      select: "place_id,place_name,root_place,latest_version,latest_published_at,latest_checked_at,updated_at",
+      is_active: "eq.true",
+      order: "root_place.desc,place_name.asc",
+      limit: "100"
+    }),
+    supabaseSelect(env, ROBLOX_RELEASE_STATE_TABLE, {
+      select: "channel,binary_type,current_version,client_version_upload,bootstrapper_version,last_checked_at,updated_at",
+      channel: `eq.${robloxReleaseChannel(env)}`,
+      binary_type: `eq.${robloxReleaseBinaryType(env)}`,
+      limit: "1"
+    })
+  ]);
+  const release = releaseStates[0] || null;
+  const normalizedPlaces = places.map(place => ({
+    place_id: toNumber(place.place_id),
+    place_name: stringOrNull(place.place_name) || `Place ${place.place_id}`,
+    root_place: Boolean(place.root_place),
+    version: toNumber(place.latest_version),
+    published_at: safeIso(place.latest_published_at),
+    checked_at: safeIso(place.latest_checked_at || place.updated_at)
+  }));
+  const checkedAt = [
+    safeIso(release?.last_checked_at || release?.updated_at),
+    ...normalizedPlaces.map(place => place.checked_at)
+  ].filter(Boolean).sort().pop() || new Date().toISOString();
+  const checkedUnix = Math.floor(new Date(checkedAt).getTime() / 1000);
+  const placeLines = normalizedPlaces.length
+    ? normalizedPlaces.map(place => {
+      const published = place.published_at
+        ? ` — <t:${Math.floor(new Date(place.published_at).getTime() / 1000)}:R>`
+        : "";
+      return `**${escapeDiscordMarkdown(place.place_name)}:** ${place.version ?? "Unknown"}${published}`;
+    })
+    : ["No tracked PS99 place versions are stored yet."];
+  const ps99Section = [
+    "## Pet Simulator 99",
+    ...placeLines
+  ].join("\n");
+  const robloxSection = [
+    "## ROBLOX",
+    `Client version: **${escapeDiscordMarkdown(release?.current_version || "Unknown")}**`
+  ].join("\n");
+
+  return {
+    payload: persistentDiscordComponentPayload("📥 Versions", [
+      `Last scanned: <t:${checkedUnix}:R>`,
+      ps99Section,
+      robloxSection
+    ], checkedAt),
+    digestSource: {
+      checked_at: checkedAt,
+      places: normalizedPlaces,
+      roblox_release: release ? {
+        channel: release.channel,
+        binary_type: release.binary_type,
+        current_version: release.current_version,
+        client_version_upload: release.client_version_upload,
+        bootstrapper_version: release.bootstrapper_version,
+        checked_at: safeIso(release.last_checked_at || release.updated_at)
+      } : null
+    },
+    snapshotAt: checkedAt
   };
 }
 
@@ -1243,17 +1758,63 @@ async function buildRewardCutoffDashboard(env) {
   const playerRanks = rewardCutoffRanks(playerUrl, env, "players");
   const clanRanks = rewardCutoffRanks(clanUrl, env, "clans");
   const leagueRanks = leagueRewardCutoffRanks(env);
-  const [players, clans, leagues] = await Promise.all([
+  const [players, clans, leagues, leaguePlayers] = await Promise.all([
     buildPlayerRewardCutoffs(playerUrl, env, playerRanks),
     buildClanRewardCutoffs(clanUrl, env, clanRanks),
-    buildLeagueRewardCutoffs(env, leagueRanks)
+    buildLeagueRewardCutoffs(env, leagueRanks),
+    buildLeaguePlayerRewardCutoffs(env, playerRanks).catch(error => ({
+      ok: false,
+      type: "players",
+      pool_source: "leagues",
+      message: error?.message || String(error),
+      ranks: playerRanks,
+      cutoffs: []
+    }))
   ]);
 
   return {
     generated_at: new Date().toISOString(),
     players,
     clans,
-    leagues
+    leagues,
+    league_players: leaguePlayers
+  };
+}
+
+async function buildLeaguePlayerRewardCutoffs(env, ranks) {
+  const payload = await fetchLeagueSoloLeaderboard(env, 500);
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const byRank = new Map(rows.map((row, index) => [
+    toNumber(row.rank) || index + 1,
+    row
+  ]));
+  const snapshotAt = safeIso(
+    payload.snapshot_at ||
+    rows[0]?.fetched_at ||
+    payload.generated_at
+  );
+
+  return {
+    ok: true,
+    type: "players",
+    pool_source: "leagues",
+    pool_is_partial: true,
+    generated_at: payload.generated_at || new Date().toISOString(),
+    snapshot_at: snapshotAt,
+    league_run_key: payload.league_run_key || null,
+    league_run_label: payload.league_run_label || payload.league_run_key || null,
+    total_global_players: Math.max(toNumber(payload.top_available) || 0, rows.length),
+    ranks,
+    cutoffs: ranks.map(rankValue => {
+      const row = byRank.get(rankValue);
+      return {
+        rank: rankValue,
+        user_id: row ? toNumber(row.user_id) : null,
+        username: row ? stringOrNull(row.username || row.display_name) : null,
+        points: row ? toNumber(row.points ?? row.total_points) : null,
+        available: Boolean(row)
+      };
+    })
   };
 }
 
@@ -1300,6 +1861,8 @@ async function buildLeagueRewardCutoffs(env, ranks) {
     generated_at: payload.generated_at || new Date().toISOString(),
     snapshot_at: payload.snapshot_at || null,
     league_run_key: payload.league_run_key || null,
+    league_run_label: payload.league_run_label || payload.league_run_key || null,
+    league_end_at: safeIso(payload.league_end_at || payload.league_run_end_at),
     ranks,
     cutoffs: ranks.map(rankValue => {
       const row = byRank.get(rankValue);
@@ -1325,33 +1888,95 @@ function leagueRewardCutoffRanks(env) {
 
 function rewardCutoffDiscordPayload(dashboard) {
   const players = dashboard.players || {};
+  const leaguePlayers = dashboard.league_players || {};
   const clans = dashboard.clans || {};
   const leagues = dashboard.leagues || {};
-  const eventName = players.event_name || players.display_name || clans.display_name || clans.battle || "Current event";
+  const eventMode = rewardCutoffEventMode(dashboard);
+  const eventName = eventMode === "clan"
+    ? (players.event_name || players.display_name || clans.display_name || clans.battle || "Current Clan Battle")
+    : (leagues.league_run_label || leagues.league_run_key || "Current League");
   const snapshotAt = latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at || new Date().toISOString();
   const unix = Math.floor(new Date(snapshotAt).getTime() / 1000);
-  const divider = "────────────────────────";
-  const description = [
-    `**${eventName}** | Updated <t:${unix}:R>`,
-    "",
-    "**Global Player Leaderboard**",
-    ...rewardCutoffLines(players.cutoffs, playerRewardRangeLabel),
-    divider,
-    "**Clan Rewards**",
-    ...rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel),
-    divider,
-    "**League Rewards**",
-    ...rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel)
-  ].join("\n");
+  const eventTiming = eventMode === "clan" ? clans.battle_end_iso : leagues.league_end_at;
+  const eventTimingLine = eventTiming
+    ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
+    : null;
+  const activeGlobalPlayers = eventMode === "league" ? leaguePlayers : players;
+  const globalLines = rewardCutoffLines(activeGlobalPlayers.cutoffs, playerRewardRangeLabel);
+  if (eventMode === "league" && activeGlobalPlayers.pool_is_partial) {
+    globalLines.push("-# The public League-player feed currently exposes the Top 500; deeper cutoffs remain unavailable until the full League roster crawl completes.");
+  }
+  const rewardLines = eventMode === "clan"
+    ? rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel)
+    : rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel);
+  const globalLabel = eventMode === "clan"
+    ? "Global Leaderboard (Clan Battle)"
+    : "Global Leaderboard (Leagues)";
+  const rewardsLabel = eventMode === "clan" ? "Clan Rewards" : "League Rewards";
+
+  return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
+    [
+      `**${eventName}**`,
+      `Updated <t:${unix}:R>`,
+      eventTimingLine
+    ].filter(Boolean).join("\n"),
+    [`## ${globalLabel}`, ...globalLines].join("\n"),
+    [`## ${rewardsLabel}`, ...rewardLines].join("\n")
+  ], snapshotAt);
+}
+
+function rewardCutoffEventMode(dashboard) {
+  const now = Date.now();
+  const clanEnd = new Date(dashboard?.clans?.battle_end_iso || 0).getTime();
+  const leagueEnd = new Date(dashboard?.leagues?.league_end_at || dashboard?.leagues?.league_run_end_at || 0).getTime();
+  if (Number.isFinite(clanEnd) && clanEnd > now) return "clan";
+  if (Number.isFinite(leagueEnd) && leagueEnd > now) return "league";
+  return "league";
+}
+
+function persistentDiscordComponentPayload(title, sections, timestamp) {
+  const iso = safeIso(timestamp) || new Date().toISOString();
+  const unix = Math.floor(new Date(iso).getTime() / 1000);
+  const body = [{
+    type: 9,
+    components: [{
+      type: 10,
+      content: `## ${String(title || "Automated Update").slice(0, 200)}`
+    }],
+    accessory: {
+      type: 11,
+      media: { url: DISCORD_ALERT_THUMBNAIL_URL },
+      description: "PS99 Genie Fox"
+    }
+  }, discordSeparatorComponent()];
+
+  const normalizedSections = (Array.isArray(sections) ? sections : [sections])
+    .map(section => String(section || "").trim())
+    .filter(Boolean);
+  normalizedSections.forEach((section, index) => {
+    if (index > 0) body.push(discordSeparatorComponent());
+    body.push({ type: 10, content: section.slice(0, 4000) });
+  });
+  body.push(
+    discordSeparatorComponent(),
+    {
+      type: 10,
+      content: `-# **${DISCORD_ALERT_FOOTER_TEXT} Today at <t:${unix}:t>**`
+    }
+  );
 
   return {
-    embeds: [{
-      title: "Reward Cutoffs",
-      description: description.slice(0, 4096),
-      color: 0xff5f67,
-      timestamp: safeIso(snapshotAt) || new Date().toISOString()
+    flags: DISCORD_COMPONENTS_V2_FLAG,
+    components: [{
+      type: 17,
+      accent_color: DISCORD_ALERT_COLOR,
+      components: body
     }]
   };
+}
+
+function discordSeparatorComponent() {
+  return { type: 14, divider: true, spacing: 1 };
 }
 
 function rewardCutoffLines(cutoffs, labeler) {
@@ -1370,10 +1995,10 @@ function clanRewardRangeLabel(rank) {
     1: "#1",
     3: "#2-3",
     10: "#4-10",
-    30: "Top 30",
-    50: "#11-50",
+    30: "#11-30",
+    50: "#31-50",
     250: "#51-250",
-    500: "Top 500"
+    500: "#251-500"
   };
   return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
 }
@@ -1386,7 +2011,7 @@ function leagueRewardRangeLabel(rank) {
     50: "#16-50",
     100: "#51-100",
     250: "#101-250",
-    2000: "#251-2000"
+    2000: "#251-2,000"
   };
   return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
 }
@@ -1397,7 +2022,12 @@ function formatRewardCutoffPoints(value) {
 }
 
 function latestRewardCutoffSnapshot(dashboard) {
-  return [dashboard.players?.snapshot_at, dashboard.clans?.snapshot_at, dashboard.leagues?.snapshot_at]
+  return [
+    dashboard.players?.snapshot_at,
+    dashboard.league_players?.snapshot_at,
+    dashboard.clans?.snapshot_at,
+    dashboard.leagues?.snapshot_at
+  ]
     .map(safeIso)
     .filter(Boolean)
     .sort()
@@ -6351,6 +6981,156 @@ async function postPs99DiscordAlert(env, payload) {
   return postDiscordFeedAlert(env, "ps99_updates", payload);
 }
 
+async function postDiscordBotChannelMessage(env, feed, channelId, payload, roleId = "") {
+  const body = discordFeedMessageBody(feed, payload, roleId);
+  const result = await discordBotChannelMessageRequest(env, {
+    method: "POST",
+    channelId,
+    body
+  });
+  if (!result.ok) {
+    return {
+      configured: true,
+      posted: false,
+      feed,
+      reason: result.reason,
+      error: result.error
+    };
+  }
+  return {
+    configured: true,
+    posted: true,
+    feed,
+    transport: "bot",
+    role_mentioned: Boolean(roleId),
+    message_id: stringOrNull(result.body?.id),
+    channel_id: stringOrNull(result.body?.channel_id) || channelId
+  };
+}
+
+async function updateDiscordBotChannelMessage(env, feed, channelId, messageId, payload, roleId = "") {
+  const body = discordFeedMessageBody(feed, payload, roleId);
+  const result = await discordBotChannelMessageRequest(env, {
+    method: "PATCH",
+    channelId,
+    messageId,
+    body
+  });
+  if (!result.ok) {
+    return {
+      configured: true,
+      posted: false,
+      updated: false,
+      feed,
+      reason: result.reason,
+      error: result.error
+    };
+  }
+  return {
+    configured: true,
+    posted: true,
+    updated: true,
+    feed,
+    transport: "bot",
+    role_mentioned: Boolean(roleId),
+    message_id: stringOrNull(result.body?.id) || String(messageId),
+    channel_id: stringOrNull(result.body?.channel_id) || channelId
+  };
+}
+
+async function inspectDiscordBotChannelMessage(env, channelId, messageId) {
+  const result = await discordBotChannelMessageRequest(env, {
+    method: "GET",
+    channelId,
+    messageId
+  });
+  if (!result.ok) {
+    return {
+      exists: result.reason === "message_not_found" ? false : null,
+      reason: result.reason,
+      message_id: String(messageId),
+      error: result.error
+    };
+  }
+  return {
+    exists: true,
+    reason: "found",
+    message_id: stringOrNull(result.body?.id) || String(messageId),
+    channel_id: stringOrNull(result.body?.channel_id) || channelId,
+    flags: toNumber(result.body?.flags) || 0,
+    edited_timestamp: safeIso(result.body?.edited_timestamp),
+    timestamp: safeIso(result.body?.timestamp)
+  };
+}
+
+async function deleteDiscordBotChannelMessage(env, channelId, messageId) {
+  const result = await discordBotChannelMessageRequest(env, {
+    method: "DELETE",
+    channelId,
+    messageId
+  });
+  return result.ok
+    ? { deleted: true, reason: "deleted", message_id: String(messageId) }
+    : {
+      deleted: result.reason === "message_not_found",
+      reason: result.reason,
+      message_id: String(messageId),
+      error: result.error
+    };
+}
+
+async function discordBotChannelMessageRequest(env, { method, channelId, messageId = null, body = null }) {
+  const botToken = String(env.DISCORD_BOT_TOKEN || "").trim();
+  if (!botToken) return { ok: false, reason: "discord_bot_token_missing", error: "DISCORD_BOT_TOKEN is not configured." };
+  if (!/^\d{5,30}$/.test(String(channelId || ""))) {
+    return { ok: false, reason: "invalid_channel_id", error: "The Discord channel ID is invalid." };
+  }
+
+  const suffix = messageId ? `/messages/${encodeURIComponent(messageId)}` : "/messages";
+  const url = `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}${suffix}`;
+  let lastError = "Discord bot message request failed.";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const headers = { Authorization: `Bot ${botToken}` };
+      if (body !== null) headers["Content-Type"] = "application/json";
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body === null ? undefined : JSON.stringify(body)
+      });
+      const responseText = await response.text();
+      const responseBody = parseJsonObject(responseText) || {};
+      if (response.ok) return { ok: true, status: response.status, body: responseBody };
+      if (response.status === 404) {
+        return { ok: false, status: 404, reason: "message_not_found", error: responseText.slice(0, 500) };
+      }
+
+      lastError = `Discord bot API returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 300)}` : ""}`;
+      if (attempt < 3 && (response.status === 429 || response.status >= 500)) {
+        const retrySeconds = toNumber(responseBody.retry_after);
+        await sleep(response.status === 429 && retrySeconds !== null
+          ? clamp(retrySeconds * 1000, 500, 15000)
+          : attempt * 1000);
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err?.message || String(err);
+      if (attempt < 3) {
+        await sleep(attempt * 1000);
+        continue;
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    reason: "discord_bot_request_failed",
+    error: lastError.slice(0, 500)
+  };
+}
+
 async function postDiscordFeedAlert(env, feed, payload) {
   const config = discordFeedConfig(env, feed);
   if (!config.configured) return emptyDiscordFeedResult(env, feed, "webhook_not_configured");
@@ -6477,8 +7257,110 @@ async function updateDiscordFeedMessage(env, feed, messageId, payload) {
   };
 }
 
+async function inspectDiscordFeedMessage(env, feed, messageId) {
+  const config = discordFeedConfig(env, feed);
+  if (!config.configured) return { exists: null, reason: "webhook_not_configured" };
+  if (!config.webhook_url) return { exists: null, reason: "invalid_webhook_url" };
+  const messageUrl = discordFeedMessageUrl(config.webhook_url, messageId);
+  let lastError = "Discord webhook message lookup failed.";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(messageUrl, { method: "GET" });
+      const responseText = await response.text();
+      const responseBody = parseJsonObject(responseText) || {};
+      if (response.ok) {
+        return {
+          exists: true,
+          reason: "found",
+          message_id: stringOrNull(responseBody.id) || String(messageId),
+          channel_id: stringOrNull(responseBody.channel_id),
+          flags: toNumber(responseBody.flags) || 0,
+          edited_timestamp: safeIso(responseBody.edited_timestamp),
+          timestamp: safeIso(responseBody.timestamp)
+        };
+      }
+      if (response.status === 404) {
+        return { exists: false, reason: "message_not_found", message_id: String(messageId) };
+      }
+      lastError = `Discord webhook lookup returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 300)}` : ""}`;
+      if (attempt < 3 && (response.status === 429 || response.status >= 500)) {
+        const retrySeconds = toNumber(responseBody.retry_after);
+        await sleep(response.status === 429 && retrySeconds !== null
+          ? clamp(retrySeconds * 1000, 500, 15000)
+          : attempt * 1000);
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err?.message || String(err);
+      if (attempt < 3) {
+        await sleep(attempt * 1000);
+        continue;
+      }
+    }
+  }
+
+  return {
+    exists: null,
+    reason: "message_lookup_failed",
+    message_id: String(messageId),
+    error: lastError.slice(0, 500)
+  };
+}
+
+async function deleteDiscordFeedMessage(env, feed, messageId) {
+  const config = discordFeedConfig(env, feed);
+  if (!config.configured) return { deleted: false, reason: "webhook_not_configured" };
+  if (!config.webhook_url) return { deleted: false, reason: "invalid_webhook_url" };
+  const messageUrl = discordFeedMessageUrl(config.webhook_url, messageId);
+  try {
+    const response = await fetch(messageUrl, { method: "DELETE" });
+    if (response.ok || response.status === 404) {
+      return {
+        deleted: true,
+        reason: response.status === 404 ? "message_not_found" : "deleted",
+        message_id: String(messageId)
+      };
+    }
+    const text = await response.text();
+    return {
+      deleted: false,
+      reason: "webhook_delete_failed",
+      message_id: String(messageId),
+      error: `Discord webhook delete returned HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ""}`
+    };
+  } catch (error) {
+    return {
+      deleted: false,
+      reason: "webhook_delete_failed",
+      message_id: String(messageId),
+      error: String(error?.message || error).slice(0, 500)
+    };
+  }
+}
+
+function discordFeedMessageUrl(webhookUrl, messageId) {
+  const url = new URL(webhookUrl);
+  url.search = "";
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/messages/${encodeURIComponent(messageId)}`;
+  return url.toString();
+}
+
 function discordFeedMessageBody(feed, payload, roleId) {
   const styledPayload = styleDiscordFeedAlert(feed, payload);
+  if (isDiscordComponentsV2Payload(styledPayload)) {
+    const components = [...styledPayload.components];
+    if (roleId) components.unshift({ type: 10, content: `<@&${roleId}>` });
+    return {
+      ...styledPayload,
+      components,
+      allowed_mentions: {
+        parse: [],
+        roles: roleId ? [roleId] : []
+      }
+    };
+  }
   return {
     ...styledPayload,
     content: roleId ? `<@&${roleId}>` : (styledPayload.content ?? null),
@@ -6490,29 +7372,19 @@ function discordFeedMessageBody(feed, payload, roleId) {
 }
 
 function styleDiscordFeedAlert(feed, payload = {}) {
-  const feedNames = {
-    roblox_updates: "Roblox Updates",
-    ps99_updates: "Pet Simulator 99 Updates",
-    ps99_fflags: "Pet Simulator 99 FFlags",
-    ps99_restarts: "Pet Simulator 99 Restarts",
-    ps99_dev_blogs: "Pet Simulator 99 Dev Blogs",
-    reward_cutoffs: "Reward Cutoffs"
-  };
-  const footerNotes = {
-    ps99_fflags: "Public Roblox client settings only",
-    ps99_dev_blogs: "Official BIG Games posts"
-  };
+  if (isDiscordComponentsV2Payload(payload)) {
+    return { ...payload };
+  }
   const alertTitles = {
     roblox_updates: "Roblox Client Update",
     ps99_updates: "Pet Simulator 99 Update",
     ps99_fflags: "Pet Simulator 99 FFlag Change",
     ps99_restarts: "Pet Simulator 99 Restart",
     ps99_dev_blogs: "Pet Simulator 99 Dev Blog",
-    reward_cutoffs: "Reward Cutoffs"
+    reward_cutoffs: "Reward Cutoffs",
+    roblox_status: "🌐 ROBLOX Status",
+    versions_status: "📥 Versions"
   };
-  const senderName = "Oapl's 3rd-Eye";
-  const feedName = feedNames[feed] || "Automated Alerts";
-  const footerText = [senderName, feedName, footerNotes[feed]].filter(Boolean).join(" | ");
   const embeds = (Array.isArray(payload.embeds) ? payload.embeds : []).map(embed => {
     const rawTitle = String(embed?.title || "").trim();
     const isTest = /^\[TEST\]/i.test(rawTitle);
@@ -6522,16 +7394,13 @@ function styleDiscordFeedAlert(feed, payload = {}) {
 
     return {
       ...embed,
-      title: `${isTest ? "[TEST] " : ""}3rd-Eye Alert | ${alertTitle}${titleDetail}`.slice(0, 256),
-      color: 0xff5f67,
-      author: {
-        name: senderName
-      },
-      thumbnail: embed?.thumbnail || {
-        url: "https://i.imgur.com/aCHMjbP.png"
+      title: `${isTest ? "[TEST] " : ""}${alertTitle}${titleDetail}`.slice(0, 256),
+      color: DISCORD_ALERT_COLOR,
+      thumbnail: {
+        url: DISCORD_ALERT_THUMBNAIL_URL
       },
       footer: {
-        text: footerText
+        text: DISCORD_ALERT_FOOTER_TEXT
       },
       timestamp: safeIso(embed?.timestamp) || new Date().toISOString()
     };
@@ -6539,10 +7408,13 @@ function styleDiscordFeedAlert(feed, payload = {}) {
 
   return {
     ...payload,
-    username: senderName,
-    avatar_url: "https://i.imgur.com/aCHMjbP.png",
     embeds
   };
+}
+
+function isDiscordComponentsV2Payload(payload) {
+  return Boolean((toNumber(payload?.flags) || 0) & DISCORD_COMPONENTS_V2_FLAG) &&
+    Array.isArray(payload?.components);
 }
 
 function ps99AlertRuntimeConfig(env) {
@@ -6553,7 +7425,9 @@ function ps99AlertRuntimeConfig(env) {
       "ps99_fflags",
       "ps99_restarts",
       "ps99_dev_blogs",
-      "reward_cutoffs"
+      "reward_cutoffs",
+      "roblox_status",
+      "versions_status"
     ].map(feed => {
       const config = discordFeedConfig(env, feed);
       return [feed, {
@@ -6562,7 +7436,11 @@ function ps99AlertRuntimeConfig(env) {
         role_id_configured: Boolean(config.role_id),
         legacy_fallback: config.legacy_fallback
       }];
-    }))
+    })),
+    reward_cutoff_schedule: {
+      minutes: rewardCutoffScheduleMinutes(env),
+      offset_minutes: rewardCutoffScheduleOffsetMinutes(env)
+    }
   };
 }
 
@@ -6586,7 +7464,9 @@ function discordFeedConfig(env, feed) {
     ps99_fflags: [env.PS99_FFLAGS_WEBHOOK_URL, env.PS99_FFLAGS_ROLE_ID],
     ps99_restarts: [env.PS99_RESTARTS_WEBHOOK_URL || legacyWebhook, env.PS99_RESTARTS_ROLE_ID || legacyRole],
     ps99_dev_blogs: [env.PS99_DEV_BLOG_WEBHOOK_URL, env.PS99_DEV_BLOG_ROLE_ID],
-    reward_cutoffs: [env.REWARD_CUTOFFS_WEBHOOK_URL, env.REWARD_CUTOFFS_ROLE_ID]
+    reward_cutoffs: [env.REWARD_CUTOFFS_WEBHOOK_URL, env.REWARD_CUTOFFS_ROLE_ID],
+    roblox_status: [env.ROBLOX_STATUS_WEBHOOK_URL, env.ROBLOX_STATUS_ROLE_ID],
+    versions_status: [env.VERSIONS_WEBHOOK_URL, env.VERSIONS_ROLE_ID]
   };
   const definition = definitions[feed] || [null, null];
   const rawWebhook = String(definition[0] || "").trim();
@@ -11718,8 +12598,9 @@ function shouldRunPs99DevBlogSchedule(env, scheduledAt = null) {
   );
 }
 
-function rewardCutoffAlertEnabled(env) {
-  return discordFeedConfig(env, "reward_cutoffs").configured;
+function persistentDiscordPostsEnabled(env) {
+  return Object.keys(PERSISTENT_DISCORD_TARGETS)
+    .some(type => persistentDiscordDeliveryConfig(env, type).configured);
 }
 
 function rewardCutoffScheduleMinutes(env) {
