@@ -149,12 +149,18 @@ async function handleTrackerServerAdd(request, env) {
   const remote = matches[0] || null;
   const vipServerId = remote ? robloxVipServerId(remote) : "";
   const resolved = Boolean(remote && vipServerId);
+  const visibleVipServerIds = [
+    ...new Set(authorized.map(row => robloxVipServerId(row)).filter(Boolean))
+  ];
   const resolutionError = resolved
     ? ""
     : collectionError
       ? "Awaiting observer access; the latest Roblox collection was unavailable."
       : `Awaiting observer access. The account currently sees ${authorized.length} other private servers for this place.`;
   const existing = await findTrackerServerByStableReference(env, guildId, placeId, reference, vipServerId);
+  const existingBaseline = jsonArray(existing?.resolution_baseline_vip_server_ids)
+    .map(normalizePrivateServerIdentifier)
+    .filter(Boolean);
   const now = new Date().toISOString();
   const serverValues = {
     guild_id: guildId,
@@ -169,6 +175,14 @@ async function handleTrackerServerAdd(request, env) {
     resolution_status: resolved ? "resolved" : "pending",
     resolution_error: resolutionError || null,
     last_resolution_at: now,
+    resolution_baseline_vip_server_ids: resolved
+      ? []
+      : existing?.resolution_baseline_ready
+        ? existingBaseline
+        : visibleVipServerIds,
+    resolution_baseline_ready: resolved ||
+      Boolean(existing?.resolution_baseline_ready) ||
+      !collectionError,
     is_active: true,
     created_by_discord_id: actorId,
     updated_at: now
@@ -206,6 +220,7 @@ async function handleTrackerServerAdd(request, env) {
     resolution_message: resolved
       ? "Matched to the stable Roblox vipServerId."
       : "Saved immediately. The tracker will resolve it automatically after the central observer account can access the server.",
+    observer_username: firstString(env.ROBLOX_OBSERVER_USERNAME) || null,
     server: serializeTrackedServer(state.servers.find(row => row.id === tracked.id) || tracked),
     persistent_message: published
   });
@@ -384,6 +399,9 @@ async function collectTrackerGuild(env, guild, options = {}) {
   const errors = [];
   const observations = [];
   let pendingCount = 0;
+  const claimedVipServerIds = new Set(
+    servers.map(server => normalizePrivateServerIdentifier(server.vip_server_id)).filter(Boolean)
+  );
 
   for (const placeId of new Set(servers.map(server => String(server.place_id)))) {
     if (!authorizedByPlace.has(placeId)) {
@@ -413,9 +431,36 @@ async function collectTrackerGuild(env, guild, options = {}) {
       accessCode: normalizePrivateServerIdentifier(server.access_code),
       vipServerId: normalizePrivateServerIdentifier(vipServerId)
     };
-    const remote = vipServerId
+    let remote = vipServerId
       ? placeResult.rows.find(row => robloxVipServerId(row) === vipServerId)
       : placeResult.rows.find(row => privateServerMatchesReference(row, storedReference));
+    let pendingResolutionError = "";
+
+    if (
+      !remote &&
+      !vipServerId &&
+      !placeResult.error &&
+      server.resolution_baseline_ready
+    ) {
+      const baselineVipServerIds = new Set(
+        jsonArray(server.resolution_baseline_vip_server_ids)
+          .map(normalizePrivateServerIdentifier)
+          .filter(Boolean)
+      );
+      const newlyVisible = placeResult.rows.filter(row => {
+        const candidateVipServerId = robloxVipServerId(row);
+        return candidateVipServerId &&
+          !baselineVipServerIds.has(candidateVipServerId) &&
+          !claimedVipServerIds.has(candidateVipServerId);
+      });
+
+      if (newlyVisible.length === 1) {
+        remote = newlyVisible[0];
+      } else if (newlyVisible.length > 1) {
+        pendingResolutionError =
+          "Multiple new private servers became visible to the observer account. Approve pending servers one at a time so each link can be matched safely.";
+      }
+    }
 
     if (remote) {
       const resolvedVipServerId = robloxVipServerId(remote);
@@ -439,20 +484,39 @@ async function collectTrackerGuild(env, guild, options = {}) {
         resolution_status: "resolved",
         resolution_error: null,
         last_resolution_at: now,
+        resolution_baseline_vip_server_ids: [],
+        resolution_baseline_ready: true,
         updated_at: now
       };
       if (!vipServerId || server.resolution_status !== "resolved") {
         await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, serverUpdate);
       }
+      claimedVipServerIds.add(resolvedVipServerId);
       observations.push(await buildTrackerObservation({ ...server, ...serverUpdate }, remote, memberSets, env, now));
       continue;
     }
 
     if (!vipServerId) {
       pendingCount += 1;
+      if (!placeResult.error && !server.resolution_baseline_ready) {
+        const baselineVipServerIds = [
+          ...new Set(placeResult.rows.map(row => robloxVipServerId(row)).filter(Boolean))
+        ];
+        await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, {
+          resolution_status: "pending",
+          resolution_error:
+            "Observer baseline captured. Grant the observer account access to this private server after this refresh.",
+          resolution_baseline_vip_server_ids: baselineVipServerIds,
+          resolution_baseline_ready: true,
+          last_resolution_at: now,
+          updated_at: now
+        });
+        continue;
+      }
       const message = placeResult.error
         ? "Awaiting observer access; the latest Roblox collection was unavailable."
-        : "Awaiting observer access. Grant the central observer Roblox account access to this private server.";
+        : pendingResolutionError ||
+          "Awaiting observer access. Grant the central observer Roblox account access to this private server.";
       await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, {
         resolution_status: "pending",
         resolution_error: message,

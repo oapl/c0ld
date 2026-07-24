@@ -20,6 +20,7 @@ SERVER_STATUS_DISCORD_DELAY_SECONDS = "30"
 # Discord guild private-server tracker. The cron checks each enabled guild's
 # stored refresh_minutes value and fetches each configured Roblox place once.
 SERVER_TRACKER_ENABLED = "true"
+ROBLOX_OBSERVER_USERNAME = ""
 
 [triggers]
 crons = ["*/5 * * * *"]

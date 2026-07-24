@@ -261,7 +261,7 @@ async function handleInteraction(request, env, ctx) {
     const subcommand = getSubcommandName(interaction);
     const managementAction =
       commandName === "tracking" ||
-      (commandName === "server" && ["add", "remove"].includes(subcommand));
+      (commandName === "server" && subcommand === "remove");
 
     if (managementAction && !memberCanManageServerTracker(interaction, env)) {
       return interactionJson(messageResponse(
@@ -493,10 +493,13 @@ function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
 
   if (commandName === "server" && subcommand === "add") {
     const server = payload.server || {};
+    const observer = payload.observer_username
+      ? ` Add **${escapeDiscordMarkdown(payload.observer_username)}** to the private server's authorized members.`
+      : " Grant the central observer Roblox account access to that private server.";
     return {
       content: payload.resolved
         ? `${server.label || `S${server.server_number || "?"}`} was ${payload.action || "added"} and matched to vipServerId ${server.vip_server_id}.`
-        : `${server.label || `S${server.server_number || "?"}`} was ${payload.action || "added"}. It is awaiting access for the central observer Roblox account; tracking will begin automatically once it resolves.`,
+        : `${server.label || `S${server.server_number || "?"}`} was ${payload.action || "added"} and saved as pending.${observer} Tracking will begin automatically once it resolves.`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
@@ -4209,7 +4212,7 @@ function serverCommandPayload() {
     options: [
       {
         name: "add",
-        description: "Add an authorized Roblox private server to this Discord server.",
+        description: "Add a Roblox private server to this Discord server.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {

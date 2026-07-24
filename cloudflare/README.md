@@ -1092,6 +1092,7 @@ Set these secrets on `c0ld-servers-worker`:
 | `SUPABASE_SERVICE_KEY` | Supabase service-role key. |
 | `SERVERS_ADMIN_TOKEN` | Shared private API token. |
 | `ROBLOX_SECURITY_COOKIE` | Raw `.ROBLOSECURITY` value for the observer Roblox account. |
+| `ROBLOX_OBSERVER_USERNAME` | Optional username shown after `/server add` so the owner knows which observer account to authorize. |
 | `DISCORD_BOT_TOKEN` | Token for editing each guild's persistent tracker message. |
 
 Set `SERVER_TRACKER_ENABLED=true` and use a five-minute cron. Each guild's
@@ -1107,7 +1108,10 @@ If the central observer account cannot see a submitted server yet, it is stored
 as `pending` and displayed as "Awaiting observer access." Grant that Roblox
 account access to the server; a later scheduled collection will resolve the
 record to its stable `vipServerId` and begin population/roster observations
-automatically.
+automatically. Approve one pending server at a time. The Worker compares the
+observer account's before/after server lists, so approving multiple new servers
+at once is intentionally left pending rather than attaching a link to the wrong
+server.
 
 Set these on `c0ld-discord-search`:
 
@@ -1117,8 +1121,9 @@ Set these on `c0ld-discord-search`:
 | `SERVERS_API_TOKEN` | Secret matching `SERVERS_ADMIN_TOKEN`. |
 | `SERVER_TRACKER_ADMIN_ROLE_IDS` | Optional comma-separated roles allowed to change tracking. |
 
-Discord members with Administrator or Manage Server can always use
-`/server add`, `/server remove`, `/tracking enable`, and `/tracking disable`.
+Any guild member can use `/server add`, `/server list`, and `/server who`.
+Discord members with Administrator, Manage Server, or a configured tracker-admin
+role can use `/server remove`, `/tracking enable`, and `/tracking disable`.
 `/server list` and `/server who` are available to guild members.
 
 After deploying both Workers, register the new commands with the existing
