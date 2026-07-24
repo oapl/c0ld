@@ -129,13 +129,15 @@ while ($offset -lt $TopLeagues) {
   }
 
   $elapsed = (Get-Date) - $startedAt
-  Write-Host ("offset={0} scanned={1} players={2} next={3} finalized={4} elapsed={5:hh\\:mm\\:ss}" -f `
+  $elapsedText = $elapsed.ToString("hh\:mm\:ss")
+  Write-Host ("offset={0} source={1} scanned={2} players={3} next={4} finalized={5} elapsed={6}" -f `
     $offset,
+    $response.manifest_source,
     $response.leagues_scanned,
     $response.players_seen,
     $response.next_offset,
     $response.finalized,
-    $elapsed)
+    $elapsedText)
 
   if ($response.finalized) {
     Write-Host ("Completed. Published {0} unique League players in snapshot {1}." -f `

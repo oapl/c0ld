@@ -947,14 +947,6 @@ async function handleLeaguePlayerPoolIngest(request, env) {
   const scanId = normalizeLeaguePlayerPoolScanId(
     url.searchParams.get("scan_id") || `${runKey}:${topLimit}`
   );
-  const manifest = await fetchLeaguePlayerPoolManifest(env, runKey, topLimit);
-
-  if (!manifest.length) {
-    throw httpError(409, `No stored Top-X league rows were found for ${runKey}. Run the Top Leagues ingest first.`);
-  }
-  if (manifest.length < topLimit) {
-    throw httpError(409, `Only ${manifest.length} stored leagues are available for ${runKey}; ${topLimit} were requested.`);
-  }
 
   if (reset) {
     await supabaseDelete(env, CURRENT_TABLE, {
@@ -964,7 +956,15 @@ async function handleLeaguePlayerPoolIngest(request, env) {
   }
 
   const fetchedAt = new Date().toISOString();
-  const batch = manifest.slice(offset, Math.min(offset + batchSize, topLimit));
+  const manifestContext = await fetchLeaguePlayerPoolManifestWindow(env, runKey, offset, batchSize, topLimit);
+  const batch = manifestContext.rows;
+  const expectedBatchSize = Math.min(batchSize, topLimit - offset);
+  if (batch.length < expectedBatchSize) {
+    throw httpError(
+      409,
+      `BIG Games returned only ${batch.length} leagues for ranks ${offset + 1}-${offset + expectedBatchSize}; the player-pool scan cannot safely continue.`
+    );
+  }
   const scanResults = await mapLimit(batch, concurrency, row => scanLeagueForPlayerPool(env, row));
   const failed = scanResults.filter(result => result.error);
   const stagingRows = scanResults.flatMap(result => leaguePlayerPoolStagingRows(result, {
@@ -1009,8 +1009,7 @@ async function handleLeaguePlayerPoolIngest(request, env) {
         runKey,
         scanId,
         fetchedAt,
-        topLimit,
-        manifest
+        topLimit
       })
     : null;
 
@@ -1024,6 +1023,7 @@ async function handleLeaguePlayerPoolIngest(request, env) {
     offset,
     batch_size: batch.length,
     concurrency,
+    manifest_source: manifestContext.source,
     leagues_scanned: scanResults.length,
     players_seen: scanResults.reduce((sum, result) => sum + result.members.length, 0),
     next_offset: nextOffset,
@@ -1033,41 +1033,51 @@ async function handleLeaguePlayerPoolIngest(request, env) {
   }, shouldFinalize ? 200 : 202);
 }
 
-async function fetchLeaguePlayerPoolManifest(env, runKey, topLimit) {
+async function fetchLeaguePlayerPoolManifestWindow(env, runKey, offset, limit, topLimit) {
   const select = "snapshot_id,fetched_at,league_run_key,league_name,league_id,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league";
+  const startRank = offset + 1;
+  const endRank = Math.min(topLimit, offset + limit);
+  const expected = Math.max(0, endRank - startRank + 1);
+  const readList = listName => supabaseSelect(env, CURRENT_TABLE, {
+    select,
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${listName}`,
+    rank_gte: `gte.${startRank}`,
+    rank_lte: `lte.${endRank}`,
+    order: "rank.asc",
+    limit: String(Math.max(1, expected))
+  }, { paramRename: { rank_gte: "rank", rank_lte: "rank" } });
   const [topRows, allRows] = await Promise.all([
-    supabaseSelectAll(env, CURRENT_TABLE, {
-      select,
-      league_run_key: `eq.${runKey}`,
-      league_name: `eq.${TOP_LEAGUES_NAME}`,
-      order: "rank.asc"
-    }, { maxRows: topLimit }),
-    supabaseSelectAll(env, CURRENT_TABLE, {
-      select,
-      league_run_key: `eq.${runKey}`,
-      league_name: `eq.${ALL_TOP_LEAGUES_NAME}`,
-      order: "rank.asc"
-    }, { maxRows: topLimit })
+    readList(TOP_LEAGUES_NAME),
+    readList(ALL_TOP_LEAGUES_NAME)
   ]);
-  const byLeague = new Map();
+  const byRank = new Map();
 
   for (const row of [...topRows, ...allRows]) {
-    const publicRow = publicLeagueRow(row);
     const rank = toNumber(row.rank);
-    const identity = key(publicRow.league_id || publicRow.league_name);
-    if (!identity || !rank || rank > topLimit) continue;
-    const candidate = { ...row, _pool_rank: rank, _pool_name: publicRow.league_name };
-    const existing = byLeague.get(identity);
+    if (!rank || rank < startRank || rank > endRank) continue;
+    const existing = byRank.get(rank);
     const candidateTime = new Date(row.fetched_at || 0).getTime() || 0;
     const existingTime = new Date(existing?.fetched_at || 0).getTime() || 0;
-    if (!existing || rank < existing._pool_rank || (rank === existing._pool_rank && candidateTime > existingTime)) {
-      byLeague.set(identity, candidate);
-    }
+    if (!existing || candidateTime > existingTime) byRank.set(rank, row);
+  }
+  const storedRows = [...byRank.values()].sort((a, b) => toNumber(a.rank) - toNumber(b.rank));
+  if (storedRows.length >= expected) {
+    return { source: "stored-top-league-window", rows: storedRows.slice(0, expected) };
   }
 
-  return [...byLeague.values()]
-    .sort((a, b) => a._pool_rank - b._pool_rank || a._pool_name.localeCompare(b._pool_name))
-    .slice(0, topLimit);
+  const live = await fetchLiveTopLeagueRowsWindowForOverlap(env, runKey, offset, limit, topLimit);
+  if (live.persist_rows?.length) {
+    await persistTopLeagueWindowRows(env, runKey, live.persist_rows, {
+      listName: live.list_name || topLeagueListNameForLimit(topLimit, env),
+      fetchedAt: live.snapshot_at || new Date().toISOString(),
+      source: "manual:league-player-pool-manifest"
+    });
+  }
+  return {
+    source: live.source || "live-top-league-window",
+    rows: (live.rows || []).sort((a, b) => toNumber(a.rank) - toNumber(b.rank))
+  };
 }
 
 async function scanLeagueForPlayerPool(env, topRow) {
@@ -1171,8 +1181,10 @@ async function finalizeLeaguePlayerPool(env, context) {
     .filter(row => row.role === "League Player Pool Marker")
     .map(row => toNumber(normalizeRawLeague(row.raw_league).league_rank))
     .filter(Boolean));
-  const expectedRanks = new Set(context.manifest.map(row => toNumber(row._pool_rank)).filter(Boolean));
-  const missingRanks = [...expectedRanks].filter(rank => !markerRanks.has(rank)).sort((a, b) => a - b);
+  const missingRanks = [];
+  for (let rank = 1; rank <= context.topLimit; rank += 1) {
+    if (!markerRanks.has(rank)) missingRanks.push(rank);
+  }
 
   if (missingRanks.length) {
     throw httpError(409, `Player-pool scan is incomplete. Missing ${missingRanks.length} league ranks; first missing rank is ${missingRanks[0]}.`);
