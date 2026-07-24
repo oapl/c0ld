@@ -9,6 +9,7 @@ const INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE = 6;
 const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
+const APPLICATION_COMMAND_OPTION_CHANNEL = 7;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 const MESSAGE_FLAG_COMPONENTS_V2 = 1 << 15;
 const COMPONENT_TYPE_ACTION_ROW = 1;
@@ -45,6 +46,7 @@ const CHART_LINE_RANGE = { label: "Ranks 1-4", min: 1, max: 4, cutoffRank: 3, ch
 const CHART_LOOKBACK_HOURS = 1;
 const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
 const CHART_LARGE_GAP_BREAK_MINUTES = 25;
+const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 let chartDuckImagePromise = null;
 
 export default {
@@ -93,6 +95,16 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-lg-command") {
         requireAdmin(request, env);
         return await registerLgCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-server-command") {
+        requireAdmin(request, env);
+        return await registerServerCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-tracking-command") {
+        requireAdmin(request, env);
+        return await registerTrackingCommand(url, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/commands") {
@@ -245,6 +257,28 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "server" || commandName === "tracking") {
+    const subcommand = getSubcommandName(interaction);
+    const managementAction =
+      commandName === "tracking" ||
+      (commandName === "server" && ["add", "remove"].includes(subcommand));
+
+    if (managementAction && !memberCanManageServerTracker(interaction, env)) {
+      return interactionJson(messageResponse(
+        "You need Manage Server permission or an approved tracker-admin role to change private-server tracking.",
+        true
+      ));
+    }
+
+    ctx.waitUntil(completeServerTrackerInteraction(interaction, env, commandName, subcommand));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
   if (commandName !== "search") {
     return interactionJson(messageResponse(`Unknown command: ${commandName || "none"}`));
   }
@@ -318,6 +352,192 @@ async function buildSearchResponse(query, env) {
       flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
     }
   };
+}
+
+async function completeServerTrackerInteraction(interaction, env, commandName, subcommand) {
+  try {
+    const guildId = String(interaction.guild_id || "").trim();
+    const channelId = String(interaction.channel_id || "").trim();
+    const actorId = interactionUserId(interaction);
+    if (!guildId) throw httpError(400, "Private-server tracking is only available inside a Discord server.");
+
+    let payload;
+    if (commandName === "server" && subcommand === "add") {
+      const serverLink = getCommandOption(interaction, "link");
+      if (!serverLink) throw httpError(400, "Use `/server add link:<private server link>`.");
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/add", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: channelId,
+          actor_id: actorId,
+          server_link: serverLink,
+          place_id: getCommandOption(interaction, "place_id") || undefined
+        }
+      });
+    } else if (commandName === "server" && subcommand === "remove") {
+      const server = getCommandOption(interaction, "server");
+      if (!server) throw httpError(400, "Use `/server remove server:S1`.");
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/remove", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          actor_id: actorId,
+          server
+        }
+      });
+    } else if (commandName === "server" && subcommand === "list") {
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/list", {
+        query: { guild_id: guildId }
+      });
+    } else if (commandName === "server" && subcommand === "who") {
+      const server = getCommandOption(interaction, "server");
+      if (!server) throw httpError(400, "Use `/server who server:S1`.");
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/who", {
+        query: { guild_id: guildId, server }
+      });
+    } else if (commandName === "tracking" && ["enable", "disable"].includes(subcommand)) {
+      const configuredChannel = getCommandOption(interaction, "channel") || channelId;
+      payload = await serverTrackerApiRequest(env, "/api/tracker/tracking", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: configuredChannel,
+          actor_id: actorId,
+          enabled: subcommand === "enable"
+        }
+      });
+    } else {
+      throw httpError(400, `Unknown /${commandName} action.`);
+    }
+
+    await editOriginalInteraction(interaction, buildServerTrackerCommandMessage(commandName, subcommand, payload));
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Private-server tracker failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
+  if (commandName === "server" && subcommand === "list") {
+    const servers = Array.isArray(payload.servers) ? payload.servers : [];
+    const lines = servers.map(server => {
+      const population = trackerPopulation(server);
+      const stale = server.stale && server.status !== "pending" ? " · last known" : "";
+      const link = server.server_link ? ` · [Join](${server.server_link})` : "";
+      return `${trackerStatusIcon(server.status)} **${server.label || `S${server.server_number}`}** · ${population}${stale}${link}`;
+    });
+
+    return {
+      content: "",
+      embeds: [{
+        title: "Tracked Roblox Private Servers",
+        description: lines.length ? lines.join("\n").slice(0, 4000) : "No private servers are currently tracked.",
+        color: 0x58a6ff,
+        fields: [
+          {
+            name: "Tracking",
+            value: payload.guild?.tracking_enabled ? "Enabled" : "Disabled",
+            inline: true
+          },
+          {
+            name: "Last Refresh",
+            value: payload.guild?.last_refresh_at ? discordTime(payload.guild.last_refresh_at) : "Not refreshed yet",
+            inline: true
+          }
+        ]
+      }],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "server" && subcommand === "who") {
+    const server = payload.server || {};
+    const players = Array.isArray(payload.players) ? payload.players : [];
+    const playerLines = players.map((player, index) => {
+      const name = escapeDiscordMarkdown(player.display_name || player.username || `user_${player.user_id || index + 1}`);
+      const profile = player.profile_url || (player.user_id
+        ? `https://www.roblox.com/users/${encodeURIComponent(player.user_id)}/profile`
+        : "");
+      const linkedName = profile ? `[${name}](${profile})` : name;
+      return `${index + 1}. ${linkedName} · ${player.clan || "Other"}`;
+    });
+
+    return {
+      content: "",
+      embeds: [{
+        title: `${server.label || `S${server.server_number || "?"}`} · ${trackerPopulation(server)}`,
+        description: playerLines.length
+          ? playerLines.join("\n").slice(0, 4000)
+          : server.status === "pending"
+            ? "This link is saved. Player tracking will begin after the central observer Roblox account can access it."
+          : server.status === "offline"
+            ? "This private server is currently offline."
+            : "No player identities are available for the latest observation.",
+        color: 0x58a6ff,
+        fields: [
+          { name: "Status", value: `${trackerStatusIcon(server.status)} ${server.status || "unavailable"}`, inline: true },
+          { name: "Observed", value: discordTime(server.observed_at), inline: true },
+          { name: "Place", value: String(server.place_id || "-"), inline: true }
+        ]
+      }],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "server" && subcommand === "add") {
+    const server = payload.server || {};
+    return {
+      content: payload.resolved
+        ? `${server.label || `S${server.server_number || "?"}`} was ${payload.action || "added"} and matched to vipServerId ${server.vip_server_id}.`
+        : `${server.label || `S${server.server_number || "?"}`} was ${payload.action || "added"}. It is awaiting access for the central observer Roblox account; tracking will begin automatically once it resolves.`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "server" && subcommand === "remove") {
+    const server = payload.server || {};
+    return {
+      content: `${server.label || `S${server.server_number || "?"}`} was removed from active tracking. Its observation history was preserved.`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  return {
+    content: `Private-server tracking is now **${payload.tracking_enabled ? "enabled" : "disabled"}** for this Discord server.`,
+    embeds: [],
+    components: [],
+    allowed_mentions: { parse: [] }
+  };
+}
+
+function trackerPopulation(server) {
+  if (server?.status === "pending") return "awaiting observer access";
+  if (server?.playing === null || server?.playing === undefined || server?.playing === "") {
+    return "unknown population";
+  }
+  const playing = Number(server?.playing);
+  const maxPlayers = Number(server?.max_players);
+  if (!Number.isFinite(playing)) return "unknown population";
+  return `${playing}/${Number.isFinite(maxPlayers) && maxPlayers > 0 ? maxPlayers : "?"}`;
+}
+
+function trackerStatusIcon(status) {
+  if (status === "pending") return "🟡";
+  if (status === "online") return "🟢";
+  if (status === "full") return "🟣";
+  if (status === "offline") return "🔴";
+  return "🟠";
 }
 
 async function completeLeagueInfoInteraction(interaction, env, leagueName, options = {}) {
@@ -3156,6 +3376,14 @@ async function registerLgCommand(url, env) {
   return registerCommand(url, env, lgCommandPayload());
 }
 
+async function registerServerCommand(url, env) {
+  return registerCommand(url, env, serverCommandPayload());
+}
+
+async function registerTrackingCommand(url, env) {
+  return registerCommand(url, env, trackingCommandPayload());
+}
+
 async function registerCommand(url, env, commandPayload) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
@@ -3732,6 +3960,48 @@ async function fetchLeagueApi(env, url, init) {
   return fetch(request);
 }
 
+async function serverTrackerApiRequest(env, path, options = {}) {
+  const token = String(env.SERVERS_API_TOKEN || env.SERVER_TRACKER_API_TOKEN || "").trim();
+  if (!token) throw httpError(500, "Missing SERVERS_API_TOKEN on the Discord interactions Worker.");
+
+  const base = hasServersApiServiceBinding(env)
+    ? "https://c0ld-servers-worker.service"
+    : String(env.SERVERS_API_BASE || "https://c0ld-servers-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const url = new URL(path, base);
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Private-Server-Tracker"
+    }
+  };
+  if (options.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  }
+
+  const request = new Request(url.toString(), init);
+  const response = hasServersApiServiceBinding(env)
+    ? await env.SERVERS_API_WORKER.fetch(request)
+    : await fetch(request);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Private-server API failed (${response.status}).`);
+  }
+  return payload;
+}
+
+function hasServersApiServiceBinding(env) {
+  return Boolean(env?.SERVERS_API_WORKER && typeof env.SERVERS_API_WORKER.fetch === "function");
+}
+
 async function fetchDiscordDebugEndpoint(env, path) {
   const res = await fetch(`${DISCORD_API_BASE}${path}`, {
     headers: discordBotHeaders(env)
@@ -3930,6 +4200,96 @@ function lgCommandPayload() {
   };
 }
 
+function serverCommandPayload() {
+  return {
+    name: "server",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Manage and inspect Roblox private-server tracking.",
+    dm_permission: false,
+    options: [
+      {
+        name: "add",
+        description: "Add an authorized Roblox private server to this Discord server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "link",
+            description: "Roblox private-server share or access link",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          },
+          {
+            name: "place_id",
+            description: `Roblox place ID; defaults to ${DEFAULT_TRACKER_PLACE_ID}`,
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false
+          }
+        ]
+      },
+      {
+        name: "remove",
+        description: "Stop tracking a server while preserving its history.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "server",
+            description: "Tracker server ID, for example S1",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          }
+        ]
+      },
+      {
+        name: "list",
+        description: "List this Discord server's tracked private servers.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "who",
+        description: "Show the players last observed in a tracked private server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "server",
+            description: "Tracker server ID, for example S1",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function trackingCommandPayload() {
+  return {
+    name: "tracking",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Enable or disable this guild's persistent private-server tracker.",
+    dm_permission: false,
+    options: [
+      {
+        name: "enable",
+        description: "Enable tracking and publish the persistent tracker message.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "channel",
+            description: "Channel for the persistent tracker message; defaults to this channel",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false
+          }
+        ]
+      },
+      {
+        name: "disable",
+        description: "Disable scheduled tracking for this Discord server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -3961,6 +4321,25 @@ function memberHasAllowedRole(interaction, env) {
     ? interaction.member.roles.map(role => String(role))
     : [];
 
+  return memberRoles.some(roleId => allowedRoleIds.includes(roleId));
+}
+
+function memberCanManageServerTracker(interaction, env) {
+  let permissions = 0n;
+  try {
+    permissions = BigInt(String(interaction?.member?.permissions || "0"));
+  } catch {}
+  const administrator = 1n << 3n;
+  const manageGuild = 1n << 5n;
+  if ((permissions & administrator) === administrator || (permissions & manageGuild) === manageGuild) {
+    return true;
+  }
+
+  const allowedRoleIds = parseCsv(env.SERVER_TRACKER_ADMIN_ROLE_IDS);
+  if (!allowedRoleIds.length) return false;
+  const memberRoles = Array.isArray(interaction?.member?.roles)
+    ? interaction.member.roles.map(role => String(role))
+    : [];
   return memberRoles.some(roleId => allowedRoleIds.includes(roleId));
 }
 

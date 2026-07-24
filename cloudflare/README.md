@@ -1061,5 +1061,82 @@ server audit events in Supabase.
 Run this Supabase migration first:
 
 ```text
-supabase/migrations/008_servers.sql
+supabase/migrations/008_c0ld_servers.sql
 ```
+
+### Discord private-server tracker
+
+The same Worker also supports guild-local Roblox private-server tracking for
+the `/server` and `/tracking` commands. Run:
+
+```text
+supabase/migrations/033_private_server_tracker.sql
+supabase/migrations/034_private_server_pending_resolution.sql
+```
+
+The tracker stores its configuration, stable `vipServerId` records, and
+time-stamped observations in:
+
+- `discord_server_tracker_guilds`
+- `discord_server_tracker_servers`
+- `discord_server_tracker_observations`
+
+The transient Roblox Job ID is only written to an observation. It is never
+used to identify a tracked server.
+
+Set these secrets on `c0ld-servers-worker`:
+
+| Secret | Purpose |
+|---|---|
+| `SUPABASE_URL` | c0ld Supabase project URL. |
+| `SUPABASE_SERVICE_KEY` | Supabase service-role key. |
+| `SERVERS_ADMIN_TOKEN` | Shared private API token. |
+| `ROBLOX_SECURITY_COOKIE` | Raw `.ROBLOSECURITY` value for the observer Roblox account. |
+| `DISCORD_BOT_TOKEN` | Token for editing each guild's persistent tracker message. |
+
+Set `SERVER_TRACKER_ENABLED=true` and use a five-minute cron. Each guild's
+`refresh_minutes` value defaults to 10, so cron invocations that occur before a
+guild is due are skipped.
+
+Discord users never provide a Roblox cookie. There is one central observer
+account whose cookie remains a Worker secret and must never be committed, put
+in Supabase, or sent to the Discord interaction Worker.
+
+`/server add` accepts and numbers every valid private-server link immediately.
+If the central observer account cannot see a submitted server yet, it is stored
+as `pending` and displayed as "Awaiting observer access." Grant that Roblox
+account access to the server; a later scheduled collection will resolve the
+record to its stable `vipServerId` and begin population/roster observations
+automatically.
+
+Set these on `c0ld-discord-search`:
+
+| Setting | Purpose |
+|---|---|
+| `SERVERS_API_WORKER` | Service binding to `c0ld-servers-worker`. |
+| `SERVERS_API_TOKEN` | Secret matching `SERVERS_ADMIN_TOKEN`. |
+| `SERVER_TRACKER_ADMIN_ROLE_IDS` | Optional comma-separated roles allowed to change tracking. |
+
+Discord members with Administrator or Manage Server can always use
+`/server add`, `/server remove`, `/tracking enable`, and `/tracking disable`.
+`/server list` and `/server who` are available to guild members.
+
+After deploying both Workers, register the new commands with the existing
+PowerShell helper:
+
+```powershell
+.\scripts\discord-search-command-admin.ps1 `
+  -WorkerUrl "https://discord-search-interactions-worker.opal-dde.workers.dev" `
+  -GuildId "YOUR_GUILD_ID" `
+  -Token "YOUR_REGISTER_ADMIN_TOKEN" `
+  -SkipDelete
+```
+
+The tracker commands are:
+
+- `/tracking enable [channel]`
+- `/tracking disable`
+- `/server add link:<private-server-link> [place_id]`
+- `/server remove server:<S1>`
+- `/server list`
+- `/server who server:<S1>`

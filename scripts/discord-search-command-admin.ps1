@@ -16,6 +16,8 @@ param(
 
   [switch]$RegisterGlobal,
 
+  [switch]$TrackerOnly,
+
   [switch]$SkipDelete,
 
   [switch]$SkipDebug,
@@ -68,30 +70,69 @@ function Invoke-C0ldDiscordWorker {
     [string]$Path,
 
     [ValidateSet("GET", "POST", "DELETE")]
-    [string]$Method = "GET"
+    [string]$Method = "GET",
+
+    [int]$MaxAttempts = 6
   )
 
   $uri = "$adminBase$Path"
-  try {
-    Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
-  } catch {
-    $statusCode = $null
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     try {
-      $statusCode = [int]$_.Exception.Response.StatusCode
+      return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
     } catch {
+      $requestError = $_
       $statusCode = $null
-    }
+      $errorPayload = $null
+      try {
+        $statusCode = [int]$requestError.Exception.Response.StatusCode
+      } catch {
+        $statusCode = $null
+      }
+      try {
+        $errorPayload = $requestError.ErrorDetails.Message | ConvertFrom-Json
+      } catch {
+        $errorPayload = $null
+      }
 
-    if ($statusCode -eq 401) {
-      Write-Host ""
-      Write-Host "401 Unauthorized from Worker admin route." -ForegroundColor Yellow
-      Write-Host "The route exists, but the token sent here does not match REGISTER_ADMIN_TOKEN or INGEST_ADMIN_TOKEN on that Worker." -ForegroundColor Yellow
-      Write-Host "Check that the secret is set on this exact Worker and that Cloudflare saved/deployed the updated variable." -ForegroundColor Yellow
-      Write-Host ""
-    }
+      $discordStatusCode = $null
+      if ($null -ne $errorPayload -and $null -ne $errorPayload.status) {
+        try {
+          $discordStatusCode = [int]$errorPayload.status
+        } catch {
+          $discordStatusCode = $null
+        }
+      }
+      $rateLimited = $statusCode -eq 429 -or $discordStatusCode -eq 429
 
-    throw
+      if ($rateLimited -and $attempt -lt $MaxAttempts) {
+        $retryAfterSeconds = 2.0
+        if ($null -ne $errorPayload) {
+          if ($null -ne $errorPayload.details.retry_after) {
+            $retryAfterSeconds = [double]$errorPayload.details.retry_after
+          } elseif ($null -ne $errorPayload.retry_after) {
+            $retryAfterSeconds = [double]$errorPayload.retry_after
+          }
+        }
+
+        $waitMilliseconds = [Math]::Ceiling(([Math]::Max(0.5, $retryAfterSeconds) + 0.35) * 1000)
+        Write-Host "Discord rate limit reached. Retrying in $([Math]::Round($waitMilliseconds / 1000, 2)) seconds (attempt $attempt/$MaxAttempts)..." -ForegroundColor Yellow
+        Start-Sleep -Milliseconds $waitMilliseconds
+        continue
+      }
+
+      if ($statusCode -eq 401) {
+        Write-Host ""
+        Write-Host "401 Unauthorized from Worker admin route." -ForegroundColor Yellow
+        Write-Host "The route exists, but the token sent here does not match REGISTER_ADMIN_TOKEN or INGEST_ADMIN_TOKEN on that Worker." -ForegroundColor Yellow
+        Write-Host "Check that the secret is set on this exact Worker and that Cloudflare saved/deployed the updated variable." -ForegroundColor Yellow
+        Write-Host ""
+      }
+
+      throw
+    }
   }
+
+  throw "Worker request still failed after $MaxAttempts attempts: $Method $uri"
 }
 
 Write-Host "Checking Worker..." -ForegroundColor Cyan
@@ -138,14 +179,24 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search, /version, /clan, /duck, and /lg..." -ForegroundColor Cyan
-  $registerPaths = @(
-    "/admin/register-search-command",
-    "/admin/register-version-command",
-    "/admin/register-clan-command",
-    "/admin/register-duck-command",
-    "/admin/register-lg-command"
-  )
+  $registerPaths = if ($TrackerOnly) {
+    Write-Host "Registering /server and /tracking..." -ForegroundColor Cyan
+    @(
+      "/admin/register-server-command",
+      "/admin/register-tracking-command"
+    )
+  } else {
+    Write-Host "Registering /search, /version, /clan, /duck, /lg, /server, and /tracking..." -ForegroundColor Cyan
+    @(
+      "/admin/register-search-command",
+      "/admin/register-version-command",
+      "/admin/register-clan-command",
+      "/admin/register-duck-command",
+      "/admin/register-lg-command",
+      "/admin/register-server-command",
+      "/admin/register-tracking-command"
+    )
+  }
   foreach ($path in $registerPaths) {
     $registerPath = if ($RegisterGlobal) {
       $path
@@ -155,6 +206,7 @@ if (-not $SkipRegister) {
     }
     Invoke-C0ldDiscordWorker -Method POST -Path $registerPath |
       ConvertTo-Json -Depth 8
+    Start-Sleep -Milliseconds 600
   }
 }
 

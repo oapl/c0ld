@@ -9,6 +9,15 @@ const ROBLOX_BATCH_SIZE = 100;
 const DEFAULT_STATUS_SERVER_NUMBER = 20;
 const DISCORD_STATUS_EVENT_TYPE = "server_status_discord_message";
 const DISCORD_STATUS_COLOR = 0xff9b96;
+const TRACKER_GUILDS_TABLE = "discord_server_tracker_guilds";
+const TRACKER_SERVERS_TABLE = "discord_server_tracker_servers";
+const TRACKER_OBSERVATIONS_TABLE = "discord_server_tracker_observations";
+const DEFAULT_TRACKER_PLACE_ID = 8737899170;
+const DEFAULT_TRACKER_REFRESH_MINUTES = 10;
+const TRACKER_DISCORD_COLOR = 0x3498db;
+const TRACKER_DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
+const TRACKER_DISCORD_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/3e/PS99_Genie_Fox.png/revision/latest/scale-to-width/360?cb=20260718171435";
+const TRACKER_DISCORD_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Last Updated:";
 
 export default {
   async fetch(request, env) {
@@ -21,7 +30,15 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
-        response = json({ ok: true, service: "c0ld-servers" });
+        response = json({
+          ok: true,
+          service: "c0ld-servers",
+          private_server_tracker: {
+            roblox_auth_configured: Boolean(String(env.ROBLOX_SECURITY_COOKIE || "").trim()),
+            discord_bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
+            scheduler_enabled: trackerSchedulerEnabled(env)
+          }
+        });
       } else if (request.method === "GET" && url.pathname === "/api/servers") {
         response = await handleServers(env);
       } else if (request.method === "GET" && url.pathname === "/api/servers/submission-status") {
@@ -46,6 +63,24 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/admin/discord/server-status") {
         requireAdmin(request, env);
         response = await handlePublishServerStatus(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/tracker/server/add") {
+        requireAdmin(request, env);
+        response = await handleTrackerServerAdd(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/tracker/server/remove") {
+        requireAdmin(request, env);
+        response = await handleTrackerServerRemove(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/tracker/server/list") {
+        requireAdmin(request, env);
+        response = await handleTrackerServerList(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/tracker/server/who") {
+        requireAdmin(request, env);
+        response = await handleTrackerServerWho(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/tracker/tracking") {
+        requireAdmin(request, env);
+        response = await handleTrackerToggle(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/tracker/refresh") {
+        requireAdmin(request, env);
+        response = await handleTrackerRefresh(request, env);
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -61,12 +96,1009 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
-      publishScheduledServerStatus(env).catch(err => {
-        console.error("Discord server status publish failed", err);
+      Promise.allSettled([
+        publishScheduledServerStatus(env),
+        refreshEnabledGuildTrackers(env)
+      ]).then(results => {
+        if (results[0].status === "rejected") {
+          console.error("Discord server status publish failed", results[0].reason);
+        }
+        if (results[1].status === "rejected") {
+          console.error("Private server tracker refresh failed", results[1].reason);
+        }
       })
     );
   }
 };
+
+async function handleTrackerServerAdd(request, env) {
+  requireSupabase(env);
+  const body = await readJsonOptional(request);
+  const guildId = trackerGuildId(body.guild_id);
+  const channelId = trackerChannelId(body.channel_id, false);
+  const serverLink = firstString(body.server_link, body.link);
+  const placeId = trackerPlaceId(body.place_id, DEFAULT_TRACKER_PLACE_ID);
+  const actorId = firstString(body.actor_id, body.user_id);
+
+  if (!serverLink) throw httpError(400, "A Roblox private-server link is required.");
+
+  const reference = parsePrivateServerReference(serverLink);
+  if (!reference.code && !reference.vipServerId) {
+    throw httpError(400, "Could not read a private-server share code, access code, or vipServerId from that value.");
+  }
+
+  const guild = await ensureTrackerGuild(env, {
+    guild_id: guildId,
+    channel_id: channelId,
+    default_place_id: placeId,
+    created_by_discord_id: actorId
+  });
+  let authorized = [];
+  let collectionError = "";
+  try {
+    authorized = await fetchRobloxPrivateServers(env, placeId);
+  } catch (err) {
+    collectionError = err?.message || String(err);
+  }
+  const matches = authorized.filter(row => privateServerMatchesReference(row, reference));
+
+  if (matches.length > 1) {
+    throw httpError(409, "That link matched more than one authorized private server. Use a link containing its exact access code.");
+  }
+
+  const remote = matches[0] || null;
+  const vipServerId = remote ? robloxVipServerId(remote) : "";
+  const resolved = Boolean(remote && vipServerId);
+  const resolutionError = resolved
+    ? ""
+    : collectionError
+      ? "Awaiting observer access; the latest Roblox collection was unavailable."
+      : `Awaiting observer access. The account currently sees ${authorized.length} other private servers for this place.`;
+  const existing = await findTrackerServerByStableReference(env, guildId, placeId, reference, vipServerId);
+  const now = new Date().toISOString();
+  const serverValues = {
+    guild_id: guildId,
+    place_id: placeId,
+    vip_server_id: vipServerId || existing?.vip_server_id || null,
+    access_code: firstString(remote?.accessCode, remote?.access_code, reference.accessCode, existing?.access_code) || null,
+    share_code: firstString(reference.shareCode, remote?.shareCode, remote?.share_code, existing?.share_code, reference.code) || null,
+    server_link: serverLink,
+    server_name: firstString(remote?.name, remote?.serverName, existing?.server_name) || null,
+    owner_user_id: trackerOptionalInteger(remote?.owner?.id, remote?.ownerId, remote?.owner_user_id, existing?.owner_user_id),
+    owner_username: firstString(remote?.owner?.name, remote?.owner?.username, remote?.ownerName, existing?.owner_username) || null,
+    resolution_status: resolved ? "resolved" : "pending",
+    resolution_error: resolutionError || null,
+    last_resolution_at: now,
+    is_active: true,
+    created_by_discord_id: actorId,
+    updated_at: now
+  };
+
+  let tracked;
+  if (existing) {
+    const rows = await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${existing.id}` }, serverValues);
+    tracked = rows?.[0] || { ...existing, ...serverValues };
+  } else {
+    const serverNumber = await nextTrackerServerNumber(env, guildId);
+    const rows = await supabaseInsert(env, TRACKER_SERVERS_TABLE, [{
+      ...serverValues,
+      server_number: serverNumber
+    }]);
+    tracked = rows?.[0];
+  }
+
+  if (resolved) {
+    const memberSets = await fetchClanMemberSets(env);
+    const observation = await buildTrackerObservation(tracked, remote, memberSets, env, now);
+    await supabaseInsert(env, TRACKER_OBSERVATIONS_TABLE, [observation]);
+  }
+  await markTrackerGuildRefresh(env, guild, now, collectionError);
+  const state = await loadTrackerState(env, guildId);
+  const published = await publishTrackerMessage(env, state).catch(err => ({
+    ok: false,
+    message: err?.message || String(err)
+  }));
+
+  return json({
+    ok: true,
+    action: existing ? "updated" : "added",
+    resolved,
+    resolution_message: resolved
+      ? "Matched to the stable Roblox vipServerId."
+      : "Saved immediately. The tracker will resolve it automatically after the central observer account can access the server.",
+    server: serializeTrackedServer(state.servers.find(row => row.id === tracked.id) || tracked),
+    persistent_message: published
+  });
+}
+
+async function handleTrackerServerRemove(request, env) {
+  requireSupabase(env);
+  const body = await readJsonOptional(request);
+  const guildId = trackerGuildId(body.guild_id);
+  const reference = firstString(body.server, body.server_id, body.server_number);
+  if (!reference) throw httpError(400, "Provide a server such as S1.");
+
+  const server = await findTrackedServer(env, guildId, reference, false);
+  if (!server) throw httpError(404, `No tracked server matched ${reference}.`);
+
+  const rows = await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, {
+    is_active: false,
+    updated_at: new Date().toISOString()
+  });
+  const state = await loadTrackerState(env, guildId);
+  const published = await publishTrackerMessage(env, state).catch(err => ({
+    ok: false,
+    message: err?.message || String(err)
+  }));
+
+  return json({
+    ok: true,
+    action: "removed",
+    server: serializeTrackedServer(rows?.[0] || server),
+    persistent_message: published
+  });
+}
+
+async function handleTrackerServerList(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const guildId = trackerGuildId(url.searchParams.get("guild_id"));
+  const state = await loadTrackerState(env, guildId);
+  return json(serializeTrackerState(state));
+}
+
+async function handleTrackerServerWho(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const guildId = trackerGuildId(url.searchParams.get("guild_id"));
+  const reference = firstString(url.searchParams.get("server"), url.searchParams.get("server_id"));
+  if (!reference) throw httpError(400, "Provide ?server=S1.");
+
+  const state = await loadTrackerState(env, guildId);
+  const server = findTrackedServerInState(state.servers, reference);
+  if (!server) throw httpError(404, `No active tracked server matched ${reference}.`);
+
+  return json({
+    ok: true,
+    guild: serializeTrackerGuild(state.guild),
+    server: serializeTrackedServer(server),
+    players: jsonArray(server.effective_observation?.players)
+  });
+}
+
+async function handleTrackerToggle(request, env) {
+  requireSupabase(env);
+  const body = await readJsonOptional(request);
+  const guildId = trackerGuildId(body.guild_id);
+  const channelId = trackerChannelId(body.channel_id, true);
+  const enabled = Boolean(body.enabled);
+  const guild = await ensureTrackerGuild(env, {
+    guild_id: guildId,
+    channel_id: channelId,
+    tracking_enabled: enabled,
+    default_place_id: trackerPlaceId(body.place_id, DEFAULT_TRACKER_PLACE_ID),
+    created_by_discord_id: firstString(body.actor_id, body.user_id)
+  });
+
+  let result;
+  if (enabled) {
+    result = await collectTrackerGuild(env, guild, { source: "command" });
+  } else {
+    const state = await loadTrackerState(env, guildId);
+    result = {
+      ok: true,
+      state: serializeTrackerState(state),
+      persistent_message: await publishTrackerMessage(env, state).catch(err => ({
+        ok: false,
+        message: err?.message || String(err)
+      }))
+    };
+  }
+
+  return json({
+    ok: true,
+    tracking_enabled: enabled,
+    ...result
+  });
+}
+
+async function handleTrackerRefresh(request, env) {
+  requireSupabase(env);
+  const body = await readJsonOptional(request);
+  const url = new URL(request.url);
+  const guildId = trackerGuildId(firstString(body.guild_id, url.searchParams.get("guild_id")));
+  const guild = await fetchTrackerGuild(env, guildId);
+  if (!guild) throw httpError(404, "Tracker configuration was not found for that guild.");
+  return json(await collectTrackerGuild(env, guild, { source: "manual" }));
+}
+
+async function refreshEnabledGuildTrackers(env) {
+  if (!trackerSchedulerEnabled(env)) {
+    return { ok: true, skipped: true, message: "SERVER_TRACKER_ENABLED is not true." };
+  }
+
+  requireSupabase(env);
+  const guilds = await supabaseSelect(env, TRACKER_GUILDS_TABLE, {
+    select: "*",
+    tracking_enabled: "eq.true",
+    order: "guild_id.asc",
+    limit: "1000"
+  });
+  const dueGuilds = guilds.filter(trackerGuildIsDue);
+  if (!dueGuilds.length) {
+    return { ok: true, refreshed: 0, message: "No tracker guilds are due." };
+  }
+
+  const placeIds = new Set();
+  const serversByGuild = new Map();
+  for (const guild of dueGuilds) {
+    const servers = await fetchTrackerServers(env, guild.guild_id);
+    serversByGuild.set(guild.guild_id, servers);
+    for (const server of servers) placeIds.add(String(server.place_id));
+  }
+
+  const authorizedByPlace = new Map();
+  for (const placeId of placeIds) {
+    try {
+      authorizedByPlace.set(placeId, {
+        rows: await fetchRobloxPrivateServers(env, placeId),
+        error: null
+      });
+    } catch (err) {
+      authorizedByPlace.set(placeId, {
+        rows: [],
+        error: err?.message || String(err)
+      });
+    }
+  }
+
+  const results = [];
+  for (const guild of dueGuilds) {
+    try {
+      results.push(await collectTrackerGuild(env, guild, {
+        source: "schedule",
+        servers: serversByGuild.get(guild.guild_id) || [],
+        authorizedByPlace
+      }));
+    } catch (err) {
+      results.push({
+        ok: false,
+        guild_id: guild.guild_id,
+        message: err?.message || String(err)
+      });
+    }
+  }
+
+  return {
+    ok: results.every(result => result.ok !== false),
+    refreshed: results.length,
+    results
+  };
+}
+
+async function collectTrackerGuild(env, guild, options = {}) {
+  const now = new Date().toISOString();
+  const servers = options.servers || await fetchTrackerServers(env, guild.guild_id);
+  const memberSets = await fetchClanMemberSets(env);
+  const authorizedByPlace = options.authorizedByPlace || new Map();
+  const errors = [];
+  const observations = [];
+  let pendingCount = 0;
+
+  for (const placeId of new Set(servers.map(server => String(server.place_id)))) {
+    if (!authorizedByPlace.has(placeId)) {
+      try {
+        authorizedByPlace.set(placeId, {
+          rows: await fetchRobloxPrivateServers(env, placeId),
+          error: null
+        });
+      } catch (err) {
+        authorizedByPlace.set(placeId, {
+          rows: [],
+          error: err?.message || String(err)
+        });
+      }
+    }
+  }
+
+  for (const server of servers) {
+    const placeResult = authorizedByPlace.get(String(server.place_id)) || {
+      rows: [],
+      error: "No Roblox collection result was available."
+    };
+    const vipServerId = firstString(server.vip_server_id);
+    const storedReference = {
+      code: normalizePrivateServerIdentifier(firstString(server.share_code, server.access_code)),
+      shareCode: normalizePrivateServerIdentifier(server.share_code),
+      accessCode: normalizePrivateServerIdentifier(server.access_code),
+      vipServerId: normalizePrivateServerIdentifier(vipServerId)
+    };
+    const remote = vipServerId
+      ? placeResult.rows.find(row => robloxVipServerId(row) === vipServerId)
+      : placeResult.rows.find(row => privateServerMatchesReference(row, storedReference));
+
+    if (remote) {
+      const resolvedVipServerId = robloxVipServerId(remote);
+      if (!resolvedVipServerId) {
+        pendingCount += 1;
+        await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, {
+          resolution_status: "pending",
+          resolution_error: "Roblox returned a matching record without a vipServerId.",
+          last_resolution_at: now,
+          updated_at: now
+        });
+        continue;
+      }
+
+      const serverUpdate = {
+        vip_server_id: resolvedVipServerId,
+        access_code: firstString(remote.accessCode, remote.access_code, server.access_code) || null,
+        server_name: firstString(remote.name, remote.serverName, server.server_name) || null,
+        owner_user_id: trackerOptionalInteger(remote.owner?.id, remote.ownerId, remote.owner_user_id, server.owner_user_id),
+        owner_username: firstString(remote.owner?.name, remote.owner?.username, remote.ownerName, server.owner_username) || null,
+        resolution_status: "resolved",
+        resolution_error: null,
+        last_resolution_at: now,
+        updated_at: now
+      };
+      if (!vipServerId || server.resolution_status !== "resolved") {
+        await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, serverUpdate);
+      }
+      observations.push(await buildTrackerObservation({ ...server, ...serverUpdate }, remote, memberSets, env, now));
+      continue;
+    }
+
+    if (!vipServerId) {
+      pendingCount += 1;
+      const message = placeResult.error
+        ? "Awaiting observer access; the latest Roblox collection was unavailable."
+        : "Awaiting observer access. Grant the central observer Roblox account access to this private server.";
+      await supabasePatch(env, TRACKER_SERVERS_TABLE, { id: `eq.${server.id}` }, {
+        resolution_status: "pending",
+        resolution_error: message,
+        last_resolution_at: now,
+        updated_at: now
+      });
+      if (placeResult.error) errors.push(`S${server.server_number}: ${placeResult.error}`);
+      continue;
+    }
+
+    const message = placeResult.error ||
+      `vipServerId ${vipServerId} was not returned by the authorized private-server endpoint.`;
+    errors.push(`S${server.server_number}: ${message}`);
+    observations.push(buildUnavailableTrackerObservation(server, message, now));
+  }
+
+  if (observations.length) {
+    await supabaseInsert(env, TRACKER_OBSERVATIONS_TABLE, observations);
+  }
+
+  const errorMessage = errors.join(" | ").slice(0, 4000);
+  await markTrackerGuildRefresh(env, guild, now, errorMessage);
+  const state = await loadTrackerState(env, guild.guild_id);
+  const published = await publishTrackerMessage(env, state).catch(err => ({
+    ok: false,
+    message: err?.message || String(err)
+  }));
+
+  return {
+    ok: !errors.length,
+    guild_id: guild.guild_id,
+    source: options.source || "manual",
+    observed_at: now,
+    tracked_server_count: servers.length,
+    unavailable_count: errors.length,
+    pending_resolution_count: pendingCount,
+    state: serializeTrackerState(state),
+    persistent_message: published
+  };
+}
+
+async function fetchRobloxPrivateServers(env, placeId) {
+  const cookieValue = firstString(env.ROBLOX_SECURITY_COOKIE, env.ROBLOSECURITY);
+  if (!cookieValue) {
+    throw httpError(500, "Missing ROBLOX_SECURITY_COOKIE on the c0ld servers Worker.");
+  }
+
+  const cookie = /^\.ROBLOSECURITY=/i.test(cookieValue)
+    ? cookieValue
+    : `.ROBLOSECURITY=${cookieValue}`;
+  const rows = [];
+  let cursor = "";
+
+  for (let page = 0; page < 100; page += 1) {
+    const url = new URL(`https://games.roblox.com/v1/games/${encodeURIComponent(placeId)}/private-servers`);
+    url.searchParams.set("cursor", cursor);
+    url.searchParams.set("sortOrder", "Desc");
+    url.searchParams.set("excludeFullGames", "false");
+
+    const res = await fetchWithRetry(url.toString(), {
+      headers: {
+        Accept: "application/json",
+        Cookie: cookie,
+        "User-Agent": "c0ld-Private-Server-Tracker/1.0"
+      }
+    }, 4);
+
+    if (res.status === 401 || res.status === 403) {
+      throw httpError(502, "Roblox rejected ROBLOX_SECURITY_COOKIE. Rotate the Worker secret and confirm the observer account can access these private servers.");
+    }
+    if (!res.ok) {
+      throw httpError(502, `Roblox private-server collection failed (${res.status}): ${truncateText(await res.text(), 400)}`);
+    }
+
+    const payload = await res.json().catch(() => ({}));
+    rows.push(...(Array.isArray(payload.data) ? payload.data : []));
+    cursor = firstString(payload.nextPageCursor);
+    if (!cursor) break;
+  }
+
+  return rows;
+}
+
+async function fetchWithRetry(url, init, attempts) {
+  let lastResponse;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    lastResponse = await fetch(url, init);
+    if (lastResponse.ok || ![429, 500, 502, 503, 504].includes(lastResponse.status) || attempt === attempts) {
+      return lastResponse;
+    }
+
+    const retryAfter = Number(lastResponse.headers.get("Retry-After"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 30000)
+      : Math.min(1000 * (2 ** (attempt - 1)), 10000);
+    await sleep(delayMs);
+  }
+  return lastResponse;
+}
+
+async function buildTrackerObservation(server, remote, memberSets, env, observedAt) {
+  const players = await enrichPlayers(annotatePlayers(normalizeRobloxServerPlayers(remote.players), memberSets), env);
+  const playing = trackerOptionalInteger(remote.playing, players.length);
+  const maxPlayers = trackerOptionalInteger(remote.maxPlayers, remote.max_players);
+  const status = !remote.id || !playing
+    ? "offline"
+    : maxPlayers && playing >= maxPlayers
+      ? "full"
+      : "online";
+
+  return {
+    tracked_server_id: server.id,
+    guild_id: server.guild_id,
+    place_id: Number(server.place_id),
+    vip_server_id: String(server.vip_server_id),
+    job_id: firstString(remote.id),
+    playing: playing ?? 0,
+    max_players: maxPlayers,
+    players,
+    player_tokens: Array.isArray(remote.playerTokens) ? remote.playerTokens : [],
+    clan_counts: countPlayerClans(players),
+    fps: trackerOptionalNumber(remote.fps),
+    ping: trackerOptionalNumber(remote.ping),
+    status,
+    collection_error: null,
+    observed_at: observedAt,
+    raw_payload: remote
+  };
+}
+
+function buildUnavailableTrackerObservation(server, message, observedAt) {
+  return {
+    tracked_server_id: server.id,
+    guild_id: server.guild_id,
+    place_id: Number(server.place_id),
+    vip_server_id: String(server.vip_server_id),
+    job_id: null,
+    playing: null,
+    max_players: null,
+    players: [],
+    player_tokens: [],
+    clan_counts: {},
+    fps: null,
+    ping: null,
+    status: "unavailable",
+    collection_error: truncateText(message, 1000),
+    observed_at: observedAt,
+    raw_payload: null
+  };
+}
+
+function normalizeRobloxServerPlayers(value) {
+  return (Array.isArray(value) ? value : []).map((player, index) => ({
+    user_id: firstString(player.id, player.userId, player.user_id),
+    username: firstString(player.name, player.username),
+    display_name: firstString(player.displayName, player.display_name),
+    avatar_url: firstString(player.avatarUrl, player.avatar_url),
+    slot: index + 1
+  }));
+}
+
+async function ensureTrackerGuild(env, values) {
+  const existing = await fetchTrackerGuild(env, values.guild_id);
+  const now = new Date().toISOString();
+  const row = {
+    guild_id: values.guild_id,
+    channel_id: firstString(values.channel_id, existing?.channel_id) || null,
+    tracking_enabled: values.tracking_enabled === undefined
+      ? Boolean(existing?.tracking_enabled)
+      : Boolean(values.tracking_enabled),
+    default_place_id: trackerPlaceId(values.default_place_id, existing?.default_place_id || DEFAULT_TRACKER_PLACE_ID),
+    refresh_minutes: trackerRefreshMinutes(values.refresh_minutes, existing?.refresh_minutes),
+    created_by_discord_id: firstString(existing?.created_by_discord_id, values.created_by_discord_id) || null,
+    updated_at: now
+  };
+  const rows = await supabaseUpsert(env, TRACKER_GUILDS_TABLE, [row], "guild_id");
+  return rows?.[0] || { ...existing, ...row };
+}
+
+async function fetchTrackerGuild(env, guildId) {
+  return fetchSingle(env, TRACKER_GUILDS_TABLE, {
+    select: "*",
+    guild_id: `eq.${guildId}`
+  });
+}
+
+async function fetchTrackerServers(env, guildId, activeOnly = true) {
+  const params = {
+    select: "*",
+    guild_id: `eq.${guildId}`,
+    order: "server_number.asc",
+    limit: "1000"
+  };
+  if (activeOnly) params.is_active = "eq.true";
+  return supabaseSelect(env, TRACKER_SERVERS_TABLE, params);
+}
+
+async function nextTrackerServerNumber(env, guildId) {
+  const rows = await supabaseSelect(env, TRACKER_SERVERS_TABLE, {
+    select: "server_number",
+    guild_id: `eq.${guildId}`,
+    order: "server_number.desc",
+    limit: "1"
+  });
+  return Number(rows?.[0]?.server_number || 0) + 1;
+}
+
+async function findTrackedServer(env, guildId, reference, activeOnly = true) {
+  const servers = await fetchTrackerServers(env, guildId, activeOnly);
+  return findTrackedServerInState(servers, reference);
+}
+
+async function findTrackerServerByStableReference(env, guildId, placeId, reference, vipServerId) {
+  const servers = await fetchTrackerServers(env, guildId, false);
+  const normalizedVipServerId = normalizePrivateServerIdentifier(vipServerId);
+  const referenceIdentifiers = new Set([
+    reference.code,
+    reference.shareCode,
+    reference.accessCode,
+    reference.vipServerId
+  ].map(normalizePrivateServerIdentifier).filter(Boolean));
+
+  return servers.find(server => {
+    if (Number(server.place_id) !== Number(placeId)) return false;
+    if (
+      normalizedVipServerId &&
+      normalizePrivateServerIdentifier(server.vip_server_id) === normalizedVipServerId
+    ) {
+      return true;
+    }
+
+    return [server.share_code, server.access_code]
+      .map(normalizePrivateServerIdentifier)
+      .filter(Boolean)
+      .some(identifier => referenceIdentifiers.has(identifier));
+  }) || null;
+}
+
+function findTrackedServerInState(servers, reference) {
+  const raw = String(reference || "").trim();
+  const serverNumberMatch = raw.match(/^s(?:erver\s*)?(\d+)$/i) || raw.match(/^(\d+)$/);
+  if (serverNumberMatch) {
+    const number = Number(serverNumberMatch[1]);
+    const numbered = servers.find(server => Number(server.server_number) === number);
+    if (numbered) return numbered;
+  }
+  return servers.find(server => String(server.vip_server_id) === raw) || null;
+}
+
+async function loadTrackerState(env, guildId) {
+  const guild = await fetchTrackerGuild(env, guildId);
+  if (!guild) {
+    return {
+      guild: {
+        guild_id: guildId,
+        tracking_enabled: false,
+        refresh_minutes: DEFAULT_TRACKER_REFRESH_MINUTES
+      },
+      servers: []
+    };
+  }
+
+  const servers = await fetchTrackerServers(env, guildId);
+  const observationLimit = String(Math.min(5000, Math.max(200, servers.length * 8)));
+  const observations = servers.length
+    ? await supabaseSelect(env, TRACKER_OBSERVATIONS_TABLE, {
+        select: "id,tracked_server_id,job_id,playing,max_players,players,player_tokens,clan_counts,fps,ping,status,collection_error,observed_at",
+        guild_id: `eq.${guildId}`,
+        order: "observed_at.desc",
+        limit: observationLimit
+      })
+    : [];
+  const successfulObservations = servers.length
+    ? await supabaseSelect(env, TRACKER_OBSERVATIONS_TABLE, {
+        select: "id,tracked_server_id,job_id,playing,max_players,players,player_tokens,clan_counts,fps,ping,status,collection_error,observed_at",
+        guild_id: `eq.${guildId}`,
+        status: "neq.unavailable",
+        order: "observed_at.desc",
+        limit: observationLimit
+      })
+    : [];
+  const latest = new Map();
+  const lastGood = new Map();
+
+  for (const observation of observations) {
+    const key = String(observation.tracked_server_id);
+    if (!latest.has(key)) latest.set(key, observation);
+  }
+  for (const observation of successfulObservations) {
+    const key = String(observation.tracked_server_id);
+    if (!lastGood.has(key)) lastGood.set(key, observation);
+  }
+
+  return {
+    guild,
+    servers: servers.map(server => {
+      const key = String(server.id);
+      const current = latest.get(key) || null;
+      const good = lastGood.get(key) || null;
+      return {
+        ...server,
+        latest_observation: current,
+        effective_observation: current?.status === "unavailable" ? good : current,
+        last_good_observation: good
+      };
+    })
+  };
+}
+
+async function markTrackerGuildRefresh(env, guild, observedAt, errorMessage) {
+  await supabasePatch(env, TRACKER_GUILDS_TABLE, { guild_id: `eq.${guild.guild_id}` }, {
+    last_refresh_at: observedAt,
+    last_success_at: errorMessage ? guild.last_success_at || null : observedAt,
+    last_error: errorMessage || null,
+    updated_at: observedAt
+  });
+}
+
+function serializeTrackerState(state) {
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    guild: serializeTrackerGuild(state.guild),
+    servers: state.servers.map(serializeTrackedServer)
+  };
+}
+
+function serializeTrackerGuild(guild) {
+  return {
+    guild_id: guild?.guild_id || null,
+    channel_id: guild?.channel_id || null,
+    message_id: guild?.message_id || null,
+    tracking_enabled: Boolean(guild?.tracking_enabled),
+    default_place_id: Number(guild?.default_place_id || DEFAULT_TRACKER_PLACE_ID),
+    refresh_minutes: Number(guild?.refresh_minutes || DEFAULT_TRACKER_REFRESH_MINUTES),
+    last_refresh_at: guild?.last_refresh_at || null,
+    last_success_at: guild?.last_success_at || null,
+    last_error: guild?.last_error || null
+  };
+}
+
+function serializeTrackedServer(server) {
+  const latest = server.latest_observation || null;
+  const effective = server.effective_observation || latest;
+  const pendingResolution = server.resolution_status === "pending" || !firstString(server.vip_server_id);
+  return {
+    id: server.id,
+    label: `S${server.server_number}`,
+    server_number: Number(server.server_number),
+    place_id: Number(server.place_id),
+    vip_server_id: firstString(server.vip_server_id) || null,
+    server_link: server.server_link,
+    server_name: server.server_name || null,
+    owner_user_id: server.owner_user_id || null,
+    owner_username: server.owner_username || null,
+    is_active: Boolean(server.is_active),
+    resolution_status: pendingResolution ? "pending" : "resolved",
+    resolution_error: server.resolution_error || null,
+    status: pendingResolution ? "pending" : latest?.status || "unavailable",
+    stale: pendingResolution || latest?.status === "unavailable",
+    job_id: effective?.job_id || null,
+    playing: effective?.playing ?? null,
+    max_players: effective?.max_players ?? null,
+    players: jsonArray(effective?.players),
+    clan_counts: effective?.clan_counts || {},
+    fps: effective?.fps ?? null,
+    ping: effective?.ping ?? null,
+    observed_at: latest?.observed_at || null,
+    last_known_at: effective?.observed_at || null,
+    collection_error: latest?.collection_error || server.resolution_error || null
+  };
+}
+
+async function publishTrackerMessage(env, state) {
+  const guild = state.guild || {};
+  if (!guild.channel_id) {
+    return { ok: true, skipped: true, message: "No tracker channel is configured." };
+  }
+
+  const payload = buildTrackerDiscordPayload(state);
+  const result = await upsertDiscordBotMessage(env, guild.channel_id, guild.message_id, payload);
+
+  if (result.message_id && result.message_id !== guild.message_id) {
+    await supabasePatch(env, TRACKER_GUILDS_TABLE, { guild_id: `eq.${guild.guild_id}` }, {
+      message_id: result.message_id,
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  return {
+    ok: true,
+    action: result.action,
+    message_id: result.message_id
+  };
+}
+
+function buildTrackerDiscordPayload(state) {
+  const guild = state.guild || {};
+  const lines = state.servers.map(server => {
+    const row = serializeTrackedServer(server);
+    const statusIcon = row.status === "pending"
+      ? "🟡"
+      : row.status === "online"
+      ? "🟢"
+      : row.status === "full"
+        ? "🟣"
+        : row.status === "offline"
+          ? "🔴"
+          : "🟠";
+    const population = row.status === "pending"
+      ? "awaiting observer access"
+      : row.playing === null
+      ? "unknown"
+      : `${row.playing}/${row.max_players || "?"}`;
+    const counts = row.clan_counts || {};
+    const stale = row.stale && row.status !== "pending" ? " · last known" : "";
+    const link = row.server_link ? ` · [Join](${row.server_link})` : "";
+    const clanCounts = row.status === "pending"
+      ? ""
+      : ` · C0LD ${Number(counts.C0LD || 0)} · WMSY ${Number(counts.WMSY || 0)} · Other ${Number(counts.other || 0)}`;
+    return `${statusIcon} **${row.label}** · ${population}${stale}${clanCounts}${link}`;
+  });
+  const serverSection = !guild.tracking_enabled
+    ? "Tracking is disabled for this server."
+    : lines.length
+      ? truncateText(lines.join("\n"), 4000)
+      : "No private servers are currently tracked. Use `/server add` to add one.";
+  const timestamp = guild.last_refresh_at || new Date().toISOString();
+  const unix = Math.floor(new Date(timestamp).getTime() / 1000);
+  return {
+    flags: TRACKER_DISCORD_COMPONENTS_V2_FLAG,
+    allowed_mentions: { parse: [] },
+    components: [{
+      type: 17,
+      accent_color: TRACKER_DISCORD_COLOR,
+      components: [
+        {
+          type: 9,
+          components: [{
+            type: 10,
+            content: [
+              "## 🖥️ Private Server Tracker",
+              `**Tracking:** ${guild.tracking_enabled ? "Enabled" : "Disabled"}`,
+              `**Refresh:** ${guild.tracking_enabled ? `Every ${Number(guild.refresh_minutes || DEFAULT_TRACKER_REFRESH_MINUTES)} minutes` : "Disabled"}`,
+              `Last Updated: <t:${unix}:R>`
+            ].join("\n")
+          }],
+          accessory: {
+            type: 11,
+            media: { url: TRACKER_DISCORD_THUMBNAIL_URL },
+            description: "PS99 Genie Fox"
+          }
+        },
+        trackerDiscordSeparator(),
+        {
+          type: 10,
+          content: `## Servers\n${serverSection}`.slice(0, 4000)
+        },
+        trackerDiscordSeparator(),
+        {
+          type: 10,
+          content: `-# **${TRACKER_DISCORD_FOOTER_TEXT} Today at <t:${unix}:t>**`
+        }
+      ]
+    }]
+  };
+}
+
+function trackerDiscordSeparator() {
+  return {
+    type: 14,
+    divider: true,
+    spacing: 1
+  };
+}
+
+async function deleteDiscordBotMessageBestEffort(token, channelId, messageId) {
+  try {
+    await fetch(
+      `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bot ${token}`,
+          Accept: "application/json"
+        }
+      }
+    );
+  } catch {}
+}
+
+async function upsertDiscordBotMessage(env, channelId, messageId, payload) {
+  const token = firstString(env.DISCORD_BOT_TOKEN);
+  if (!token) throw httpError(500, "Missing DISCORD_BOT_TOKEN on the c0ld servers Worker.");
+  const headers = {
+    Authorization: `Bot ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json"
+  };
+
+  if (messageId) {
+    const update = await fetch(
+      `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(payload)
+      }
+    );
+    if (update.ok) {
+      const message = await update.json().catch(() => ({ id: messageId }));
+      return { action: "updated", message_id: firstString(message.id, messageId), message };
+    }
+    if (update.status === 400) {
+      await deleteDiscordBotMessageBestEffort(token, channelId, messageId);
+    } else if (![403, 404].includes(update.status)) {
+      throw httpError(502, `Discord tracker message update failed (${update.status}): ${truncateText(await update.text(), 400)}`);
+    }
+  }
+
+  const create = await fetch(
+    `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!create.ok) {
+    throw httpError(502, `Discord tracker message create failed (${create.status}): ${truncateText(await create.text(), 400)}`);
+  }
+  const message = await create.json();
+  return { action: "created", message_id: firstString(message.id), message };
+}
+
+function parsePrivateServerReference(value) {
+  const raw = String(value || "").trim();
+  let code = "";
+  let vipServerId = "";
+  let accessCode = "";
+  let shareCode = "";
+
+  try {
+    const url = new URL(raw);
+    shareCode = firstString(url.searchParams.get("code"));
+    accessCode = firstString(
+      url.searchParams.get("privateServerLinkCode"),
+      url.searchParams.get("accessCode")
+    );
+    vipServerId = firstString(url.searchParams.get("vipServerId"));
+    code = firstString(shareCode, accessCode, vipServerId);
+  } catch {}
+
+  if (!code && /^[a-z0-9_-]{6,}$/i.test(raw)) code = raw;
+  if (!vipServerId && /^\d+$/.test(raw)) vipServerId = raw;
+
+  return {
+    raw,
+    code: normalizePrivateServerIdentifier(code),
+    shareCode: normalizePrivateServerIdentifier(shareCode),
+    accessCode: normalizePrivateServerIdentifier(accessCode),
+    vipServerId: normalizePrivateServerIdentifier(vipServerId)
+  };
+}
+
+function privateServerMatchesReference(server, reference) {
+  const identifiers = robloxPrivateServerIdentifiers(server);
+  if (reference.vipServerId && identifiers.has(reference.vipServerId)) return true;
+  return Boolean(reference.code && identifiers.has(reference.code));
+}
+
+function robloxPrivateServerIdentifiers(server) {
+  return new Set([
+    server.vipServerId,
+    server.vip_server_id,
+    server.accessCode,
+    server.access_code,
+    server.privateServerLinkCode,
+    server.private_server_link_code,
+    server.shareCode,
+    server.share_code,
+    server.linkCode
+  ].map(normalizePrivateServerIdentifier).filter(Boolean));
+}
+
+function robloxVipServerId(server) {
+  return normalizePrivateServerIdentifier(firstString(server.vipServerId, server.vip_server_id));
+}
+
+function normalizePrivateServerIdentifier(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function trackerGuildId(value) {
+  const guildId = String(value || "").trim();
+  if (!/^\d{10,24}$/.test(guildId)) throw httpError(400, "A valid Discord guild_id is required.");
+  return guildId;
+}
+
+function trackerChannelId(value, required) {
+  const channelId = String(value || "").trim();
+  if (!channelId && !required) return "";
+  if (!/^\d{10,24}$/.test(channelId)) throw httpError(400, "A valid Discord channel_id is required.");
+  return channelId;
+}
+
+function trackerPlaceId(value, fallback) {
+  const placeId = Math.trunc(Number(value || fallback || DEFAULT_TRACKER_PLACE_ID));
+  if (!Number.isSafeInteger(placeId) || placeId <= 0) throw httpError(400, "A valid Roblox place_id is required.");
+  return placeId;
+}
+
+function trackerRefreshMinutes(value, fallback) {
+  const number = Math.round(Number(value || fallback || DEFAULT_TRACKER_REFRESH_MINUTES));
+  return clamp(Number.isFinite(number) ? number : DEFAULT_TRACKER_REFRESH_MINUTES, 1, 60);
+}
+
+function trackerOptionalInteger(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Math.trunc(Number(value));
+    if (Number.isSafeInteger(number)) return number;
+  }
+  return null;
+}
+
+function trackerOptionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function trackerSchedulerEnabled(env) {
+  return String(env.SERVER_TRACKER_ENABLED || "").toLowerCase() === "true";
+}
+
+function trackerGuildIsDue(guild) {
+  const last = Date.parse(guild.last_refresh_at || "");
+  if (!Number.isFinite(last)) return true;
+  const refreshMs = trackerRefreshMinutes(guild.refresh_minutes) * 60 * 1000;
+  return Date.now() - last >= refreshMs - 5000;
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "");
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
 
 async function handleServers(env) {
   requireSupabase(env);
@@ -1081,6 +2113,22 @@ async function supabaseInsert(env, table, rows) {
     body: JSON.stringify(rows)
   });
   if (!res.ok) throw new Error(`Supabase insert failed for ${table} (${res.status}): ${await res.text()}`);
+  return res.json();
+}
+
+async function supabaseUpsert(env, table, rows, onConflict) {
+  const url = new URL(`${trimSlash(env.SUPABASE_URL)}/rest/v1/${table}`);
+  if (onConflict) url.searchParams.set("on_conflict", onConflict);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      ...supabaseHeaders(env),
+      "Content-Type": "application/json",
+      "Prefer": "resolution=merge-duplicates,return=representation"
+    },
+    body: JSON.stringify(rows)
+  });
+  if (!res.ok) throw new Error(`Supabase upsert failed for ${table} (${res.status}): ${await res.text()}`);
   return res.json();
 }
 
