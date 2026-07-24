@@ -7,6 +7,7 @@
   const RUN_KEY = String(config.run || config.runKey || "tap-heroes-part-2").trim();
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  let LEAGUE_END_AT = null;
   let rows = [];
   let currentData = null;
   let topLeagueRow = null;
@@ -37,6 +38,45 @@
   function delta(v){if(v==null)return'<span class="unknown">—</span>';const n=Number(v);if(!Number.isFinite(n))return'<span class="unknown">—</span>';if(n>0)return'<span class="positive">+'+shortNum(n)+'</span>';if(n<0)return'<span class="negative">'+shortNum(n)+'</span>';return'<span class="zero">0</span>'}
   function initials(s){s=String(s||"?").trim();return s.slice(0,2).toUpperCase()}
   function iconUrl(icon){const t=String(icon||"").trim();if(!t)return"";if(/^https?:\/\//i.test(t)||t.startsWith("data:"))return t;const m=t.match(/rbxassetid:\/\/(\d+)/i);if(m)return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(m[1]);if(/^\d+$/.test(t))return"https://ps99.biggamesapi.io/image/"+encodeURIComponent(t);return""}
+
+  function renderLeagueCountdown(){
+    // Source note: this countdown is driven by league_end_at from /api/health.
+    const node=document.getElementById("league-countdown");
+    if(!node) return;
+    const remaining=Date.parse(LEAGUE_END_AT)-Date.now();
+    if(!Number.isFinite(remaining)){
+      node.textContent="—";
+      return;
+    }
+    if(remaining<=0){
+      node.textContent="Ended";
+      return;
+    }
+    const totalSeconds=Math.floor(remaining/1000);
+    const days=Math.floor(totalSeconds/86400);
+    const hours=Math.floor(totalSeconds%86400/3600);
+    const minutes=Math.floor(totalSeconds%3600/60);
+    const seconds=totalSeconds%60;
+    node.textContent=(days>0?days+"d ":"")+String(hours).padStart(2,"0")+"h "+String(minutes).padStart(2,"0")+"m "+String(seconds).padStart(2,"0")+"s";
+  }
+
+  async function loadLeagueTiming(){
+    try{
+      const url=new URL(API+"/api/health");
+      url.searchParams.set("v",Date.now());
+      const r=await fetch(url,{cache:"no-store"});
+      const data=await r.json();
+      if(r.ok && data?.league_end_at){
+        LEAGUE_END_AT=data.league_end_at;
+        const node=document.getElementById("league-countdown");
+        if(node) node.dateTime=LEAGUE_END_AT;
+        renderLeagueCountdown();
+      }
+    }catch(e){
+      console.warn("Could not load league timing",e);
+    }
+  }
+
   function isFallbackMemberName(value,userId){const text=String(value||"").trim(),id=String(userId||"").trim();return !text||(id&&text===id)||/^user[ _-]?\d+$/i.test(text)}
   function memberName(row){const id=String(row?.user_id||"").trim();const names=[row?.username,row?.display_name];return names.map(value=>String(value||"").trim()).find(value=>!isFallbackMemberName(value,id))||(id?"User "+id:"Unknown player")}
   function avatar(r){const url=String(r.avatar_url||"").trim();return url?'<img class="avatar" src="'+esc(url)+'" alt="">':'<span class="avatar">'+esc(initials(memberName(r)))+'</span>'}
@@ -119,10 +159,10 @@
     currentData=data;
     document.title=leagueName+" League Tracker";
     const leaguePoints=data.league_points ?? topLeagueRow?.total_points ?? topLeagueRow?.points;
-    const snapshotAt=data.snapshot_at || topLeagueRow?.fetched_at;
     document.getElementById("league-points").textContent=shortNum(leaguePoints);
     document.getElementById("league-points").title=fullNum(leaguePoints);
-    document.getElementById("last-db-update").textContent=snapshotAt?dt(snapshotAt):"—";
+    if(!LEAGUE_END_AT && data.league_end_at) LEAGUE_END_AT=data.league_end_at;
+    renderLeagueCountdown();
     document.getElementById("page-title").textContent=leagueName+" League Tracker";
     const runLabel=document.getElementById("run-label");
     if(runLabel)runLabel.textContent=data.league_run_label||RUN_KEY;
@@ -400,6 +440,11 @@
     }catch(e){console.error(e);showError(e.message||String(e))}
     finally{loading=false}
   }
+
+  loadLeagueTiming();
+  renderLeagueCountdown();
+  setInterval(renderLeagueCountdown,1000);
+  setInterval(loadLeagueTiming, 5 * 60 * 1000);
 
   document.getElementById("refresh-btn").addEventListener("click",loadData);
   document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{

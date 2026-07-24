@@ -1160,6 +1160,58 @@ async function fetchLeagueMilestones(env, ranks) {
   };
 }
 
+async function fetchLeaguePlayerMilestones(env, ranks) {
+  const requested = [...new Set(
+    (Array.isArray(ranks) ? ranks : [])
+      .map(rank => toNumber(rank))
+      .filter(rank => Number.isFinite(rank) && rank >= 1)
+      .map(rank => Math.round(rank))
+  )].sort((a, b) => a - b);
+  const maxRequested = requested.length ? Math.max(...requested) : 500;
+  let payload = null;
+  let lastError = null;
+  const attemptLimits = [...new Set([maxRequested, 500].filter(value => Number.isFinite(value) && value > 0))];
+  for (const limit of attemptLimits.sort((a, b) => b - a)) {
+    try {
+      payload = await fetchLeagueSoloLeaderboard(env, limit);
+      break;
+    } catch (error) {
+      lastError = error;
+      if (limit <= 500) break;
+    }
+  }
+  if (!payload) {
+    throw new Error(`League player leaderboard API failed: ${lastError?.message || "unknown error"}`);
+  }
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const byRank = new Map(
+    rows
+      .map(row => {
+        const rank = toNumber(row?.rank) || 0;
+        return [rank, row];
+      })
+      .filter(([rank]) => Number.isFinite(rank) && rank >= 1)
+  );
+
+  return {
+    payload: {
+      ok: payload?.ok !== false,
+      generated_at: payload?.generated_at || new Date().toISOString(),
+      snapshot_at: payload?.snapshot_at || payload?.generated_at || null,
+      league_run_key: payload?.league_run_key || null,
+      league_run_label: payload?.league_run_label || null,
+      top_available: toNumber(payload?.top_available) || rows.length,
+      rows: requested.map(rank => {
+        const row = byRank.get(rank);
+        return row
+          ? { rank, points: toNumber(row.points), available: true }
+          : { rank, points: null, available: false };
+      })
+    },
+    ranks: requested
+  };
+}
+
 async function handleRewardCutoffs(request, env) {
   requireSupabase(env);
 
@@ -1925,7 +1977,7 @@ async function buildRewardCutoffDashboard(env) {
 }
 
 async function buildLeaguePlayerRewardCutoffs(env, ranks) {
-  const { payload } = await fetchLeagueMilestones(env, ranks);
+  const { payload } = await fetchLeaguePlayerMilestones(env, ranks);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
   const requested = [...new Set((Array.isArray(ranks) ? ranks : []).map(toNumber).filter(value => Number.isFinite(value) && value >= 1))].sort((a, b) => a - b);
