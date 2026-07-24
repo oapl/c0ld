@@ -226,6 +226,11 @@ async function handleTrackerServerAdd(request, env) {
   });
 }
 
+function trackerApiIncludeInactive(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "all";
+}
+
 async function handleTrackerServerRemove(request, env) {
   requireSupabase(env);
   const body = await readJsonOptional(request);
@@ -258,7 +263,9 @@ async function handleTrackerServerList(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const guildId = trackerGuildId(url.searchParams.get("guild_id"));
-  const state = await loadTrackerState(env, guildId);
+  const includeInactive = trackerApiIncludeInactive(url.searchParams.get("include_inactive")) ||
+    trackerApiIncludeInactive(url.searchParams.get("includeInactive"));
+  const state = await loadTrackerState(env, guildId, { includeInactive });
   return json(serializeTrackerState(state));
 }
 
@@ -266,12 +273,14 @@ async function handleTrackerServerWho(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const guildId = trackerGuildId(url.searchParams.get("guild_id"));
+  const includeInactive = trackerApiIncludeInactive(url.searchParams.get("include_inactive")) ||
+    trackerApiIncludeInactive(url.searchParams.get("includeInactive"));
   const reference = firstString(url.searchParams.get("server"), url.searchParams.get("server_id"));
   if (!reference) throw httpError(400, "Provide ?server=S1.");
 
-  const state = await loadTrackerState(env, guildId);
+  const state = await loadTrackerState(env, guildId, { includeInactive });
   const server = findTrackedServerInState(state.servers, reference);
-  if (!server) throw httpError(404, `No active tracked server matched ${reference}.`);
+  if (!server) throw httpError(404, `No tracked server matched ${reference}.`);
 
   return json({
     ok: true,
@@ -766,7 +775,8 @@ function findTrackedServerInState(servers, reference) {
   return servers.find(server => String(server.vip_server_id) === raw) || null;
 }
 
-async function loadTrackerState(env, guildId) {
+async function loadTrackerState(env, guildId, options = {}) {
+  const includeInactive = Boolean(options.includeInactive);
   const guild = await fetchTrackerGuild(env, guildId);
   if (!guild) {
     return {
@@ -779,7 +789,7 @@ async function loadTrackerState(env, guildId) {
     };
   }
 
-  const servers = await fetchTrackerServers(env, guildId);
+  const servers = await fetchTrackerServers(env, guildId, !includeInactive);
   const observationLimit = String(Math.min(5000, Math.max(200, servers.length * 8)));
   const observations = servers.length
     ? await supabaseSelect(env, TRACKER_OBSERVATIONS_TABLE, {
@@ -896,7 +906,8 @@ async function publishTrackerMessage(env, state) {
     return { ok: true, skipped: true, message: "No tracker channel is configured." };
   }
 
-  const payload = buildTrackerDiscordPayload(state);
+  const displayState = await loadTrackerState(env, guild.guild_id, { includeInactive: true });
+  const payload = buildTrackerDiscordPayload(displayState);
   const result = await upsertDiscordBotMessage(env, guild.channel_id, guild.message_id, payload);
 
   if (result.message_id && result.message_id !== guild.message_id) {
@@ -923,32 +934,45 @@ function buildTrackerDiscordPayload(state) {
     : Math.floor(Date.now() / 1000);
   const refreshMinutes = Number(guild.refresh_minutes || DEFAULT_TRACKER_REFRESH_MINUTES);
   const trackingEnabled = Boolean(guild.tracking_enabled);
+  const serverRows = [...rows].sort((a, b) => {
+    const aNum = Number(a.server_number);
+    const bNum = Number(b.server_number);
+    if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+    if (!Number.isFinite(aNum)) return 1;
+    if (!Number.isFinite(bNum)) return -1;
+    return 0;
+  });
 
-  const serverBlocks = rows.map(row => {
+  const serverBlocks = serverRows.map(row => {
     const counts = row.clan_counts || {};
-    const statusIcon = trackerMonitorStatusIcon(row.status);
-    const statusLabel = trackerMonitorStatusLabel(row.status);
+    const effectiveStatus = row.is_active ? row.status : "inactive";
+    const statusIcon = trackerMonitorStatusIcon(effectiveStatus);
+    const statusLabel = trackerMonitorStatusLabel(effectiveStatus);
     const population = trackerMonitorPopulation(row);
     const nameLine = row.server_name ? `\n-# ${trackerEscapeDiscord(row.server_name)}` : "";
-    const clanLine = row.status === "pending"
+    const clanLine = effectiveStatus === "pending" || effectiveStatus === "inactive" || effectiveStatus === "offline" || effectiveStatus === "unavailable"
       ? ""
       : `\n**Clans:** C0LD ${Number(counts.C0LD || 0)} · WMSY ${Number(counts.WMSY || 0)} · Other ${Number(counts.other || 0)}`;
-    const latencyLine = row.status === "pending" || row.status === "offline"
+    const latencyLine = effectiveStatus === "pending" || effectiveStatus === "offline" || effectiveStatus === "inactive" || effectiveStatus === "unavailable"
       ? ""
       : `\n**Ping:** ${trackerMonitorMetric(row.ping, "ms")} · **FPS:** ${trackerMonitorMetric(row.fps, "")}`;
     const staleLine = row.stale && row.status !== "pending"
       ? `\n-# Last successful observation: ${trackerDiscordTimestamp(row.last_known_at || row.observed_at)}`
       : "";
     const collectionError = firstString(row.collection_error, row.resolution_error);
-    const errorLine = row.status === "pending" && collectionError
+    const errorLine = effectiveStatus === "pending" && collectionError
       ? `\n-# ${trackerEscapeDiscord(collectionError)}`
       : "";
-    const joinLine = row.server_link ? `\n[Join Server](${row.server_link})` : "";
+    const joinLine = row.server_link && row.is_active ? `\n[Join Server](${row.server_link})` : "";
+    const inactiveLine = effectiveStatus === "inactive" ? "\n-# Inactive in this guild. Track and refresh are paused." : "";
     const label = trackerEscapeDiscord(row.label || `S${row.server_number || "?"}`);
+    const playerLine = effectiveStatus === "pending" || effectiveStatus === "inactive"
+      ? trackerMonitorPopulation(row)
+      : population;
 
     return [
       `### ${statusIcon} ${label} · ${statusLabel}`,
-      `**Players:** ${population}${nameLine}${clanLine}${latencyLine}${staleLine}${errorLine}${joinLine}`
+      `**Players:** ${playerLine}${nameLine}${clanLine}${latencyLine}${staleLine}${inactiveLine}${errorLine}${joinLine}`
     ].join("\n");
   });
 
@@ -957,7 +981,7 @@ function buildTrackerDiscordPayload(state) {
     : serverBlocks.length
       ? serverBlocks.join("\n\n")
       : "No private servers are currently tracked. Use `/server add` to add one.";
-  const summary = trackerMonitorSummary(rows);
+  const summary = trackerMonitorSummary(serverRows);
   const healthLine = guild.last_error
     ? `-# ⚠️ Latest refresh issue: ${trackerEscapeDiscord(guild.last_error)}`
     : "";
@@ -974,10 +998,10 @@ function buildTrackerDiscordPayload(state) {
           components: [{
             type: 10,
             content: [
-              "## 🖥️ Private Server Monitor",
+              "## Tracked Roblox Private Servers",
               `${trackingEnabled ? "🟢" : "🔴"} **Tracking ${trackingEnabled ? "Enabled" : "Disabled"}**`,
+              `Refresh interval: every ${refreshMinutes} minutes`,
               `Last Updated: <t:${unix}:R>`,
-              trackingEnabled ? `Refreshes every ${refreshMinutes} minutes` : "Automatic refresh is disabled",
               healthLine
             ].filter(Boolean).join("\n")
           }],
@@ -992,6 +1016,7 @@ function buildTrackerDiscordPayload(state) {
           type: 10,
           content: [
             "## Summary",
+            `**Active:** ${summary.active} · **Inactive:** ${summary.inactive}`,
             `**Online:** ${summary.online} · **Full:** ${summary.full} · **Offline:** ${summary.offline}`,
             `**Pending:** ${summary.pending} · **Unavailable:** ${summary.unavailable}`,
             `**Players:** ${summary.players}/${summary.capacity}`
@@ -1000,7 +1025,7 @@ function buildTrackerDiscordPayload(state) {
         trackerDiscordSeparator(),
         {
           type: 10,
-          content: `## Private Servers\n${serverSection}`.slice(0, 4000)
+          content: `## Server Roster\n${serverSection}`.slice(0, 4000)
         },
         trackerDiscordSeparator(),
         {
@@ -1013,6 +1038,7 @@ function buildTrackerDiscordPayload(state) {
 }
 
 function trackerMonitorStatusIcon(status) {
+  if (status === "inactive") return "⛔";
   if (status === "pending") return "🟡";
   if (status === "online") return "🟢";
   if (status === "full") return "🟣";
@@ -1021,6 +1047,7 @@ function trackerMonitorStatusIcon(status) {
 }
 
 function trackerMonitorStatusLabel(status) {
+  if (status === "inactive") return "Inactive";
   if (status === "pending") return "Awaiting Observer Access";
   if (status === "online") return "Online";
   if (status === "full") return "Full";
@@ -1053,8 +1080,24 @@ function trackerEscapeDiscord(value) {
 }
 
 function trackerMonitorSummary(rows) {
-  const summary = { online: 0, full: 0, offline: 0, pending: 0, unavailable: 0, players: 0, capacity: 0 };
+  const summary = {
+    active: 0,
+    inactive: 0,
+    online: 0,
+    full: 0,
+    offline: 0,
+    pending: 0,
+    unavailable: 0,
+    players: 0,
+    capacity: 0
+  };
   for (const row of rows) {
+    if (!row.is_active) {
+      summary.inactive += 1;
+      continue;
+    }
+
+    summary.active += 1;
     if (Object.prototype.hasOwnProperty.call(summary, row.status)) summary[row.status] += 1;
     else summary.unavailable += 1;
     const playing = Number(row.playing);
