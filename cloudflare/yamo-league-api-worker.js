@@ -1648,15 +1648,25 @@ async function handleProfile(request, env) {
   if (rawRun && String(rawRun).toLowerCase() !== "all") params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
-  const rows = await fetchLeagueProfileRows(env, params, limit);
+  const [rows, playerPoolRows] = await Promise.all([
+    fetchLeagueProfileRows(env, params, limit),
+    fetchLeaguePlayerPoolProfileRows(env, userId, rawRun, summaryLimit)
+  ]);
   const usernameMap = await resolveRobloxUsernames([userId], env).catch(() => new Map());
   const resolvedUsername = usernameMap.get(userId) || null;
-  const visibleRows = rows.filter(row => !isLeaguePubliclyHidden(env, row.league_name));
+  const visibleRows = rows.filter(row =>
+    !isAggregateLeagueListName(row.league_name)
+    && !isLeaguePubliclyHidden(env, row.league_name)
+  );
   const rawSummaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(visibleRows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
   const summaries = rawSummaries.map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
-  const latest = summaries[0] || null;
+  const leaderboardSummaries = summarizeLeaguePlayerPoolProfileRows(playerPoolRows, env)
+    .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0))
+    .slice(0, summaryLimit)
+    .map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
+  const latest = summaries[0] || leaderboardSummaries[0] || null;
 
   return cacheJson({
     ok: true,
@@ -1665,8 +1675,76 @@ async function handleProfile(request, env) {
     username: latest?.display_name || null,
     profile_url: `https://www.roblox.com/users/${userId}/profile`,
     rows_scanned: visibleRows.length,
-    rows: summaries
+    rows: summaries,
+    leaderboard_rows_scanned: playerPoolRows.length,
+    leaderboard_rows: leaderboardSummaries
   }, env);
+}
+
+async function fetchLeaguePlayerPoolProfileRows(env, userId, rawRun, limit) {
+  const params = {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,rank,user_id,display_name,points,raw_member,raw_league",
+    league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+    user_id: `eq.${userId}`,
+    order: "fetched_at.desc,snapshot_id.desc",
+    limit: String(clamp(Number(limit) || 200, 1, 500))
+  };
+  if (rawRun && String(rawRun).toLowerCase() !== "all") {
+    params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
+  }
+  return supabaseSelect(env, SNAPSHOT_TABLE, params);
+}
+
+function summarizeLeaguePlayerPoolProfileRows(rows, env) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    const runKey = normalizeRunKey(row.league_run_key || DEFAULT_LEAGUE_RUN_KEY);
+    if (!groups.has(runKey)) groups.set(runKey, []);
+    groups.get(runKey).push(row);
+  }
+
+  return [...groups.entries()].map(([runKey, groupRows]) => {
+    const ordered = groupRows
+      .slice()
+      .filter(row => row?.fetched_at)
+      .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+    if (!ordered.length) return null;
+
+    const first = ordered[0];
+    const latest = ordered[ordered.length - 1];
+    const ranks = ordered.map(row => toNumber(row.rank)).filter(Number.isFinite);
+    const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
+    const metadata = normalizeRawLeague(latest.raw_league);
+    const memberMetadata = normalizeRawLeague(latest.raw_member);
+    const runLabel = leagueRunLabel(env, runKey);
+    const leaderboardLabel = `${runLabel} (League)`;
+
+    return {
+      type: "leaderboard",
+      source: "league-player-pool",
+      run_key: runKey,
+      league_run_key: runKey,
+      label: leaderboardLabel,
+      leaderboard_name: leaderboardLabel,
+      event_name: leaderboardLabel,
+      user_id: toNumber(latest.user_id ?? first.user_id),
+      display_name: latest.display_name || first.display_name || null,
+      final_rank: toNumber(latest.rank),
+      global_rank: toNumber(latest.rank),
+      best_rank: ranks.length ? Math.min(...ranks) : null,
+      final_points: toNumber(latest.points) || 0,
+      highest_points: points.length ? Math.max(...points) : 0,
+      total_ranked: toNumber(metadata.pool_total_players),
+      total_global_players: toNumber(metadata.pool_total_players),
+      top_leagues_scanned: toNumber(metadata.pool_top_leagues_scanned),
+      source_league_name: stringOrNull(memberMetadata.source_league_name),
+      first_snapshot_at: first.fetched_at || null,
+      final_snapshot_at: latest.fetched_at || null,
+      period_start_at: first.fetched_at || null,
+      period_end_at: latest.fetched_at || null,
+      snapshot_count: ordered.length
+    };
+  }).filter(Boolean);
 }
 
 async function fetchLeagueProfileRows(env, params, limit) {

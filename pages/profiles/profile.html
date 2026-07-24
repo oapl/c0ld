@@ -196,6 +196,7 @@ const CW_BOT_IMPORT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/exter
 const BIG_BOT_IMPORT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/external-history/bigbot/import";
 const CLANS_CURRENT="https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
 const LEAGUE_PROFILE="https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/profile";
+const LEAGUE_PLAYER_POOL_NAME="GLOBAL_LEAGUE_PLAYER_POOL";
 const ACTIVE_BATTLE="https://ps99.biggamesapi.io/api/activeClanBattle";
 const REWARD_ITEM_CATALOG={
   "Gargantuan Storm Wolf":{name:"Gargantuan Storm Wolf",category:"Pet",icon_id:"94993144229478"},
@@ -695,6 +696,40 @@ function normalizeLeagueSummaryRows(rows){
     .sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
 }
 
+function normalizeLeagueLeaderboardSummaryRows(rows){
+  return(Array.isArray(rows)?rows:[])
+    .map(row=>{
+      const runLabel=row.run_label||row.event_name||row.league_run_key||row.run_key||"League";
+      const label=row.label||row.leaderboard_name||`${runLabel} (League)`;
+      return{
+        type:"leaderboard",
+        source:row.source||"league-player-pool",
+        run_key:row.run_key||row.league_run_key||null,
+        league_run_key:row.league_run_key||row.run_key||null,
+        label,
+        leaderboard_name:row.leaderboard_name||label,
+        event_name:row.event_name&&row.league_name!==LEAGUE_PLAYER_POOL_NAME?row.event_name:label,
+        display_name:row.display_name||null,
+        final_rank:finite(row.final_rank??row.global_rank??row.player_league_rank??row.rank),
+        global_rank:finite(row.global_rank??row.final_rank??row.player_league_rank??row.rank),
+        best_rank:finite(row.best_rank),
+        final_points:finite(row.final_points??row.global_points??row.points),
+        highest_points:finite(row.highest_points),
+        total_ranked:finite(row.total_ranked??row.total_global_players),
+        total_global_players:finite(row.total_global_players??row.total_ranked),
+        top_leagues_scanned:finite(row.top_leagues_scanned),
+        source_league_name:row.source_league_name||null,
+        first_snapshot_at:row.first_snapshot_at||null,
+        final_snapshot_at:row.final_snapshot_at||null,
+        period_start_at:row.period_start_at||row.first_snapshot_at||null,
+        period_end_at:row.period_end_at||row.final_snapshot_at||null,
+        snapshot_count:finite(row.snapshot_count)
+      };
+    })
+    .filter(row=>row.final_rank!==null||row.final_points!==null)
+    .sort((a,b)=>new Date(b.final_snapshot_at||0)-new Date(a.final_snapshot_at||0));
+}
+
 function downsampleSeriesByMinutes(series,minutes){
   const bucketMs=Math.max(1,minutes)*60*1000;
   const buckets=new Map();
@@ -960,19 +995,30 @@ async function loadLeagueProfile(userId){
   if(id===null)return null;
 
   const payload=await optionalJson(`${LEAGUE_PROFILE}?user_id=${encodeURIComponent(id)}&limit=2000&summary_limit=100`);
-  const rows=normalizeLeagueSummaryRows(payload?.rows||[]);
-  if(!payload?.ok||!rows.length)return null;
+  const rawRows=Array.isArray(payload?.rows)?payload.rows:[];
+  const fallbackLeaderboardRows=rawRows.filter(row=>normalize(row.league_name)===normalize(LEAGUE_PLAYER_POOL_NAME));
+  const rows=normalizeLeagueSummaryRows(
+    rawRows.filter(row=>normalize(row.league_name)!==normalize(LEAGUE_PLAYER_POOL_NAME))
+  );
+  const leaderboardRows=normalizeLeagueLeaderboardSummaryRows(
+    Array.isArray(payload?.leaderboard_rows)&&payload.leaderboard_rows.length
+      ?payload.leaderboard_rows
+      :fallbackLeaderboardRows
+  );
+  if(!payload?.ok||(!rows.length&&!leaderboardRows.length))return null;
 
   const latest=rows[0]||{};
+  const latestLeaderboard=leaderboardRows[0]||{};
 
   return{
     aliases:[String(id)],
-    username:payload.username||latest.display_name||`user_${id}`,
+    username:payload.username||latest.display_name||latestLeaderboard.display_name||`user_${id}`,
     user_id:id,
     profile_url:payload.profile_url||`https://www.roblox.com/users/${id}/profile`,
-    latest_seen:latest.final_snapshot_at||null,
-    latest_points:latest.final_points??null,
+    latest_seen:latest.final_snapshot_at||latestLeaderboard.final_snapshot_at||null,
+    latest_points:latest.final_points??latestLeaderboard.final_points??null,
     league_summaries:rows,
+    leaderboard_summaries:leaderboardRows,
     battles:[]
   };
 }
@@ -2447,7 +2493,12 @@ async function main(){
         user_id:profile.user_id||leagueProfile.user_id,
         profile_url:profile.profile_url||leagueProfile.profile_url,
         latest_seen:profile.latest_seen??leagueProfile.latest_seen??null,
-        league_summaries:mergeSummaries("league",profile.league_summaries,leagueProfile.league_summaries)
+        league_summaries:mergeSummaries("league",profile.league_summaries,leagueProfile.league_summaries),
+        leaderboard_summaries:mergeSummaries(
+          "leaderboard",
+          profile.leaderboard_summaries,
+          leagueProfile.leaderboard_summaries
+        )
       };
     }
 
