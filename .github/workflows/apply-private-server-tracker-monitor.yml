@@ -37,3 +37,5 @@ jobs:
           }
           git commit -m "Update private server tracker monitor Worker"
           git push origin HEAD:main
+
+# Triggered through a normal merge so GitHub Actions receives a push event.
