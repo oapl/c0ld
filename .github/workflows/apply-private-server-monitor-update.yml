@@ -1,0 +1,41 @@
+name: Apply private server monitor worker update
+
+on:
+  push:
+    branches:
+      - fix-private-server-monitor-worker
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-private-server-monitor-worker
+          fetch-depth: 0
+
+      - name: Update worker file
+        shell: pwsh
+        run: .\scripts\update-private-server-tracker-monitor-style.ps1
+
+      - name: Verify JavaScript syntax
+        shell: pwsh
+        run: node --check .\cloudflare\c0ld-servers-worker.js
+
+      - name: Commit updated worker
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudflare/c0ld-servers-worker.js
+          if (git diff --cached --quiet) {
+            Write-Host "No worker changes were produced."
+            exit 0
+          }
+          git commit -m "Update private server tracker monitor payload"
+          git push origin HEAD:fix-private-server-monitor-worker
