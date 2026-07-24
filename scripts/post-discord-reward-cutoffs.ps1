@@ -14,13 +14,16 @@ $headers = @{ Authorization = "Bearer $AdminToken" }
 Write-Host "Checking the live cutoff sources..." -ForegroundColor Cyan
 $players = Invoke-RestMethod -Method Get -Uri "$WorkerBase/api/reward-cutoffs?type=players"
 $clans = Invoke-RestMethod -Method Get -Uri "$WorkerBase/api/reward-cutoffs?type=clans"
+$leaguePlayers = Invoke-RestMethod -Method Get -Uri "https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/player-milestones?ranks=3,100,1000,1050,1150,6150,30000"
 $leagues = Invoke-RestMethod -Method Get -Uri "https://yamo-league-api-worker.opal-dde.workers.dev/api/leagues/milestones?ranks=1,3,15,50,100,250,2000"
 
 if (-not $players.ok) { throw "Player cutoff data is unavailable: $($players.message)" }
 if (-not $clans.ok) { throw "Clan cutoff data is unavailable: $($clans.message)" }
+if (-not $leaguePlayers.ok) { throw "League player cutoff data is unavailable: $($leaguePlayers.message)" }
 if (-not $leagues.ok) { throw "League cutoff data is unavailable: $($leagues.message)" }
 
-Write-Host "Player, clan, and league cutoff data are available." -ForegroundColor Green
+Write-Host "League player pool: $($leaguePlayers.total_players) players." -ForegroundColor Green
+Write-Host "Player, clan, league-player, and league cutoff data are available." -ForegroundColor Green
 Write-Host "Creating or force-refreshing the three persistent Discord posts..." -ForegroundColor Cyan
 
 $result = Invoke-RestMethod `

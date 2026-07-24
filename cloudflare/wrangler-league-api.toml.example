@@ -45,16 +45,25 @@ GENERAL_LEAGUE_REFRESH_CONCURRENCY = "4"
 # Exact-league pulls retry temporary Big Games throttling/server failures.
 LEAGUE_API_RETRY_ATTEMPTS = "4"
 LEAGUE_API_RETRY_BASE_MS = "1500"
-# The */5 cron checks the two exact-league cadences above and updates Top 1000.
+# The */5 cron checks the two exact-league cadences above and updates whichever top list
+# size is configured below. For league reward cutoffs that rely on Top 30,000 and
+# similar points, keep this at 10000 (or higher) to keep all milestone rows fresh.
 # Run POST /api/leagues/top-leagues/ingest?limit=10000&page_size=25 manually once to seed
 # outside-Top-1000 ranks. After that, the cron only refreshes small neighborhoods
 # around tracked leagues that are outside the Top 1000.
 TOP_LEAGUES_LIMIT = "1000"
-SCHEDULED_TOP_LEAGUES_LIMIT = "1000"
+SCHEDULED_TOP_LEAGUES_LIMIT = "10000"
 ALL_TOP_LEAGUES_LIMIT = "10000"
 TOP_LEAGUES_PAGE_DELAY_MS = "2500"
 # Manual Top 10000 seed scan pulls 25 leagues every 2.5 seconds.
 ALL_TOP_LEAGUES_PAGE_DELAY_MS = "2500"
+# Extended League-player reward cutoffs are simulated by collecting every
+# member from the stored Top-X League list. BIG Games' direct player endpoint
+# remains authoritative for ranks 1-100.
+LEAGUE_PLAYER_POOL_TOP_LEAGUES = "1000"
+LEAGUE_PLAYER_POOL_BATCH_SIZE = "25"
+LEAGUE_PLAYER_POOL_CONCURRENCY = "4"
+LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT = "100"
 INGEST_TRACKED_RANK_WINDOWS = "true"
 TRACKED_RANK_WINDOW_SIZE = "50"
 TRACKED_RANK_WINDOW_PAGE_DELAY_MS = "2500"

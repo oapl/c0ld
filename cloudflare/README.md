@@ -803,9 +803,11 @@ clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
 and the c0ld league overlap page.
 
 `LEAGUE_COLLECTION_ENABLED` is the master collection switch and defaults to
-`false`. While it is false, scheduled scans, manual ingest requests, and the
-page-triggered live overlap/window scans are all blocked. Set it to `true` only
-when the configured league run should begin. `INGEST_LEAGUES`,
+`false`. While it is false, scheduled scans, normal manual ingest requests, and
+the page-triggered live overlap/window scans are all blocked. The protected,
+resumable League player-pool endpoint remains available for a deliberate final
+backfill after a League ends. Set the switch to `true` only when the configured
+league run should begin. `INGEST_LEAGUES`,
 `INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
 sub-switches once the master switch is enabled.
 
@@ -876,14 +878,35 @@ Useful endpoints:
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
 | `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
+| `/api/leagues/player-milestones?ranks=3,100,1000,1050,1150,6150,30000` | Individual League-player thresholds used by the persistent post. Ranks 1-100 come directly from BIG Games; extended ranks come from the latest completed Top-X League roster pool. |
+| `/api/leagues/player-pool/status` | Metadata for the latest completed extended League-player pool. |
+| `POST /api/leagues/player-pool/ingest` | Protected, resumable Top-X roster-pool batch ingest used by `scripts/ingest-league-player-pool.ps1`. |
 | `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
-| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
+| `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored League-team point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
 | `/api/leagues/c0ld-overlap?clan=c0ld&top_limit=10000&offset=0&limit=30` | Manual reassessment scan that can walk Top 10000 in chunks, compares league rosters against current c0ld clan members, and returns only matched leagues. |
 
 The overlap endpoint is intentionally chunked. `c0ld-leagues.html` walks through
 the chunks automatically so one request does not attempt hundreds of league
 detail fetches at once.
+
+The public League-player endpoint is authoritative for the first 100 players,
+but it does not expose the full reward range. The extended leaderboard is a
+simulation built from every member score found in the stored Top-X League list.
+First ingest the desired Top-X League list, then publish its deduplicated player
+pool with:
+
+```powershell
+.\scripts\ingest-league-player-pool.ps1 `
+  -Run "tap-heroes-part-2" `
+  -TopLeagues 1000 `
+  -BatchSize 25 `
+  -Concurrency 4
+```
+
+Change `-TopLeagues` to `2000` or `3000` for a deeper future simulation. The
+script retries failed batches and does not replace the published pool until
+every requested League roster has succeeded.
 
 `LEAGUE_RUN_END_AT` is the ISO timestamp for the current League ending. It is
 returned by `/api/health` and `/api/leagues/milestones`; historical or alternate

@@ -63,6 +63,7 @@ const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
+const LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT = 1000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
 const DEFAULT_CLAN_ACTIVITY_TOP_N = 100;
@@ -1110,13 +1111,37 @@ async function fetchLeagueSoloLeaderboard(env, limit = 500) {
   throw httpError(502, `League player leaderboard API failed: ${lastFailure || "no endpoint was available"}`);
 }
 
-async function fetchLeagueMilestones(env, ranks) {
-  const requested = [...new Set(
+function normalizeLeagueMilestoneRanks(ranks) {
+  return [...new Set(
     (Array.isArray(ranks) ? ranks : [])
       .map(rank => toNumber(rank))
       .filter(rank => Number.isFinite(rank) && rank >= 1)
       .map(rank => Math.round(rank))
   )].sort((a, b) => a - b);
+}
+
+function parseLeagueMilestoneListScope(value) {
+  const requested = String(value || "").trim().toLowerCase();
+  if (!requested) return null;
+  if (["all", "10k", "10000", "top10000", "global_top_10000_leagues"].includes(requested)) return "all";
+  if (["top", "1k", "1000", "top1000", "global_top_1000_leagues"].includes(requested)) return "top";
+  return null;
+}
+
+function leagueMilestoneTopListLimit(env) {
+  const configured = Number(
+    env.LEAGUE_TOP_MILESTONE_LIST_LIMIT ||
+    env.TOP_LEAGUES_LIMIT ||
+    env.TOP_LEAGUES_SCHEDULE_LIMIT ||
+    env.SCHEDULED_TOP_LEAGUES_LIMIT ||
+    LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT
+  );
+  return clamp(Number.isFinite(configured) ? configured : LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT, 1, 100000);
+}
+
+async function fetchLeagueMilestonesForRanks(env, ranks, listScope = null) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const list = parseLeagueMilestoneListScope(listScope);
   const rankList = requested.join(",");
   const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
   const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
@@ -1136,6 +1161,7 @@ async function fetchLeagueMilestones(env, ranks) {
   for (const attempt of attempts) {
     const url = new URL(`${attempt.base}/api/leagues/milestones`);
     if (rankList) url.searchParams.set("ranks", rankList);
+    if (list) url.searchParams.set("list", list);
     try {
       const response = await attempt.fetcher(new Request(url.toString()));
       const text = await response.text();
@@ -1160,56 +1186,108 @@ async function fetchLeagueMilestones(env, ranks) {
   };
 }
 
-async function fetchLeaguePlayerMilestones(env, ranks) {
-  const requested = [...new Set(
-    (Array.isArray(ranks) ? ranks : [])
-      .map(rank => toNumber(rank))
-      .filter(rank => Number.isFinite(rank) && rank >= 1)
-      .map(rank => Math.round(rank))
-  )].sort((a, b) => a - b);
-  const maxRequested = requested.length ? Math.max(...requested) : 500;
-  let payload = null;
-  let lastError = null;
-  const attemptLimits = [...new Set([maxRequested, 500].filter(value => Number.isFinite(value) && value > 0))];
-  for (const limit of attemptLimits.sort((a, b) => b - a)) {
-    try {
-      payload = await fetchLeagueSoloLeaderboard(env, limit);
-      break;
-    } catch (error) {
-      lastError = error;
-      if (limit <= 500) break;
+async function fetchLeagueMilestonesCombined(env, ranks) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const splitLimit = leagueMilestoneTopListLimit(env);
+  const topRanks = requested.filter(rank => rank <= splitLimit);
+  const allRanks = requested.filter(rank => rank > splitLimit);
+
+  const [topResult, allResult] = await Promise.all([
+    topRanks.length ? fetchLeagueMilestonesForRanks(env, topRanks, "top") : Promise.resolve(null),
+    allRanks.length ? fetchLeagueMilestonesForRanks(env, allRanks, "all") : Promise.resolve(null)
+  ]);
+
+  const byRank = new Map();
+  const ingestRows = (result) => {
+    if (!result?.payload?.rows) return;
+    for (const row of result.payload.rows) {
+      const rank = toNumber(row.rank);
+      if (!rank) continue;
+      const existing = byRank.get(rank);
+      if (!existing || new Date(row.fetched_at || 0) > new Date(existing.fetched_at || 0)) {
+        byRank.set(rank, row);
+      }
     }
-  }
-  if (!payload) {
-    throw new Error(`League player leaderboard API failed: ${lastError?.message || "unknown error"}`);
-  }
-  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-  const byRank = new Map(
-    rows
-      .map(row => {
-        const rank = toNumber(row?.rank) || 0;
-        return [rank, row];
-      })
-      .filter(([rank]) => Number.isFinite(rank) && rank >= 1)
-  );
+  };
+
+  ingestRows(topResult);
+  ingestRows(allResult);
+
+  const candidatePayloads = [topResult?.payload, allResult?.payload].filter(Boolean);
+  const source = candidatePayloads
+    .map(item => ({
+      payload: item,
+      ts: Date.parse(item.snapshot_at || item.generated_at || 0)
+    }))
+    .sort((a, b) => b.ts - a.ts)[0];
+  const latestPayload = source?.payload || {};
+  const snapshotAt = source?.ts ? new Date(source.ts).toISOString() : null;
+
+  const rows = requested
+    .map(rank => byRank.get(rank))
+    .filter(Boolean);
 
   return {
     payload: {
-      ok: payload?.ok !== false,
-      generated_at: payload?.generated_at || new Date().toISOString(),
-      snapshot_at: payload?.snapshot_at || payload?.generated_at || null,
-      league_run_key: payload?.league_run_key || null,
-      league_run_label: payload?.league_run_label || null,
-      top_available: toNumber(payload?.top_available) || rows.length,
-      rows: requested.map(rank => {
-        const row = byRank.get(rank);
-        return row
-          ? { rank, points: toNumber(row.points), available: true }
-          : { rank, points: null, available: false };
-      })
+      ok: true,
+      generated_at: latestPayload.generated_at || new Date().toISOString(),
+      snapshot_at: snapshotAt,
+      league_run_key: latestPayload.league_run_key || null,
+      league_run_label: latestPayload.league_run_label || latestPayload.league_run_key || null,
+      league_end_at: latestPayload.league_end_at || latestPayload.league_run_end_at || null,
+      total_players: latestPayload.total_players || null,
+      top_available: latestPayload.top_available || null,
+      rows
     },
     ranks: requested
   };
+}
+
+async function fetchLeagueMilestones(env, ranks, options = {}) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const listScope = parseLeagueMilestoneListScope(options?.list || options?.scope);
+  return listScope ? fetchLeagueMilestonesForRanks(env, requested, listScope) : fetchLeagueMilestonesCombined(env, requested);
+}
+
+async function fetchLeaguePlayerMilestones(env, ranks) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const rankList = requested.join(",");
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const attempts = [];
+
+  if (env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function") {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({
+    name: "public endpoint",
+    base: externalBase,
+    fetcher: request => fetch(request)
+  });
+
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/player-milestones`);
+    if (rankList) url.searchParams.set("ranks", rankList);
+    try {
+      const response = await attempt.fetcher(new Request(url.toString(), {
+        headers: { Accept: "application/json" }
+      }));
+      const text = await response.text();
+      const payload = parseJsonObject(text) || {};
+      if (response.ok && payload.ok !== false && Array.isArray(payload.rows)) {
+        return { payload, ranks: requested };
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${payload.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error?.message || String(error)}`;
+    }
+  }
+
+  throw httpError(502, `League player milestones API failed: ${lastFailure || "no endpoint was available"}`);
 }
 
 async function handleRewardCutoffs(request, env) {
@@ -1993,11 +2071,20 @@ async function buildLeaguePlayerRewardCutoffs(env, ranks) {
     ok: true,
     type: "players",
     pool_source: "leagues",
-    pool_is_partial: maxRequested > 0 ? (maxRequested > maxAvailable || rows.some(row => row?.available === false)) : true,
+    pool_is_partial: payload.pool_is_partial === true
+      || (maxRequested > 0 ? (maxRequested > maxAvailable || rows.some(row => row?.available === false)) : true),
     generated_at: payload.generated_at || new Date().toISOString(),
     snapshot_at: snapshotAt,
     league_run_key: payload.league_run_key || null,
     league_run_label: payload.league_run_label || payload.league_run_key || null,
+    source: payload.source || null,
+    direct_authoritative_limit: toNumber(payload.direct_authoritative_limit) || null,
+    direct_top_available: toNumber(payload.direct_top_available) || null,
+    pool_completed: payload.pool_completed === true,
+    pool_scan_id: payload.pool_scan_id || null,
+    top_leagues_requested: toNumber(payload.top_leagues_requested) || null,
+    top_leagues_scanned: toNumber(payload.top_leagues_scanned) || null,
+    simulated_player_count: toNumber(payload.simulated_player_count) || null,
     total_global_players: toNumber(payload.total_players) || toNumber(payload.top_available) || null,
     ranks,
     cutoffs: ranks.map(rankValue => {
@@ -2078,8 +2165,18 @@ function rewardCutoffDiscordPayload(dashboard) {
     ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
     : null;
   const globalLines = rewardCutoffLines(leaguePlayers.cutoffs, playerRewardRangeLabel);
-  if (leaguePlayers.pool_is_partial) {
-    const totalPlayers = toNumber(leaguePlayers.total_global_players);
+  const totalPlayers = toNumber(leaguePlayers.total_global_players);
+  const topLeaguesScanned = toNumber(leaguePlayers.top_leagues_scanned);
+  const directLimit = toNumber(leaguePlayers.direct_authoritative_limit);
+  if (leaguePlayers.pool_completed && topLeaguesScanned && directLimit) {
+    globalLines.push(
+      `-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; extended ranks simulate `
+      + `${Math.round(totalPlayers || 0).toLocaleString("en-US")} players collected from the Top `
+      + `${Math.round(topLeaguesScanned).toLocaleString("en-US")} League rosters.`
+    );
+  } else if (directLimit) {
+    globalLines.push(`-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; the extended League roster pool has not been built yet.`);
+  } else if (leaguePlayers.pool_is_partial) {
     globalLines.push(totalPlayers
       ? `-# Based on the latest ${Math.round(totalPlayers).toLocaleString("en-US")} League players currently available.`
       : "-# Based on the latest League player leaderboard data currently available.");
