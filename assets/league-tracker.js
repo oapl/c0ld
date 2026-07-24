@@ -197,8 +197,7 @@
       const gapTitle=gap==null?entry:fullNum(gap)+" more points required; "+entry;
       return '<article class="reward-milestone '+statusClass+'"><div class="reward-art-shell '+esc(tier.variant)+'"><img class="reward-art" src="'+esc(tier.image)+'" alt="'+esc(tier.reward)+'" loading="lazy"></div><div class="reward-copy"><div class="reward-title-row"><div class="reward-name">'+esc(tier.reward)+'</div><div class="reward-gap" title="'+esc(gapTitle)+'">'+esc(status)+'</div></div><div class="reward-rank">League '+esc(range)+'</div><div class="reward-threshold">'+esc(entry)+'</div></div></article>';
     }).join("");
-    const context=currentRank==null?"Current placement unavailable":("Current placement #"+fullNum(currentRank)+(points==null?"":" · "+fullNum(points)+" points"));
-    box.innerHTML='<div class="reward-milestone-heading"><div><strong>Reward Eligibility</strong><span>'+esc(context)+' · Exact entry requirements from the latest stored leaderboard</span></div><span class="squad-prize">Every squad member receives the prize</span></div><div class="reward-milestone-grid">'+cards+'</div>';
+    box.innerHTML='<div class="reward-milestone-heading"><div><strong>Reward Eligibility</strong></div></div><div class="reward-milestone-grid">'+cards+'</div>';
   }
 
   function growthSeries(){
@@ -252,7 +251,9 @@
       return '<span class="growth-legend-item'+(series.hidden?' hidden':'')+'" style="--series-color:'+series.color+'"><span class="growth-legend-dot"></span><span>'+esc(series.name)+(series.hidden?' · points hidden':'')+'</span>'+(series.hidden?'':'<strong>'+esc(signedShort(gain))+'</strong>')+'</span>';
     }).join("");
     const visible=chart.series.filter(series=>!series.hidden&&series.values.some(value=>value!=null)).length;
-    meta.textContent=visible?"96 quarter-hour intervals · "+visible+" visible member"+(visible===1?"":"s"):"Waiting for stored point history";
+    const currentSnapshotAt=currentData?.snapshot_at||topLeagueRow?.fetched_at||topLeagueRow?.snapshot_at||Date.now();
+    const lastUpdated=dt(currentSnapshotAt);
+    meta.textContent=visible?"Last updated: "+lastUpdated:lastUpdated;
   }
 
   function drawMemberGrowthChart(){
