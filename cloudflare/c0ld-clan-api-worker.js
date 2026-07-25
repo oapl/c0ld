@@ -23,6 +23,10 @@ const PS99_RESTART_EVENTS_TABLE = "c0ld_ps99_restart_events";
 const PS99_RESTART_PROBE_OBSERVATIONS_TABLE = "c0ld_ps99_restart_probe_observations";
 const PS99_RESTART_PROBE_STATE_TABLE = "c0ld_ps99_restart_probe_state";
 const PS99_CCU_SAMPLES_TABLE = "c0ld_ps99_ccu_samples";
+const PS99_RESTART_OBSERVATIONS_TABLE = "c0ld_ps99_restart_observations";
+const PS99_RESTART_CANDIDATES_TABLE = "c0ld_ps99_restart_candidates";
+const PS99_RESTART_CANDIDATE_TIMELINE_TABLE = "c0ld_ps99_restart_candidate_timeline";
+const PS99_RESTART_ANALYTICS_STATE_TABLE = "c0ld_ps99_restart_analytics_state";
 const ROBLOX_RELEASE_STATE_TABLE = "c0ld_roblox_release_state";
 const ROBLOX_RELEASE_EVENTS_TABLE = "c0ld_roblox_release_events";
 const ROBLOX_FFLAG_STATE_TABLE = "c0ld_roblox_fflag_state";
@@ -63,6 +67,7 @@ const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
+const LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT = 1000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
 const DEFAULT_CLAN_ACTIVITY_TOP_N = 100;
@@ -84,7 +89,7 @@ const DEFAULT_ROBLOX_RELEASE_SCHEDULE_MINUTES = 5;
 const DEFAULT_ROBLOX_RELEASE_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_ROBLOX_RELEASE_HISTORY_LIMIT = 100;
 const DEFAULT_ROBLOX_FFLAG_SCHEDULE_MINUTES = 15;
-const DEFAULT_PS99_DEV_BLOG_SCHEDULE_MINUTES = 15;
+const DEFAULT_PS99_DEV_BLOG_SCHEDULE_MINUTES = 1;
 const DEFAULT_ROBLOX_FFLAGS_SOURCE_URL = "https://clientsettings.roblox.com/v2/settings/application/PCDesktopClient/channel/live";
 const DEFAULT_PS99_DEV_BLOG_FEED_URL = "https://www.biggames.io/post";
 const DEFAULT_PS99_RESTART_SAMPLE_SIZE = 10;
@@ -99,6 +104,13 @@ const DEFAULT_PS99_RESTART_PROBE_MACHINE_QUORUM = 2;
 const DEFAULT_PS99_RESTART_PROBE_WINDOW_SECONDS = 600;
 const DEFAULT_PS99_RESTART_PROBE_STALE_SECONDS = 120;
 const DEFAULT_PS99_RESTART_PROBE_HISTORY_SECONDS = 1800;
+const DEFAULT_PS99_RESTART_INTEL_PRE_MINUTES = 15;
+const DEFAULT_PS99_RESTART_INTEL_POST_MINUTES = 15;
+const DEFAULT_PS99_RESTART_INTEL_MERGE_MINUTES = 90;
+const DEFAULT_PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT = 5;
+const DEFAULT_PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT = 8;
+const DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT = 20;
+const DEFAULT_PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS = 20;
 const PS99_RESTART_CRONS = new Set([
   "* * * * *",
   "*/1 * * * *"
@@ -227,6 +239,30 @@ export default {
         response = await handlePs99DevBlogs(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restarts") {
         response = await handlePs99Restarts(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/restart-intelligence/candidates") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceCandidates(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/restart-intelligence/report") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceReport(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-intelligence/review") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceReview(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-intelligence/refresh-message") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceRefreshMessage(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-intelligence/refresh-all") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceRefreshAll(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/ps99/restart-intelligence/analytics") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceAnalytics(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-intelligence/analytics/refresh") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceAnalyticsRefresh(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/ps99/restart-intelligence/resolve-pending") {
+        requireAdmin(request, env);
+        response = await handlePs99RestartIntelligenceResolvePending(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/ps99/restart-probes") {
         requireAdmin(request, env);
         response = await handlePs99RestartProbeStatus(env);
@@ -300,7 +336,8 @@ export default {
     } catch (err) {
       return withCors(json({
         ok: false,
-        message: err?.message || String(err)
+        message: err?.message || String(err),
+        details: err?.details || undefined
       }, err?.status || 500), request, env);
     }
   },
@@ -325,6 +362,12 @@ export default {
       }
       if (String(env.INGEST_PS99_DEV_BLOGS || "false").toLowerCase() === "true" && shouldRunPs99DevBlogSchedule(env, scheduledAt)) {
         standaloneJobs.push(runScheduledStandaloneJob("ps99-dev-blogs", () => handlePs99DevBlogIngest(env, "schedule", { force: false })));
+      }
+      if (shouldRefreshPs99RestartAnalytics(env, scheduledAt)) {
+        standaloneJobs.push(runScheduledStandaloneJob(
+          "ps99-restart-analytics",
+          () => refreshPs99RestartAnalyticsDashboard(env, { reason: "schedule" })
+        ));
       }
       if (standaloneJobs.length) ctx.waitUntil(Promise.allSettled(standaloneJobs));
       return;
@@ -641,14 +684,14 @@ async function handleIngest(env, source, requestedClan, force = false, options =
 
   const api = await fetchClanApi(clan);
   const battles = api.data?.Battles || {};
-  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
+  const resolvedBattleKey = resolveAuthoritativeBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
   if (!battle) {
     const available = Object.keys(battles);
     throw httpError(
-      502,
-      `No battle data found for ${configuredBattleKey}. Available battles: ${available.join(", ") || "none"}`
+      409,
+      `The active battle ${activeBattleMeta?.battleKey || configuredBattleKey} is not available in ${clan}'s Battles data yet. Available battles: ${available.join(", ") || "none"}`
     );
   }
 
@@ -778,13 +821,13 @@ async function handleCurrent(request, env) {
   }
 
   if (!latest) {
-    return cacheJson({
+    return noStoreJson({
       generated_at: new Date().toISOString(),
       snapshot_at: null,
       clan_name: clan,
       battle: explicitBattle ? requestedBattle : null,
       rows: []
-    }, env);
+    });
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
@@ -802,7 +845,37 @@ async function handleCurrent(request, env) {
   const activeBattleMeta = !explicitBattle
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
-  latest = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const currentBattleMismatch = Boolean(
+    !explicitBattle &&
+    latest?.battle_key &&
+    activeBattleMeta?.battleKey &&
+    normalizeText(latest.battle_key) !== normalizeText(activeBattleMeta.battleKey)
+  );
+
+  if (currentBattleMismatch) {
+    return noStoreJson({
+      generated_at: new Date().toISOString(),
+      snapshot_at: null,
+      clan_name: clan,
+      battle: activeBattleMeta.battleKey,
+      display_name: cleanBattleDisplayName(
+        activeBattleMeta.battleKey,
+        activeBattleMeta.displayName
+      ),
+      battle_start_iso: activeBattleMeta.startedAt || null,
+      battle_end_iso: activeBattleMeta.endedAt || null,
+      clan_rank: null,
+      clan_points: null,
+      source: "c0ld-clan-api-worker",
+      downtime_included: includeDowntime,
+      avatars_included: includeAvatars,
+      waiting_for_first_snapshot: true,
+      stale_battle_key: latest.battle_key,
+      rows: []
+    });
+  }
+
+  latest = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: false });
   const usernameMap = await resolveMissingUsernames(rowsWithDowntime, env);
   const avatarMap = includeAvatars
     ? await resolveRobloxAvatarHeadshots(
@@ -812,7 +885,7 @@ async function handleCurrent(request, env) {
     : new Map();
   const trackedClan = await fetchTrackedClanCurrent(env, clan).catch(() => null);
 
-  return cacheJson({
+  return noStoreJson({
     generated_at: new Date().toISOString(),
     snapshot_at: latest.fetched_at,
     clan_name: latest.clan_name,
@@ -840,7 +913,7 @@ async function handleCurrent(request, env) {
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h
     }))
-  }, env, publicCacheSeconds(env, "CURRENT"));
+  });
 }
 
 async function handleHomeAwards(request, env) {
@@ -930,14 +1003,32 @@ async function handleGlobalLeaderboard(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 1000);
   const includeAvatars = ["1", "true", "yes"].includes(String(url.searchParams.get("avatars") || "").toLowerCase());
   const includeGains = !["0", "false", "no"].includes(String(url.searchParams.get("gains") || "true").toLowerCase());
-  const run = await findLatestGlobalRankSearchRun(env, clan);
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleKey = String(activeBattleMeta?.battleKey || "").trim();
+  const run = await findLatestGlobalRankSearchRun(env, clan, activeBattleKey || null);
 
   if (!run?.run_key) {
     return cacheJson({
-      ok: false,
-      message: "No completed global rank scan is available yet.",
+      ok: true,
       source_mode: "clans",
+      source_label: "Clan Battle",
+      generated_at: new Date().toISOString(),
       clan_name: clan,
+      snapshot_at: null,
+      waiting_for_first_scan: Boolean(activeBattleKey),
+      run: activeBattleKey ? {
+        run_key: null,
+        event_name: cleanBattleDisplayName(activeBattleKey, activeBattleMeta?.displayName),
+        battle_display_name: cleanBattleDisplayName(activeBattleKey, activeBattleMeta?.displayName),
+        battle_key: activeBattleKey,
+        source_mode: "clans",
+        started_at: activeBattleMeta?.startedAt || null,
+        finished_at: null,
+        status: "waiting"
+      } : null,
+      total_global_players: 0,
+      gains_included: includeGains,
+      avatars_included: includeAvatars,
       rows: []
     }, env);
   }
@@ -1110,6 +1201,185 @@ async function fetchLeagueSoloLeaderboard(env, limit = 500) {
   throw httpError(502, `League player leaderboard API failed: ${lastFailure || "no endpoint was available"}`);
 }
 
+function normalizeLeagueMilestoneRanks(ranks) {
+  return [...new Set(
+    (Array.isArray(ranks) ? ranks : [])
+      .map(rank => toNumber(rank))
+      .filter(rank => Number.isFinite(rank) && rank >= 1)
+      .map(rank => Math.round(rank))
+  )].sort((a, b) => a - b);
+}
+
+function parseLeagueMilestoneListScope(value) {
+  const requested = String(value || "").trim().toLowerCase();
+  if (!requested) return null;
+  if (["all", "10k", "10000", "top10000", "global_top_10000_leagues"].includes(requested)) return "all";
+  if (["top", "1k", "1000", "top1000", "global_top_1000_leagues"].includes(requested)) return "top";
+  return null;
+}
+
+function leagueMilestoneTopListLimit(env) {
+  const configured = Number(
+    env.LEAGUE_TOP_MILESTONE_LIST_LIMIT ||
+    env.TOP_LEAGUES_LIMIT ||
+    env.TOP_LEAGUES_SCHEDULE_LIMIT ||
+    env.SCHEDULED_TOP_LEAGUES_LIMIT ||
+    LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT
+  );
+  return clamp(Number.isFinite(configured) ? configured : LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT, 1, 100000);
+}
+
+async function fetchLeagueMilestonesForRanks(env, ranks, listScope = null) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const list = parseLeagueMilestoneListScope(listScope);
+  const rankList = requested.join(",");
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
+  const attempts = [];
+
+  if (hasBinding) {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
+
+  let payload = null;
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/milestones`);
+    if (rankList) url.searchParams.set("ranks", rankList);
+    if (list) url.searchParams.set("list", list);
+    try {
+      const response = await attempt.fetcher(new Request(url.toString()));
+      const text = await response.text();
+      const parsed = parseJsonObject(text) || {};
+      if (response.ok && parsed.ok !== false) {
+        payload = parsed;
+        break;
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error?.message || String(error)}`;
+    }
+  }
+
+  if (!payload) {
+    throw httpError(502, `League milestones API failed: ${lastFailure || "no endpoint was available"}`);
+  }
+
+  return {
+    payload,
+    ranks: requested
+  };
+}
+
+async function fetchLeagueMilestonesCombined(env, ranks) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const splitLimit = leagueMilestoneTopListLimit(env);
+  const topRanks = requested.filter(rank => rank <= splitLimit);
+  const allRanks = requested.filter(rank => rank > splitLimit);
+
+  const [topResult, allResult] = await Promise.all([
+    topRanks.length ? fetchLeagueMilestonesForRanks(env, topRanks, "top") : Promise.resolve(null),
+    allRanks.length ? fetchLeagueMilestonesForRanks(env, allRanks, "all") : Promise.resolve(null)
+  ]);
+
+  const byRank = new Map();
+  const ingestRows = (result) => {
+    if (!result?.payload?.rows) return;
+    for (const row of result.payload.rows) {
+      const rank = toNumber(row.rank);
+      if (!rank) continue;
+      const existing = byRank.get(rank);
+      if (!existing || new Date(row.fetched_at || 0) > new Date(existing.fetched_at || 0)) {
+        byRank.set(rank, row);
+      }
+    }
+  };
+
+  ingestRows(topResult);
+  ingestRows(allResult);
+
+  const candidatePayloads = [topResult?.payload, allResult?.payload].filter(Boolean);
+  const source = candidatePayloads
+    .map(item => ({
+      payload: item,
+      ts: Date.parse(item.snapshot_at || item.generated_at || 0)
+    }))
+    .sort((a, b) => b.ts - a.ts)[0];
+  const latestPayload = source?.payload || {};
+  const snapshotAt = source?.ts ? new Date(source.ts).toISOString() : null;
+
+  const rows = requested
+    .map(rank => byRank.get(rank))
+    .filter(Boolean);
+
+  return {
+    payload: {
+      ok: true,
+      generated_at: latestPayload.generated_at || new Date().toISOString(),
+      snapshot_at: snapshotAt,
+      league_run_key: latestPayload.league_run_key || null,
+      league_run_label: latestPayload.league_run_label || latestPayload.league_run_key || null,
+      league_end_at: latestPayload.league_end_at || latestPayload.league_run_end_at || null,
+      total_players: latestPayload.total_players || null,
+      top_available: latestPayload.top_available || null,
+      rows
+    },
+    ranks: requested
+  };
+}
+
+async function fetchLeagueMilestones(env, ranks, options = {}) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const listScope = parseLeagueMilestoneListScope(options?.list || options?.scope);
+  return listScope ? fetchLeagueMilestonesForRanks(env, requested, listScope) : fetchLeagueMilestonesCombined(env, requested);
+}
+
+async function fetchLeaguePlayerMilestones(env, ranks) {
+  const requested = normalizeLeagueMilestoneRanks(ranks);
+  const rankList = requested.join(",");
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const attempts = [];
+
+  if (env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function") {
+    attempts.push({
+      name: "service binding",
+      base: "https://league-api-worker.service",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({
+    name: "public endpoint",
+    base: externalBase,
+    fetcher: request => fetch(request)
+  });
+
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    const url = new URL(`${attempt.base}/api/leagues/player-milestones`);
+    if (rankList) url.searchParams.set("ranks", rankList);
+    try {
+      const response = await attempt.fetcher(new Request(url.toString(), {
+        headers: { Accept: "application/json" }
+      }));
+      const text = await response.text();
+      const payload = parseJsonObject(text) || {};
+      if (response.ok && payload.ok !== false && Array.isArray(payload.rows)) {
+        return { payload, ranks: requested };
+      }
+      lastFailure = `${attempt.name} returned ${response.status}: ${payload.message || text.slice(0, 300)}`;
+    } catch (error) {
+      lastFailure = `${attempt.name} failed: ${error?.message || String(error)}`;
+    }
+  }
+
+  throw httpError(502, `League player milestones API failed: ${lastFailure || "no endpoint was available"}`);
+}
+
 async function handleRewardCutoffs(request, env) {
   requireSupabase(env);
 
@@ -1237,6 +1507,23 @@ async function buildClanRewardCutoffs(url, env, ranks) {
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
   const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const latestClanBattleRun = !explicitBattle
+    ? await fetchLatestBattleRun(env, CLANS_BATTLE_RUN_CLAN_NAME).catch(() => null)
+    : null;
+  const activeClanBattle = (() => {
+    const runActive = parseBooleanish(latestClanBattleRun?.is_active);
+    if (runActive !== null) return runActive;
+
+    const battleEndedAt = safeIso(latestWithActiveMeta?.battle_ended_at);
+    if (battleEndedAt) {
+      const endedMs = new Date(battleEndedAt).getTime();
+      if (Number.isFinite(endedMs)) {
+        return endedMs > Date.now();
+      }
+    }
+
+    return null;
+  })();
   const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
   const liveCutoffs = !explicitBattle
     ? await fetchLiveClanRewardCutoffRows(env, ranks.filter(rankValue => !byRank.has(rankValue))).catch(() => new Map())
@@ -1261,6 +1548,7 @@ async function buildClanRewardCutoffs(url, env, ranks) {
       : null,
     battle_start_iso: latestWithActiveMeta?.battle_started_at || null,
     battle_end_iso: latestWithActiveMeta?.battle_ended_at || null,
+    battle_is_active: activeClanBattle,
     total_ranked: rows.length,
     available_rank_max: availableRankMax,
     ranks,
@@ -1857,12 +2145,12 @@ async function buildRewardCutoffDashboard(env) {
 }
 
 async function buildLeaguePlayerRewardCutoffs(env, ranks) {
-  const payload = await fetchLeagueSoloLeaderboard(env, 500);
+  const { payload } = await fetchLeaguePlayerMilestones(env, ranks);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  const byRank = new Map(rows.map((row, index) => [
-    toNumber(row.rank) || index + 1,
-    row
-  ]));
+  const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
+  const requested = [...new Set((Array.isArray(ranks) ? ranks : []).map(toNumber).filter(value => Number.isFinite(value) && value >= 1))].sort((a, b) => a - b);
+  const maxRequested = requested.length ? Math.max(...requested) : 0;
+  const maxAvailable = rows.reduce((max, row) => Math.max(max, toNumber(row.rank) || 0), 0);
   const snapshotAt = safeIso(
     payload.snapshot_at ||
     rows[0]?.fetched_at ||
@@ -1873,61 +2161,35 @@ async function buildLeaguePlayerRewardCutoffs(env, ranks) {
     ok: true,
     type: "players",
     pool_source: "leagues",
-    pool_is_partial: true,
+    pool_is_partial: payload.pool_is_partial === true
+      || (maxRequested > 0 ? (maxRequested > maxAvailable || rows.some(row => row?.available === false)) : true),
     generated_at: payload.generated_at || new Date().toISOString(),
     snapshot_at: snapshotAt,
     league_run_key: payload.league_run_key || null,
     league_run_label: payload.league_run_label || payload.league_run_key || null,
-    total_global_players: Math.max(toNumber(payload.top_available) || 0, rows.length),
+    source: payload.source || null,
+    direct_authoritative_limit: toNumber(payload.direct_authoritative_limit) || null,
+    direct_top_available: toNumber(payload.direct_top_available) || null,
+    pool_completed: payload.pool_completed === true,
+    pool_scan_id: payload.pool_scan_id || null,
+    top_leagues_requested: toNumber(payload.top_leagues_requested) || null,
+    top_leagues_scanned: toNumber(payload.top_leagues_scanned) || null,
+    simulated_player_count: toNumber(payload.simulated_player_count) || null,
+    total_global_players: toNumber(payload.total_players) || toNumber(payload.top_available) || null,
     ranks,
     cutoffs: ranks.map(rankValue => {
-      const row = byRank.get(rankValue);
+      const row = byRank.get(toNumber(rankValue));
       return {
         rank: rankValue,
-        user_id: row ? toNumber(row.user_id) : null,
-        username: row ? stringOrNull(row.username || row.display_name) : null,
-        points: row ? toNumber(row.points ?? row.total_points) : null,
-        available: Boolean(row)
+        points: row && row.available !== false ? toNumber(row.points ?? row.total_points) : null,
+        available: Boolean(row && row.available !== false)
       };
     })
   };
 }
 
 async function buildLeagueRewardCutoffs(env, ranks) {
-  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
-  const hasBinding = env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function";
-  const attempts = [];
-  if (hasBinding) {
-    attempts.push({
-      name: "service binding",
-      base: "https://league-api-worker.service",
-      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
-    });
-  }
-  attempts.push({ name: "public endpoint", base: externalBase, fetcher: request => fetch(request) });
-
-  let payload = null;
-  let lastFailure = null;
-  for (const attempt of attempts) {
-    const url = new URL(`${attempt.base}/api/leagues/milestones`);
-    url.searchParams.set("ranks", ranks.join(","));
-    try {
-      const response = await attempt.fetcher(new Request(url.toString()));
-      const text = await response.text();
-      const parsed = parseJsonObject(text) || {};
-      if (response.ok && parsed.ok !== false) {
-        payload = parsed;
-        break;
-      }
-      lastFailure = `${attempt.name} returned ${response.status}: ${parsed.message || text.slice(0, 300)}`;
-    } catch (error) {
-      lastFailure = `${attempt.name} failed: ${error && error.message ? error.message : String(error)}`;
-    }
-  }
-
-  if (!payload) {
-    throw httpError(502, `League reward cutoff API failed: ${lastFailure || "no endpoint was available"}`);
-  }
+  const { payload } = await fetchLeagueMilestones(env, ranks);
   const byRank = new Map((Array.isArray(payload.rows) ? payload.rows : []).map(row => [toNumber(row.rank), row]));
 
   return {
@@ -1962,34 +2224,54 @@ function leagueRewardCutoffRanks(env) {
 }
 
 function rewardCutoffDiscordPayload(dashboard) {
-  const players = dashboard.players || {};
   const leaguePlayers = dashboard.league_players || {};
   const clans = dashboard.clans || {};
   const leagues = dashboard.leagues || {};
-  const eventMode = rewardCutoffEventMode(dashboard);
-  const eventName = eventMode === "clan"
-    ? (players.event_name || players.display_name || clans.display_name || clans.battle || "Current Clan Battle")
-    : (leagues.league_run_label || leagues.league_run_key || "Current League");
-  const snapshotAt = latestRewardCutoffSnapshot(dashboard) || dashboard.generated_at || new Date().toISOString();
+  const clanCutoffRows = Array.isArray(clans.cutoffs) ? clans.cutoffs : [];
+  const clanCutoffRanks = Array.isArray(clans.ranks) ? clans.ranks : [];
+  const clanHasActiveBattle = rewardCutoffClanActive(clans);
+  const clanLines = clanHasActiveBattle
+    ? rewardCutoffLines(clanCutoffRows, clanRewardRangeLabel)
+    : rewardCutoffBlankLines(clanCutoffRanks, clanRewardRangeLabel);
+  const eventName = leagues.league_run_label
+    || leaguePlayers.league_run_label
+    || leagues.league_run_key
+    || leaguePlayers.league_run_key
+    || "Current League";
+  const snapshotAt = [
+    leaguePlayers.snapshot_at,
+    leagues.snapshot_at,
+    clans.snapshot_at
+  ]
+    .map(safeIso)
+    .filter(Boolean)
+    .sort()
+    .pop()
+    || dashboard.generated_at
+    || new Date().toISOString();
   const unix = Math.floor(new Date(snapshotAt).getTime() / 1000);
-  const eventTiming = eventMode === "clan" ? clans.battle_end_iso : leagues.league_end_at;
+  const eventTiming = safeIso(leagues.league_end_at || leagues.league_run_end_at);
   const eventTimingLine = eventTiming
     ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
     : null;
-  const activeGlobalCutoffs = eventMode === "league"
-    ? mergeLeaguePlayerCutoffEstimates(leaguePlayers.cutoffs, players.cutoffs)
-    : players.cutoffs;
-  const globalLines = rewardCutoffLines(activeGlobalCutoffs, playerRewardRangeLabel);
-  if (eventMode === "league") {
-    globalLines.push("-# These numbers are estimates based on the scores of the top 35k players in Leagues.");
+  const globalLines = rewardCutoffLines(leaguePlayers.cutoffs, playerRewardRangeLabel);
+  const totalPlayers = toNumber(leaguePlayers.total_global_players);
+  const topLeaguesScanned = toNumber(leaguePlayers.top_leagues_scanned);
+  const directLimit = toNumber(leaguePlayers.direct_authoritative_limit);
+  if (leaguePlayers.pool_completed && topLeaguesScanned && directLimit) {
+    globalLines.push(
+      `-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; extended ranks simulate `
+      + `${Math.round(totalPlayers || 0).toLocaleString("en-US")} players collected from the Top `
+      + `${Math.round(topLeaguesScanned).toLocaleString("en-US")} League rosters.`
+    );
+  } else if (directLimit) {
+    globalLines.push(`-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; the extended League roster pool has not been built yet.`);
+  } else if (leaguePlayers.pool_is_partial) {
+    globalLines.push(totalPlayers
+      ? `-# Based on the latest ${Math.round(totalPlayers).toLocaleString("en-US")} League players currently available.`
+      : "-# Based on the latest League player leaderboard data currently available.");
   }
-  const rewardLines = eventMode === "clan"
-    ? rewardCutoffLines(clans.cutoffs, clanRewardRangeLabel)
-    : rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel);
-  const globalLabel = eventMode === "clan"
-    ? "Global Leaderboard (Clan Battle)"
-    : "Global Leaderboard (Leagues)";
-  const rewardsLabel = eventMode === "clan" ? "Clan Rewards" : "League Rewards";
+  const leagueLines = rewardCutoffLines(leagues.cutoffs, leagueRewardRangeLabel);
 
   const headerSummary = [
       `**${eventName}**`,
@@ -1998,35 +2280,10 @@ function rewardCutoffDiscordPayload(dashboard) {
     ].filter(Boolean).join("\n");
 
   return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
-    [`## ${globalLabel}`, ...globalLines].join("\n"),
-    [`## ${rewardsLabel}`, ...rewardLines].join("\n")
+    ["## Global Leaderboard (Leagues)", ...globalLines].join("\n"),
+    ["## Clan Rewards", ...clanLines].join("\n"),
+    ["## League Rewards", ...leagueLines].join("\n")
   ], snapshotAt, { headerSummary });
-}
-
-function mergeLeaguePlayerCutoffEstimates(liveCutoffs, estimatedCutoffs) {
-  const live = new Map((Array.isArray(liveCutoffs) ? liveCutoffs : [])
-    .map(row => [toNumber(row?.rank), row])
-    .filter(([rank]) => rank));
-  const estimates = new Map((Array.isArray(estimatedCutoffs) ? estimatedCutoffs : [])
-    .map(row => [toNumber(row?.rank), row])
-    .filter(([rank]) => rank));
-  const ranks = [...new Set([...live.keys(), ...estimates.keys()])].sort((a, b) => a - b);
-
-  return ranks.map(rank => {
-    const liveRow = live.get(rank);
-    const estimatedRow = estimates.get(rank);
-    if (toNumber(liveRow?.points) !== null) return liveRow;
-    return estimatedRow || liveRow || { rank, points: null, available: false };
-  });
-}
-
-function rewardCutoffEventMode(dashboard) {
-  const now = Date.now();
-  const clanEnd = new Date(dashboard?.clans?.battle_end_iso || 0).getTime();
-  const leagueEnd = new Date(dashboard?.leagues?.league_end_at || dashboard?.leagues?.league_run_end_at || 0).getTime();
-  if (Number.isFinite(clanEnd) && clanEnd > now) return "clan";
-  if (Number.isFinite(leagueEnd) && leagueEnd > now) return "league";
-  return "league";
 }
 
 function persistentDiscordComponentPayload(title, sections, timestamp, options = {}) {
@@ -2094,6 +2351,41 @@ function rewardCutoffLines(cutoffs, labeler) {
   return rows.length
     ? rows.map(row => `**${labeler(toNumber(row.rank) || 0)}:** ${formatRewardCutoffPoints(row.points)}`)
     : ["No cutoff data available."];
+}
+
+function rewardCutoffBlankLines(ranks, labeler) {
+  const values = Array.isArray(ranks) ? ranks : [];
+  return values.length
+    ? values.map(rank => `**${labeler(toNumber(rank) || 0)}:** —`)
+    : ["No active clan battle currently."];
+}
+
+function rewardCutoffClanActive(clans) {
+  const battleEndedAt = safeIso(clans?.battle_end_iso || clans?.battleEndedAt || clans?.battle_ended_at);
+  if (battleEndedAt) {
+    const endedMs = new Date(battleEndedAt).getTime();
+    if (Number.isFinite(endedMs)) {
+      return endedMs > Date.now();
+    }
+  }
+
+  const active = parseBooleanish(clans?.battle_is_active);
+  if (active !== null) {
+    return active;
+  }
+
+  return false;
+}
+
+async function fetchLatestBattleRun(env, clan) {
+  const rows = await supabaseSelect(env, BATTLE_RUNS_TABLE, {
+    select: "clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,first_seen_at,last_seen_at,latest_snapshot_id,latest_snapshot_at,is_active,updated_at",
+    clan_name: `eq.${clan}`,
+    order: "latest_snapshot_at.desc",
+    limit: "1"
+  });
+
+  return rows[0] || null;
 }
 
 function playerRewardRangeLabel(rank) {
@@ -4290,8 +4582,17 @@ async function handleClansIngest(env, source, force = false, options = {}) {
 
   const api = await fetchClanApi(trackedClan);
   const battles = api.data?.Battles || {};
-  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
+  const resolvedBattleKey = resolveAuthoritativeBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+
+  if (!battle) {
+    const available = Object.keys(battles);
+    throw httpError(
+      409,
+      `The active battle ${activeBattleMeta?.battleKey || configuredBattleKey} is not available in ${trackedClan}'s Battles data yet. Available battles: ${available.join(", ") || "none"}`
+    );
+  }
+
   const battleMeta = mergeBattleMeta(
     extractBattleMeta(battle || {}, resolvedBattleKey, env, {
       allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
@@ -4412,13 +4713,43 @@ async function handleClansCurrent(request, env) {
   const activeBattleMeta = latest && !explicitBattle
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
-  const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: !explicitBattle });
+  const currentBattleMismatch = Boolean(
+    !explicitBattle &&
+    latest?.battle_key &&
+    activeBattleMeta?.battleKey &&
+    normalizeText(latest.battle_key) !== normalizeText(activeBattleMeta.battleKey)
+  );
+
+  if (currentBattleMismatch) {
+    return noStoreJson({
+      generated_at: new Date().toISOString(),
+      snapshot_at: null,
+      battle: activeBattleMeta.battleKey,
+      display_name: cleanBattleDisplayName(
+        activeBattleMeta.battleKey,
+        activeBattleMeta.displayName
+      ),
+      battle_start_iso: activeBattleMeta.startedAt || null,
+      battle_end_iso: activeBattleMeta.endedAt || null,
+      clan_name: clanName(env),
+      clan_rank: null,
+      clan_points: null,
+      projected_rank: null,
+      projected_points: null,
+      projection_basis: null,
+      waiting_for_first_snapshot: true,
+      stale_battle_key: latest.battle_key,
+      rows: []
+    });
+  }
+
+  const latestWithActiveMeta = mergeLatestMeta(latest, activeBattleMeta, { allowMismatch: false });
   const rowsWithGains = latestWithActiveMeta ? await addClanGainFields(env, rows, latestWithActiveMeta) : rows;
   const rowsWithProjections = latestWithActiveMeta ? addClanProjectionFields(rowsWithGains, latestWithActiveMeta) : rowsWithGains;
   const trackedClan = clanName(env);
   const tracked = rowsWithProjections.find(row => normalizeText(row.clan_name) === normalizeText(trackedClan));
 
-  return cacheJson({
+  return noStoreJson({
     generated_at: new Date().toISOString(),
     snapshot_at: latestWithActiveMeta?.fetched_at || null,
     battle: latestWithActiveMeta?.battle_key || null,
@@ -4449,7 +4780,7 @@ async function handleClansCurrent(request, env) {
       projected_rank: row.projected_rank,
       projection_basis: row.projection_basis
     }))
-  }, env, publicCacheSeconds(env, "CLANS_CURRENT"));
+  });
 }
 
 async function handleClansHistory(request, env) {
@@ -4619,7 +4950,7 @@ async function handleTopClanThresholds(request, env) {
       const api = await fetchClanApi(clan.clan_name);
       const data = api.data || {};
       const battles = data.Battles || data.battles || {};
-      const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
+      const resolvedBattleKey = resolveAuthoritativeBattleKey(battles, configuredBattleKey, env, activeBattleMeta?.battleKey);
       const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
       if (!battle) {
@@ -6491,6 +6822,12 @@ async function handlePs99RestartProbeIngest(request, env) {
     allowConfirmation: true
   });
 
+  let intelligence = null;
+  if (ps99RestartIntelligenceEnabled(env)) {
+    intelligence = await capturePs99RestartSentinelEvidence(env, receivedAt, result.evaluation, observations)
+      .catch(error => ({ ok: false, error: String(error?.message || error).slice(0, 1000) }));
+  }
+
   return json({
     ok: true,
     accepted: observations.length,
@@ -6499,7 +6836,8 @@ async function handlePs99RestartProbeIngest(request, env) {
     evaluation: result.evaluation,
     restart_detected: result.restartDetected,
     event_id: result.event?.event_id || null,
-    webhook_alert: result.webhookAlert
+    webhook_alert: result.webhookAlert,
+    restart_intelligence: intelligence
   }, 202, {
     "Cache-Control": "no-store"
   });
@@ -7031,6 +7369,2185 @@ function modeNumber(values) {
     .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? null;
 }
 
+
+function ps99RestartIntelligenceEnabled(env) {
+  return String(env.PS99_RESTART_INTELLIGENCE_ENABLED || "true").toLowerCase() !== "false";
+}
+
+function ps99RestartIntelligenceRuntimeConfig(env) {
+  return {
+    enabled: ps99RestartIntelligenceEnabled(env),
+    review_webhook_configured: Boolean(String(env.DISCORD_REVIEW_INTERNAL_TOKEN || "").trim() && (env.DISCORD_INTERACTIONS_WORKER || String(env.DISCORD_INTERACTIONS_BASE || env.DISCORD_WORKER_BASE || "").trim())),
+    pre_minutes: clamp(Number(env.PS99_RESTART_INTEL_PRE_MINUTES || DEFAULT_PS99_RESTART_INTEL_PRE_MINUTES), 5, 60),
+    post_minutes: clamp(Number(env.PS99_RESTART_INTEL_POST_MINUTES || DEFAULT_PS99_RESTART_INTEL_POST_MINUTES), 5, 60),
+    merge_minutes: clamp(Number(env.PS99_RESTART_INTEL_MERGE_MINUTES || DEFAULT_PS99_RESTART_INTEL_MERGE_MINUTES), 15, 180),
+    ccu_drop_3m_percent: clamp(Number(env.PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT || DEFAULT_PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT), 1, 50),
+    ccu_drop_10m_percent: clamp(Number(env.PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT || DEFAULT_PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT), 1, 50),
+    turnover_percent: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_PERCENT || DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT), 1, 100),
+    min_public_servers: clamp(Number(env.PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS || DEFAULT_PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS), 5, 1000),
+    turnover_only_open_percent: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_ONLY_OPEN_PERCENT || 90), 50, 100),
+    turnover_only_consecutive_observations: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_ONLY_CONSECUTIVE || 2), 2, 6),
+    require_corroboration: String(env.PS99_RESTART_INTEL_REQUIRE_CORROBORATION || "true").toLowerCase() !== "false"
+  };
+}
+
+async function capturePs99RestartIntelligenceObservation(env, context) {
+  const config = ps99RestartIntelligenceRuntimeConfig(env);
+  const observedAt = safeIso(context.checkedAt) || new Date().toISOString();
+  const servers = Array.isArray(context.serverObservation?.servers) ? context.serverObservation.servers : [];
+  const serverIds = servers.map(row => String(row.server_id || "")).filter(Boolean);
+  const previousRows = await supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
+    select: "observation_id,observed_at,ccu,place_version,public_server_ids,public_server_count,sentinel_summary",
+    place_id: `eq.${context.placeId}`,
+    observed_at: `lt.${observedAt}`,
+    order: "observed_at.desc",
+    limit: "12"
+  }).catch(() => []);
+  const previous = previousRows[0] || null;
+  const previousIds = new Set(parseJsonArray(previous?.public_server_ids).map(String));
+  const currentIds = new Set(serverIds);
+  const disappeared = [...previousIds].filter(id => !currentIds.has(id));
+  const appeared = [...currentIds].filter(id => !previousIds.has(id));
+  const denominator = Math.max(1, Math.min(previousIds.size || currentIds.size, currentIds.size || previousIds.size));
+  const turnoverPercent = previous && previousIds.size && currentIds.size
+    ? Math.round((disappeared.length / denominator) * 10000) / 100
+    : null;
+  const latestProbeState = await supabaseSelect(env, PS99_RESTART_PROBE_STATE_TABLE, {
+    select: "last_evaluation,updated_at",
+    place_id: `eq.${context.placeId}`,
+    limit: "1"
+  }).catch(() => []);
+  const sentinelSummary = parseJsonObject(latestProbeState[0]?.last_evaluation) || {};
+  const observationId = `ps99-intel:${context.placeId}:${observedAt}`;
+  const row = {
+    observation_id: observationId,
+    universe_id: context.universeId,
+    place_id: context.placeId,
+    observed_at: observedAt,
+    source: context.source || "schedule",
+    ccu: toNumber(context.ccuSample?.ccu),
+    place_version: toNumber(context.currentVersion),
+    public_server_count: serverIds.length,
+    public_server_ids: serverIds,
+    public_disappeared_count: disappeared.length,
+    public_appeared_count: appeared.length,
+    public_turnover_percent: turnoverPercent,
+    detector_status: context.detectorStatus || null,
+    sentinel_summary: sentinelSummary,
+    api_metrics: {
+      pages_requested: toNumber(context.serverObservation?.scan?.pages_requested),
+      pages_fetched: toNumber(context.serverObservation?.scan?.pages_fetched),
+      page_size: toNumber(context.serverObservation?.scan?.page_size),
+      exhausted: context.serverObservation?.scan?.exhausted ?? null,
+      ccu_error: context.ccuError || null
+    },
+    raw_observation: {
+      servers,
+      tracked_servers: context.trackedServers || [],
+      candidate_servers: context.candidateServers || [],
+      version_context: context.versionContext || {},
+      suppressed_restart: context.suppressedRestart || null,
+      confirmed_event: context.eventRow || null
+    }
+  };
+  await supabaseUpsert(env, PS99_RESTART_OBSERVATIONS_TABLE, [row], "observation_id");
+
+  const triggers = await buildPs99RestartIntelligenceTriggers(env, row, previousRows);
+  const existingCandidate = await activePs99RestartCandidate(env, context.placeId);
+  const gate = ps99RestartCandidateOpeningDecision(config, row, previousRows, triggers);
+  const candidate = existingCandidate
+    ? (triggers.length
+        ? await openOrMergePs99RestartCandidate(env, row, triggers)
+        : existingCandidate)
+    : (gate.open
+        ? await openOrMergePs99RestartCandidate(env, row, triggers)
+        : null);
+
+  if (!existingCandidate && triggers.length && !gate.open) {
+    await appendPs99RestartSuppressedTriggerTimeline(env, row, triggers, gate);
+  }
+
+  if (candidate) {
+    await appendPs99RestartCandidateTimeline(env, candidate.candidate_id, observedAt, "observation", {
+      ccu: row.ccu,
+      place_version: row.place_version,
+      public_server_count: row.public_server_count,
+      public_turnover_percent: row.public_turnover_percent,
+      triggers
+    });
+  }
+  const finalized = await finalizeDuePs99RestartCandidates(env, observedAt);
+  return {
+    ok: true,
+    observation_id: observationId,
+    triggers,
+    opening_gate: gate,
+    candidate_id: candidate?.candidate_id || null,
+    finalized_candidates: finalized
+  };
+}
+
+async function buildPs99RestartIntelligenceTriggers(env, row, recentRows) {
+  const config = ps99RestartIntelligenceRuntimeConfig(env);
+  const triggers = [];
+  const nowMs = isoToMs(row.observed_at) || Date.now();
+  const previous = recentRows[0] || null;
+  if (previous && toNumber(previous.place_version) !== null && toNumber(row.place_version) !== null && toNumber(previous.place_version) !== toNumber(row.place_version)) {
+    triggers.push({ type: "version_changed", severity: "high", previous: toNumber(previous.place_version), current: toNumber(row.place_version) });
+  }
+  const ccuNow = toNumber(row.ccu);
+  for (const window of [
+    { minutes: 3, threshold: config.ccu_drop_3m_percent, type: "ccu_drop_3m" },
+    { minutes: 10, threshold: config.ccu_drop_10m_percent, type: "ccu_drop_10m" }
+  ]) {
+    const targetMs = nowMs - window.minutes * 60000;
+    const baseline = [...recentRows].sort((a, b) => Math.abs((isoToMs(a.observed_at) || 0) - targetMs) - Math.abs((isoToMs(b.observed_at) || 0) - targetMs))[0];
+    const before = toNumber(baseline?.ccu);
+    if (ccuNow !== null && before && before > ccuNow) {
+      const drop = Math.round(((before - ccuNow) / before) * 10000) / 100;
+      if (drop >= window.threshold) triggers.push({ type: window.type, severity: "medium", percent: drop, before, current: ccuNow });
+    }
+  }
+  if (toNumber(row.public_server_count) >= config.min_public_servers && toNumber(row.public_turnover_percent) >= config.turnover_percent) {
+    triggers.push({ type: "public_turnover", severity: "medium", percent: toNumber(row.public_turnover_percent), observed_servers: toNumber(row.public_server_count) });
+  }
+  const sentinel = parseJsonObject(row.sentinel_summary) || row.sentinel_summary || {};
+  const changed = toNumber(sentinel.changed_probe_count) || 0;
+  if (changed >= 1) triggers.push({ type: "sentinel_transition", severity: changed >= 2 ? "high" : "medium", changed_probes: changed, machines: toNumber(sentinel.machine_count) || 0 });
+  if (sentinel.decision === "version_conflict") triggers.push({ type: "sentinel_version_conflict", severity: "medium" });
+  return triggers;
+}
+
+
+function ps99RestartCandidateOpeningDecision(config, row, recentRows, triggers) {
+  if (!Array.isArray(triggers) || !triggers.length) {
+    return {
+      open: false,
+      reason: "no_trigger",
+      strong_trigger_types: [],
+      turnover_consecutive_count: 0
+    };
+  }
+
+  const strongTypes = new Set([
+    "version_changed",
+    "ccu_drop_3m",
+    "ccu_drop_10m",
+    "sentinel_transition",
+    "sentinel_version_conflict"
+  ]);
+  const strongTriggers = triggers.filter(trigger => strongTypes.has(String(trigger?.type || "")));
+
+  if (!config.require_corroboration || strongTriggers.length) {
+    return {
+      open: true,
+      reason: strongTriggers.length ? "corroborating_signal" : "corroboration_disabled",
+      strong_trigger_types: strongTriggers.map(trigger => trigger.type),
+      turnover_consecutive_count: 0
+    };
+  }
+
+  const turnoverTrigger = triggers.find(trigger => trigger?.type === "public_turnover");
+  if (!turnoverTrigger) {
+    return {
+      open: false,
+      reason: "no_corroborating_signal",
+      strong_trigger_types: [],
+      turnover_consecutive_count: 0
+    };
+  }
+
+  const threshold = config.turnover_only_open_percent;
+  const required = config.turnover_only_consecutive_observations;
+  const samples = [
+    {
+      percent: toNumber(row.public_turnover_percent) || 0,
+      server_count: toNumber(row.public_server_count) || 0
+    },
+    ...(recentRows || []).map(prior => ({
+      percent: toNumber(prior.public_turnover_percent) || 0,
+      server_count: toNumber(prior.public_server_count) || 0
+    }))
+  ];
+
+  let consecutive = 0;
+  for (const sample of samples) {
+    if (
+      sample.percent >= threshold &&
+      sample.server_count >= config.min_public_servers
+    ) {
+      consecutive += 1;
+      if (consecutive >= required) break;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    open: consecutive >= required,
+    reason: consecutive >= required
+      ? "sustained_extreme_turnover"
+      : "turnover_only_not_sustained",
+    strong_trigger_types: [],
+    turnover_percent: toNumber(row.public_turnover_percent) || 0,
+    turnover_threshold: threshold,
+    turnover_consecutive_count: consecutive,
+    turnover_consecutive_required: required
+  };
+}
+
+async function appendPs99RestartSuppressedTriggerTimeline(env, observation, triggers, gate) {
+  // Suppressed evidence is retained on the observation itself. This log entry
+  // makes the gate decision visible without creating a review candidate.
+  console.log("PS99 restart candidate opening suppressed", {
+    observation_id: observation.observation_id,
+    place_id: observation.place_id,
+    observed_at: observation.observed_at,
+    triggers,
+    gate
+  });
+}
+
+async function activePs99RestartCandidate(env, placeId) {
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    place_id: `eq.${placeId}`,
+    status: "in.(collecting,ready_for_review,needs_more_evidence)",
+    archived_at: "is.null",
+    order: "opened_at.desc",
+    limit: "1"
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function openOrMergePs99RestartCandidate(env, observation, triggers) {
+  const config = ps99RestartIntelligenceRuntimeConfig(env);
+  const nowMs = isoToMs(observation.observed_at) || Date.now();
+  const mergeAfter = new Date(nowMs - config.merge_minutes * 60000).toISOString();
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    place_id: `eq.${observation.place_id}`,
+    opened_at: `gte.${mergeAfter}`,
+    status: "in.(collecting,ready_for_review,needs_more_evidence)",
+    order: "opened_at.desc",
+    limit: "1"
+  }).catch(() => []);
+  const existing = rows[0] || null;
+  if (existing) {
+    const mergedTriggers = mergeRestartIntelTriggers(parseJsonArray(existing.triggers), triggers);
+
+    // The evidence window is fixed when the candidate opens. Repeated sampled
+    // turnover observations may add evidence, but they cannot postpone review
+    // indefinitely by continuously extending finalize_at.
+    const finalizeAt = safeIso(existing.finalize_at) ||
+      new Date((isoToMs(existing.opened_at) || nowMs) + config.post_minutes * 60000).toISOString();
+
+    await supabasePatch(env, PS99_RESTART_CANDIDATES_TABLE, { candidate_id: `eq.${existing.candidate_id}` }, {
+      triggers: mergedTriggers,
+      last_trigger_at: observation.observed_at,
+      finalize_at: finalizeAt,
+      post_window_end: safeIso(existing.post_window_end) || finalizeAt,
+      updated_at: observation.observed_at
+    });
+    await appendPs99RestartCandidateTimeline(env, existing.candidate_id, observation.observed_at, "trigger", {
+      triggers,
+      finalize_at_unchanged: true
+    });
+    return {
+      ...existing,
+      triggers: mergedTriggers,
+      finalize_at: finalizeAt,
+      post_window_end: safeIso(existing.post_window_end) || finalizeAt
+    };
+  }
+
+  const candidateBucket = new Date(Math.floor(nowMs / 60000) * 60000).toISOString();
+  const candidateId = `ps99-candidate:${observation.place_id}:${candidateBucket}`;
+  const finalizeAt = new Date(nowMs + config.post_minutes * 60000).toISOString();
+  const candidate = {
+    candidate_id: candidateId,
+    universe_id: observation.universe_id,
+    place_id: observation.place_id,
+    status: "collecting",
+    opened_at: observation.observed_at,
+    first_trigger_at: observation.observed_at,
+    last_trigger_at: observation.observed_at,
+    finalize_at: finalizeAt,
+    pre_window_start: new Date(nowMs - config.pre_minutes * 60000).toISOString(),
+    post_window_end: finalizeAt,
+    triggers,
+    summary: {},
+    discord_message_id: null,
+    review_status: "unreviewed",
+    updated_at: observation.observed_at
+  };
+  await supabaseUpsert(env, PS99_RESTART_CANDIDATES_TABLE, [candidate], "candidate_id");
+  await appendPs99RestartCandidateTimeline(env, candidateId, observation.observed_at, "candidate_opened", { triggers });
+  const discord = await postPs99RestartCandidateReviewMessage(
+    env,
+    candidate,
+    null,
+    false
+  ).catch(error => {
+    console.error(
+      "restart candidate Discord creation failed",
+      candidate.candidate_id,
+      error?.message || String(error)
+    );
+
+    return {
+      posted: false,
+      error: error?.message || String(error)
+    };
+  });
+  if (discord?.message_id) {
+    await supabasePatch(env, PS99_RESTART_CANDIDATES_TABLE, { candidate_id: `eq.${candidateId}` }, {
+      discord_message_id: discord.message_id,
+      discord_channel_id: discord.channel_id || null,
+      updated_at: observation.observed_at
+    });
+    candidate.discord_message_id = discord.message_id;
+  }
+  return candidate;
+}
+
+function mergeRestartIntelTriggers(existing, incoming) {
+  const map = new Map();
+  for (const trigger of [...(existing || []), ...(incoming || [])]) {
+    const key = String(trigger?.type || "unknown");
+    const prior = map.get(key);
+    if (!prior || (toNumber(trigger?.percent) || 0) > (toNumber(prior?.percent) || 0) || (toNumber(trigger?.changed_probes) || 0) > (toNumber(prior?.changed_probes) || 0)) map.set(key, trigger);
+  }
+  return [...map.values()];
+}
+
+async function appendPs99RestartCandidateTimeline(env, candidateId, occurredAt, eventType, details) {
+  const timelineId = `ps99-timeline:${await sha256Hex(`${candidateId}|${occurredAt}|${eventType}|${stableJsonStringify(details || {})}`)}`;
+  await supabaseUpsert(env, PS99_RESTART_CANDIDATE_TIMELINE_TABLE, [{
+    timeline_id: timelineId,
+    candidate_id: candidateId,
+    occurred_at: occurredAt,
+    event_type: eventType,
+    details: details || {}
+  }], "timeline_id");
+}
+
+async function capturePs99RestartSentinelEvidence(env, observedAt, evaluation, observations) {
+  const candidate = await activePs99RestartCandidate(env, ps99RootPlaceId(env));
+  const changed = toNumber(evaluation?.changed_probe_count) || 0;
+  const shouldOpen = changed > 0 || evaluation?.decision === "version_conflict" || evaluation?.would_confirm;
+  let target = candidate;
+  if (!target && shouldOpen) {
+    const syntheticObservation = {
+      observation_id: `ps99-intel-sentinel:${observedAt}`,
+      universe_id: ps99UniverseId(env),
+      place_id: ps99RootPlaceId(env),
+      observed_at: observedAt,
+      ccu: null,
+      place_version: toNumber(evaluation?.current_place_version),
+      public_server_count: 0,
+      public_server_ids: [],
+      sentinel_summary: evaluation || {}
+    };
+    target = await openOrMergePs99RestartCandidate(env, syntheticObservation, [{
+      type: "sentinel_transition",
+      severity: changed >= 2 ? "high" : "medium",
+      changed_probes: changed,
+      machines: toNumber(evaluation?.machine_count) || 0,
+      decision: evaluation?.decision || null
+    }]);
+  }
+  if (target) {
+    await appendPs99RestartCandidateTimeline(env, target.candidate_id, observedAt, "sentinel_evidence", {
+      evaluation,
+      observations: (observations || []).map(normalizePs99RestartProbeObservationOutput)
+    });
+  }
+  return { ok: true, candidate_id: target?.candidate_id || null, changed_probe_count: changed };
+}
+
+async function finalizeDuePs99RestartCandidates(env, nowAt) {
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    status: "eq.collecting",
+    finalize_at: `lte.${nowAt}`,
+    order: "finalize_at.asc",
+    limit: "20"
+  }).catch(() => []);
+  const finalized = [];
+  for (const candidate of rows) {
+    const summary = await summarizePs99RestartCandidate(env, candidate);
+    const report = await buildPs99RestartCandidateTextReport(env, candidate, summary);
+    await supabasePatch(env, PS99_RESTART_CANDIDATES_TABLE, { candidate_id: `eq.${candidate.candidate_id}` }, {
+      status: "ready_for_review",
+      summary,
+      report_text: report,
+      finalized_at: nowAt,
+      updated_at: nowAt
+    });
+    await appendPs99RestartCandidateTimeline(env, candidate.candidate_id, nowAt, "ready_for_review", { summary });
+    const updated = { ...candidate, status: "ready_for_review", summary, report_text: report, finalized_at: nowAt };
+    const discord = await postPs99RestartCandidateReviewMessage(
+      env,
+      updated,
+      report,
+      true
+    ).catch(error => {
+      console.warn(
+        "restart candidate Discord finalization failed",
+        candidate.candidate_id,
+        error?.message || String(error)
+      );
+
+      return {
+        posted: false,
+        error: error?.message || String(error)
+      };
+    });
+
+    if (discord?.message_id) {
+      await supabasePatch(
+        env,
+        PS99_RESTART_CANDIDATES_TABLE,
+        { candidate_id: `eq.${candidate.candidate_id}` },
+        {
+          discord_message_id: discord.message_id,
+          discord_channel_id: discord.channel_id || null,
+          updated_at: nowAt
+        }
+      );
+    }
+
+    finalized.push(candidate.candidate_id);
+  }
+
+  if (finalized.length) {
+    await refreshPs99RestartAnalyticsDashboard(env, {
+      reason: "candidate_finalized",
+      changed_candidate_ids: finalized
+    }).catch(error => console.warn(
+      "restart analytics refresh after finalization failed",
+      error?.message || String(error)
+    ));
+  }
+
+  return finalized;
+}
+
+async function summarizePs99RestartCandidate(env, candidate) {
+  const observations = await supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
+    select: "observation_id,observed_at,ccu,place_version,public_server_count,public_disappeared_count,public_appeared_count,public_turnover_percent,detector_status,sentinel_summary,api_metrics",
+    place_id: `eq.${candidate.place_id}`,
+    observed_at: [`gte.${candidate.pre_window_start}`, `lte.${candidate.post_window_end}`],
+    order: "observed_at.asc",
+    limit: "500"
+  });
+  const ccus = observations.map(row => toNumber(row.ccu)).filter(value => value !== null);
+  const firstCcu = ccus[0] ?? null;
+  const minCcu = ccus.length ? Math.min(...ccus) : null;
+  const lastCcu = ccus.length ? ccus[ccus.length - 1] : null;
+  const maxCcuDropPercent = firstCcu && minCcu !== null && minCcu < firstCcu ? Math.round(((firstCcu - minCcu) / firstCcu) * 10000) / 100 : 0;
+  const versions = [...new Set(observations.map(row => toNumber(row.place_version)).filter(value => value !== null))];
+  const maxTurnover = observations.reduce((max, row) => Math.max(max, toNumber(row.public_turnover_percent) || 0), 0);
+  const maxSentinelChanged = observations.reduce((max, row) => Math.max(max, toNumber((parseJsonObject(row.sentinel_summary) || {}).changed_probe_count) || 0), 0);
+  const maxMachines = observations.reduce((max, row) => Math.max(max, toNumber((parseJsonObject(row.sentinel_summary) || {}).machine_count) || 0), 0);
+  return {
+    observation_count: observations.length,
+    ccu_before: firstCcu,
+    ccu_minimum: minCcu,
+    ccu_after: lastCcu,
+    maximum_ccu_drop_percent: maxCcuDropPercent,
+    version_before: versions[0] ?? null,
+    version_after: versions.length ? versions[versions.length - 1] : null,
+    version_changed: versions.length > 1,
+    maximum_public_turnover_percent: Math.round(maxTurnover * 100) / 100,
+    maximum_sentinel_changes: maxSentinelChanged,
+    maximum_independent_machines: maxMachines,
+    triggers: parseJsonArray(candidate.triggers)
+  };
+}
+
+async function buildPs99RestartCandidateTextReport(env, candidate, summary = null) {
+  const finalSummary = summary || await summarizePs99RestartCandidate(env, candidate);
+  const [observations, timeline] = await Promise.all([
+    supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
+      select: "observed_at,ccu,place_version,public_server_count,public_disappeared_count,public_appeared_count,public_turnover_percent,detector_status,sentinel_summary,api_metrics,raw_observation",
+      place_id: `eq.${candidate.place_id}`,
+      observed_at: [`gte.${candidate.pre_window_start}`, `lte.${candidate.post_window_end}`],
+      order: "observed_at.asc",
+      limit: "500"
+    }),
+    supabaseSelect(env, PS99_RESTART_CANDIDATE_TIMELINE_TABLE, {
+      select: "occurred_at,event_type,details",
+      candidate_id: `eq.${candidate.candidate_id}`,
+      order: "occurred_at.asc",
+      limit: "1000"
+    })
+  ]);
+  const lines = [
+    "PS99 RESTART INTELLIGENCE REPORT",
+    "================================",
+    `Candidate ID: ${candidate.candidate_id}`,
+    `Status: ${candidate.status || "collecting"}`,
+    `Review status: ${candidate.review_status || "unreviewed"}`,
+    `Opened: ${candidate.opened_at}`,
+    `Evidence window: ${candidate.pre_window_start} through ${candidate.post_window_end}`,
+    `Finalized: ${candidate.finalized_at || "Not finalized"}`,
+    "",
+    "TRIGGERS",
+    "--------",
+    ...parseJsonArray(candidate.triggers).map(trigger => `- ${trigger.type}: ${stableJsonStringify(trigger)}`),
+    "",
+    "SUMMARY",
+    "-------",
+    `Observations: ${finalSummary.observation_count ?? observations.length}`,
+    `CCU before / minimum / after: ${finalSummary.ccu_before ?? "Unknown"} / ${finalSummary.ccu_minimum ?? "Unknown"} / ${finalSummary.ccu_after ?? "Unknown"}`,
+    `Maximum CCU drop: ${finalSummary.maximum_ccu_drop_percent ?? 0}%`,
+    `Version before / after: ${finalSummary.version_before ?? "Unknown"} / ${finalSummary.version_after ?? "Unknown"}`,
+    `Maximum public turnover: ${finalSummary.maximum_public_turnover_percent ?? 0}%`,
+    `Maximum sentinel changes: ${finalSummary.maximum_sentinel_changes ?? 0}`,
+    `Maximum independent machines: ${finalSummary.maximum_independent_machines ?? 0}`,
+    `Automated confidence: ${ps99RestartConfidenceAssessment(finalSummary).score}% (${ps99RestartConfidenceAssessment(finalSummary).label})`,
+    "",
+    "AUTOMATED EVIDENCE ASSESSMENT",
+    "-----------------------------",
+    ...ps99RestartEvidenceAssessmentLines(finalSummary).slice(1).map(line => line.replace(/\*\*/g, "")),
+    "",
+    "MINUTE-BY-MINUTE OBSERVATIONS",
+    "-----------------------------"
+  ];
+  for (const row of observations) {
+    const sentinel = parseJsonObject(row.sentinel_summary) || {};
+    lines.push([
+      row.observed_at,
+      `CCU=${toNumber(row.ccu) ?? "Unknown"}`,
+      `Version=${toNumber(row.place_version) ?? "Unknown"}`,
+      `PublicServers=${toNumber(row.public_server_count) ?? 0}`,
+      `Disappeared=${toNumber(row.public_disappeared_count) ?? 0}`,
+      `Appeared=${toNumber(row.public_appeared_count) ?? 0}`,
+      `Turnover=${toNumber(row.public_turnover_percent) ?? 0}%`,
+      `SentinelChanged=${toNumber(sentinel.changed_probe_count) ?? 0}`,
+      `Machines=${toNumber(sentinel.machine_count) ?? 0}`,
+      `Decision=${sentinel.decision || "none"}`,
+      `Detector=${row.detector_status || "unknown"}`
+    ].join(" | "));
+  }
+  lines.push("", "EVENT TIMELINE", "--------------");
+  for (const event of timeline) lines.push(`${event.occurred_at} | ${event.event_type} | ${stableJsonStringify(event.details || {})}`);
+  lines.push("", "RAW EVIDENCE", "------------");
+  for (const row of observations) lines.push(`${row.observed_at}\n${JSON.stringify(row.raw_observation || {}, null, 2)}\n`);
+  return lines.join("\n").slice(0, 7_500_000);
+}
+
+
+function ps99RestartFormatNumber(value, decimals = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  const factor = 10 ** decimals;
+  return Math.round(number * factor) / factor;
+}
+
+function ps99RestartConfidenceAssessment(summary) {
+  const safe = summary && typeof summary === "object" ? summary : {};
+  const versionBefore = toNumber(safe.version_before);
+  const versionAfter = toNumber(safe.version_after);
+  const versionChanged = Boolean(
+    safe.version_changed ||
+    (versionBefore !== null && versionAfter !== null && versionBefore !== versionAfter)
+  );
+  const ccuDrop = Math.max(0, toNumber(safe.maximum_ccu_drop_percent) || 0);
+  const turnover = Math.max(0, toNumber(safe.maximum_public_turnover_percent) || 0);
+  const sentinelChanges = Math.max(0, toNumber(safe.maximum_sentinel_changes) || 0);
+  const machines = Math.max(0, toNumber(safe.maximum_independent_machines) || 0);
+
+  let score = 0;
+  if (versionChanged) score += 50;
+  if (ccuDrop >= 35) score += 30;
+  else if (ccuDrop >= 20) score += 24;
+  else if (ccuDrop >= 10) score += 14;
+  else if (ccuDrop >= 5) score += 7;
+
+  if (machines >= 3) score += 25;
+  else if (machines >= 2) score += 18;
+  else if (machines >= 1) score += 9;
+
+  if (sentinelChanges >= 4) score += 20;
+  else if (sentinelChanges >= 2) score += 13;
+  else if (sentinelChanges >= 1) score += 6;
+
+  // Public server turnover is a weak signal because Roblox's public-server
+  // listing is sampled and can rotate without a true game restart.
+  if (turnover >= 85) score += 15;
+  else if (turnover >= 70) score += 11;
+  else if (turnover >= 50) score += 7;
+  else if (turnover >= 30) score += 4;
+  else if (turnover >= 15) score += 2;
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label = score >= 80
+    ? "Very High"
+    : score >= 60
+      ? "High"
+      : score >= 40
+        ? "Moderate"
+        : score >= 20
+          ? "Low"
+          : "Very Low";
+
+  return { score, label, versionChanged, ccuDrop, turnover, sentinelChanges, machines };
+}
+
+function ps99RestartEvidenceAssessmentLines(summary) {
+  const assessment = ps99RestartConfidenceAssessment(summary);
+  return [
+    "## Evidence Assessment",
+    `**Automated Confidence:** ${assessment.score}% — ${assessment.label}`,
+    `${assessment.versionChanged ? "✅" : "❌"} ${assessment.versionChanged ? "Place version changed" : "No place-version change"}`,
+    `${assessment.ccuDrop >= 10 ? "✅" : "❌"} ${assessment.ccuDrop >= 10 ? `Material CCU drop: ${ps99RestartFormatNumber(assessment.ccuDrop)}%` : `No material CCU drop: ${ps99RestartFormatNumber(assessment.ccuDrop)}%`}`,
+    `${assessment.sentinelChanges > 0 ? "✅" : "❌"} ${assessment.sentinelChanges > 0 ? `Sentinel transitions: ${assessment.sentinelChanges}` : "No sentinel transitions"}`,
+    `${assessment.machines > 0 ? "✅" : "❌"} ${assessment.machines > 0 ? `Independent machines: ${assessment.machines}` : "No independent-machine confirmation"}`,
+    `⚠️ Public-server turnover: ${ps99RestartFormatNumber(assessment.turnover)}% — weak when uncorroborated`
+  ];
+}
+
+function ps99RestartCandidateDiscordTitle(candidate, finalized) {
+  const reviewStatus = String(candidate?.review_status || "unreviewed").trim().toLowerCase();
+  const reviewed = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+
+  if (reviewed) {
+    return `${restartIntelReviewStatusEmoji(reviewStatus)} PS99 Restart Candidate — ${restartIntelReviewStatusLabel(reviewStatus)}`;
+  }
+  if (reviewStatus === "needs_more_evidence") {
+    return "🔵 PS99 Restart Candidate — Needs More Evidence";
+  }
+  if (finalized) {
+    return "🟠 PS99 Restart Candidate — Ready for Review";
+  }
+  return "🟡 PS99 Restart Candidate — Collecting";
+}
+
+function ps99RestartCandidateDiscordPayload(candidate, summary, finalized) {
+  const reviewStatus = String(candidate.review_status || "unreviewed").trim().toLowerCase();
+  const reviewed = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+  const needsMoreEvidence = reviewStatus === "needs_more_evidence";
+  const status = reviewed
+    ? restartIntelReviewStatusLabel(reviewStatus)
+    : needsMoreEvidence
+      ? "Needs More Evidence"
+      : finalized
+        ? "Ready for Review"
+        : "Collecting Evidence";
+  const title = ps99RestartCandidateDiscordTitle(candidate, finalized);
+  const triggerLines = parseJsonArray(candidate.triggers).map(trigger => `• **${escapeDiscordMarkdown(trigger.type)}:** ${escapeDiscordMarkdown(restartIntelTriggerDescription(trigger))}`);
+  const sections = [
+    [
+      `**Candidate:** \`${escapeDiscordMarkdown(candidate.candidate_id)}\``,
+      `**Status:** ${status}`,
+      `**Opened:** ${discordTimestamp(candidate.opened_at, "F") || candidate.opened_at}`,
+      `**Evidence Window Ends:** ${discordTimestamp(candidate.post_window_end, "R") || candidate.post_window_end}`
+    ].join("\n"),
+    ["## Triggers", ...(triggerLines.length ? triggerLines : ["No triggers stored."])].join("\n")
+  ];
+  if (summary) sections.push([
+    "## Evidence Summary",
+    `**CCU:** ${ps99AlertCcu(summary.ccu_before)} → ${ps99AlertCcu(summary.ccu_minimum)} → ${ps99AlertCcu(summary.ccu_after)}`,
+    `**Maximum CCU Drop:** ${toNumber(summary.maximum_ccu_drop_percent) || 0}%`,
+    `**Public Turnover:** ${toNumber(summary.maximum_public_turnover_percent) || 0}%`,
+    `**Sentinels Changed:** ${toNumber(summary.maximum_sentinel_changes) || 0}`,
+    `**Independent Machines:** ${toNumber(summary.maximum_independent_machines) || 0}`,
+    `**Version:** ${summary.version_before ?? "Unknown"} → ${summary.version_after ?? "Unknown"}`,
+    "",
+    ...ps99RestartEvidenceAssessmentLines(summary),
+    "",
+    reviewed
+      ? "Human classification is complete. Download Evidence remains available for audit."
+      : needsMoreEvidence
+        ? "Additional evidence was requested. Classify the candidate again when sufficient evidence is available."
+        : finalized
+          ? "Use the buttons below to classify this candidate. Download Evidence contains the complete observation window."
+          : "Evidence collection is active. Classification buttons appear when the candidate is ready for review."
+  ].join("\n"));
+  if (reviewed || needsMoreEvidence) {
+    sections.push([
+      "## Human Review",
+      `**Decision:** ${restartIntelReviewStatusLabel(reviewStatus)}`,
+      `**Reviewed By:** ${escapeDiscordMarkdown(candidate.reviewed_by || "Unknown")}`,
+      `**Reviewed At:** ${discordTimestamp(candidate.reviewed_at, "F") || candidate.reviewed_at || "Unknown"}`,
+      candidate.review_notes ? `**Notes:** ${escapeDiscordMarkdown(candidate.review_notes)}` : null
+    ].filter(Boolean).join("\n"));
+  }
+
+  const payload = persistentDiscordComponentPayload(title, sections, candidate.updated_at || candidate.opened_at, {
+    headerSummary: reviewed
+      ? "Human review is complete."
+      : needsMoreEvidence
+        ? "Additional evidence was requested; no public restart alert has been sent."
+        : finalized
+          ? "Hidden review candidate; no public restart alert has been sent."
+          : "Evidence collection is active."
+  });
+
+  if (finalized || reviewed || needsMoreEvidence) {
+    payload.components.push(...ps99RestartReviewDiscordComponents(candidate));
+  }
+
+  return payload;
+}
+
+function restartIntelReviewStatusLabel(status) {
+  if (status === "confirmed_restart") return "Confirmed Restart";
+  if (status === "not_a_restart") return "Not a Restart";
+  if (status === "unsure") return "Unsure";
+  if (status === "needs_more_evidence") return "Needs More Evidence";
+  return "Ready for Review";
+}
+
+function restartIntelReviewStatusEmoji(status) {
+  if (status === "confirmed_restart") return "🟢";
+  if (status === "not_a_restart") return "🔴";
+  if (status === "unsure") return "⚪";
+  if (status === "needs_more_evidence") return "🔵";
+  return "🟠";
+}
+
+function ps99RestartReviewCustomId(action, candidateId) {
+  return `ps99r|${action}|${String(candidateId || "")}`.slice(0, 100);
+}
+
+function ps99RestartReviewDiscordComponents(candidate) {
+  const reviewStatus = String(candidate.review_status || "unreviewed").trim().toLowerCase();
+  const finalDecision = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+  const disabled = finalDecision;
+  return [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 3,
+          label: "Confirm Restart",
+          custom_id: ps99RestartReviewCustomId("confirmed_restart", candidate.candidate_id),
+          disabled
+        },
+        {
+          type: 2,
+          style: 4,
+          label: "Not a Restart",
+          custom_id: ps99RestartReviewCustomId("not_a_restart", candidate.candidate_id),
+          disabled
+        },
+        {
+          type: 2,
+          style: 2,
+          label: "Unsure",
+          custom_id: ps99RestartReviewCustomId("unsure", candidate.candidate_id),
+          disabled
+        },
+        {
+          type: 2,
+          style: 1,
+          label: "Needs More Evidence",
+          custom_id: ps99RestartReviewCustomId("needs_more_evidence", candidate.candidate_id),
+          disabled
+        }
+      ]
+    },
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 2,
+          label: "Download Evidence",
+          custom_id: ps99RestartReviewCustomId("report", candidate.candidate_id),
+          disabled: false
+        }
+      ]
+    }
+  ];
+}
+
+function restartIntelTriggerDescription(trigger) {
+  if (trigger.type === "version_changed") return `${trigger.previous} → ${trigger.current}`;
+  if (trigger.type.startsWith("ccu_drop")) return `${trigger.percent}% (${trigger.before} → ${trigger.current})`;
+  if (trigger.type === "public_turnover") return `${trigger.percent}% across ${trigger.observed_servers} observed servers`;
+  if (trigger.type === "sentinel_transition") return `${trigger.changed_probes || 0} probes across ${trigger.machines || 0} machines`;
+  return stableJsonStringify(trigger);
+}
+
+async function postPs99RestartCandidateReviewMessage(env, candidate, reportText = null, finalized = false) {
+  const internalToken = String(env.DISCORD_REVIEW_INTERNAL_TOKEN || "").trim();
+  if (!internalToken) {
+    return {
+      configured: false,
+      posted: false,
+      reason: "discord_review_internal_token_not_configured"
+    };
+  }
+
+  const channelId = String(
+    candidate.discord_channel_id ||
+    env.PS99_RESTART_REVIEW_CHANNEL_ID ||
+    ""
+  ).trim();
+  if (!channelId) {
+    return {
+      configured: false,
+      posted: false,
+      reason: "restart_review_channel_not_configured"
+    };
+  }
+
+  const summary = candidate.summary && typeof candidate.summary === "object"
+    ? candidate.summary
+    : parseJsonObject(candidate.summary);
+  const payload = ps99RestartCandidateDiscordPayload(candidate, summary, finalized);
+  const existingMessageId = String(candidate.discord_message_id || "").trim();
+
+  const base = env.DISCORD_INTERACTIONS_WORKER &&
+      typeof env.DISCORD_INTERACTIONS_WORKER.fetch === "function"
+    ? "https://c0ld-discord-interactions-worker.service"
+    : String(
+        env.DISCORD_INTERACTIONS_BASE ||
+        env.DISCORD_WORKER_BASE ||
+        ""
+      ).trim().replace(/\/$/, "");
+
+  if (!base) {
+    return {
+      configured: false,
+      posted: false,
+      reason: "discord_interactions_base_not_configured"
+    };
+  }
+
+  const url = new URL("/internal/ps99/restart-review-message", base);
+  const requestBody = {
+    candidate_id: candidate.candidate_id,
+    channel_id: channelId,
+    message_id: existingMessageId || null,
+    finalized: Boolean(finalized),
+    payload,
+    report_text: reportText || null
+  };
+
+  const request = new Request(url.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${internalToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": "c0ld-Clan-API-Restart-Review"
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  const response = env.DISCORD_INTERACTIONS_WORKER &&
+      typeof env.DISCORD_INTERACTIONS_WORKER.fetch === "function"
+    ? await env.DISCORD_INTERACTIONS_WORKER.fetch(request)
+    : await fetch(request);
+
+  const text = await response.text();
+  const responseBody = parseJsonObject(text) || {};
+
+  if (!response.ok || responseBody.ok === false) {
+    const error = httpError(
+      502,
+      responseBody.message ||
+      `Discord interactions Worker returned ${response.status}: ${text}`
+    );
+    error.details = {
+      internal_worker_status: response.status,
+      internal_worker_response: responseBody,
+      candidate_id: candidate.candidate_id || null,
+      channel_id: channelId,
+      existing_message_id: existingMessageId || null
+    };
+    throw error;
+  }
+
+  return {
+    configured: true,
+    posted: true,
+    updated: Boolean(responseBody.updated),
+    created_new: Boolean(responseBody.created_new),
+    replaced_webhook_message: Boolean(responseBody.replaced_webhook_message),
+    message_id: stringOrNull(responseBody.message_id),
+    channel_id: stringOrNull(responseBody.channel_id) || channelId
+  };
+}
+
+async function handlePs99RestartIntelligenceCandidates(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const status = String(url.searchParams.get("status") || "").trim();
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "candidate_id,universe_id,place_id,status,opened_at,first_trigger_at,last_trigger_at,finalize_at,pre_window_start,post_window_end,finalized_at,triggers,summary,discord_channel_id,discord_message_id,review_status,reviewed_at,reviewed_by,review_notes,external_evidence,updated_at",
+    status: status ? `eq.${status}` : undefined,
+    order: "opened_at.desc",
+    limit: String(limit)
+  });
+  return json({ ok: true, generated_at: new Date().toISOString(), rows }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handlePs99RestartIntelligenceReport(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const candidateId = String(url.searchParams.get("candidate_id") || "").trim();
+  if (!candidateId) throw httpError(400, "Missing candidate_id.");
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, { select: "*", candidate_id: `eq.${candidateId}`, limit: "1" });
+  const candidate = rows[0];
+  if (!candidate) throw httpError(404, "Restart candidate not found.");
+  const report = candidate.report_text || await buildPs99RestartCandidateTextReport(env, candidate);
+  return new Response(report, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${candidateId.replace(/[^A-Za-z0-9._-]+/g, "_")}.txt"`,
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+
+async function handlePs99RestartIntelligenceRefreshMessage(request, env) {
+  requireSupabase(env);
+  const body = await readJsonRequest(request);
+  const candidateId = String(body.candidate_id || "").trim();
+  const attachReport = body.attach_report !== false;
+  const debugPayload = body.debug_payload === true;
+  if (!candidateId) throw httpError(400, "Missing candidate_id.");
+
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    candidate_id: `eq.${candidateId}`,
+    limit: "1"
+  });
+  const candidate = rows[0];
+  if (!candidate) throw httpError(404, "Restart candidate not found.");
+
+  const finalized = String(candidate.status || "").toLowerCase() !== "collecting";
+  const reportText = attachReport
+    ? (candidate.report_text || await buildPs99RestartCandidateTextReport(env, candidate))
+    : null;
+
+  const discord = await postPs99RestartCandidateReviewMessage(
+    env,
+    candidate,
+    reportText,
+    finalized
+  );
+
+  if (discord?.message_id && (
+    discord.message_id !== candidate.discord_message_id ||
+    (discord.channel_id && discord.channel_id !== candidate.discord_channel_id)
+  )) {
+    await supabasePatch(
+      env,
+      PS99_RESTART_CANDIDATES_TABLE,
+      { candidate_id: `eq.${candidateId}` },
+      {
+        discord_message_id: discord.message_id,
+        discord_channel_id: discord.channel_id || candidate.discord_channel_id || null,
+        updated_at: new Date().toISOString()
+      }
+    );
+  }
+
+  return json({
+    ok: true,
+    candidate_id: candidateId,
+    database_status: candidate.status || null,
+    review_status: candidate.review_status || null,
+    finalized,
+    attached_report: Boolean(reportText),
+    rendered_title: ps99RestartCandidateDiscordTitle(candidate, finalized),
+    automated_confidence: ps99RestartConfidenceAssessment(
+      candidate.summary && typeof candidate.summary === "object"
+        ? candidate.summary
+        : parseJsonObject(candidate.summary)
+    ),
+    rendered_top_level_component_types: ps99RestartCandidateDiscordPayload(
+      candidate,
+      candidate.summary && typeof candidate.summary === "object"
+        ? candidate.summary
+        : parseJsonObject(candidate.summary),
+      finalized
+    ).components.map(component => component.type),
+    rendered_payload: debugPayload
+      ? ps99RestartCandidateDiscordPayload(
+          candidate,
+          candidate.summary && typeof candidate.summary === "object"
+            ? candidate.summary
+            : parseJsonObject(candidate.summary),
+          finalized
+        )
+      : undefined,
+    discord
+  }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handlePs99RestartIntelligenceRefreshAll(request, env) {
+  requireSupabase(env);
+  const body = await readJsonRequest(request);
+  const limit = clamp(Number(body.limit || 100), 1, 500);
+  const includeWithoutMessage = body.include_without_message === true;
+  const attachReport = body.attach_report === true;
+
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    order: "opened_at.desc",
+    limit: String(limit)
+  });
+
+  const candidates = rows.filter(candidate =>
+    includeWithoutMessage || String(candidate.discord_message_id || "").trim()
+  );
+  const results = [];
+
+  for (const candidate of candidates) {
+    try {
+      const finalized = String(candidate.status || "").toLowerCase() !== "collecting";
+      const reportText = attachReport
+        ? (candidate.report_text || await buildPs99RestartCandidateTextReport(env, candidate))
+        : null;
+      const discord = await postPs99RestartCandidateReviewMessage(
+        env,
+        candidate,
+        reportText,
+        finalized
+      );
+
+      if (discord?.message_id && (
+        discord.message_id !== candidate.discord_message_id ||
+        (discord.channel_id && discord.channel_id !== candidate.discord_channel_id)
+      )) {
+        await supabasePatch(
+          env,
+          PS99_RESTART_CANDIDATES_TABLE,
+          { candidate_id: `eq.${candidate.candidate_id}` },
+          {
+            discord_message_id: discord.message_id,
+            discord_channel_id: discord.channel_id || candidate.discord_channel_id || null,
+            updated_at: new Date().toISOString()
+          }
+        );
+      }
+
+      results.push({
+        candidate_id: candidate.candidate_id,
+        ok: true,
+        discord
+      });
+    } catch (error) {
+      results.push({
+        candidate_id: candidate.candidate_id,
+        ok: false,
+        message: error?.message || String(error)
+      });
+    }
+  }
+
+  return json({
+    ok: results.every(result => result.ok),
+    requested_limit: limit,
+    processed: results.length,
+    succeeded: results.filter(result => result.ok).length,
+    failed: results.filter(result => !result.ok).length,
+    results
+  }, results.every(result => result.ok) ? 200 : 207, { "Cache-Control": "no-store" });
+}
+
+async function handlePs99RestartIntelligenceReview(request, env) {
+  requireSupabase(env);
+  const body = await readJsonRequest(request);
+  const candidateId = String(body.candidate_id || "").trim();
+  const reviewStatus = String(body.status || body.review_status || "").trim().toLowerCase();
+  const allowed = new Set(["confirmed_restart", "not_a_restart", "unsure", "needs_more_evidence"]);
+  if (!candidateId) throw httpError(400, "Missing candidate_id.");
+  if (!allowed.has(reviewStatus)) throw httpError(400, "status must be confirmed_restart, not_a_restart, unsure, or needs_more_evidence.");
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, { select: "*", candidate_id: `eq.${candidateId}`, limit: "1" });
+  const candidate = rows[0];
+  if (!candidate) throw httpError(404, "Restart candidate not found.");
+  const reviewedAt = new Date().toISOString();
+  const reviewer = String(body.reviewed_by || "admin_api").slice(0, 200);
+  const status = reviewStatus === "needs_more_evidence" ? "needs_more_evidence" : "reviewed";
+  const patch = {
+    status,
+    review_status: reviewStatus,
+    reviewed_at: reviewedAt,
+    reviewed_by: reviewer,
+    review_notes: String(body.notes || "").slice(0, 10000) || null,
+    external_evidence: Array.isArray(body.external_evidence) ? body.external_evidence.slice(0, 50) : [],
+    updated_at: reviewedAt
+  };
+  await supabasePatch(env, PS99_RESTART_CANDIDATES_TABLE, { candidate_id: `eq.${candidateId}` }, patch);
+  await appendPs99RestartCandidateTimeline(env, candidateId, reviewedAt, "human_review", patch);
+
+  const updatedCandidate = {
+    ...candidate,
+    ...patch,
+    review_status: reviewStatus
+  };
+
+  const discord = await postPs99RestartCandidateReviewMessage(
+    env,
+    updatedCandidate,
+    null,
+    true
+  ).catch(error => {
+    console.warn(
+      "restart candidate Discord review update failed",
+      candidateId,
+      error?.message || String(error)
+    );
+    return {
+      posted: false,
+      error: error?.message || String(error)
+    };
+  });
+
+  const analytics = await refreshPs99RestartAnalyticsDashboard(env, {
+    reason: "human_review",
+    changed_candidate_ids: [candidateId]
+  }).catch(error => ({
+    ok: false,
+    message: error?.message || String(error)
+  }));
+
+  return json({
+    ok: true,
+    candidate_id: candidateId,
+    ...patch,
+    discord,
+    analytics
+  }, 200, { "Cache-Control": "no-store" });
+}
+
+
+function shouldRefreshPs99RestartAnalytics(env, scheduledAt) {
+  const enabled = String(env.PS99_RESTART_ANALYTICS_ENABLED || "true").toLowerCase() !== "false";
+  if (!enabled) return false;
+  const interval = clamp(Number(env.PS99_RESTART_ANALYTICS_REFRESH_MINUTES || 5), 1, 60);
+  const date = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt
+    : new Date();
+  return date.getUTCMinutes() % interval === 0;
+}
+
+function ps99RestartAnalyticsChannelId(env) {
+  return String(
+    env.PS99_RESTART_ANALYTICS_CHANNEL_ID ||
+    env.PS99_RESTART_REVIEW_CHANNEL_ID ||
+    ""
+  ).trim();
+}
+
+function ps99RestartAnalyticsReviewClass(candidate) {
+  if (candidate?.archived_at) return "archived";
+  const review = String(candidate?.review_status || "unreviewed").trim().toLowerCase();
+  if (review === "confirmed_restart") return "confirmed";
+  if (review === "not_a_restart") return "rejected";
+  if (review === "unsure") return "unsure";
+  if (review === "needs_more_evidence") return "needs_more_evidence";
+  return "unreviewed";
+}
+
+function ps99RestartAnalyticsTriggerTypes(candidate) {
+  const triggers = Array.isArray(candidate?.triggers)
+    ? candidate.triggers
+    : parseJsonArray(candidate?.triggers);
+  return [...new Set(
+    triggers
+      .map(trigger => String(trigger?.type || "").trim())
+      .filter(Boolean)
+  )].sort();
+}
+
+function ps99RestartAnalyticsPercent(numerator, denominator) {
+  if (!denominator) return 0;
+  return Math.round((numerator / denominator) * 1000) / 10;
+}
+
+function ps99RestartAnalyticsAverage(values) {
+  const usable = values.filter(value => Number.isFinite(value));
+  if (!usable.length) return null;
+  return Math.round((usable.reduce((sum, value) => sum + value, 0) / usable.length) * 10) / 10;
+}
+
+function ps99RestartAnalyticsConfidence(candidate) {
+  const summary = candidate?.summary && typeof candidate.summary === "object"
+    ? candidate.summary
+    : parseJsonObject(candidate?.summary);
+  return ps99RestartConfidenceAssessment(summary).score;
+}
+
+function ps99RestartAnalyticsDateMs(value) {
+  const ms = Date.parse(String(value || ""));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date().toISOString()) {
+  const nowMs = ps99RestartAnalyticsDateMs(generatedAt) || Date.now();
+  const sevenDaysAgo = nowMs - 7 * 86400000;
+  const thirtyDaysAgo = nowMs - 30 * 86400000;
+
+  const normalized = candidates.map(candidate => {
+    const classification = ps99RestartAnalyticsReviewClass(candidate);
+    const confidence = ps99RestartAnalyticsConfidence(candidate);
+    const openedMs = ps99RestartAnalyticsDateMs(candidate.opened_at);
+    const readyMs = ps99RestartAnalyticsDateMs(candidate.finalized_at);
+    const reviewedMs = ps99RestartAnalyticsDateMs(candidate.reviewed_at);
+    const triggerTypes = ps99RestartAnalyticsTriggerTypes(candidate);
+    return {
+      candidate,
+      candidateId: String(candidate?.candidate_id || ""),
+      status: String(candidate?.status || ""),
+      classification,
+      confidence,
+      openedMs,
+      readyMs,
+      reviewedMs,
+      triggerTypes,
+      triggerCombination: triggerTypes.length ? triggerTypes.join(" + ") : "no_trigger_metadata"
+    };
+  });
+
+  const reviewed = normalized.filter(row =>
+    ["confirmed", "rejected", "unsure"].includes(row.classification)
+  );
+  const confirmed = normalized.filter(row => row.classification === "confirmed");
+  const rejected = normalized.filter(row => row.classification === "rejected");
+  const unsure = normalized.filter(row => row.classification === "unsure");
+  const needsMore = normalized.filter(row => row.classification === "needs_more_evidence");
+  const archived = normalized.filter(row => row.classification === "archived");
+  const pending = normalized.filter(row => row.classification === "unreviewed");
+
+  const recentSummary = sinceMs => {
+    const rows = normalized.filter(row =>
+      row.classification !== "archived" &&
+      row.openedMs >= sinceMs
+    );
+    return {
+      candidates: rows.length,
+      confirmed: rows.filter(row => row.classification === "confirmed").length,
+      rejected: rows.filter(row => row.classification === "rejected").length,
+      unsure: rows.filter(row => row.classification === "unsure").length,
+      pending: rows.filter(row => ["unreviewed", "needs_more_evidence"].includes(row.classification)).length
+    };
+  };
+
+  const confidenceBands = [
+    [0, 19],
+    [20, 39],
+    [40, 59],
+    [60, 79],
+    [80, 100]
+  ].map(([minimum, maximum]) => {
+    const rows = reviewed.filter(row => row.confidence >= minimum && row.confidence <= maximum);
+    const bandConfirmed = rows.filter(row => row.classification === "confirmed").length;
+    return {
+      band: `${minimum}-${maximum}`,
+      minimum,
+      maximum,
+      candidates: rows.length,
+      confirmed: bandConfirmed,
+      rejected: rows.filter(row => row.classification === "rejected").length,
+      unsure: rows.filter(row => row.classification === "unsure").length,
+      actual_confirmation_rate: ps99RestartAnalyticsPercent(bandConfirmed, rows.length)
+    };
+  });
+
+  const triggerMap = new Map();
+  for (const row of reviewed) {
+    for (const type of row.triggerTypes) {
+      const item = triggerMap.get(type) || { trigger: type, candidates: 0, confirmed: 0, rejected: 0, unsure: 0 };
+      item.candidates += 1;
+      item[row.classification] += 1;
+      triggerMap.set(type, item);
+    }
+  }
+  const triggerPerformance = [...triggerMap.values()]
+    .map(item => ({
+      ...item,
+      confirmation_rate: ps99RestartAnalyticsPercent(item.confirmed, item.candidates)
+    }))
+    .sort((a, b) => b.candidates - a.candidates || b.confirmation_rate - a.confirmation_rate);
+
+  const combinationMap = new Map();
+  for (const row of reviewed) {
+    const item = combinationMap.get(row.triggerCombination) || {
+      combination: row.triggerCombination,
+      candidates: 0,
+      confirmed: 0,
+      rejected: 0,
+      unsure: 0
+    };
+    item.candidates += 1;
+    item[row.classification] += 1;
+    combinationMap.set(row.triggerCombination, item);
+  }
+  const triggerCombinations = [...combinationMap.values()]
+    .map(item => ({
+      ...item,
+      confirmation_rate: ps99RestartAnalyticsPercent(item.confirmed, item.candidates)
+    }))
+    .sort((a, b) => b.candidates - a.candidates || b.confirmation_rate - a.confirmation_rate);
+
+  const monthlyMap = new Map();
+  for (const row of normalized) {
+    if (!row.openedMs) continue;
+    const date = new Date(row.openedMs);
+    const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+    const item = monthlyMap.get(month) || { month, candidates: 0, confirmed: 0, rejected: 0 };
+    item.candidates += 1;
+    if (row.classification === "confirmed") item.confirmed += 1;
+    if (row.classification === "rejected") item.rejected += 1;
+    monthlyMap.set(month, item);
+  }
+  const monthlyTrend = [...monthlyMap.values()]
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-6);
+
+  const reviewLatenciesMinutes = reviewed
+    .map(row => {
+      const start = row.readyMs || row.openedMs;
+      return start && row.reviewedMs && row.reviewedMs >= start
+        ? (row.reviewedMs - start) / 60000
+        : null;
+    })
+    .filter(value => value !== null);
+
+  const recommendations = [];
+  for (const item of triggerPerformance) {
+    if (item.candidates < 10) continue;
+    if (item.trigger === "public_turnover" && item.confirmation_rate < 20) {
+      recommendations.push({
+        signal: item.trigger,
+        sample_count: item.candidates,
+        observed_confirmation_rate: item.confirmation_rate,
+        recommendation: "Keep turnover weak and require corroboration."
+      });
+    } else if (item.confirmation_rate >= 85) {
+      recommendations.push({
+        signal: item.trigger,
+        sample_count: item.candidates,
+        observed_confirmation_rate: item.confirmation_rate,
+        recommendation: "Strong signal; consider a modest weight increase after manual review."
+      });
+    } else if (item.confirmation_rate <= 25) {
+      recommendations.push({
+        signal: item.trigger,
+        sample_count: item.candidates,
+        observed_confirmation_rate: item.confirmation_rate,
+        recommendation: "Weak signal; consider reducing its score contribution."
+      });
+    }
+  }
+
+  return {
+    generated_at: generatedAt,
+    lifetime: {
+      candidates: normalized.length,
+      reviewed: reviewed.length,
+      confirmed: confirmed.length,
+      rejected: rejected.length,
+      unsure: unsure.length,
+      needs_more_evidence: needsMore.length,
+      archived: archived.length,
+      pending_review: pending.length,
+      confirmation_rate: ps99RestartAnalyticsPercent(confirmed.length, reviewed.length),
+      rejection_rate: ps99RestartAnalyticsPercent(rejected.length, reviewed.length)
+    },
+    confidence: {
+      average_all: ps99RestartAnalyticsAverage(
+        normalized
+          .filter(row => row.classification !== "archived")
+          .map(row => row.confidence)
+      ),
+      average_confirmed: ps99RestartAnalyticsAverage(confirmed.map(row => row.confidence)),
+      average_rejected: ps99RestartAnalyticsAverage(rejected.map(row => row.confidence)),
+      average_unsure: ps99RestartAnalyticsAverage(unsure.map(row => row.confidence))
+    },
+    recent: {
+      last_7_days: recentSummary(sevenDaysAgo),
+      last_30_days: recentSummary(thirtyDaysAgo)
+    },
+    calibration: confidenceBands,
+    trigger_performance: triggerPerformance,
+    trigger_combinations: triggerCombinations,
+    monthly_trend: monthlyTrend,
+    operations: {
+      average_review_latency_minutes: ps99RestartAnalyticsAverage(reviewLatenciesMinutes),
+      reviews_last_24_hours: reviewed.filter(row => row.reviewedMs >= nowMs - 86400000).length,
+      pending_reviews: pending.length,
+      needs_more_evidence: needsMore.length,
+      last_candidate_opened_at: normalized
+        .map(row => row.openedMs)
+        .filter(Boolean)
+        .sort((a, b) => b - a)[0]
+          ? new Date(normalized.map(row => row.openedMs).filter(Boolean).sort((a, b) => b - a)[0]).toISOString()
+          : null,
+      oldest_pending_opened_at: pending
+        .map(row => row.openedMs)
+        .filter(Boolean)
+        .sort((a, b) => a - b)[0]
+          ? new Date(pending.map(row => row.openedMs).filter(Boolean).sort((a, b) => a - b)[0]).toISOString()
+          : null
+    },
+    confidence_distribution: confidenceBands.map(row => ({
+      band: row.band,
+      candidates: normalized.filter(item =>
+        item.classification !== "archived" &&
+        item.confidence >= row.minimum &&
+        item.confidence <= row.maximum
+      ).length
+    })),
+    priority_review_queue: pending
+      .filter(row => !(
+        row.status === "ready_for_review" &&
+        row.confidence <= 19 &&
+        row.triggerTypes.length === 1 &&
+        row.triggerTypes[0] === "public_turnover"
+      ))
+      .slice()
+      .sort((a, b) => {
+        const aStrong = a.triggerTypes.some(type =>
+          ["version_changed", "ccu_drop_3m", "ccu_drop_10m", "sentinel_transition", "sentinel_version_conflict"].includes(type)
+        ) ? 1 : 0;
+        const bStrong = b.triggerTypes.some(type =>
+          ["version_changed", "ccu_drop_3m", "ccu_drop_10m", "sentinel_transition", "sentinel_version_conflict"].includes(type)
+        ) ? 1 : 0;
+        return bStrong - aStrong || b.confidence - a.confidence || a.openedMs - b.openedMs;
+      })
+      .slice(0, 6)
+      .map(row => ({
+        candidate_id: row.candidateId,
+        status: row.status,
+        opened_at: row.openedMs ? new Date(row.openedMs).toISOString() : null,
+        confidence: row.confidence,
+        trigger_types: row.triggerTypes,
+        priority: row.triggerTypes.includes("version_changed") || row.confidence >= 50
+          ? "high"
+          : row.confidence >= 20 || row.triggerTypes.some(type => type.startsWith("ccu_drop"))
+            ? "medium"
+            : "low"
+      })),
+    maintenance_queue: pending
+      .filter(row =>
+        row.status === "ready_for_review" &&
+        row.confidence <= 19 &&
+        row.triggerTypes.length === 1 &&
+        row.triggerTypes[0] === "public_turnover"
+      )
+      .slice()
+      .sort((a, b) => a.openedMs - b.openedMs)
+      .map(row => ({
+        candidate_id: row.candidateId,
+        status: row.status,
+        opened_at: row.openedMs ? new Date(row.openedMs).toISOString() : null,
+        confidence: row.confidence,
+        trigger_types: row.triggerTypes,
+        recommendation: "archive_low_turnover"
+      })),
+    legacy_duplicate_groups: (() => {
+      const rows = pending
+        .slice()
+        .sort((a, b) => a.openedMs - b.openedMs);
+      const groups = [];
+      let current = [];
+      for (const row of rows) {
+        if (!current.length || row.openedMs - current[current.length - 1].openedMs <= 5000) {
+          current.push(row);
+        } else {
+          if (current.length > 1) groups.push(current);
+          current = [row];
+        }
+      }
+      if (current.length > 1) groups.push(current);
+      return groups.map(group => ({
+        candidate_ids: group.map(row => row.candidateId),
+        opened_at: group[0].openedMs ? new Date(group[0].openedMs).toISOString() : null,
+        span_seconds: Math.round((group[group.length - 1].openedMs - group[0].openedMs) / 1000),
+        count: group.length
+      }));
+    })(),
+    pending_queue: pending
+      .slice()
+      .sort((a, b) => a.openedMs - b.openedMs)
+      .slice(0, 6)
+      .map(row => ({
+        candidate_id: row.candidateId,
+        status: row.status,
+        opened_at: row.openedMs ? new Date(row.openedMs).toISOString() : null,
+        confidence: row.confidence,
+        trigger_types: row.triggerTypes
+      })),
+    review_agreement: confidenceBands
+      .filter(row => row.candidates > 0)
+      .map(row => ({
+        band: row.band,
+        reviewed: row.candidates,
+        confirmed: row.confirmed,
+        rejected: row.rejected,
+        unsure: row.unsure,
+        confirmation_rate: row.actual_confirmation_rate
+      })),
+    recommendations
+  };
+}
+
+function ps99RestartAnalyticsMetric(value, suffix = "") {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  return `${value}${suffix}`;
+}
+
+function ps99RestartAnalyticsTriggerLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function ps99RestartAnalyticsHealthIndicator(value, warningAt, criticalAt, lowerIsBetter = true) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "⚪";
+  if (lowerIsBetter) {
+    if (numeric >= criticalAt) return "🔴";
+    if (numeric >= warningAt) return "🟡";
+    return "🟢";
+  }
+  if (numeric <= criticalAt) return "🔴";
+  if (numeric <= warningAt) return "🟡";
+  return "🟢";
+}
+
+function ps99RestartAnalyticsAgeMinutes(isoValue, nowMs = Date.now()) {
+  const timestamp = ps99RestartAnalyticsDateMs(isoValue);
+  if (!timestamp) return null;
+  return Math.max(0, Math.round((nowMs - timestamp) / 60000));
+}
+
+function ps99RestartAnalyticsHumanDuration(minutes) {
+  if (minutes === null || minutes === undefined || !Number.isFinite(Number(minutes))) return "—";
+  const total = Math.max(0, Math.round(Number(minutes)));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const remaining = total % 60;
+  if (hours < 24) return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const leftoverHours = hours % 24;
+  return leftoverHours ? `${days}d ${leftoverHours}h` : `${days}d`;
+}
+
+function ps99RestartAnalyticsBar(count, maximum, width = 10) {
+  if (!maximum || count <= 0) return "░".repeat(width);
+  const filled = Math.max(1, Math.min(width, Math.round((count / maximum) * width)));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+function ps99RestartAnalyticsConfidenceLabel(score) {
+  const value = Number(score) || 0;
+  if (value >= 80) return "Very High";
+  if (value >= 60) return "High";
+  if (value >= 40) return "Moderate";
+  if (value >= 20) return "Low";
+  return "Very Low";
+}
+
+function ps99RestartAnalyticsPriorityIcon(priority, status) {
+  if (String(status) === "collecting") return "🔵";
+  if (priority === "high") return "🔴";
+  if (priority === "medium") return "🟡";
+  return "⚪";
+}
+
+function ps99RestartAnalyticsCandidateTime(isoValue) {
+  const ms = ps99RestartAnalyticsDateMs(isoValue);
+  if (!ms) return "Unknown";
+  return new Date(ms).toISOString().slice(11, 16) + " UTC";
+}
+
+function ps99RestartAnalyticsDashboardPayload(analytics) {
+  const lifetime = analytics.lifetime;
+  const confidence = analytics.confidence;
+  const recent7 = analytics.recent.last_7_days;
+  const recent30 = analytics.recent.last_30_days;
+  const operations = analytics.operations || {};
+  const nowMs = ps99RestartAnalyticsDateMs(analytics.generated_at) || Date.now();
+  const priorityQueue = analytics.priority_review_queue || [];
+  const maintenanceQueue = analytics.maintenance_queue || [];
+  const duplicateGroups = analytics.legacy_duplicate_groups || [];
+
+  const pendingIndicator = ps99RestartAnalyticsHealthIndicator(
+    operations.pending_reviews,
+    3,
+    8,
+    true
+  );
+  const latencyIndicator = ps99RestartAnalyticsHealthIndicator(
+    operations.average_review_latency_minutes,
+    30,
+    120,
+    true
+  );
+  const needsEvidenceIndicator = ps99RestartAnalyticsHealthIndicator(
+    operations.needs_more_evidence,
+    2,
+    5,
+    true
+  );
+
+  const lastCandidateAge = ps99RestartAnalyticsAgeMinutes(
+    operations.last_candidate_opened_at,
+    nowMs
+  );
+  const oldestPendingAge = ps99RestartAnalyticsAgeMinutes(
+    operations.oldest_pending_opened_at,
+    nowMs
+  );
+
+  const operatorSummary = priorityQueue.length && maintenanceQueue.length
+    ? `${priorityQueue.length} candidate(s) require review. ${maintenanceQueue.length} low-confidence turnover-only candidate(s) are recommended for archival.`
+    : priorityQueue.length
+      ? `${priorityQueue.length} candidate(s) require review. No routine archival cleanup is currently recommended.`
+      : maintenanceQueue.length
+        ? `No substantive candidates require review. ${maintenanceQueue.length} maintenance candidate(s) are recommended for archival.`
+        : "No pending restart candidates require action.";
+
+  const priorityLines = priorityQueue.map((item, index) => {
+    const age = ps99RestartAnalyticsAgeMinutes(item.opened_at, nowMs);
+    const triggers = item.trigger_types.length
+      ? item.trigger_types.map(ps99RestartAnalyticsTriggerLabel).join(", ")
+      : "No trigger metadata";
+    const icon = ps99RestartAnalyticsPriorityIcon(item.priority, item.status);
+    const statusLabel = item.status === "collecting" ? "Collecting" : "Ready for Review";
+    return [
+      `${icon} **${index + 1}. ${ps99RestartAnalyticsCandidateTime(item.opened_at)} — ${statusLabel}**`,
+      `${ps99RestartAnalyticsConfidenceLabel(item.confidence)} (${item.confidence}%) • ${ps99RestartAnalyticsHumanDuration(age)} old`,
+      `Signals: ${triggers}`
+    ].join("\n");
+  });
+
+  const maintenanceLines = maintenanceQueue.slice(0, 8).map((item, index) => {
+    const age = ps99RestartAnalyticsAgeMinutes(item.opened_at, nowMs);
+    return [
+      `⚪ **${index + 1}. ${ps99RestartAnalyticsCandidateTime(item.opened_at)}**`,
+      `Very Low (${item.confidence}%) • ${ps99RestartAnalyticsHumanDuration(age)} old • Public Turnover only`
+    ].join("\n");
+  });
+
+  const duplicateLines = duplicateGroups.length
+    ? duplicateGroups.slice(0, 5).map(group =>
+        `• ${group.count} candidates opened within ${group.span_seconds}s at ${ps99RestartAnalyticsCandidateTime(group.opened_at)}`
+      )
+    : ["No obvious same-event legacy duplicates remain in the pending queue."];
+
+  const populatedDistribution = (analytics.confidence_distribution || [])
+    .filter(row => row.candidates > 0);
+  const maxDistribution = Math.max(0, ...populatedDistribution.map(row => row.candidates || 0));
+  const distributionLines = populatedDistribution.map(row =>
+    `\`${row.band.padEnd(6)}\` ${ps99RestartAnalyticsBar(row.candidates, maxDistribution)} ${row.candidates}`
+  );
+
+  const populatedCalibration = (analytics.calibration || []).filter(row => row.candidates > 0);
+  const calibrationLines = populatedCalibration.map(row =>
+    `**${row.band}:** ${row.candidates} reviewed • ${row.confirmed} confirmed • ${ps99RestartAnalyticsMetric(row.actual_confirmation_rate, "%")} actual`
+  );
+  const agreementLines = (analytics.review_agreement || []).map(row =>
+    `**${row.band}:** ${row.confirmed} confirmed • ${row.rejected} rejected • ${row.unsure} unsure`
+  );
+
+  const meaningfulSignals = [...(analytics.trigger_performance || [])]
+    .filter(row => row.candidates >= 10)
+    .sort((a, b) => b.confirmation_rate - a.confirmation_rate || b.candidates - a.candidates);
+  const largestSignalSample = [...(analytics.trigger_performance || [])]
+    .sort((a, b) => b.candidates - a.candidates)[0] || null;
+  const signalLines = meaningfulSignals.length
+    ? meaningfulSignals.slice(0, 6).map((row, index) =>
+        `${index < 3 ? ["🥇", "🥈", "🥉"][index] : "•"} **${ps99RestartAnalyticsTriggerLabel(row.trigger)}:** ${row.confirmation_rate}% confirmed (${row.candidates})`
+      )
+    : [
+        "Signal rankings require at least 10 reviewed cases per signal.",
+        largestSignalSample
+          ? `Largest current sample: **${ps99RestartAnalyticsTriggerLabel(largestSignalSample.trigger)} (${largestSignalSample.candidates})**`
+          : "No reviewed signal data yet."
+      ];
+
+  const meaningfulCombinations = (analytics.trigger_combinations || [])
+    .filter(row => row.candidates >= 5)
+    .slice(0, 5);
+  const combinationLines = meaningfulCombinations.length
+    ? meaningfulCombinations.map(row =>
+        `**${ps99RestartAnalyticsTriggerLabel(row.combination)}:** ${row.candidates} reviewed • ${ps99RestartAnalyticsMetric(row.confirmation_rate, "%")} confirmed`
+      )
+    : ["Trigger-combination rankings require at least 5 reviewed cases."];
+
+  const monthLines = (analytics.monthly_trend || []).map(row =>
+    `**${row.month}:** ${row.candidates} candidates • ${row.confirmed} confirmed • ${row.rejected} rejected`
+  );
+  const recommendationLines = analytics.recommendations.length
+    ? analytics.recommendations.slice(0, 5).map(item =>
+        `**${ps99RestartAnalyticsTriggerLabel(item.signal)} (${item.sample_count}):** ${item.observed_confirmation_rate}% confirmed — ${item.recommendation}`
+      )
+    : ["No detector-weight recommendation has reached the minimum 10-case sample size."];
+
+  const sections = [
+    [
+      "# 📊 PS99 Restart Intelligence — Operations Console",
+      `**Operator Summary:** ${operatorSummary}`,
+      "",
+      `**Last Updated:** ${analytics.generated_at}`
+    ].join("\n"),
+
+    [
+      "## Current Operations",
+      `${pendingIndicator} **Pending Reviews:** ${operations.pending_reviews}`,
+      `${needsEvidenceIndicator} **Needs More Evidence:** ${operations.needs_more_evidence}`,
+      `${latencyIndicator} **Average Review Latency:** ${ps99RestartAnalyticsHumanDuration(operations.average_review_latency_minutes)}`,
+      `🕒 **Newest Candidate:** ${lastCandidateAge === null ? "—" : `${ps99RestartAnalyticsHumanDuration(lastCandidateAge)} ago`}`,
+      `⏳ **Oldest Pending:** ${oldestPendingAge === null ? "—" : ps99RestartAnalyticsHumanDuration(oldestPendingAge)}`,
+      `**Reviews in Last 24 Hours:** ${operations.reviews_last_24_hours}`
+    ].join("\n"),
+
+    [
+      `## Priority Review Queue (${priorityQueue.length})`,
+      ...(priorityLines.length ? priorityLines : ["No substantive candidates currently require review."])
+    ].join("\n\n"),
+
+    [
+      `## Maintenance Recommendations (${maintenanceQueue.length})`,
+      ...(maintenanceLines.length
+        ? [
+            "Recommended policy: archive Ready-for-Review candidates with confidence ≤19% and Public Turnover as their only signal.",
+            "",
+            ...maintenanceLines
+          ]
+        : ["No candidates currently meet the routine archival policy."])
+    ].join("\n\n"),
+
+    [
+      "## Legacy Duplicate Check",
+      ...duplicateLines,
+      ...(duplicateGroups.length
+        ? ["These are informational. The archival preview remains the safe cleanup mechanism."]
+        : [])
+    ].join("\n"),
+
+    [
+      "## Candidate Workflow",
+      `**Opened:** ${lifetime.candidates}`,
+      `**Reviewed:** ${lifetime.reviewed}`,
+      `**Confirmed:** ${lifetime.confirmed}`,
+      `**Rejected:** ${lifetime.rejected}`,
+      `**Unsure:** ${lifetime.unsure}`,
+      `**Archived:** ${lifetime.archived || 0}`,
+      `**Pending:** ${lifetime.pending_review}`,
+      `**Reviewed Coverage:** ${ps99RestartAnalyticsMetric(ps99RestartAnalyticsPercent(lifetime.reviewed, lifetime.candidates), "%")}`
+    ].join("\n"),
+
+    [
+      "## Detector Confidence",
+      `**Average — All Active:** ${ps99RestartAnalyticsMetric(confidence.average_all, "%")}`,
+      `**Average — Confirmed:** ${ps99RestartAnalyticsMetric(confidence.average_confirmed, "%")}`,
+      ...(confidence.average_rejected !== null
+        ? [`**Average — Rejected:** ${ps99RestartAnalyticsMetric(confidence.average_rejected, "%")}`]
+        : []),
+      ...(confidence.average_unsure !== null
+        ? [`**Average — Unsure:** ${ps99RestartAnalyticsMetric(confidence.average_unsure, "%")}`]
+        : []),
+      "",
+      "**Current Distribution**",
+      ...(distributionLines.length ? distributionLines : ["No confidence data yet."])
+    ].join("\n"),
+
+    [
+      "## Recent Activity",
+      `**Last 7 Days:** ${recent7.candidates} candidates • ${recent7.confirmed} confirmed • ${recent7.rejected} rejected • ${recent7.pending} pending`,
+      `**Last 30 Days:** ${recent30.candidates} candidates • ${recent30.confirmed} confirmed • ${recent30.rejected} rejected • ${recent30.pending} pending`
+    ].join("\n"),
+
+    ...(calibrationLines.length
+      ? [[
+          "## Confidence Calibration",
+          ...calibrationLines,
+          "",
+          "**Review Agreement**",
+          ...agreementLines
+        ].join("\n")]
+      : []),
+
+    ["## Signal Performance", ...signalLines].join("\n"),
+    ["## Trigger Combinations", ...combinationLines].join("\n"),
+    ...(monthLines.length ? [["## Historical Trend", ...monthLines].join("\n")] : []),
+    ["## Calibration Recommendations", ...recommendationLines].join("\n")
+  ];
+
+  return {
+    flags: 32768,
+    allowed_mentions: { parse: [] },
+    components: [
+      {
+        type: 17,
+        accent_color: 3447003,
+        components: sections.flatMap((content, index) => [
+          ...(index ? [{ type: 14 }] : []),
+          { type: 10, content }
+        ])
+      },
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 2,
+            label: `Preview / Archive Recommended (${maintenanceQueue.length})`,
+            custom_id: "ps99a|archive_low_turnover|prompt",
+            disabled: maintenanceQueue.length === 0
+          },
+          {
+            type: 2,
+            style: 2,
+            label: "Refresh Dashboard",
+            custom_id: "ps99a|refresh|run"
+          }
+        ]
+      }
+    ]
+  };
+}
+
+async function loadPs99RestartAnalyticsCandidates(env) {
+  return await supabaseSelectPaged(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "candidate_id,status,opened_at,finalized_at,review_status,reviewed_at,triggers,summary,archived_at,archived_by,archive_reason"
+  }, 10000, 1000);
+}
+
+async function readPs99RestartAnalyticsState(env) {
+  const rows = await supabaseSelect(env, PS99_RESTART_ANALYTICS_STATE_TABLE, {
+    select: "*",
+    dashboard_key: "eq.main",
+    limit: "1"
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function postPs99RestartAnalyticsDashboard(env, analytics, state) {
+  const channelId = ps99RestartAnalyticsChannelId(env);
+  if (!channelId) {
+    return {
+      configured: false,
+      posted: false,
+      reason: "missing_analytics_channel"
+    };
+  }
+
+  const internalToken = String(env.DISCORD_REVIEW_INTERNAL_TOKEN || "").trim();
+  if (!internalToken) throw httpError(500, "Missing DISCORD_REVIEW_INTERNAL_TOKEN.");
+
+  const target = String(env.DISCORD_INTERACTIONS_WORKER_URL || "").trim() ||
+    "https://c0ld-discord-interactions-worker.opal-dde.workers.dev";
+  const request = new Request(`${target.replace(/\/+$/, "")}/internal/ps99/restart-review-message`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${internalToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": "c0ld-Clan-API-Restart-Analytics"
+    },
+    body: JSON.stringify({
+      channel_id: channelId,
+      message_id: String(state?.discord_message_id || "").trim() || null,
+      candidate_id: "ps99-restart-analytics-dashboard",
+      payload: ps99RestartAnalyticsDashboardPayload(analytics)
+    })
+  });
+
+  const response = env.DISCORD_INTERACTIONS_WORKER &&
+      typeof env.DISCORD_INTERACTIONS_WORKER.fetch === "function"
+    ? await env.DISCORD_INTERACTIONS_WORKER.fetch(request)
+    : await fetch(request);
+
+  const text = await response.text();
+  const body = parseJsonObject(text) || {};
+  if (!response.ok || body.ok === false) {
+    const error = httpError(502, body.message || `Analytics Discord post failed: ${response.status} ${text}`);
+    error.details = body;
+    throw error;
+  }
+
+  return {
+    configured: true,
+    posted: true,
+    updated: Boolean(body.updated),
+    created_new: Boolean(body.created_new),
+    replaced_webhook_message: Boolean(body.replaced_webhook_message),
+    message_id: stringOrNull(body.message_id),
+    channel_id: stringOrNull(body.channel_id) || channelId
+  };
+}
+
+async function refreshPs99RestartAnalyticsDashboard(env, options = {}) {
+  requireSupabase(env);
+  const candidates = await loadPs99RestartAnalyticsCandidates(env);
+  const analytics = buildPs99RestartHistoricalAnalytics(candidates);
+  const state = await readPs99RestartAnalyticsState(env);
+  const discord = await postPs99RestartAnalyticsDashboard(env, analytics, state);
+
+  const now = new Date().toISOString();
+  const nextState = {
+    dashboard_key: "main",
+    discord_channel_id: discord.channel_id || state?.discord_channel_id || ps99RestartAnalyticsChannelId(env) || null,
+    discord_message_id: discord.message_id || state?.discord_message_id || null,
+    analytics,
+    candidate_count: analytics.lifetime.candidates,
+    reviewed_count: analytics.lifetime.reviewed,
+    last_refresh_reason: String(options.reason || "manual").slice(0, 100),
+    last_refreshed_at: now,
+    updated_at: now
+  };
+  await supabaseUpsert(env, PS99_RESTART_ANALYTICS_STATE_TABLE, [nextState], "dashboard_key");
+
+  return {
+    ok: true,
+    analytics,
+    discord,
+    state: {
+      dashboard_key: "main",
+      discord_channel_id: nextState.discord_channel_id,
+      discord_message_id: nextState.discord_message_id,
+      last_refresh_reason: nextState.last_refresh_reason,
+      last_refreshed_at: nextState.last_refreshed_at
+    }
+  };
+}
+
+async function handlePs99RestartIntelligenceAnalytics(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const live = String(url.searchParams.get("live") || "false").toLowerCase() === "true";
+  if (live) {
+    const candidates = await loadPs99RestartAnalyticsCandidates(env);
+    return json({
+      ok: true,
+      source: "live",
+      analytics: buildPs99RestartHistoricalAnalytics(candidates)
+    }, 200, { "Cache-Control": "no-store" });
+  }
+
+  const state = await readPs99RestartAnalyticsState(env);
+  if (!state) {
+    return json({
+      ok: true,
+      source: "empty",
+      analytics: null,
+      message: "Analytics dashboard has not been initialized. POST the refresh endpoint."
+    }, 200, { "Cache-Control": "no-store" });
+  }
+
+  return json({
+    ok: true,
+    source: "stored",
+    analytics: state.analytics && typeof state.analytics === "object"
+      ? state.analytics
+      : parseJsonObject(state.analytics),
+    state
+  }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handlePs99RestartIntelligenceAnalyticsRefresh(request, env) {
+  const body = await readJsonRequest(request).catch(() => ({}));
+  return json(
+    await refreshPs99RestartAnalyticsDashboard(env, {
+      reason: String(body.reason || "manual_api")
+    }),
+    200,
+    { "Cache-Control": "no-store" }
+  );
+}
+
+
+function ps99RestartResolutionCandidateMatches(candidate, mode, options = {}) {
+  if (candidate?.archived_at) return false;
+  const summary = candidate?.summary && typeof candidate.summary === "object"
+    ? candidate.summary
+    : parseJsonObject(candidate?.summary);
+  const confidence = ps99RestartConfidenceAssessment(summary).score;
+  const triggerTypes = ps99RestartAnalyticsTriggerTypes(candidate);
+  const status = String(candidate?.status || "").toLowerCase();
+  const reviewStatus = String(candidate?.review_status || "unreviewed").toLowerCase();
+
+  if (!["collecting", "ready_for_review", "needs_more_evidence"].includes(status)) return false;
+  if (!["unreviewed", "needs_more_evidence", ""].includes(reviewStatus)) return false;
+
+  if (mode === "archive_low_turnover") {
+    return status === "ready_for_review" &&
+      confidence <= Number(options.confidence_max ?? 19) &&
+      triggerTypes.length === 1 &&
+      triggerTypes[0] === "public_turnover";
+  }
+
+  if (mode === "candidate_ids") {
+    const ids = new Set((options.candidate_ids || []).map(String));
+    return ids.has(String(candidate?.candidate_id || ""));
+  }
+
+  return false;
+}
+
+async function resolvePs99RestartPendingCandidates(env, options = {}) {
+  requireSupabase(env);
+  const mode = String(options.mode || "archive_low_turnover").trim().toLowerCase();
+  const dryRun = options.dry_run !== false;
+  const reviewedBy = String(options.reviewed_by || "pending_resolution").slice(0, 200);
+  const notes = String(
+    options.notes ||
+    (mode === "archive_low_turnover"
+      ? "Archived by low-confidence turnover-only cleanup policy."
+      : "Resolved through pending-candidate maintenance.")
+  ).slice(0, 10000);
+
+  if (!["archive_low_turnover", "candidate_ids"].includes(mode)) {
+    throw httpError(400, "mode must be archive_low_turnover or candidate_ids.");
+  }
+
+  const requestedResolution = String(options.resolution || "archived").trim().toLowerCase();
+  const allowedResolutions = new Set([
+    "archived",
+    "confirmed_restart",
+    "not_a_restart",
+    "unsure",
+    "needs_more_evidence"
+  ]);
+  if (!allowedResolutions.has(requestedResolution)) {
+    throw httpError(400, "resolution must be archived, confirmed_restart, not_a_restart, unsure, or needs_more_evidence.");
+  }
+
+  const candidates = await supabaseSelectPaged(env, PS99_RESTART_CANDIDATES_TABLE, {
+    select: "*",
+    status: "in.(collecting,ready_for_review,needs_more_evidence)",
+    order: "opened_at.asc"
+  }, 1000, 500);
+
+  const matches = candidates.filter(candidate =>
+    ps99RestartResolutionCandidateMatches(candidate, mode, options)
+  );
+
+  const preview = matches.map(candidate => {
+    const summary = candidate?.summary && typeof candidate.summary === "object"
+      ? candidate.summary
+      : parseJsonObject(candidate?.summary);
+    return {
+      candidate_id: candidate.candidate_id,
+      opened_at: candidate.opened_at,
+      status: candidate.status,
+      confidence: ps99RestartConfidenceAssessment(summary).score,
+      trigger_types: ps99RestartAnalyticsTriggerTypes(candidate)
+    };
+  });
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dry_run: true,
+      mode,
+      resolution: requestedResolution,
+      matched_count: preview.length,
+      candidates: preview
+    };
+  }
+
+  const resolvedAt = new Date().toISOString();
+  const results = [];
+
+  for (const candidate of matches) {
+    let patch;
+    let timelineEvent;
+
+    if (requestedResolution === "archived") {
+      patch = {
+        archived_at: resolvedAt,
+        archived_by: reviewedBy,
+        archive_reason: notes,
+        updated_at: resolvedAt
+      };
+      timelineEvent = "candidate_archived";
+    } else {
+      const finalStatus = requestedResolution === "needs_more_evidence"
+        ? "needs_more_evidence"
+        : "reviewed";
+      patch = {
+        status: finalStatus,
+        review_status: requestedResolution,
+        reviewed_at: resolvedAt,
+        reviewed_by: reviewedBy,
+        review_notes: notes,
+        updated_at: resolvedAt
+      };
+      timelineEvent = "human_review";
+    }
+
+    await supabasePatch(
+      env,
+      PS99_RESTART_CANDIDATES_TABLE,
+      { candidate_id: `eq.${candidate.candidate_id}` },
+      patch
+    );
+    await appendPs99RestartCandidateTimeline(
+      env,
+      candidate.candidate_id,
+      resolvedAt,
+      timelineEvent,
+      patch
+    );
+
+    let discord = { posted: false, reason: "archived_candidate_hidden" };
+    if (requestedResolution !== "archived") {
+      const updatedCandidate = { ...candidate, ...patch };
+      discord = await postPs99RestartCandidateReviewMessage(
+        env,
+        updatedCandidate,
+        null,
+        true
+      ).catch(error => ({
+        posted: false,
+        error: error?.message || String(error)
+      }));
+    }
+
+    results.push({
+      candidate_id: candidate.candidate_id,
+      resolution: requestedResolution,
+      archived_at: requestedResolution === "archived" ? resolvedAt : null,
+      discord
+    });
+  }
+
+  const analytics = await refreshPs99RestartAnalyticsDashboard(env, {
+    reason: "pending_resolution",
+    changed_candidate_ids: matches.map(candidate => candidate.candidate_id)
+  });
+
+  return {
+    ok: true,
+    dry_run: false,
+    mode,
+    resolution: requestedResolution,
+    resolved_count: results.length,
+    results,
+    analytics
+  };
+}
+
+async function handlePs99RestartIntelligenceResolvePending(request, env) {
+  const body = await readJsonRequest(request);
+  return json(
+    await resolvePs99RestartPendingCandidates(env, body),
+    200,
+    { "Cache-Control": "no-store" }
+  );
+}
+
 async function handlePs99Ccu(request, env) {
   requireSupabase(env);
 
@@ -7329,6 +9846,29 @@ async function handlePs99RestartIngest(env, source) {
   };
 
   await supabaseUpsert(env, PS99_RESTART_STATE_TABLE, [stateRow], "place_id");
+
+  let intelligence = null;
+  if (ps99RestartIntelligenceEnabled(env)) {
+    intelligence = await capturePs99RestartIntelligenceObservation(env, {
+      checkedAt,
+      source,
+      placeId,
+      universeId,
+      currentVersion,
+      versionContext,
+      ccuSample,
+      ccuError,
+      serverObservation,
+      trackedServers,
+      candidateServers,
+      detectorStatus: status,
+      suppressedRestart,
+      eventRow
+    }).catch(error => ({
+      ok: false,
+      error: String(error?.message || error).slice(0, 1000)
+    }));
+  }
   if (eventRow) {
     await supabaseUpsert(env, PS99_RESTART_EVENTS_TABLE, [eventRow], "event_id");
     webhookAlert = await postPs99RestartAlert(env, eventRow);
@@ -7350,7 +9890,8 @@ async function handlePs99RestartIngest(env, source) {
     server_scan: serverScan,
     ccu_sample: ccuSample ? normalizePs99CcuSampleOutput(ccuSample) : null,
     ccu_error: ccuError,
-    webhook_alert: webhookAlert
+    webhook_alert: webhookAlert,
+    restart_intelligence: intelligence
   }, 202);
 }
 
@@ -7857,11 +10398,16 @@ async function postDiscordFeedAlert(env, feed, payload) {
 
   const roleId = config.role_id;
   const body = discordFeedMessageBody(feed, payload, roleId);
+  const webhookUrl = new URL(config.webhook_url);
+  webhookUrl.searchParams.set("wait", "true");
+  if (isDiscordComponentsV2Payload(body)) {
+    webhookUrl.searchParams.set("with_components", "true");
+  }
   let lastError = "Discord webhook request failed.";
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(config.webhook_url, {
+      const response = await fetch(webhookUrl.toString(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -7918,6 +10464,9 @@ async function updateDiscordFeedMessage(env, feed, messageId, payload) {
   webhookUrl.pathname = `${webhookUrl.pathname.replace(/\/$/, "")}/messages/${encodeURIComponent(messageId)}`;
   webhookUrl.searchParams.set("wait", "true");
   const body = discordFeedMessageBody(feed, payload, config.role_id);
+  if (isDiscordComponentsV2Payload(body)) {
+    webhookUrl.searchParams.set("with_components", "true");
+  }
   let lastError = "Discord webhook message update failed.";
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -12602,6 +15151,26 @@ function skippedIngestResponse({
   });
 }
 
+function resolveAuthoritativeBattleKey(battles, configuredBattleKey, env = {}, activeBattleKey = "") {
+  const configured = String(configuredBattleKey || "").trim();
+  const configuredNormalized = normalizeText(configured);
+  const autoDetect =
+    String(env.AUTO_DETECT_BATTLE || "").toLowerCase() === "true" ||
+    configuredNormalized === "auto" ||
+    configuredNormalized === "current";
+  const explicitlyForced = Boolean(configured && !autoDetect);
+
+  if (explicitlyForced) {
+    return resolveBattleKey(battles, configured, env, "");
+  }
+
+  if (activeBattleKey) {
+    return findBattleKey(battles, activeBattleKey) || "";
+  }
+
+  return resolveBattleKey(battles, configuredBattleKey, env, "");
+}
+
 function resolveBattleKey(battles, configuredBattleKey, env = {}, activeBattleKey = "") {
   const autoDetect = String(env.AUTO_DETECT_BATTLE || "").toLowerCase() === "true" ||
     String(configuredBattleKey || "").toLowerCase() === "auto";
@@ -12858,14 +15427,18 @@ function normalizeGlobalCandidateSearchOutput(row, {
   };
 }
 
-async function findLatestGlobalRankSearchRun(env, clan) {
-  const completed = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+async function findLatestGlobalRankSearchRun(env, clan, battleKeyValue = null) {
+  const params = {
     select: "*",
     clan_name: `eq.${clan}`,
     status: "in.(ok,completed)",
     order: "started_at.desc",
     limit: "20"
-  });
+  };
+  const requestedBattle = String(battleKeyValue || "").trim();
+  if (requestedBattle) params.battle_key = `eq.${requestedBattle}`;
+
+  const completed = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
 
   const usableCompleted = completed.find(isUsableCompletedGlobalRankRun);
   if (usableCompleted) return usableCompleted;
@@ -13243,7 +15816,8 @@ function ps99RestartRuntimeConfig(env) {
     observed_version_diversity: true,
     public_server_scan_role: ps99RestartConfirmationMode(env) === "legacy"
       ? "legacy_confirmation"
-      : "supporting_evidence_only"
+      : "supporting_evidence_only",
+    intelligence: ps99RestartIntelligenceRuntimeConfig(env)
   };
 }
 
@@ -13844,6 +16418,17 @@ function stringOrNull(value) {
   return text || null;
 }
 
+function parseBooleanish(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off", "n"].includes(normalized)) return false;
+
+  return null;
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -14019,6 +16604,16 @@ function cacheJson(data, env, secondsOverride = null) {
   });
 }
 
+function noStoreJson(data, status = 200) {
+  return json(data, status, {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Cloudflare-CDN-Cache-Control": "no-store",
+    "Pragma": "no-cache",
+    "Expires": "0"
+  });
+}
+
 function shouldBypassPublicGetCache(url, request) {
   const cacheControl = request.headers.get("Cache-Control") || "";
   if (/\bno-cache\b|\bno-store\b/i.test(cacheControl)) return true;
@@ -14039,6 +16634,17 @@ function isPublicGetCacheEligible(request) {
   if (request.method !== "GET") return false;
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/")) return false;
+
+  // These endpoints change immediately after an ingest. Never read or write
+  // them through the Worker cache, otherwise an old empty rollover response
+  // can overwrite a newly ingested leaderboard in the browser.
+  if (
+    url.pathname === "/api/current" ||
+    url.pathname === "/api/clans/current"
+  ) {
+    return false;
+  }
+
   return !shouldBypassPublicGetCache(url, request);
 }
 

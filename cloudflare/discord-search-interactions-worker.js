@@ -9,6 +9,9 @@ const INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE = 6;
 const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
+const APPLICATION_COMMAND_OPTION_INTEGER = 4;
+const APPLICATION_COMMAND_OPTION_CHANNEL = 7;
+const APPLICATION_COMMAND_OPTION_ROLE = 8;
 const MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 const MESSAGE_FLAG_COMPONENTS_V2 = 1 << 15;
 const COMPONENT_TYPE_ACTION_ROW = 1;
@@ -45,6 +48,7 @@ const CHART_LINE_RANGE = { label: "Ranks 1-4", min: 1, max: 4, cutoffRank: 3, ch
 const CHART_LOOKBACK_HOURS = 1;
 const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
 const CHART_LARGE_GAP_BREAK_MINUTES = 25;
+const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 let chartDuckImagePromise = null;
 
 export default {
@@ -95,6 +99,36 @@ export default {
         return await registerLgCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-server-command") {
+        requireAdmin(request, env);
+        return await registerServerCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-luna-command") {
+        requireAdmin(request, env);
+        return await registerLunaCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-add-command") {
+        requireAdmin(request, env);
+        return await registerAddCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-remove-command") {
+        requireAdmin(request, env);
+        return await registerRemoveCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-all-commands") {
+        requireAdmin(request, env);
+        return await registerAllCommands(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/sync-global-commands") {
+        requireAdmin(request, env);
+        return await syncGlobalCommands(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/commands") {
         requireAdmin(request, env);
         return await listCommands(url, env);
@@ -120,6 +154,11 @@ export default {
         return await deleteCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/internal/ps99/restart-review-message") {
+        requireDiscordReviewInternalAuth(request, env);
+        return await handleInternalPs99RestartReviewMessage(request, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/discord/interactions") {
         return await handleInteraction(request, env, ctx);
       }
@@ -128,11 +167,181 @@ export default {
     } catch (err) {
       return json({
         ok: false,
-        message: err?.message || String(err)
+        message: err?.message || String(err),
+        details: err?.details || undefined
       }, err?.status || 500);
     }
   }
 };
+
+
+function requireDiscordReviewInternalAuth(request, env) {
+  const expected = String(env.DISCORD_REVIEW_INTERNAL_TOKEN || "").trim();
+  if (!expected) throw httpError(500, "Missing DISCORD_REVIEW_INTERNAL_TOKEN.");
+
+  const header = String(request.headers.get("Authorization") || "");
+  const token = String(header.match(/^Bearer\s+(.+)$/i)?.[1] || "").trim();
+  if (!token || token !== expected) throw httpError(401, "Unauthorized.");
+}
+
+async function handleInternalPs99RestartReviewMessage(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const channelId = String(body.channel_id || env.PS99_RESTART_REVIEW_CHANNEL_ID || "").trim();
+  const requestedMessageId = String(body.message_id || "").trim();
+  const candidateId = String(body.candidate_id || "").trim();
+  const payload = body.payload && typeof body.payload === "object" ? body.payload : null;
+  const reportText = typeof body.report_text === "string" && body.report_text
+    ? body.report_text
+    : null;
+
+  if (!channelId) throw httpError(400, "Missing channel_id.");
+  if (!payload || !Array.isArray(payload.components)) {
+    throw httpError(400, "Missing Discord Components V2 payload.");
+  }
+
+  const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
+  let updateFailure = null;
+
+  if (requestedMessageId) {
+    const updateUrl = `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(requestedMessageId)}`;
+    const updated = await sendBotAuthoredRestartReviewRequest(
+      updateUrl,
+      "PATCH",
+      botToken,
+      payload,
+      reportText,
+      candidateId
+    );
+
+    if (updated.ok) {
+      return json({
+        ok: true,
+        updated: true,
+        created_new: false,
+        replaced_webhook_message: false,
+        message_id: updated.payload.id || requestedMessageId,
+        channel_id: updated.payload.channel_id || channelId
+      });
+    }
+
+    updateFailure = {
+      status: updated.status,
+      body: updated.payload,
+      text: updated.text
+    };
+
+    // A bot cannot edit an incoming-webhook-authored message. Create a new
+    // bot-authored message when the existing stored message is not editable.
+    if (![403, 404].includes(updated.status)) {
+      throw discordBotMessageError("update", updated);
+    }
+  }
+
+  const createUrl = `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`;
+  const created = await sendBotAuthoredRestartReviewRequest(
+    createUrl,
+    "POST",
+    botToken,
+    payload,
+    reportText,
+    candidateId
+  );
+
+  if (!created.ok) throw discordBotMessageError("create", created);
+
+  return json({
+    ok: true,
+    updated: false,
+    created_new: true,
+    replaced_webhook_message: Boolean(requestedMessageId),
+    previous_message_id: requestedMessageId || null,
+    previous_update_failure: updateFailure,
+    message_id: created.payload.id || null,
+    channel_id: created.payload.channel_id || channelId
+  });
+}
+
+async function sendBotAuthoredRestartReviewRequest(
+  url,
+  method,
+  botToken,
+  payload,
+  reportText,
+  candidateId
+) {
+  const cleanPayload = stripUndefined({
+    ...payload,
+    flags: Number(payload.flags || 0) | MESSAGE_FLAG_COMPONENTS_V2,
+    allowed_mentions: payload.allowed_mentions || { parse: [] }
+  });
+
+  let requestBody;
+  const headers = {
+    Authorization: `Bot ${botToken}`,
+    Accept: "application/json"
+  };
+
+  if (reportText) {
+    const filename = `${String(candidateId || "candidate")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .slice(0, 120)}.txt`;
+    cleanPayload.attachments = [{ id: 0, filename }];
+    const form = new FormData();
+    form.set("payload_json", JSON.stringify(cleanPayload));
+    form.set(
+      "files[0]",
+      new Blob([reportText], { type: "text/plain;charset=utf-8" }),
+      filename
+    );
+    requestBody = form;
+  } else {
+    headers["Content-Type"] = "application/json";
+    requestBody = JSON.stringify(cleanPayload);
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: requestBody
+  });
+  const text = await response.text();
+  let responsePayload = {};
+  try {
+    responsePayload = JSON.parse(text || "{}");
+  } catch {}
+
+  console.log("PS99 bot-authored review message", {
+    method,
+    url,
+    status: response.status,
+    ok: response.ok,
+    candidate_id: candidateId || null,
+    response: responsePayload,
+    response_text: text
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload: responsePayload,
+    text
+  };
+}
+
+function discordBotMessageError(action, result) {
+  const error = httpError(
+    502,
+    result.payload?.message ||
+    `Discord bot message ${action} failed (${result.status}): ${result.text}`
+  );
+  error.details = {
+    action,
+    discord_status: result.status,
+    discord_response_json: result.payload,
+    discord_response_text: result.text
+  };
+  return error;
+}
 
 async function handleInteraction(request, env, ctx) {
   const body = await request.text();
@@ -149,6 +358,16 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (interaction.type === INTERACTION_TYPE_MESSAGE_COMPONENT) {
+    const restartReview = parsePs99RestartReviewCustomId(interaction.data?.custom_id);
+    if (restartReview) {
+      return interactionJson(await handlePs99RestartReviewComponent(interaction, env, ctx, restartReview));
+    }
+
+    const restartAnalytics = parsePs99RestartAnalyticsCustomId(interaction.data?.custom_id);
+    if (restartAnalytics) {
+      return interactionJson(await handlePs99RestartAnalyticsComponent(interaction, env, ctx, restartAnalytics));
+    }
+
     if (parseLeagueChartCustomId(interaction.data?.custom_id)) {
       return interactionJson(handleLeagueChartComponent(interaction, env, ctx));
     }
@@ -245,6 +464,33 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (["server", "add", "remove", "luna"].includes(commandName)) {
+    const subcommand = getSubcommandName(interaction);
+    const publicAction = commandName === "server" && subcommand === "who";
+
+    if (!publicAction) {
+      const permitted = await memberCanManageServerTracker(interaction, env, {
+        allowConfiguredRole: commandName !== "luna"
+      });
+      if (!permitted) {
+        return interactionJson(messageResponse(
+          commandName === "luna"
+            ? "You need Manage Server permission to configure Luna's administrator role."
+            : "You need Manage Server permission or the configured Luna administrator role to use this command.",
+          true
+        ));
+      }
+    }
+
+    ctx.waitUntil(completeServerTrackerInteraction(interaction, env, commandName, subcommand));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
   if (commandName !== "search") {
     return interactionJson(messageResponse(`Unknown command: ${commandName || "none"}`));
   }
@@ -318,6 +564,161 @@ async function buildSearchResponse(query, env) {
       flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
     }
   };
+}
+
+async function completeServerTrackerInteraction(interaction, env, commandName, subcommand) {
+  try {
+    const guildId = String(interaction.guild_id || "").trim();
+    const channelId = String(interaction.channel_id || "").trim();
+    const actorId = interactionUserId(interaction);
+    if (!guildId) throw httpError(400, "Private-server tracking is only available inside a Discord server.");
+
+    let payload;
+
+    if (commandName === "add" && subcommand === "server") {
+      const serverLink = getCommandOption(interaction, "link");
+      if (!serverLink) throw httpError(400, "Use `/add server link:<private server link>`.");
+
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/add", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: channelId,
+          actor_id: actorId,
+          actor_username: interactionUsername(interaction),
+          server_link: serverLink,
+          place_id: getCommandOption(interaction, "place_id") || undefined
+        }
+      });
+    } else if (commandName === "remove" && subcommand === "server") {
+      const serverId = getCommandOption(interaction, "server_id");
+      if (!serverId) throw httpError(400, "Use `/remove server server_id:1`.");
+
+      payload = await serverTrackerApiRequest(env, "/api/tracker/server/remove", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          actor_id: actorId,
+          server: `#${serverId}`
+        }
+      });
+    } else if (commandName === "server" && subcommand === "tracker") {
+      const configuredChannel = getCommandOption(interaction, "channel") || channelId;
+
+      payload = await serverTrackerApiRequest(env, "/api/tracker/tracking", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: configuredChannel,
+          actor_id: actorId,
+          enabled: true
+        }
+      });
+    } else if (commandName === "luna" && subcommand === "admin") {
+      const roleId = getCommandOption(interaction, "role");
+      if (!roleId) throw httpError(400, "Use `/luna admin role:<role>`.");
+
+      payload = await serverTrackerApiRequest(env, "/api/tracker/admin-role", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          actor_id: actorId,
+          admin_role_id: roleId
+        }
+      });
+    } else {
+      throw httpError(400, `Unknown /${commandName} action.`);
+    }
+
+    await editOriginalInteraction(
+      interaction,
+      buildServerTrackerCommandMessage(commandName, subcommand, payload)
+    );
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Private-server tracker failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
+  if (commandName === "add" && subcommand === "server") {
+    const server = payload.server || {};
+    const visibleId = server.server_number ? `#${server.server_number}` : "#?";
+    const observer = payload.observer_username
+      ? ` Add **${escapeDiscordMarkdown(payload.observer_username)}** to the private server's allow list.`
+      : " Add the observer Roblox account to the private server's allow list.";
+
+    return {
+      content: payload.resolved
+        ? `${visibleId} was ${payload.action || "added"} and matched successfully.`
+        : `${visibleId} was ${payload.action || "added"} and saved as pending.${observer}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "remove" && subcommand === "server") {
+    const server = payload.server || {};
+    const visibleId = server.server_number ? `#${server.server_number}` : "#?";
+    return {
+      content: `${visibleId} was removed from active tracking. Its observation history was preserved.`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "server" && subcommand === "tracker") {
+    return {
+      content: "The persistent private-server tracker was created or updated in the selected channel. It refreshes every five minutes.",
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "luna" && subcommand === "admin") {
+    const roleId = String(payload.admin_role_id || payload.role_id || "").trim();
+    return {
+      content: roleId
+        ? `Luna administrator role set to <@&${roleId}>.`
+        : "Luna administrator role was updated.",
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  return {
+    content: "Private-server tracker action completed.",
+    embeds: [],
+    components: [],
+    allowed_mentions: { parse: [] }
+  };
+}
+
+function trackerPopulation(server) {
+  if (server?.status === "pending") return "awaiting observer access";
+  if (server?.playing === null || server?.playing === undefined || server?.playing === "") {
+    return "unknown population";
+  }
+  const playing = Number(server?.playing);
+  const maxPlayers = Number(server?.max_players);
+  if (!Number.isFinite(playing)) return "unknown population";
+  return `${playing}/${Number.isFinite(maxPlayers) && maxPlayers > 0 ? maxPlayers : "?"}`;
+}
+
+function trackerStatusIcon(status) {
+  if (status === "pending") return "🟡";
+  if (status === "online") return "🟢";
+  if (status === "full") return "🟣";
+  if (status === "offline") return "🔴";
+  return "🟠";
 }
 
 async function completeLeagueInfoInteraction(interaction, env, leagueName, options = {}) {
@@ -446,6 +847,368 @@ function leagueInfoErrorMessage(err, env) {
     allowed_mentions: { parse: [] },
     flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
   };
+}
+
+
+
+function parsePs99RestartAnalyticsCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 3 || parts[0] !== "ps99a") return null;
+  const action = String(parts[1] || "").trim().toLowerCase();
+  const stage = String(parts[2] || "").trim().toLowerCase();
+  if (!["archive_low_turnover", "archive_duplicates", "refresh"].includes(action)) return null;
+  if (!["prompt", "confirm", "cancel", "run"].includes(stage)) return null;
+  return { action, stage };
+}
+
+async function handlePs99RestartAnalyticsComponent(interaction, env, ctx, state) {
+  const permitted = await memberCanManageServerTracker(interaction, env, {
+    allowConfiguredRole: true
+  });
+
+  if (!permitted) {
+    return messageResponse(
+      "You need Manage Server permission or the configured Luna administrator role to manage restart analytics.",
+      true
+    );
+  }
+
+  if (state.action === "archive_low_turnover" && state.stage === "prompt") {
+    return {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: [
+          "**Archive recommended maintenance candidates?**",
+          "",
+          "This archives every pending **Ready for Review** candidate recommended by the dashboard policy:",
+          "- has confidence of 19% or less;",
+          "- was triggered only by Public Turnover;",
+          "- has not already been reviewed.",
+          "",
+          "Archived candidates are removed from the pending queue and excluded from detector calibration."
+        ].join("\n"),
+        components: [{
+          type: COMPONENT_TYPE_ACTION_ROW,
+          components: [
+            {
+              type: COMPONENT_TYPE_BUTTON,
+              style: BUTTON_STYLE_DANGER,
+              label: "Archive Recommended",
+              custom_id: "ps99a|archive_low_turnover|confirm"
+            },
+            {
+              type: COMPONENT_TYPE_BUTTON,
+              style: BUTTON_STYLE_SECONDARY,
+              label: "Cancel",
+              custom_id: "ps99a|archive_low_turnover|cancel"
+            }
+          ]
+        }],
+        allowed_mentions: { parse: [] },
+        flags: MESSAGE_FLAG_EPHEMERAL
+      }
+    };
+  }
+
+  if (state.action === "archive_duplicates" && state.stage === "prompt") {
+    return {
+      type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+      data: {
+        content: [
+          "**Archive equivalent legacy duplicates?**",
+          "",
+          "For each duplicate group, the earliest candidate is preserved and only later equivalent candidates are archived.",
+          "",
+          "Equivalence requires:",
+          "- opening within five seconds;",
+          "- identical trigger types;",
+          "- identical confidence.",
+          "",
+          "This action is auditable and does not delete records."
+        ].join("\n"),
+        components: [{
+          type: COMPONENT_TYPE_ACTION_ROW,
+          components: [
+            {
+              type: COMPONENT_TYPE_BUTTON,
+              style: BUTTON_STYLE_DANGER,
+              label: "Archive Duplicates",
+              custom_id: "ps99a|archive_duplicates|confirm"
+            },
+            {
+              type: COMPONENT_TYPE_BUTTON,
+              style: BUTTON_STYLE_SECONDARY,
+              label: "Cancel",
+              custom_id: "ps99a|archive_duplicates|cancel"
+            }
+          ]
+        }],
+        allowed_mentions: { parse: [] },
+        flags: MESSAGE_FLAG_EPHEMERAL
+      }
+    };
+  }
+
+  if (state.stage === "cancel") {
+    return messageResponse("Pending resolution cancelled.", true);
+  }
+
+  ctx.waitUntil(completePs99RestartAnalyticsAction(interaction, env, state));
+  return {
+    type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+    data: { flags: MESSAGE_FLAG_EPHEMERAL }
+  };
+}
+
+async function completePs99RestartAnalyticsAction(interaction, env, state) {
+  try {
+    let result;
+    if (state.action === "refresh") {
+      result = await ps99RestartIntelligenceApiRequest(
+        env,
+        "/api/ps99/restart-intelligence/analytics/refresh",
+        {
+          method: "POST",
+          body: {
+            reason: `discord_refresh:${interactionUserId(interaction)}`
+          }
+        }
+      );
+      await editOriginalInteraction(interaction, {
+        content: `Dashboard refreshed. Pending reviews: **${result?.analytics?.lifetime?.pending_review ?? "—"}**.`,
+        embeds: [],
+        components: [],
+        attachments: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (state.action === "archive_duplicates") {
+      result = await ps99RestartIntelligenceApiRequest(
+        env,
+        "/api/ps99/restart-intelligence/resolve-duplicates",
+        {
+          method: "POST",
+          body: {
+            dry_run: false,
+            reviewed_by: `${interactionUsername(interaction)} (${interactionUserId(interaction)})`
+          }
+        }
+      );
+      await editOriginalInteraction(interaction, {
+        content: `Archived **${result?.archived_count ?? 0}** equivalent legacy duplicate candidate(s) across **${result?.duplicate_group_count ?? 0}** group(s).`,
+        embeds: [],
+        components: [],
+        attachments: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    result = await ps99RestartIntelligenceApiRequest(
+      env,
+      "/api/ps99/restart-intelligence/resolve-pending",
+      {
+        method: "POST",
+        body: {
+          mode: "archive_low_turnover",
+          resolution: "archived",
+          confidence_max: 19,
+          dry_run: false,
+          reviewed_by: `${interactionUsername(interaction)} (${interactionUserId(interaction)})`,
+          notes: "Archived from the PS99 Restart Intelligence operator dashboard."
+        }
+      }
+    );
+
+    await editOriginalInteraction(interaction, {
+      content: `Resolved **${result?.resolved_count ?? 0}** low-confidence turnover-only pending candidate(s).`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    });
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Restart analytics action failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    });
+  }
+}
+
+function parsePs99RestartReviewCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 3 || parts[0] !== "ps99r") return null;
+  const action = String(parts[1] || "").trim().toLowerCase();
+  const candidateId = String(parts[2] || "").trim();
+  const allowed = new Set([
+    "confirmed_restart",
+    "not_a_restart",
+    "unsure",
+    "needs_more_evidence",
+    "report"
+  ]);
+  if (!allowed.has(action) || !candidateId.startsWith("ps99-candidate:")) return null;
+  return { action, candidateId };
+}
+
+async function handlePs99RestartReviewComponent(interaction, env, ctx, state) {
+  const permitted = await memberCanManageServerTracker(interaction, env, {
+    allowConfiguredRole: true
+  });
+
+  if (!permitted) {
+    return messageResponse(
+      "You need Manage Server permission or the configured Luna administrator role to review restart candidates.",
+      true
+    );
+  }
+
+  if (state.action === "report") {
+    ctx.waitUntil(completePs99RestartEvidenceDownload(interaction, env, state));
+    return {
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: MESSAGE_FLAG_EPHEMERAL }
+    };
+  }
+
+  ctx.waitUntil(completePs99RestartReview(interaction, env, state));
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completePs99RestartReview(interaction, env, state) {
+  try {
+    await ps99RestartIntelligenceApiRequest(env, "/api/ps99/restart-intelligence/review", {
+      method: "POST",
+      body: {
+        candidate_id: state.candidateId,
+        status: state.action,
+        reviewed_by: `${interactionUsername(interaction)} (${interactionUserId(interaction)})`,
+        notes: ""
+      }
+    });
+  } catch (err) {
+    console.error(
+      "PS99 restart review interaction failed",
+      state.candidateId,
+      state.action,
+      err?.message || String(err)
+    );
+  }
+}
+
+async function completePs99RestartEvidenceDownload(interaction, env, state) {
+  try {
+    const report = await ps99RestartIntelligenceReportRequest(env, state.candidateId);
+    const filename = `${state.candidateId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 120)}.txt`;
+    await editOriginalInteraction(interaction, {
+      content: `Evidence report for \`${state.candidateId}\``,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] },
+      _file: {
+        filename,
+        contentType: "text/plain;charset=utf-8",
+        bytes: new TextEncoder().encode(report)
+      }
+    });
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Evidence download failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+async function ps99RestartIntelligenceApiRequest(env, path, options = {}) {
+  const token = String(
+    env.RESTART_INTELLIGENCE_API_TOKEN ||
+    env.INGEST_ADMIN_TOKEN ||
+    env.REGISTER_ADMIN_TOKEN ||
+    ""
+  ).trim();
+  if (!token) {
+    throw httpError(500, "Missing RESTART_INTELLIGENCE_API_TOKEN on the Discord interactions Worker.");
+  }
+
+  const base = hasClanApiServiceBinding(env)
+    ? "https://c0ld-clan-api-worker.service"
+    : String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const url = new URL(path, base);
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Restart-Review"
+    }
+  };
+  if (options.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  }
+
+  const request = new Request(url.toString(), init);
+  const response = hasClanApiServiceBinding(env)
+    ? await env.CLAN_API_WORKER.fetch(request)
+    : await fetch(request);
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = JSON.parse(text || "{}");
+  } catch {}
+
+  if (!response.ok || payload.ok === false) {
+    throw httpError(
+      response.status || 502,
+      payload.message || `Restart Intelligence API failed (${response.status}): ${text.slice(0, 300)}`
+    );
+  }
+  return payload;
+}
+
+async function ps99RestartIntelligenceReportRequest(env, candidateId) {
+  const token = String(
+    env.RESTART_INTELLIGENCE_API_TOKEN ||
+    env.INGEST_ADMIN_TOKEN ||
+    env.REGISTER_ADMIN_TOKEN ||
+    ""
+  ).trim();
+  if (!token) {
+    throw httpError(500, "Missing RESTART_INTELLIGENCE_API_TOKEN on the Discord interactions Worker.");
+  }
+
+  const base = hasClanApiServiceBinding(env)
+    ? "https://c0ld-clan-api-worker.service"
+    : String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const url = new URL("/api/ps99/restart-intelligence/report", base);
+  url.searchParams.set("candidate_id", candidateId);
+
+  const request = new Request(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "text/plain",
+      "User-Agent": "c0ld-Discord-Restart-Review"
+    }
+  });
+  const response = hasClanApiServiceBinding(env)
+    ? await env.CLAN_API_WORKER.fetch(request)
+    : await fetch(request);
+  const text = await response.text();
+  if (!response.ok) {
+    throw httpError(
+      response.status || 502,
+      `Restart evidence report failed (${response.status}): ${text.slice(0, 300)}`
+    );
+  }
+  return text;
 }
 
 function handleLeagueChartComponent(interaction, env, ctx) {
@@ -1116,6 +1879,16 @@ async function editOriginalInteraction(interaction, data) {
 
 function interactionUserId(interaction) {
   return String(interaction?.member?.user?.id || interaction?.user?.id || "").trim();
+}
+
+function interactionUsername(interaction) {
+  return String(
+    interaction?.member?.user?.global_name ||
+    interaction?.member?.user?.username ||
+    interaction?.user?.global_name ||
+    interaction?.user?.username ||
+    "user"
+  ).trim() || "user";
 }
 
 function historyCustomId(ownerId, targetId, view, page, action = "open") {
@@ -3156,40 +3929,283 @@ async function registerLgCommand(url, env) {
   return registerCommand(url, env, lgCommandPayload());
 }
 
-async function registerCommand(url, env, commandPayload) {
+async function registerServerCommand(url, env) {
+  return registerCommand(url, env, serverCommandPayload());
+}
+
+async function registerLunaCommand(url, env) {
+  return registerCommand(url, env, lunaCommandPayload());
+}
+
+async function registerAddCommand(url, env) {
+  return registerCommand(url, env, addCommandPayload());
+}
+
+async function registerRemoveCommand(url, env) {
+  return registerCommand(url, env, removeCommandPayload());
+}
+
+async function registerAllCommands(url, env) {
+  const payloads = [
+    searchCommandPayload(),
+    versionCommandPayload(),
+    rewardsCommandPayload(),
+    historyCommandPayload(),
+    clanCommandPayload(),
+    duckCommandPayload(),
+    lgCommandPayload(),
+    lunaCommandPayload(),
+    serverCommandPayload(),
+    addCommandPayload(),
+    removeCommandPayload()
+  ];
+
+  const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
+  const guildId = requestedScope === "guild"
+    ? String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim()
+    : "";
+
+  if (requestedScope === "guild" && !guildId) {
+    throw httpError(400, "A guild_id is required when scope=guild.");
+  }
+
+  const scopedUrl = new URL(url.toString());
+  scopedUrl.searchParams.set("scope", requestedScope === "guild" ? "guild" : "global");
+  if (guildId) scopedUrl.searchParams.set("guild_id", guildId);
+  else scopedUrl.searchParams.delete("guild_id");
+
+  const results = [];
+  for (const payload of payloads) {
+    const response = await registerCommand(scopedUrl, env, payload, {
+      retryRateLimits: true,
+      maxAttempts: 5
+    });
+    const body = await response.json().catch(() => ({}));
+    results.push({
+      name: payload.name,
+      ok: response.ok && body.ok !== false,
+      status: response.status,
+      result: body
+    });
+
+    // Avoid immediately hitting Discord's per-route application-command limit.
+    await sleep(450);
+  }
+
+  const ok = results.every(result => result.ok);
+  return json({
+    ok,
+    scope: requestedScope === "guild" ? "guild" : "global",
+    guild_id: guildId || null,
+    results
+  }, ok ? 200 : 502);
+}
+
+async function syncGlobalCommands(url, env) {
   const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
   const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
-  const guildId = String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
-  const endpoint = guildId
-    ? `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`
-    : `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/commands`;
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${botToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify(commandPayload)
-  });
-  const payload = await res.json().catch(() => ({}));
+  const commandPayloads = [
+    searchCommandPayload(),
+    versionCommandPayload(),
+    rewardsCommandPayload(),
+    historyCommandPayload(),
+    clanCommandPayload(),
+    duckCommandPayload(),
+    lgCommandPayload(),
+    lunaCommandPayload(),
+    serverCommandPayload(),
+    addCommandPayload(),
+    removeCommandPayload()
+  ];
 
-  if (!res.ok) {
-    return json({
-      ok: false,
-      status: res.status,
-      message: discordApiErrorMessage(res.status, payload.message || `Discord /${commandPayload.name} registration failed.`),
-      details: payload
-    }, 502);
+  const deletedGuildCommands = [];
+
+  if (guildId) {
+    const guildEndpoint = discordCommandsEndpoint(applicationId, guildId);
+    const guildResponse = await fetch(guildEndpoint, {
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        Accept: "application/json"
+      }
+    });
+    const guildCommands = await guildResponse.json().catch(() => []);
+
+    if (!guildResponse.ok) {
+      throw httpError(
+        502,
+        discordApiErrorMessage(
+          guildResponse.status,
+          guildCommands?.message || `Discord guild command list failed (${guildResponse.status}).`
+        )
+      );
+    }
+
+    for (const command of Array.isArray(guildCommands) ? guildCommands : []) {
+      const commandId = String(command?.id || "").trim();
+      if (!commandId) continue;
+
+      const deleteResponse = await fetch(
+        `${guildEndpoint}/${encodeURIComponent(commandId)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bot ${botToken}`,
+            Accept: "application/json"
+          }
+        }
+      );
+
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        const payload = await deleteResponse.json().catch(() => ({}));
+        throw httpError(
+          502,
+          discordApiErrorMessage(
+            deleteResponse.status,
+            payload.message || `Discord guild command delete failed (${deleteResponse.status}).`
+          )
+        );
+      }
+
+      deletedGuildCommands.push({
+        id: commandId,
+        name: command.name || null
+      });
+    }
+  }
+
+  // Discord bulk overwrite replaces the complete global command set atomically.
+  // This prevents stale or duplicate registrations from accumulating.
+  const globalEndpoint = discordCommandsEndpoint(applicationId, null);
+  let attempts = 0;
+  let globalResponse;
+  let globalPayload;
+
+  while (attempts < 6) {
+    attempts += 1;
+    globalResponse = await fetch(globalEndpoint, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(commandPayloads)
+    });
+    globalPayload = await globalResponse.json().catch(() => ({}));
+
+    if (globalResponse.status !== 429) break;
+
+    const retryAfterSeconds = Number(
+      globalPayload?.retry_after ??
+      globalResponse.headers.get("retry-after") ??
+      1
+    );
+    await sleep(
+      Math.max(
+        1000,
+        Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 500
+      )
+    );
+  }
+
+  if (!globalResponse?.ok) {
+    throw httpError(
+      502,
+      discordApiErrorMessage(
+        globalResponse?.status || 502,
+        globalPayload?.message || `Discord global command synchronization failed (${globalResponse?.status || "unknown"}).`
+      )
+    );
   }
 
   return json({
     ok: true,
-    scope: guildId ? "guild" : "global",
     guild_id: guildId || null,
-    command: payload
+    deleted_guild_commands: deletedGuildCommands,
+    global_commands: Array.isArray(globalPayload)
+      ? globalPayload.map(command => ({
+          id: command.id,
+          name: command.name,
+          type: command.type
+        }))
+      : [],
+    global_command_count: Array.isArray(globalPayload) ? globalPayload.length : 0,
+    attempts
   });
+}
+
+async function registerCommand(url, env, commandPayload, options = {}) {
+  const applicationId = requiredEnv(env, "DISCORD_APPLICATION_ID");
+  const botToken = requiredEnv(env, "DISCORD_BOT_TOKEN");
+  const requestedScope = String(url.searchParams.get("scope") || "").trim().toLowerCase();
+
+  // Explicit scope=global must never fall back to DISCORD_GUILD_ID.
+  const guildId = requestedScope === "global"
+    ? ""
+    : String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim();
+
+  const endpoint = guildId
+    ? `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`
+    : `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/commands`;
+
+  const maxAttempts = Math.max(1, Math.min(8, Number(options.maxAttempts || 1)));
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(commandPayload)
+    });
+    const payload = await res.json().catch(() => ({}));
+
+    if (res.status === 429 && options.retryRateLimits && attempt < maxAttempts) {
+      const retryAfterSeconds = Number(
+        payload.retry_after ??
+        res.headers.get("retry-after") ??
+        1
+      );
+      const waitMs = Math.max(1000, Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 500);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!res.ok) {
+      return json({
+        ok: false,
+        status: res.status,
+        message: discordApiErrorMessage(res.status, payload.message || `Discord /${commandPayload.name} registration failed.`),
+        details: payload,
+        attempts: attempt
+      }, 502);
+    }
+
+    return json({
+      ok: true,
+      scope: guildId ? "guild" : "global",
+      guild_id: guildId || null,
+      command: payload,
+      attempts: attempt
+    });
+  }
+
+  return json({
+    ok: false,
+    status: 429,
+    message: `Discord /${commandPayload.name} registration remained rate limited after ${maxAttempts} attempts.`
+  }, 502);
+}
+
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(milliseconds) || 0)));
 }
 
 async function buildVersionResponse(env) {
@@ -3732,6 +4748,48 @@ async function fetchLeagueApi(env, url, init) {
   return fetch(request);
 }
 
+async function serverTrackerApiRequest(env, path, options = {}) {
+  const token = String(env.SERVER_TRACKER_API_TOKEN || env.SERVERS_API_TOKEN || "").trim();
+  if (!token) throw httpError(500, "Missing SERVER_TRACKER_API_TOKEN on the Discord interactions Worker.");
+
+  const base = hasServersApiServiceBinding(env)
+    ? "https://c0ld-servers-worker.service"
+    : String(env.SERVERS_API_BASE || "https://c0ld-servers.opal-dde.workers.dev").replace(/\/$/, "");
+  const url = new URL(path, base);
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Private-Server-Tracker"
+    }
+  };
+  if (options.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  }
+
+  const request = new Request(url.toString(), init);
+  const response = hasServersApiServiceBinding(env)
+    ? await env.SERVERS_API_WORKER.fetch(request)
+    : await fetch(request);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Private-server API failed (${response.status}).`);
+  }
+  return payload;
+}
+
+function hasServersApiServiceBinding(env) {
+  return Boolean(env?.SERVERS_API_WORKER && typeof env.SERVERS_API_WORKER.fetch === "function");
+}
+
 async function fetchDiscordDebugEndpoint(env, path) {
   const res = await fetch(`${DISCORD_API_BASE}${path}`, {
     headers: discordBotHeaders(env)
@@ -3930,6 +4988,109 @@ function lgCommandPayload() {
   };
 }
 
+function lunaCommandPayload() {
+  return {
+    name: "luna",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Configure Luna for this Discord server.",
+    dm_permission: false,
+    options: [
+      {
+        name: "admin",
+        description: "Set the role allowed to use Luna administrator commands.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "role",
+            description: "Role allowed to use Luna administrator commands",
+            type: APPLICATION_COMMAND_OPTION_ROLE,
+            required: true
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function serverCommandPayload() {
+  return {
+    name: "server",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Private-server tracker tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "tracker",
+        description: "Create or move the persistent private-server tracker post.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "channel",
+            description: "Tracker channel; defaults to this channel",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function addCommandPayload() {
+  return {
+    name: "add",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Add tracked resources.",
+    dm_permission: false,
+    options: [
+      {
+        name: "server",
+        description: "Add a Roblox private server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "link",
+            description: "Roblox private-server share link",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true
+          },
+          {
+            name: "place_id",
+            description: `Roblox place ID; defaults to ${DEFAULT_TRACKER_PLACE_ID}`,
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function removeCommandPayload() {
+  return {
+    name: "remove",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Remove tracked resources.",
+    dm_permission: false,
+    options: [
+      {
+        name: "server",
+        description: "Remove a Roblox private server from active tracking.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "server_id",
+            description: "Server number shown in the tracker, such as 1",
+            type: APPLICATION_COMMAND_OPTION_INTEGER,
+            required: true,
+            min_value: 1
+          }
+        ]
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -3962,6 +5123,43 @@ function memberHasAllowedRole(interaction, env) {
     : [];
 
   return memberRoles.some(roleId => allowedRoleIds.includes(roleId));
+}
+
+async function memberCanManageServerTracker(interaction, env, options = {}) {
+  let permissions = 0n;
+  try {
+    permissions = BigInt(String(interaction?.member?.permissions || "0"));
+  } catch {}
+
+  const administrator = 1n << 3n;
+  const manageGuild = 1n << 5n;
+  if ((permissions & administrator) === administrator || (permissions & manageGuild) === manageGuild) {
+    return true;
+  }
+
+  if (options.allowConfiguredRole === false) return false;
+
+  const guildId = String(interaction?.guild_id || "").trim();
+  const memberRoles = Array.isArray(interaction?.member?.roles)
+    ? interaction.member.roles.map(role => String(role))
+    : [];
+
+  const environmentRoles = parseCsv(env.SERVER_TRACKER_ADMIN_ROLE_IDS);
+  if (memberRoles.some(roleId => environmentRoles.includes(roleId))) {
+    return true;
+  }
+
+  if (!guildId || !memberRoles.length) return false;
+
+  try {
+    const payload = await serverTrackerApiRequest(env, "/api/tracker/admin-role", {
+      query: { guild_id: guildId }
+    });
+    const configuredRoleId = String(payload.admin_role_id || payload.role_id || "").trim();
+    return Boolean(configuredRoleId) && memberRoles.includes(configuredRoleId);
+  } catch {
+    return false;
+  }
 }
 
 function parseCsv(value) {
