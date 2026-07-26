@@ -17,26 +17,8 @@
   const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
   const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
   const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
-  const GLOBAL_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/current";
   const CLAN_MODE_STORAGE_KEY = "c0ld:site-clan-mode";
 
-  const DEFAULT_AVATAR_SVG =
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
-        <rect width="150" height="150" rx="16" fill="#21262d"/>
-        <circle cx="75" cy="58" r="26" fill="#6e7681"/>
-        <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
-      </svg>
-    `);
-
-  let wmsyRows = [];
-  let wmsyData = null;
-  let wmsySortKey = "rank";
-  let wmsySortAsc = true;
-  let wmsySearch = "";
-  let wmsyLoading = false;
-  let wmsyRendering = false;
   let clansCurrentPromise = null;
   let profileChartPromise = null;
   let profileChartDataKey = "";
@@ -189,41 +171,6 @@
   function formatRank(value) {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? `#${n.toLocaleString("en-US")}` : "—";
-  }
-
-  function fmtDowntime(minutes) {
-    const value = finiteNumber(minutes);
-    if (value === null) return "—";
-    if (value < 5) return "<5m";
-
-    const totalMinutes = Math.floor(value);
-    const days = Math.floor(totalMinutes / 1440);
-    const hours = Math.floor((totalMinutes % 1440) / 60);
-    const mins = totalMinutes % 60;
-
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
-  }
-
-  function downtimeTitle(row) {
-    const value = finiteNumber(row?.downtime_minutes);
-    if (value === null) return "No downtime data yet";
-
-    const parts = [`No point gain for ${fmtDowntime(value)}`];
-    if (row?.last_gain_at) parts.push(`Last gain: ${fmtDateTime(row.last_gain_at)}`);
-    return parts.join(" | ");
-  }
-
-  function globalRankTitle(row) {
-    const rank = finiteNumber(row?.global_rank);
-    if (!rank) return "No cached global rank yet";
-
-    const parts = [`Global rank #${fmtNum(rank)}`];
-    const points = finiteNumber(row?.global_points);
-    if (points !== null) parts.push(`Global points: ${fmtNum(points)}`);
-    if (row?.global_fetched_at) parts.push(`Updated: ${fmtDateTime(row.global_fetched_at)}`);
-    return parts.join(" | ");
   }
 
   function profileUrl(row) {
