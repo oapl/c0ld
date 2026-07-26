@@ -32,8 +32,10 @@ const HISTORY_VIEW_LABELS = {
   leaderboard: "Leaderboard History"
 };
 const DEFAULT_HISTORY_PAGE_SIZE = 10;
+const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 10, 100, 250, 500, 1000, 10000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
+const LEGACY_PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000";
 const CLAN_REWARD_CATEGORIES = [
   { label: "#1", rank: 1 },
   { label: "#2-3", rank: 3 },
@@ -4367,9 +4369,12 @@ function rewardCutoffLines(payload, type) {
   }
 
   const byRank = new Map((payload.cutoffs || []).map(cutoff => [Number(cutoff.rank), cutoff]));
-  return CLAN_REWARD_CATEGORIES.map(category => rewardCutoffLine({
+  const categories = Array.isArray(payload.reward_categories) && payload.reward_categories.length
+    ? payload.reward_categories
+    : CLAN_REWARD_CATEGORIES;
+  return categories.map(category => rewardCutoffLine({
     ...(byRank.get(category.rank) || {}),
-    rank: category.rank,
+    rank: Number(category.rank ?? category.worst),
     label: category.label
   }));
 }
@@ -4385,6 +4390,14 @@ function rewardCutoffLine(cutoff) {
 
 function rewardLeaderboardTitle(payload, type, env) {
   if (type === "players") {
+    const activeEventLabel = String(
+      payload.event_name ||
+      payload.display_name ||
+      payload.battle ||
+      ""
+    ).trim();
+    if (activeEventLabel) return activeEventLabel;
+
     const customLabel = String(env.PLAYER_REWARD_LEADERBOARD_LABEL || "").trim();
     if (customLabel) return customLabel;
 
@@ -4416,13 +4429,13 @@ function configuredRewardRanks(type, env) {
     .map(value => Math.round(Number(value)))
     .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank);
 
+  const normalizedRaw = [...new Set(parsed)].sort((a, b) => a - b).join(",");
   if (type === "clans") {
-    const normalizedRaw = [...new Set(parsed)].sort((a, b) => a - b).join(",");
     if (!raw.trim() || normalizedRaw === LEGACY_CLAN_REWARD_CUTOFF_RANKS) {
       return DEFAULT_CLAN_REWARD_CUTOFF_RANKS;
     }
-  } else if (!raw.trim()) {
-    return [];
+  } else if (!raw.trim() || normalizedRaw === LEGACY_PLAYER_REWARD_CUTOFF_RANKS) {
+    return DEFAULT_PLAYER_REWARD_CUTOFF_RANKS;
   }
 
   return [...new Set(parsed)]

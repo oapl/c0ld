@@ -51,8 +51,18 @@ const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 0;
-const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 100, 1000, 1050, 1150, 6150, 30000];
+const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 10, 100, 250, 500, 1000, 10000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const DEFAULT_CLAN_REWARD_CATEGORIES = [
+  { label: "#1", best: 1, worst: 1, rank: 1 },
+  { label: "#2-3", best: 2, worst: 3, rank: 3 },
+  { label: "#4-10", best: 4, worst: 10, rank: 10 },
+  { label: "#11-50", best: 11, worst: 50, rank: 50 },
+  { label: "#51-250", best: 51, worst: 250, rank: 250 },
+  { label: "Top 30", best: 1, worst: 30, rank: 30 },
+  { label: "Top 50", best: 1, worst: 50, rank: 50 },
+  { label: "Top 500", best: 1, worst: 500, rank: 500 }
+];
 const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
 const DEFAULT_REWARD_CUTOFF_SCHEDULE_MINUTES = 5;
 const DEFAULT_REWARD_CUTOFF_SCHEDULE_OFFSET_MINUTES = 0;
@@ -62,6 +72,7 @@ const DISCORD_ALERT_COLOR = 0x3498db;
 const DISCORD_ALERT_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/3e/PS99_Genie_Fox.png/revision/latest/scale-to-width/360?cb=20260718171435";
 const DISCORD_ALERT_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Last Updated:";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
+const LEGACY_PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000";
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
@@ -1191,19 +1202,21 @@ async function handleLeagueGlobalLeaderboard(url, env) {
   }, env, publicCacheSeconds(env, "GLOBAL_LEADERBOARD_FAST"));
 }
 
-async function fetchLeagueSoloLeaderboard(env, limit = 500) {
+async function fetchLeagueSoloLeaderboard(env, limit = 500, query = "") {
   const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const searchQuery = String(query || "").trim();
+  const searchSuffix = searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : "";
   const attempts = [];
   if (env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function") {
     attempts.push({
       name: "service binding",
-      url: `https://league-api-worker.service/api/leagues/solo-leaderboard?limit=${limit}`,
+      url: `https://league-api-worker.service/api/leagues/solo-leaderboard?limit=${limit}${searchSuffix}`,
       fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
     });
   }
   attempts.push({
     name: "public endpoint",
-    url: `${externalBase}/api/leagues/solo-leaderboard?limit=${limit}`,
+    url: `${externalBase}/api/leagues/solo-leaderboard?limit=${limit}${searchSuffix}`,
     fetcher: request => fetch(request)
   });
 
@@ -1409,12 +1422,21 @@ async function handleRewardCutoffs(request, env) {
   const url = new URL(request.url);
   const rawType = String(url.searchParams.get("type") || "players").trim().toLowerCase();
   const type = rawType.startsWith("clan") ? "clans" : "players";
-  const ranks = rewardCutoffRanks(url, env, type);
 
   if (type === "clans") {
-    return cacheJson(await buildClanRewardCutoffs(url, env, ranks), env, publicCacheSeconds(env, "CLANS_CURRENT"));
+    const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+    const rewardCategories = clanRewardCategoriesFromBattleMeta(activeBattleMeta);
+    const ranks = rewardCategories.length
+      ? clanRewardRanksFromCategories(rewardCategories)
+      : rewardCutoffRanks(url, env, type);
+    return cacheJson(await buildClanRewardCutoffs(url, env, ranks, {
+      activeBattleMeta,
+      battleKey: activeBattleMeta?.battleKey || null,
+      rewardCategories
+    }), env, publicCacheSeconds(env, "CLANS_CURRENT"));
   }
 
+  const ranks = rewardCutoffRanks(url, env, type);
   return cacheJson(await buildPlayerRewardCutoffs(url, env, ranks), env, publicCacheSeconds(env, "GLOBAL_LEADERBOARD_FAST"));
 }
 
@@ -1515,6 +1537,9 @@ async function buildClanRewardCutoffs(url, env, ranks, options = {}) {
     ? String(options.eventMode).trim().toLowerCase()
     : null;
   const suppliedActiveBattleMeta = options.activeBattleMeta || null;
+  const rewardCategories = Array.isArray(options.rewardCategories) && options.rewardCategories.length
+    ? options.rewardCategories
+    : clanRewardCategoriesFromBattleMeta(suppliedActiveBattleMeta);
   const expectedBattleKey = String(
     options.battleKey ||
     suppliedActiveBattleMeta?.battleKey ||
@@ -1599,8 +1624,67 @@ async function buildClanRewardCutoffs(url, env, ranks, options = {}) {
     total_ranked: rows.length,
     available_rank_max: availableRankMax,
     ranks,
+    reward_categories: rewardCategories.length ? rewardCategories : DEFAULT_CLAN_REWARD_CATEGORIES,
     cutoffs: ranks.map(rankValue => clanRewardCutoffRow(rankValue, byRank.get(rankValue)))
   };
+}
+
+function clanRewardCategoriesFromBattleMeta(activeBattleMeta) {
+  const raw = activeBattleMeta?.raw || {};
+  const configData = raw.configData || raw.ConfigData || {};
+  const placementRewards = firstDefined(
+    getFirstValue(configData, [
+      "PlacementRewards",
+      "placementRewards",
+      "placement_rewards"
+    ]),
+    getFirstValue(raw, [
+      "PlacementRewards",
+      "placementRewards",
+      "placement_rewards"
+    ])
+  );
+  if (!Array.isArray(placementRewards) || !placementRewards.length) return [];
+
+  const grouped = new Map();
+  for (const reward of placementRewards) {
+    const best = toNumber(getFirstValue(reward, ["Best", "best"]));
+    const worst = toNumber(getFirstValue(reward, ["Worst", "worst"]));
+    if (!(best >= 1) || !(worst >= best)) continue;
+
+    const key = `${best}:${worst}`;
+    const existing = grouped.get(key) || {
+      label: clanRewardPlacementLabel(best, worst),
+      best,
+      worst,
+      rank: worst,
+      rewards: []
+    };
+    const item = firstDefined(reward.Item, reward.item);
+    if (item) existing.rewards.push(item);
+    grouped.set(key, existing);
+  }
+
+  return [...grouped.values()].sort((a, b) => {
+    const aTop = a.best === 1 && a.worst > 1;
+    const bTop = b.best === 1 && b.worst > 1;
+    if (aTop !== bTop) return aTop ? 1 : -1;
+    if (a.best !== b.best) return a.best - b.best;
+    return a.worst - b.worst;
+  });
+}
+
+function clanRewardPlacementLabel(best, worst) {
+  if (best === 1 && worst === 1) return "#1";
+  if (best === 1) return `Top ${Number(worst).toLocaleString("en-US")}`;
+  return `#${Number(best).toLocaleString("en-US")}-${Number(worst).toLocaleString("en-US")}`;
+}
+
+function clanRewardRanksFromCategories(categories) {
+  return [...new Set((categories || [])
+    .map(category => toNumber(category?.rank ?? category?.worst))
+    .filter(rank => Number.isFinite(rank) && rank >= 1))]
+    .sort((a, b) => a - b);
 }
 
 async function fetchLiveClanRewardCutoffRows(env, ranks) {
@@ -1654,7 +1738,10 @@ function rewardCutoffRanks(url, env, type) {
     .map(value => Math.round(Number(value)))
     .filter(value => Number.isFinite(value) && value >= 1 && value <= maxRank);
   const normalizedRaw = [...new Set(parsed)].sort((a, b) => a - b).join(",");
-  const ranks = parsed.length && (!isClans || normalizedRaw !== LEGACY_CLAN_REWARD_CUTOFF_RANKS)
+  const isLegacy = isClans
+    ? normalizedRaw === LEGACY_CLAN_REWARD_CUTOFF_RANKS
+    : normalizedRaw === LEGACY_PLAYER_REWARD_CUTOFF_RANKS;
+  const ranks = parsed.length && !isLegacy
     ? parsed
     : fallback;
 
@@ -2166,12 +2253,15 @@ async function buildRewardCutoffDashboard(env) {
   const clanUrl = new URL(baseUrl);
   clanUrl.searchParams.set("type", "clans");
   const playerRanks = rewardCutoffRanks(playerUrl, env, "players");
-  const clanRanks = rewardCutoffRanks(clanUrl, env, "clans");
   const leagueRanks = leagueRewardCutoffRanks(env);
   const eventMode = await globalLeaderboardSourceMode(playerUrl, env);
   const activeBattleMeta = eventMode === "clans"
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
+  const clanRewardCategories = clanRewardCategoriesFromBattleMeta(activeBattleMeta);
+  const clanRanks = clanRewardCategories.length
+    ? clanRewardRanksFromCategories(clanRewardCategories)
+    : rewardCutoffRanks(clanUrl, env, "clans");
   const activeBattleKey = String(activeBattleMeta?.battleKey || "").trim();
 
   let players = {
@@ -2186,6 +2276,9 @@ async function buildRewardCutoffDashboard(env) {
     type: "clans",
     battle_is_active: false,
     ranks: clanRanks,
+    reward_categories: clanRewardCategories.length
+      ? clanRewardCategories
+      : DEFAULT_CLAN_REWARD_CATEGORIES,
     cutoffs: []
   };
   let leagues = {
@@ -2210,7 +2303,8 @@ async function buildRewardCutoffDashboard(env) {
       buildClanRewardCutoffs(clanUrl, env, clanRanks, {
         eventMode,
         activeBattleMeta,
-        battleKey: activeBattleKey
+        battleKey: activeBattleKey,
+        rewardCategories: clanRewardCategories
       })
     ]);
   } else {
@@ -2325,13 +2419,16 @@ function rewardCutoffDiscordPayload(dashboard) {
   const leagues = dashboard.leagues || {};
   const clanCutoffRows = Array.isArray(clans.cutoffs) ? clans.cutoffs : [];
   const clanCutoffRanks = Array.isArray(clans.ranks) ? clans.ranks : [];
+  const clanRewardCategories = Array.isArray(clans.reward_categories) && clans.reward_categories.length
+    ? clans.reward_categories
+    : DEFAULT_CLAN_REWARD_CATEGORIES;
   const leagueCutoffRows = Array.isArray(leagues.cutoffs) ? leagues.cutoffs : [];
   const leagueCutoffRanks = Array.isArray(leagues.ranks) ? leagues.ranks : [];
   const clanHasActiveBattle = eventMode === "clans" && rewardCutoffClanActive(clans);
   const leagueHasActiveEvent = eventMode === "leagues" && rewardCutoffLeagueActive(leagues);
   const clanLines = clanHasActiveBattle
-    ? rewardCutoffLines(clanCutoffRows, clanRewardRangeLabel)
-    : rewardCutoffBlankLines(clanCutoffRanks, clanRewardRangeLabel);
+    ? rewardCutoffCategoryLines(clanCutoffRows, clanRewardCategories)
+    : rewardCutoffCategoryBlankLines(clanRewardCategories, clanCutoffRanks, clanRewardRangeLabel);
   const leagueLines = leagueHasActiveEvent
     ? rewardCutoffLines(leagueCutoffRows, leagueRewardRangeLabel)
     : rewardCutoffBlankLines(leagueCutoffRanks, leagueRewardRangeLabel);
@@ -2494,6 +2591,26 @@ function rewardCutoffClanActive(clans) {
   return false;
 }
 
+function rewardCutoffCategoryLines(cutoffs, categories) {
+  const byRank = new Map((Array.isArray(cutoffs) ? cutoffs : [])
+    .map(row => [toNumber(row?.rank), row]));
+  const values = Array.isArray(categories) ? categories : [];
+  if (!values.length) return ["No cutoff data available."];
+
+  return values.map(category => {
+    const rank = toNumber(category?.rank ?? category?.worst);
+    const row = byRank.get(rank);
+    const label = category?.label || playerRewardRangeLabel(rank);
+    return `**${label}:** ${formatRewardCutoffPoints(row?.points)}`;
+  });
+}
+
+function rewardCutoffCategoryBlankLines(categories, fallbackRanks = [], fallbackLabeler = playerRewardRangeLabel) {
+  const values = Array.isArray(categories) ? categories : [];
+  if (!values.length) return rewardCutoffBlankLines(fallbackRanks, fallbackLabeler);
+  return values.map(category => `**${category?.label || fallbackLabeler(category?.rank)}:** —`);
+}
+
 function rewardCutoffLeagueActive(leagues) {
   const leagueEndedAt = safeIso(leagues?.league_end_at || leagues?.league_run_end_at);
   if (leagueEndedAt) {
@@ -2533,10 +2650,10 @@ function clanRewardRangeLabel(rank) {
     1: "#1",
     3: "#2-3",
     10: "#4-10",
-    30: "#11-30",
-    50: "#31-50",
+    30: "Top 30",
+    50: "#11-50",
     250: "#51-250",
-    500: "#251-500"
+    500: "Top 500"
   };
   return labels[rank] || `Top ${Number(rank || 0).toLocaleString("en-US")}`;
 }
@@ -3032,6 +3149,10 @@ async function handleGlobalSearch(request, env) {
     throw httpError(400, "Missing search query. Use ?q=username.");
   }
 
+  if (String(url.searchParams.get("scope") || "").trim().toLowerCase() === "pool") {
+    return handleGlobalLeaderboardPoolSearch(url, env, clan, query);
+  }
+
   const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
     select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,raw_global,updated_at",
     clan_name: `eq.${clan}`,
@@ -3136,6 +3257,97 @@ async function handleGlobalSearch(request, env) {
       };
     })
   }, env);
+}
+
+async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
+  const sourceMode = await globalLeaderboardSourceMode(url, env);
+
+  if (sourceMode === "leagues") {
+    const payload = await fetchLeagueSoloLeaderboard(env, 500, query);
+    const sourceRows = Array.isArray(payload.rows) ? payload.rows : [];
+    const avatarMap = await resolveRobloxAvatarHeadshots(
+      sourceRows.map(row => row.user_id),
+      env
+    ).catch(() => new Map());
+    const rows = sourceRows.map((row, index) => ({
+      global_rank: toNumber(row.rank),
+      projected_rank: null,
+      projected_rank_1h: null,
+      projected_points_1h: null,
+      projection_basis: null,
+      clan: String(row.league_name || "").trim() || "Unlisted",
+      source_clan: String(row.league_name || "").trim() || "Unlisted",
+      user_id: toNumber(row.user_id),
+      username: String(row.username || row.display_name || `user_${row.user_id}`).trim(),
+      display_name: String(row.display_name || row.username || `user_${row.user_id}`).trim(),
+      avatar_url: avatarMap.get(String(row.user_id)) || null,
+      points: toNumber(row.points ?? row.total_points) || 0,
+      gain_5m: null,
+      gain_1h: null,
+      gain_12h: null,
+      gain_24h: null,
+      fetched_at: safeIso(row.fetched_at || payload.snapshot_at || payload.generated_at)
+    }));
+
+    return cacheJson({
+      ok: rows.length > 0,
+      message: rows.length
+        ? null
+        : `No League player matched "${query}".`,
+      query,
+      source_mode: "leagues",
+      source_label: "Leagues",
+      search_scope: payload.search_scope || "top-500-plus-direct-player-plus-stored-league-rosters",
+      total_global_players: toNumber(payload.top_available) || null,
+      rank_is_exact: rows.every(row => toNumber(row.global_rank) !== null),
+      rows,
+      row: rows[0] || null
+    }, env, 30);
+  }
+
+  const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
+  const activeBattleKey = String(activeBattleMeta?.battleKey || "").trim();
+  const result = await searchGlobalRankCandidates(env, clan, query, activeBattleKey || null);
+
+  if (!result?.ok || !result.row) {
+    return cacheJson({
+      ...result,
+      source_mode: "clans",
+      source_label: "Clan Battle",
+      rows: [],
+      row: null
+    }, env, 30);
+  }
+
+  const row = {
+    global_rank: toNumber(result.row.global_rank),
+    projected_rank: null,
+    projected_rank_1h: null,
+    projected_points_1h: null,
+    projection_basis: null,
+    clan: String(result.row.source_clan || result.row.clan_name || "").trim() || "Unlisted",
+    source_clan: String(result.row.source_clan || result.row.clan_name || "").trim() || "Unlisted",
+    user_id: toNumber(result.row.user_id),
+    username: result.row.username,
+    display_name: result.row.display_name,
+    avatar_url: result.row.avatar_url || null,
+    points: toNumber(result.row.global_points ?? result.row.member_points) || 0,
+    gain_5m: null,
+    gain_1h: null,
+    gain_12h: null,
+    gain_24h: null,
+    fetched_at: result.row.fetched_at || result.run?.finished_at || result.run?.updated_at || null
+  };
+
+  return cacheJson({
+    ...result,
+    source_mode: "clans",
+    source_label: "Clan Battle",
+    total_global_players: toNumber(result.row.total_global_players) || null,
+    rank_is_exact: toNumber(row.global_rank) !== null,
+    rows: [row],
+    row
+  }, env, 30);
 }
 
 async function handleExternalHistory(request, env) {
@@ -3627,8 +3839,8 @@ async function handleBigBotHistoryImport(request, env) {
   });
 }
 
-async function searchGlobalRankCandidates(env, clan, query) {
-  const run = await findLatestGlobalRankSearchRun(env, clan);
+async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = null) {
+  const run = await findLatestGlobalRankSearchRun(env, clan, battleKeyValue);
 
   if (!run?.run_key) {
     return {
@@ -3662,7 +3874,7 @@ async function searchGlobalRankCandidates(env, clan, query) {
   if (!candidate) {
     return {
       ok: false,
-      message: `No global-rank row matched "${query}" in the latest Top ${toNumber(run.scan_limit) || 500} clan scan.`,
+      message: `No player matched "${query}" in the latest scanned global pool.`,
       query,
       clan_name: clan,
       run

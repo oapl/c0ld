@@ -203,8 +203,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
 | `GLOBAL_RANK_LEADERBOARD_LABEL` | Optional leaderboard placement label, such as `Update 84 Leaderboard`; preferred for profile Leaderboard History. |
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/api/reward-cutoffs?type=clans` ranks. Active-battle categories are read from BIG Games `PlacementRewards`; the fallback defaults to `1,3,10,30,50,250,500`. |
 | `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
 | `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `5`; interval used to refresh the three persistent Discord posts. |
@@ -636,8 +636,8 @@ Required Worker variables:
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
 | `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/rewards clans` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -798,10 +798,11 @@ The reward cutoff commands are:
 /rewards clans
 ```
 
-They post the current point minimums for the configured reward ranks. Defaults
-are `3,100,1000,1050,1150,6150,30000` for players and `1,3,10,30,50,250,500` for
-clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
-`CLAN_REWARD_CUTOFF_RANKS` on either Worker. For the player command header, set
+They post the current point minimums for the reward ranks. Player defaults are
+`3,10,100,250,500,1000,10000`. Clan categories and labels are taken from the
+active battle's BIG Games `PlacementRewards` metadata; `CLAN_REWARD_CUTOFF_RANKS`
+is only a fallback when that metadata is unavailable. For a player command with
+no current-event label in the API payload, set
 `PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or
 `PS99_UPDATE_LABEL="Update 88"` on the Discord Worker.
 
