@@ -17,6 +17,7 @@
   const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
   const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
   const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+  const GLOBAL_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/global/current";
   const CLAN_MODE_STORAGE_KEY = "c0ld:site-clan-mode";
 
   const DEFAULT_AVATAR_SVG =
@@ -187,7 +188,42 @@
 
   function formatRank(value) {
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? `#${n}` : "—";
+    return Number.isFinite(n) && n > 0 ? `#${n.toLocaleString("en-US")}` : "—";
+  }
+
+  function fmtDowntime(minutes) {
+    const value = finiteNumber(minutes);
+    if (value === null) return "—";
+    if (value < 5) return "<5m";
+
+    const totalMinutes = Math.floor(value);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const mins = totalMinutes % 60;
+
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
+  }
+
+  function downtimeTitle(row) {
+    const value = finiteNumber(row?.downtime_minutes);
+    if (value === null) return "No downtime data yet";
+
+    const parts = [`No point gain for ${fmtDowntime(value)}`];
+    if (row?.last_gain_at) parts.push(`Last gain: ${fmtDateTime(row.last_gain_at)}`);
+    return parts.join(" | ");
+  }
+
+  function globalRankTitle(row) {
+    const rank = finiteNumber(row?.global_rank);
+    if (!rank) return "No cached global rank yet";
+
+    const parts = [`Global rank #${fmtNum(rank)}`];
+    const points = finiteNumber(row?.global_points);
+    if (points !== null) parts.push(`Global points: ${fmtNum(points)}`);
+    if (row?.global_fetched_at) parts.push(`Updated: ${fmtDateTime(row.global_fetched_at)}`);
+    return parts.join(" | ");
   }
 
   function profileUrl(row) {
@@ -255,7 +291,10 @@
       .menu-bar .menu-btn.active,
       .tab-btn.active,
       button.active,
-      [data-tab].active {
+      [data-tab].active,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-control.active,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-menu > .site-nav-control.active,
+      html[data-clan="wmsy"] header .site-nav-panel > .site-nav-link.active {
         border-color: rgba(72, 187, 120, 0.78) !important;
         color: #74d99f !important;
         background: rgba(72, 187, 120, 0.14) !important;
@@ -277,7 +316,10 @@
       .menu-bar .menu-btn.active:hover,
       .tab-btn.active:hover,
       button.active:hover,
-      [data-tab].active:hover {
+      [data-tab].active:hover,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-control.active:hover,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-menu > .site-nav-control.active:hover,
+      html[data-clan="wmsy"] header .site-nav-panel > .site-nav-link.active:hover {
         background: rgba(72, 187, 120, 0.22) !important;
       }
 
@@ -408,7 +450,7 @@
     wmsyRendering = true;
 
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:#8b949e;">No WMSY players found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:#8b949e;">No WMSY players found.</td></tr>`;
       window.setTimeout(() => { wmsyRendering = false; }, 0);
       return;
     }
@@ -427,10 +469,12 @@
             </a>
           </td>
           <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
+          <td class="num" title="${escapeHtml(downtimeTitle(row))}">${fmtDowntime(row.downtime_minutes)}</td>
           <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
           <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
           <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
           <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
+          <td class="num" title="${escapeHtml(globalRankTitle(row))}">${formatRank(row.global_rank)}</td>
         </tr>
       `;
     }).join("");
@@ -443,8 +487,26 @@
 
     wmsyLoading = true;
     try {
-      wmsyData = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=WMSY`);
-      wmsyRows = Array.isArray(wmsyData?.rows) ? wmsyData.rows.slice() : [];
+      const [memberData, globalData] = await Promise.all([
+        fetchJson(`${MEMBER_API_CURRENT_URL}?clan=WMSY`),
+        fetchJson(`${GLOBAL_API_CURRENT_URL}?clan=WMSY`).catch(() => ({ rows: [] }))
+      ]);
+      const globalRowsByUserId = new Map(
+        (Array.isArray(globalData?.rows) ? globalData.rows : [])
+          .map(row => [String(row.user_id || ""), row])
+          .filter(([userId]) => userId)
+      );
+
+      wmsyData = memberData;
+      wmsyRows = (Array.isArray(wmsyData?.rows) ? wmsyData.rows : []).map(row => {
+        const globalRow = globalRowsByUserId.get(String(row.user_id || ""));
+        return {
+          ...row,
+          global_rank: globalRow?.global_rank ?? null,
+          global_points: globalRow?.global_points ?? null,
+          global_fetched_at: globalRow?.fetched_at ?? globalData?.snapshot_at ?? null
+        };
+      });
       renderWmsyLeaderboard();
       applyTrackedClanCards();
     } catch (err) {

@@ -962,14 +962,37 @@ async function handleGlobalCurrent(request, env) {
   const clan = url.searchParams.get("clan") || clanName(env);
   const limit = clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000);
 
-  const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
+  let rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
     select: "clan_name,user_id,username,display_name,avatar_url,clan_rank,clan_points,battle_key,battle_display_name,event_name,global_rank,global_points,total_global_players,found,fetched_at,run_key,raw_global,updated_at",
     clan_name: `eq.${clan}`,
     order: "clan_rank.asc",
     limit: String(limit)
   });
 
-  const run = await findLatestGlobalRankSearchRun(env, clan);
+  const runClan = normalizeText(clan) === normalizeText(clanName(env))
+    ? clan
+    : clanName(env);
+  const run = await findLatestGlobalRankSearchRun(env, runClan);
+  if (!rows.length && run?.run_key && normalizeText(clan) !== normalizeText(runClan)) {
+    const memberRows = await fetchCurrentRows(env, clan).catch(() => []);
+    if (memberRows.length) {
+      const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+      const candidateById = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
+      rows = buildGlobalRankCurrentRows({
+        members: memberRows,
+        candidateById,
+        clan,
+        latest: latestMetaFromRows(memberRows),
+        eventName: run.event_name || run.battle_display_name || null,
+        fetchedAt: run.finished_at || run.updated_at || new Date().toISOString(),
+        candidatePlayerCount:
+          toNumber(run.total_global_players) ||
+          toNumber(run.candidate_player_count) ||
+          rankedCandidates.length,
+        runKey: run.run_key
+      });
+    }
+  }
   const displayRows = run
     ? await overlayGlobalCurrentRowsFromCandidates(env, rows, run)
     : rows.map(row => ({
@@ -13095,36 +13118,42 @@ async function finalizeGlobalRankRun(env, {
 }) {
   const topCandidates = await readGlobalRankRankedCandidates(env, runKey);
   const candidateById = new Map(topCandidates.map(row => [String(row.user_id), row]));
-  const finalRows = clanMembers.map(member => {
-    const match = candidateById.get(String(member.user_id));
-
-    return {
-      ...member,
-      battle_key: latest?.battle_key || member.battle_key || null,
-      battle_display_name: cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name) || member.battle_display_name || null,
-      event_name: eventName,
-      global_rank: match ? toNumber(match.global_rank) : null,
-      global_points: match ? toNumber(match.points) : null,
-      total_global_players: candidatePlayerCount,
-      found: Boolean(match),
-      fetched_at: fetchedAt,
-      run_key: runKey,
-      raw_global: match ? {
-        source_clan: match.source_clan,
-        source_clan_rank: match.source_clan_rank,
-        source_clan_points: match.source_clan_points,
-        candidate: match.raw_candidate || {}
-      } : {
-        reason: "not_found_in_scanned_clans"
-      },
-      updated_at: new Date().toISOString()
-    };
+  const finalRows = buildGlobalRankCurrentRows({
+    members: clanMembers,
+    candidateById,
+    clan,
+    latest,
+    eventName,
+    fetchedAt,
+    candidatePlayerCount,
+    runKey
   });
+  const secondaryClanRows = (await runLimited(
+    clanNames(env).filter(name => normalizeText(name) !== normalizeText(clan)),
+    3,
+    async trackedClan => {
+      const members = await fetchCurrentRows(env, trackedClan).catch(() => []);
+      return buildGlobalRankCurrentRows({
+        members,
+        candidateById,
+        clan: trackedClan,
+        latest: latestMetaFromRows(members) || latest,
+        eventName,
+        fetchedAt,
+        candidatePlayerCount,
+        runKey
+      });
+    }
+  )).flat();
+  const publishedRows = [...finalRows, ...secondaryClanRows];
+  const historyRows = publishedRows.filter((row, index, rows) =>
+    rows.findIndex(candidate => String(candidate.user_id) === String(row.user_id)) === index
+  );
 
   if (publishCurrent) {
-    await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, finalRows, "clan_name,user_id");
+    await supabaseUpsert(env, GLOBAL_RANK_CURRENT_TABLE, publishedRows, "clan_name,user_id");
   }
-  await supabaseUpsert(env, GLOBAL_RANK_HISTORY_TABLE, finalRows.map(row => ({
+  await supabaseUpsert(env, GLOBAL_RANK_HISTORY_TABLE, historyRows.map(row => ({
     run_key: runKey,
     clan_name: row.clan_name,
     user_id: row.user_id,
@@ -13148,6 +13177,50 @@ async function finalizeGlobalRankRun(env, {
     rows: finalRows,
     foundMemberCount: finalRows.filter(row => row.found).length
   };
+}
+
+function buildGlobalRankCurrentRows({
+  members,
+  candidateById,
+  clan,
+  latest,
+  eventName,
+  fetchedAt,
+  candidatePlayerCount,
+  runKey
+}) {
+  return (members || []).map(member => {
+    const userId = toNumber(member.user_id);
+    const match = candidateById.get(String(userId));
+
+    return {
+      clan_name: String(member.clan_name || clan || "").trim(),
+      user_id: userId,
+      username: String(member.username || `user_${userId}`).trim(),
+      display_name: member.display_name || null,
+      avatar_url: member.avatar_url || null,
+      clan_rank: toNumber(member.clan_rank ?? member.rank),
+      clan_points: toNumber(member.clan_points ?? member.total_points) || 0,
+      battle_key: latest?.battle_key || member.battle_key || null,
+      battle_display_name: cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name) || member.battle_display_name || null,
+      event_name: eventName,
+      global_rank: match ? toNumber(match.global_rank) : null,
+      global_points: match ? toNumber(match.points) : null,
+      total_global_players: candidatePlayerCount,
+      found: Boolean(match),
+      fetched_at: fetchedAt,
+      run_key: runKey,
+      raw_global: match ? {
+        source_clan: match.source_clan,
+        source_clan_rank: match.source_clan_rank,
+        source_clan_points: match.source_clan_points,
+        candidate: match.raw_candidate || {}
+      } : {
+        reason: "not_found_in_scanned_clans"
+      },
+      updated_at: new Date().toISOString()
+    };
+  });
 }
 
 function normalizeClanRankRow(clan, fallbackRank) {
