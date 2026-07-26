@@ -1598,12 +1598,19 @@ async function buildClanRewardCutoffs(url, env, ranks, options = {}) {
   })();
   const byRank = new Map(rows.map(row => [toNumber(row.rank), row]));
   const liveCutoffs = !explicitBattle && activeClanBattle
-    ? await fetchLiveClanRewardCutoffRows(env, ranks.filter(rankValue => !byRank.has(rankValue))).catch(() => new Map())
+    ? await fetchLiveClanRewardCutoffRows(env, ranks).catch(() => new Map())
     : new Map();
 
   for (const [rankValue, row] of liveCutoffs.entries()) {
-    if (row && !byRank.has(rankValue)) byRank.set(rankValue, row);
+    // Active reward cutoffs must reflect the live leaderboard. Stored snapshot
+    // rows remain a fallback only when the live API cannot return a rank.
+    if (row) byRank.set(rankValue, row);
   }
+  const liveSnapshotAt = [...liveCutoffs.values()]
+    .map(row => safeIso(row?.fetched_at))
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
   const availableRankMax = Math.max(
     rows.reduce((max, row) => Math.max(max, toNumber(row.rank) || 0), 0),
     ...[...liveCutoffs.values()].map(row => toNumber(row?.rank) || 0)
@@ -1613,7 +1620,7 @@ async function buildClanRewardCutoffs(url, env, ranks, options = {}) {
     ok: true,
     type: "clans",
     generated_at: new Date().toISOString(),
-    snapshot_at: latestWithActiveMeta?.fetched_at || null,
+    snapshot_at: liveSnapshotAt || latestWithActiveMeta?.fetched_at || null,
     battle: latestWithActiveMeta?.battle_key || null,
     display_name: latestWithActiveMeta
       ? cleanBattleDisplayName(latestWithActiveMeta.battle_key, latestWithActiveMeta.battle_display_name)
