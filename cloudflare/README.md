@@ -161,6 +161,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | Variable | Example |
 |---|---|
 | `CLAN_NAME` | `c0ld` |
+| `CLAN_NAMES` | Optional comma-separated clans whose member snapshots are collected by each scheduled battle-data pull. Use `c0ld,WMSY` for both website modes. |
+| `WMSY_MODE_ENABLED` | Optional. Defaults to `true`; guarantees the WMSY companion feed is collected even when an older deployment still has `CLAN_NAMES=c0ld`. Set to `false` only to disable WMSY ingestion. |
 | `CURRENT_BATTLE_NAME` | `auto`; lets the Worker avoid stale hard-coded battle keys. Set this to a specific API battle key only when you intentionally want to force one battle. |
 | `AUTO_DETECT_BATTLE` | `true`; lets the Worker pick the active/latest API battle automatically. Set to `false` only when you want to force `CURRENT_BATTLE_NAME`. |
 | `ACTIVE_BATTLE_LOOKUP` | Optional. Defaults to `true`; reads Big Games' active battle metadata for display/start/end times. |
@@ -205,7 +207,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
 | `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
-| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the three persistent Discord posts. |
+| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `5`; interval used to refresh the three persistent Discord posts. |
 | `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the persistent-post schedule interval. |
 | `REWARD_CUTOFFS_CHANNEL_ID` | Discord channel ID for one combined post containing player, clan, and league reward cutoffs. |
 | `ROBLOX_STATUS_CHANNEL_ID` | Discord channel ID for the persistent official Roblox platform-status post. |
@@ -519,7 +521,7 @@ optional fallback when the matching channel ID is absent.
 
 The existing clan Worker cron is sufficient; do not add a second cron just for
 this feature. The Worker checks the cutoff schedule whenever its normal cron
-runs. `REWARD_CUTOFFS_SCHEDULE_MINUTES` defaults to `15`. The health endpoint
+runs. `REWARD_CUTOFFS_SCHEDULE_MINUTES` defaults to `5`. The health endpoint
 and protected status endpoint report the active schedule.
 
 An optional `LEAGUE_API_WORKER` service binding targeting

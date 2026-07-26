@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  const CLAN_MODE_STORAGE_KEY = "c0ld:site-clan-mode";
   const currentPage = (window.location.pathname.split("/").pop() || "index.html").toLowerCase();
   const clanPages = new Set(["index.html", "clans.html", "global-leaderboard.html"]);
   const leaguePages = new Set([
@@ -48,10 +49,31 @@
     return "menu-btn";
   }
 
+  function currentClanMode() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = String(params.get("clan") || "").trim().toLowerCase();
+    if (requested === "wmsy") return "WMSY";
+    if (params.has("clan")) return "c0ld";
+
+    try {
+      return String(window.localStorage.getItem(CLAN_MODE_STORAGE_KEY) || "").trim().toLowerCase() === "wmsy"
+        ? "WMSY"
+        : "c0ld";
+    } catch {
+      return "c0ld";
+    }
+  }
+
+  function withClanMode(href) {
+    const url = new URL(href, window.location.href);
+    url.searchParams.set("clan", currentClanMode());
+    return `${url.pathname.split("/").pop() || "index.html"}${url.search}${url.hash}`;
+  }
+
   function makeLink(label, href, active, className) {
     const link = document.createElement("a");
     link.className = `${className} site-nav-control site-nav-link${active ? " active" : ""}`;
-    link.href = href;
+    link.href = withClanMode(href);
     link.textContent = label;
     if (href === "index.html") link.id = "tab-btn-leaderboard";
     if (href === "global-leaderboard.html") link.id = "global-nav-label";
@@ -248,8 +270,9 @@
 
     installStyles();
     const className = inheritedButtonClass(root);
+    const clanMode = currentClanMode();
     const clanLinks = [
-      ["index.html", "c0ld Leaderboard"],
+      ["index.html", `${clanMode} Leaderboard`],
       ["clans.html", "Clans Leaderboard"],
       ["global-leaderboard.html", "Global Leaderboard"]
     ];

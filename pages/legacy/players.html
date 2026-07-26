@@ -109,7 +109,7 @@
     function normalizeClanKey(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
     function normalizeBattleKey(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
     function normalizeName(value) { return String(value || "").trim().toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9_]/g, ""); }
-    function getRequestedClanName() { const raw = new URLSearchParams(location.search).get("clan") || "c0ld"; return CLAN_OPTIONS.find(c => normalizeClanKey(c) === normalizeClanKey(raw)) || "c0ld"; }
+    function getRequestedClanName() { const params = new URLSearchParams(location.search); let raw = params.get("clan"); if (!raw) { try { raw = localStorage.getItem("c0ld:site-clan-mode"); } catch { raw = ""; } } raw ||= "c0ld"; return CLAN_OPTIONS.find(c => normalizeClanKey(c) === normalizeClanKey(raw)) || "c0ld"; }
     function formatClanDisplayName(clan) { return normalizeClanKey(clan) === "c0ld" ? "c0ld" : String(clan || "").toUpperCase(); }
     function isDefaultClan() { return normalizeClanKey(activeClan) === "c0ld"; }
     function escapeHtml(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }

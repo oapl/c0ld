@@ -542,7 +542,16 @@
     let isLoading = false;
 
     function getRequestedClanName() {
-      const raw = new URLSearchParams(window.location.search).get("clan") || "c0ld";
+      const params = new URLSearchParams(window.location.search);
+      let raw = params.get("clan");
+      if (!raw) {
+        try {
+          raw = window.localStorage.getItem("c0ld:site-clan-mode");
+        } catch {
+          raw = "";
+        }
+      }
+      raw ||= "c0ld";
       return String(raw).trim().replace(/[^a-z0-9_-]/gi, "") || "c0ld";
     }
 

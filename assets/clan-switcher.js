@@ -17,6 +17,7 @@
   const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
   const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
   const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+  const CLAN_MODE_STORAGE_KEY = "c0ld:site-clan-mode";
 
   const DEFAULT_AVATAR_SVG =
     "data:image/svg+xml;utf8," +
@@ -54,9 +55,32 @@
     return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
+  function storedClanKey() {
+    try {
+      return normalizeClanKey(window.localStorage.getItem(CLAN_MODE_STORAGE_KEY)) === "wmsy"
+        ? "wmsy"
+        : "c0ld";
+    } catch {
+      return "c0ld";
+    }
+  }
+
+  function rememberClan(clan) {
+    try {
+      window.localStorage.setItem(CLAN_MODE_STORAGE_KEY, clan.key);
+    } catch {
+      // URL propagation still keeps the selected mode when storage is blocked.
+    }
+  }
+
   function currentClan() {
     const params = new URLSearchParams(window.location.search);
-    return normalizeClanKey(params.get("clan")) === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+    if (params.has("clan")) {
+      const selected = normalizeClanKey(params.get("clan")) === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+      rememberClan(selected);
+      return selected;
+    }
+    return storedClanKey() === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
   }
 
   function currentPage() {
@@ -109,11 +133,7 @@
 
     const params = new URLSearchParams(parts.query);
 
-    if (clan.key === "wmsy") {
-      params.set("clan", clan.label);
-    } else {
-      params.delete("clan");
-    }
+    params.set("clan", clan.label);
 
     const query = params.toString();
     return `${page}${query ? `?${query}` : ""}${parts.hash}`;
@@ -1081,25 +1101,51 @@
 
   function applyChrome() {
     const clan = currentClan();
+    const switchClan = clan.key === "wmsy" ? CLANS.c0ld : CLANS.wmsy;
+
+    document.documentElement.dataset.clan = clan.key;
+    if (document.body) document.body.dataset.clan = clan.key;
 
     applyWmsyTheme();
     applyProfileRedScheme();
 
-    const logo = document.querySelector("#site-mascot, .site-logo");
+    const logo = document.querySelector("#site-mascot, header .site-logo, header .brand-img, header img.logo");
     if (logo) {
       logo.src = clan.mascot;
       logo.alt = clan.label;
     }
 
-    const logoLink = document.querySelector("#clan-mascot-link, .site-logo-link");
+    let logoLink = document.querySelector("#clan-mascot-link, .site-logo-link")
+      || logo?.closest?.("a")
+      || document.querySelector("header .logo-wrap a, header .header-inner a");
+    if (!logoLink && logo?.parentNode) {
+      logoLink = document.createElement("a");
+      logoLink.className = "site-logo-link";
+      logo.parentNode.insertBefore(logoLink, logo);
+      logoLink.appendChild(logo);
+    }
     if (logoLink) {
-      logoLink.href = clan.switchHome;
-      logoLink.setAttribute("aria-label", `Switch to ${clan.key === "wmsy" ? "c0ld" : "WMSY"} leaderboard`);
-      logoLink.title = `Switch to ${clan.key === "wmsy" ? "c0ld" : "WMSY"} leaderboard`;
+      logoLink.classList.add("site-logo-link");
+      logoLink.href = withClanParam(
+        `${currentPage()}${window.location.search || ""}${window.location.hash || ""}`,
+        switchClan
+      );
+      logoLink.setAttribute("aria-label", `Switch to ${switchClan.label} mode`);
+      logoLink.title = `Switch to ${switchClan.label} mode`;
+      logoLink.dataset.clanSwitchTarget = switchClan.key;
+      if (logoLink.dataset.clanSwitchWired !== "1") {
+        logoLink.dataset.clanSwitchWired = "1";
+        logoLink.addEventListener("click", () => {
+          const target = logoLink.dataset.clanSwitchTarget === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+          rememberClan(target);
+        });
+      }
     }
 
-    document.querySelectorAll(".menu-bar a, [data-clan-link]").forEach(link => {
+    document.querySelectorAll("a[href]").forEach(link => {
+      if (link === logoLink) return;
       const href = link.getAttribute("href") || "";
+      if (!isLocalHtmlLink(href)) return;
       link.href = withClanParam(href, clan);
 
       const text = String(link.textContent || "").trim();
