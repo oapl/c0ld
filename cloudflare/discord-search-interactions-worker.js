@@ -51,6 +51,8 @@ const CHART_LOOKBACK_HOURS = 1;
 const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
 const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
+const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
+const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 let chartDuckImagePromise = null;
 
 export default {
@@ -121,6 +123,18 @@ export default {
         return await registerRemoveCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-hourly-command") {
+        requireAdmin(request, env);
+        return await registerHourlyCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/hourly/run") {
+        requireAdmin(request, env);
+        return json(await runHourlyClanAssignments(env, {
+          force: ["1", "true", "yes"].includes(String(url.searchParams.get("force") || "").toLowerCase())
+        }));
+      }
+
       if (request.method === "POST" && url.pathname === "/admin/register-all-commands") {
         requireAdmin(request, env);
         return await registerAllCommands(url, env);
@@ -173,6 +187,14 @@ export default {
         details: err?.details || undefined
       }, err?.status || 500);
     }
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runHourlyClanAssignments(env, {
+      scheduledTime: event?.scheduledTime || Date.now()
+    }).catch(err => {
+      console.error("Hourly clan delivery failed", err);
+    }));
   }
 };
 
@@ -466,6 +488,30 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "hourly") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "assign") {
+      return interactionJson(messageResponse(
+        "Use `/hourly assign clan:<clan name> channel:<text channel or thread>`.",
+        true
+      ));
+    }
+
+    const permitted = await memberCanManageServerTracker(interaction, env);
+    if (!permitted) {
+      return interactionJson(messageResponse(
+        "You need Manage Server permission or the configured Luna administrator role to assign an hourly clan board.",
+        true
+      ));
+    }
+
+    ctx.waitUntil(completeHourlyClanInteraction(interaction, env));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: MESSAGE_FLAG_EPHEMERAL }
+    });
+  }
+
   if (["server", "add", "remove", "luna"].includes(commandName)) {
     const subcommand = getSubcommandName(interaction);
     const publicAction = commandName === "server" && subcommand === "who";
@@ -702,6 +748,427 @@ function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
     components: [],
     allowed_mentions: { parse: [] }
   };
+}
+
+async function completeHourlyClanInteraction(interaction, env) {
+  try {
+    const guildId = String(interaction.guild_id || "").trim();
+    const sourceChannelId = String(interaction.channel_id || "").trim();
+    const actorId = interactionUserId(interaction);
+    const clan = String(getCommandOption(interaction, "clan") || "").trim();
+    const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
+
+    if (!guildId) throw httpError(400, "Hourly clan boards can only be assigned inside a Discord server.");
+    if (!clan) {
+      throw httpError(400, "Use `/hourly assign clan:<clan name> channel:<text channel or thread>`.");
+    }
+
+    const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
+    if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel.type))) {
+      throw httpError(400, "Select a text channel, announcement channel, or existing Discord thread.");
+    }
+
+    const assignmentPayload = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+      method: "POST",
+      body: {
+        guild_id: guildId,
+        channel_id: requestedChannelId,
+        channel_type: Number(channel.type),
+        clan_name: clan,
+        assigned_by: actorId,
+        enabled: true
+      }
+    });
+    const assignment = assignmentPayload.assignment || {
+      guild_id: guildId,
+      channel_id: requestedChannelId,
+      channel_type: Number(channel.type),
+      clan_name: clan,
+      assigned_by: actorId,
+      enabled: true
+    };
+
+    let preview;
+    try {
+      preview = await deliverHourlyClanAssignment(env, assignment, { force: true });
+    } catch (err) {
+      preview = { ok: false, error: err?.message || String(err) };
+    }
+
+    const destination = `<#${requestedChannelId}>`;
+    await editOriginalInteraction(interaction, {
+      content: preview.ok
+        ? `Hourly **${escapeDiscordMarkdown(clan)}** reporting is assigned to ${destination}. The first board was posted and Luna will refresh it hourly.`
+        : `Hourly **${escapeDiscordMarkdown(clan)}** reporting is assigned to ${destination}, but the first board could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    });
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Hourly clan assignment failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+async function resolveHourlyClanChannel(interaction, env, channelId) {
+  const resolved = interaction?.data?.resolved?.channels?.[channelId];
+  if (resolved) return resolved;
+
+  const response = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}`, {
+    headers: discordBotHeaders(env)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(
+      response.status === 403 ? 403 : 502,
+      payload.message || `Luna could not inspect the selected Discord channel (${response.status}).`
+    );
+  }
+  return payload;
+}
+
+async function runHourlyClanAssignments(env, options = {}) {
+  const force = options.force === true;
+  const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+    query: { enabled: "true", limit: 1000 }
+  });
+  const assignments = Array.isArray(response.assignments) ? response.assignments : [];
+  const now = Number(options.scheduledTime || Date.now());
+  const eligible = assignments.filter(assignment => (
+    force || hourlyAssignmentDue(assignment, now)
+  ));
+  const reportPromises = new Map();
+  const results = [];
+
+  for (const assignment of eligible) {
+    const clanKey = normalizeSearchKey(assignment.clan_name);
+    if (!reportPromises.has(clanKey)) {
+      reportPromises.set(clanKey, buildHourlyClanReport(env, assignment.clan_name));
+    }
+
+    try {
+      const report = await reportPromises.get(clanKey);
+      const posted = await postHourlyClanReport(env, assignment.channel_id, report);
+      await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
+        last_posted_at: new Date(now).toISOString(),
+        last_message_id: posted.id || null,
+        last_snapshot_at: report.current.snapshot_at || null,
+        last_error: null
+      });
+      results.push({
+        ok: true,
+        clan_name: assignment.clan_name,
+        channel_id: assignment.channel_id,
+        message_id: posted.id || null
+      });
+    } catch (err) {
+      const message = String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000);
+      await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
+        last_error: message
+      }).catch(() => null);
+      results.push({
+        ok: false,
+        clan_name: assignment.clan_name,
+        channel_id: assignment.channel_id,
+        error: message
+      });
+    }
+  }
+
+  return {
+    ok: results.every(result => result.ok),
+    scheduled_at: new Date(now).toISOString(),
+    configured: assignments.length,
+    due: eligible.length,
+    results
+  };
+}
+
+function hourlyAssignmentDue(assignment, now = Date.now()) {
+  const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
+  if (!Number.isFinite(lastPosted) || lastPosted <= 0) return true;
+  return now - lastPosted >= HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000;
+}
+
+async function deliverHourlyClanAssignment(env, assignment, options = {}) {
+  if (!options.force && !hourlyAssignmentDue(assignment)) {
+    return { ok: true, skipped: true, reason: "not_due" };
+  }
+
+  try {
+    const report = await buildHourlyClanReport(env, assignment.clan_name);
+    const posted = await postHourlyClanReport(env, assignment.channel_id, report);
+    await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
+      last_posted_at: new Date().toISOString(),
+      last_message_id: posted.id || null,
+      last_snapshot_at: report.current.snapshot_at || null,
+      last_error: null
+    });
+    return { ok: true, message_id: posted.id || null };
+  } catch (err) {
+    await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
+      last_error: String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000)
+    }).catch(() => null);
+    throw err;
+  }
+}
+
+async function buildHourlyClanReport(env, clanNameValue) {
+  const clan = String(clanNameValue || "").trim();
+  if (!clan) throw httpError(400, "The hourly clan assignment has no clan name.");
+
+  const ingest = await hourlyClanApiRequest(env, "/api/ingest", {
+    method: "POST",
+    query: { clan }
+  });
+  if (ingest.skipped && !ingest.battle_key && !ingest.resolved_battle_key) {
+    throw httpError(409, ingest.message || "No active clan battle is available for this hourly report.");
+  }
+
+  const current = await hourlyClanApiRequest(env, "/api/current", {
+    query: {
+      clan,
+      avatars: 0,
+      downtime: 0,
+      fresh: 1
+    }
+  });
+  if (!Array.isArray(current.rows) || !current.rows.length) {
+    throw httpError(409, `No current battle rows were returned for clan ${clan}.`);
+  }
+
+  return {
+    current,
+    filename: `luna-hourly-${hourlyFilenamePart(clan)}-${Date.now()}.png`,
+    bytes: await renderHourlyClanBoardPng(current)
+  };
+}
+
+async function postHourlyClanReport(env, channelId, report) {
+  const filename = report.filename;
+  const payload = {
+    content: null,
+    embeds: [{
+      color: 0x58a6ff,
+      image: { url: `attachment://${filename}` }
+    }],
+    attachments: [{ id: 0, filename }],
+    allowed_mentions: { parse: [] }
+  };
+  const form = new FormData();
+  form.append("payload_json", JSON.stringify(payload));
+  form.append("files[0]", new Blob([report.bytes], { type: "image/png" }), filename);
+
+  const response = await fetch(
+    `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${requiredEnv(env, "DISCORD_BOT_TOKEN")}`,
+        Accept: "application/json"
+      },
+      body: form
+    }
+  );
+  const responsePayload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(
+      response.status === 403 ? 403 : 502,
+      responsePayload.message || `Discord hourly clan post failed (${response.status}).`
+    );
+  }
+  return responsePayload;
+}
+
+async function updateHourlyClanAssignmentDelivery(env, channelId, patch) {
+  return hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+    method: "PATCH",
+    body: {
+      channel_id: channelId,
+      ...patch
+    }
+  });
+}
+
+async function hourlyClanApiRequest(env, path, options = {}) {
+  const token = String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim();
+  if (!token) {
+    throw httpError(500, "Missing CLAN_API_ADMIN_TOKEN on the Luna Discord Worker.");
+  }
+
+  const apiBase = String(
+    env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev"
+  ).replace(/\/$/, "");
+  const url = clanApiUrl(env, path, apiBase);
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "Luna-Hourly-Clan-Board"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  };
+  if (options.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetchClanApi(env, url, init);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(
+      response.status || 502,
+      payload.message || `Clan API request failed (${response.status}).`
+    );
+  }
+  return payload;
+}
+
+async function renderHourlyClanBoardPng(current) {
+  const fonts = await loadHistoryFonts();
+  const width = 1500;
+  const height = 860;
+  const canvas = new HistoryPixelCanvas(width, height, [7, 11, 17, 255], 1);
+  const color = {
+    background: [7, 11, 17, 255],
+    panel: [14, 20, 30, 255],
+    inset: [18, 25, 37, 255],
+    line: [45, 57, 74, 255],
+    white: [238, 243, 250, 255],
+    muted: [155, 169, 188, 255],
+    quiet: [105, 121, 145, 255],
+    blue: [88, 166, 255, 255],
+    green: [72, 211, 132, 255],
+    yellow: [255, 196, 72, 255],
+    red: [255, 91, 109, 255],
+    zero: [206, 118, 129, 255],
+    bar: [49, 57, 72, 255]
+  };
+  const clan = String(current.clan_name || "Clan").trim() || "Clan";
+  const rows = [...(current.rows || [])]
+    .map(row => ({
+      ...row,
+      gain: Math.max(0, Number(row.gain_1h) || 0),
+      total: Math.max(0, Number(row.total_points) || 0)
+    }))
+    .sort((a, b) => b.gain - a.gain || b.total - a.total || String(a.username).localeCompare(String(b.username)))
+    .slice(0, 75);
+  const hourlyPoints = rows.reduce((sum, row) => sum + row.gain, 0);
+  const active = rows.filter(row => row.gain > 0).length;
+  const zero = rows.length - active;
+  const maximum = Math.max(1, ...rows.map(row => row.gain));
+
+  canvas.fillRect(30, 24, width - 60, height - 48, color.panel);
+  canvas.fillRect(48, 43, width - 96, 5, color.blue);
+  canvas.fillRect(48, 48, Math.floor((width - 96) / 3), 3, color.green);
+  canvas.fillRect(48 + Math.floor((width - 96) / 3), 48, Math.floor((width - 96) / 3), 3, color.yellow);
+  canvas.fillRect(48 + Math.floor((width - 96) * 2 / 3), 48, Math.ceil((width - 96) / 3), 3, color.red);
+
+  canvas.fillRect(52, 70, 96, 96, color.inset);
+  const clanInitial = historyCardText(clan.slice(0, 2).toUpperCase(), 2);
+  const initialWidth = canvas.measureFontText(fonts.bold, clanInitial, 35);
+  canvas.drawFontText(fonts.bold, clanInitial, 100 - initialWidth / 2, 99, 35, color.white, 80);
+  canvas.drawFontText(fonts.bold, `[${historyCardText(clan, 22)}]`, 172, 82, 45, color.white, 460);
+  canvas.drawFontText(
+    fonts.regular,
+    historyCardText(current.display_name || current.battle || "Current Clan Battle", 52),
+    174,
+    133,
+    16,
+    color.muted,
+    520
+  );
+
+  hourlyMetricCard(canvas, fonts, 700, 72, 170, 86, "CLAN RANK", rank(current.clan_rank), color.yellow, color);
+  hourlyMetricCard(canvas, fonts, 884, 72, 190, 86, "HOURLY POINTS", shortNumber(hourlyPoints), color.blue, color);
+  hourlyMetricCard(canvas, fonts, 1100, 72, 108, 86, "PLAYERS", fullNumber(rows.length), color.white, color);
+  hourlyMetricCard(canvas, fonts, 1220, 72, 108, 86, "ACTIVE", fullNumber(active), color.green, color);
+  hourlyMetricCard(canvas, fonts, 1340, 72, 108, 86, "ZERO", fullNumber(zero), color.red, color);
+
+  const columnXs = [55, 535, 1015];
+  const columnWidth = 430;
+  const columnTop = 195;
+  const rowHeight = 23;
+  const rowsPerColumn = 25;
+
+  for (let column = 0; column < 3; column += 1) {
+    const x = columnXs[column];
+    canvas.fillRect(x, columnTop, columnWidth, rowHeight * rowsPerColumn + 38, color.background);
+    canvas.drawFontText(fonts.bold, `RANK ${column * rowsPerColumn + 1}-${(column + 1) * rowsPerColumn}`, x + 16, columnTop + 11, 11, color.quiet, 150);
+    canvas.drawFontText(fonts.bold, "1 HOUR", x + columnWidth - 84, columnTop + 11, 11, color.quiet, 70);
+
+    for (let rowIndex = 0; rowIndex < rowsPerColumn; rowIndex += 1) {
+      const absoluteIndex = column * rowsPerColumn + rowIndex;
+      const row = rows[absoluteIndex];
+      const y = columnTop + 35 + rowIndex * rowHeight;
+      canvas.fillRect(x + 8, y, columnWidth - 16, rowHeight - 2, absoluteIndex % 2 ? color.panel : color.inset);
+      if (!row) continue;
+
+      const tone = absoluteIndex === 0
+        ? color.green
+        : absoluteIndex === 1
+          ? color.yellow
+          : absoluteIndex === 2
+            ? color.red
+            : row.gain > 0
+              ? color.white
+              : color.zero;
+      const rankText = String(absoluteIndex + 1).padStart(2, "0");
+      const name = historyCardText(row.username || `User ${row.user_id || ""}`, 24);
+      const gainText = shortNumber(row.gain);
+      const barWidth = Math.max(row.gain > 0 ? 3 : 0, Math.round((row.gain / maximum) * 112));
+
+      canvas.drawFontText(fonts.bold, rankText, x + 15, y + 4, 12, tone, 30);
+      canvas.drawFontText(fonts.bold, name, x + 55, y + 4, 13, tone, 190);
+      canvas.fillRect(x + 258, y + 8, 112, 7, color.bar);
+      if (barWidth) canvas.fillRect(x + 258, y + 8, barWidth, 7, tone);
+      const gainWidth = canvas.measureFontText(fonts.bold, gainText, 12);
+      canvas.drawFontText(fonts.bold, gainText, x + columnWidth - 14 - gainWidth, y + 4, 12, tone, 68);
+    }
+  }
+
+  const updated = hourlyBoardTimestamp(current.snapshot_at || current.generated_at);
+  canvas.drawFontText(fonts.regular, `Luna hourly clan report | Updated ${updated}`, 56, height - 56, 13, color.muted, 620);
+  canvas.drawFontText(fonts.regular, historyCardText(current.display_name || current.battle || "", 42), width - 420, height - 56, 13, color.quiet, 360);
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function hourlyMetricCard(canvas, fonts, x, y, width, height, label, value, valueColor, color) {
+  canvas.fillRect(x, y, width, height, color.inset);
+  canvas.drawFontText(fonts.bold, label, x + 15, y + 13, 11, color.muted, width - 30);
+  canvas.drawFontText(fonts.bold, historyCardText(value, 22), x + 15, y + 41, 24, valueColor, width - 30);
+}
+
+function hourlyFilenamePart(value) {
+  return String(value || "clan")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "clan";
+}
+
+function hourlyBoardTimestamp(value) {
+  const date = new Date(value || Date.now());
+  if (!Number.isFinite(date.getTime())) return "now";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Guatemala",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function trackerPopulation(server) {
@@ -3947,6 +4414,10 @@ async function registerRemoveCommand(url, env) {
   return registerCommand(url, env, removeCommandPayload());
 }
 
+async function registerHourlyCommand(url, env) {
+  return registerCommand(url, env, hourlyCommandPayload());
+}
+
 async function registerAllCommands(url, env) {
   const payloads = [
     searchCommandPayload(),
@@ -3959,7 +4430,8 @@ async function registerAllCommands(url, env) {
     lunaCommandPayload(),
     serverCommandPayload(),
     addCommandPayload(),
-    removeCommandPayload()
+    removeCommandPayload(),
+    hourlyCommandPayload()
   ];
 
   const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
@@ -4019,7 +4491,8 @@ async function syncGlobalCommands(url, env) {
     lunaCommandPayload(),
     serverCommandPayload(),
     addCommandPayload(),
-    removeCommandPayload()
+    removeCommandPayload(),
+    hourlyCommandPayload()
   ];
 
   const deletedGuildCommands = [];
@@ -5097,6 +5570,39 @@ function removeCommandPayload() {
             type: APPLICATION_COMMAND_OPTION_INTEGER,
             required: true,
             min_value: 1
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function hourlyCommandPayload() {
+  return {
+    name: "hourly",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Assign Luna's hourly clan performance board.",
+    dm_permission: false,
+    options: [
+      {
+        name: "assign",
+        description: "Assign a clan's hourly board to a text channel or thread.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "clan",
+            description: "PS99 clan name, for example WMSY or c0ld",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          },
+          {
+            name: "channel",
+            description: "Text channel or thread; defaults to the current destination",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
           }
         ]
       }

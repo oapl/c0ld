@@ -658,8 +658,9 @@ Required Worker secrets:
 | Secret | Purpose |
 |---|---|
 | `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
-| `DISCORD_BOT_TOKEN` | Bot token used only by the admin registration endpoint to create/update the slash command. |
+| `DISCORD_BOT_TOKEN` | Bot token used to register commands and post Luna's scheduled hourly clan images. |
 | `REGISTER_ADMIN_TOKEN` | Your private bearer token for the command-registration endpoints. |
+| `CLAN_API_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the Clan API Worker. Required by `/hourly`. |
 
 In the Discord Developer Portal, open the application's **General Information**
 page and set the **Interactions Endpoint URL** to:
@@ -1038,6 +1039,50 @@ the lookup response, tries individual user lookups for missing IDs, and falls
 back to the previous Supabase username/display name before showing a raw user
 ID. `/debug` includes `usernameLookupMisses` and `previousUsernameFallbacks`
 inside `board.summary`.
+
+## Luna global `/hourly` clan boards
+
+The Luna Discord interactions Worker supports the hourly image-board idea for
+any PS99 clan:
+
+```text
+/hourly assign clan:WMSY channel:#hourly-gains
+```
+
+`channel` is optional and defaults to the channel or thread where the command
+is used. Text channels, announcement channels, and existing public, private,
+or announcement threads are supported. The command is registered globally, so
+there is no fixed guild allow list; a user still needs Discord **Manage Server**
+permission or the guild's configured Luna administrator role to assign a
+destination.
+
+Run this migration first:
+
+```text
+supabase/migrations/033_discord_hourly_clan_assignments.sql
+```
+
+Add this secret to `discord-search-interactions-worker.js`:
+
+| Secret | Purpose |
+|---|---|
+| `CLAN_API_ADMIN_TOKEN` | Must equal `INGEST_ADMIN_TOKEN` on `c0ld-clan-api-worker`. It lets Luna collect an assigned clan's current battle snapshot and manage saved destinations. |
+
+Keep the existing `CLAN_API_WORKER` service binding when possible. The Luna
+Worker needs an hourly cron trigger:
+
+```text
+0 * * * *
+```
+
+Assignments are stored per Discord channel/thread ID. Assigning the same
+destination again replaces its clan without affecting assignments in other
+servers. Luna posts a first board immediately, then one board per hour. Each
+assigned clan is collected independently.
+
+Register the command globally with
+`scripts/register-discord-hourly-command.ps1`. Force an immediate post for
+every configured destination with `scripts/test-discord-hourly-clans.ps1`.
 
 ## Servers Worker
 

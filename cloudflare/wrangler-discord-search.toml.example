@@ -2,6 +2,9 @@ name = "c0ld-discord-search"
 main = "discord-search-interactions-worker.js"
 compatibility_date = "2026-07-14"
 
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
 LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev"
@@ -43,3 +46,4 @@ service = "yamo-league-api-worker"
 # DISCORD_BOT_TOKEN
 # REGISTER_ADMIN_TOKEN
 # LEAGUE_INGEST_ADMIN_TOKEN (must match the league Worker's INGEST_ADMIN_TOKEN)
+# CLAN_API_ADMIN_TOKEN (must match the clan API Worker's INGEST_ADMIN_TOKEN)

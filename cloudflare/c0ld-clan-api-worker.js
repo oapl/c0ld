@@ -34,6 +34,7 @@ const ROBLOX_FFLAG_EVENTS_TABLE = "c0ld_roblox_fflag_events";
 const PS99_DEV_BLOG_STATE_TABLE = "c0ld_ps99_dev_blog_state";
 const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
 const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
+const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -222,6 +223,12 @@ export default {
         response = json(await persistentDiscordPostStatus(env), 200, {
           "Cache-Control": "no-store"
         });
+      } else if (
+        ["GET", "POST", "PATCH"].includes(request.method)
+        && url.pathname === "/api/discord/hourly-assignments"
+      ) {
+        requireAdmin(request, env);
+        response = await handleDiscordHourlyClanAssignments(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history/cwbot/missing") {
@@ -660,6 +667,90 @@ async function responseJson(response) {
   } catch {
     return null;
   }
+}
+
+async function handleDiscordHourlyClanAssignments(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+
+  if (request.method === "GET") {
+    const params = {
+      select: "channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at",
+      order: "created_at.asc",
+      limit: String(clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000))
+    };
+    const guildId = String(url.searchParams.get("guild_id") || "").trim();
+    const channelId = String(url.searchParams.get("channel_id") || "").trim();
+    const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
+    if (guildId) params.guild_id = `eq.${guildId}`;
+    if (channelId) params.channel_id = `eq.${channelId}`;
+    if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
+    if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
+
+    return noStoreJson({
+      ok: true,
+      assignments: await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, params)
+    });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const channelId = String(body.channel_id || "").trim();
+  if (!/^\d{5,30}$/.test(channelId)) {
+    throw httpError(400, "A valid Discord channel or thread ID is required.");
+  }
+
+  if (request.method === "POST") {
+    const guildId = String(body.guild_id || "").trim();
+    const clanNameValue = String(body.clan_name || "").trim();
+    if (!/^\d{5,30}$/.test(guildId)) {
+      throw httpError(400, "A valid Discord guild ID is required.");
+    }
+    if (!clanNameValue || clanNameValue.length > 100) {
+      throw httpError(400, "A clan name between 1 and 100 characters is required.");
+    }
+
+    const now = new Date().toISOString();
+    await supabaseUpsert(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, [{
+      channel_id: channelId,
+      guild_id: guildId,
+      channel_type: toNumber(body.channel_type),
+      clan_name: clanNameValue,
+      assigned_by: stringOrNull(body.assigned_by),
+      enabled: body.enabled !== false,
+      updated_at: now
+    }], "channel_id");
+
+    const assignments = await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
+      select: "channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at",
+      channel_id: `eq.${channelId}`,
+      limit: "1"
+    });
+
+    return noStoreJson({
+      ok: true,
+      assignment: assignments[0] || null
+    });
+  }
+
+  const patch = {
+    updated_at: new Date().toISOString()
+  };
+  for (const key of [
+    "enabled",
+    "last_posted_at",
+    "last_message_id",
+    "last_snapshot_at",
+    "last_error"
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      patch[key] = body[key] === "" ? null : body[key];
+    }
+  }
+  await supabasePatch(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
+    channel_id: `eq.${channelId}`
+  }, patch);
+
+  return noStoreJson({ ok: true, channel_id: channelId, updated: true });
 }
 
 async function handleIngest(env, source, requestedClan, force = false, options = {}) {
@@ -16964,7 +17055,7 @@ function corsHeaders(request, env) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-C0LD-Admin-Token",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin"
   };
