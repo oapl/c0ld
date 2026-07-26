@@ -1592,7 +1592,7 @@
         };
       } else {
         const liveBattle = await fetchLiveJson(
-          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle, avatars: "false", downtime: "false" }),
+          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle, avatars: "true", downtime: "false" }),
           `${TRACKED_CLAN_DISPLAY} ${battleDisplayName(selected)} leaderboard`
         );
 
@@ -1685,7 +1685,7 @@
         await applyBattleSelection();
 
         if (activeBattle === "current") {
-          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "false" }), `live ${TRACKED_CLAN_DISPLAY} downtime`, forceFresh)
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "true" }), `live ${TRACKED_CLAN_DISPLAY} details`, forceFresh)
             .then(fullCurrentJson => {
               if (!fullCurrentJson || !Array.isArray(fullCurrentJson.rows) || activeBattle !== "current") return;
               currentData = {
