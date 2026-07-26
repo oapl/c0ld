@@ -72,6 +72,7 @@ const DEFAULT_ROBLOX_STATUS_API_URL = "https://api.status.io/1.0/status/59db90db
 const DISCORD_ALERT_COLOR = 0x3498db;
 const DISCORD_ALERT_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/3e/PS99_Genie_Fox.png/revision/latest/scale-to-width/360?cb=20260718171435";
 const DISCORD_ALERT_FOOTER_TEXT = "🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 ∙ by Cinnamowopal | Last Updated:";
+const DEFAULT_DETECTOR_ALERT_ROLE_ID = "1529578783131177131";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
 const LEGACY_PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000";
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
@@ -11195,10 +11196,10 @@ function discordFeedConfig(env, feed) {
   const legacyWebhook = String(env.PS99_ALERT_WEBHOOK_URL || "").trim();
   const legacyRole = String(env.PS99_ALERT_ROLE_ID || "").trim();
   const definitions = {
-    roblox_updates: [env.ROBLOX_UPDATES_WEBHOOK_URL, env.ROBLOX_UPDATES_ROLE_ID],
+    roblox_updates: [env.ROBLOX_UPDATES_WEBHOOK_URL, env.ROBLOX_UPDATES_ROLE_ID || DEFAULT_DETECTOR_ALERT_ROLE_ID],
     ps99_updates: [env.PS99_UPDATES_WEBHOOK_URL || legacyWebhook, env.PS99_UPDATES_ROLE_ID || legacyRole],
     ps99_fflags: [env.PS99_FFLAGS_WEBHOOK_URL, env.PS99_FFLAGS_ROLE_ID],
-    ps99_restarts: [env.PS99_RESTARTS_WEBHOOK_URL || legacyWebhook, env.PS99_RESTARTS_ROLE_ID || legacyRole],
+    ps99_restarts: [env.PS99_RESTARTS_WEBHOOK_URL || legacyWebhook, env.PS99_RESTARTS_ROLE_ID || legacyRole || DEFAULT_DETECTOR_ALERT_ROLE_ID],
     ps99_dev_blogs: [env.PS99_DEV_BLOG_WEBHOOK_URL, env.PS99_DEV_BLOG_ROLE_ID],
     reward_cutoffs: [env.REWARD_CUTOFFS_WEBHOOK_URL, env.REWARD_CUTOFFS_ROLE_ID],
     roblox_status: [env.ROBLOX_STATUS_WEBHOOK_URL, env.ROBLOX_STATUS_ROLE_ID],

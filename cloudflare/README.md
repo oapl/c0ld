@@ -264,10 +264,10 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_RESTART_REQUIRE_VERSION_CORRELATION` | Optional. Defaults to `true`; suppresses server-turnover restart events unless they line up with a PS99 place version change or recent version event. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
-| `ROBLOX_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for Roblox client-release alerts. |
+| `ROBLOX_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for Roblox client-release alerts. Defaults to `1529578783131177131`. |
 | `PS99_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for PS99 place-version alerts. |
 | `PS99_FFLAGS_ROLE_ID` | Optional Discord role ID mentioned only for public client-settings changes. |
-| `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. |
+| `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. Defaults to `1529578783131177131`. |
 | `PS99_DEV_BLOG_ROLE_ID` | Optional Discord role ID mentioned only for official BIG Games post alerts. |
 | `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migration `025` to allow profile-page CW_Bot message-link imports. |
 | `CW_BOT_USER_ID` | Optional. Defaults to `1219229814150398003`; Discord user/app ID that imported messages must be authored by. |
@@ -300,9 +300,11 @@ The stop day and time come from the active battle metadata returned by the Big G
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
 | `PS99_RESTART_PROBE_TOKEN` | A separate long random string shared only by the dedicated restart-sentinel reporters. |
 | `ROBLOX_UPDATES_WEBHOOK_URL` | Webhook for the `roblox-updates` channel. |
+| `ROBLOX_UPDATES_ROLE_ID` | Optional role to mention on Roblox client update detector posts. Defaults to `1529578783131177131`. |
 | `PS99_UPDATES_WEBHOOK_URL` | Webhook for the `pet-sim-updates` channel. |
 | `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
 | `PS99_RESTARTS_WEBHOOK_URL` | Webhook for the `pet-sim-restarts` channel. |
+| `PS99_RESTARTS_ROLE_ID` | Optional role to mention on restart detector posts. Defaults to `1529578783131177131`. |
 | `PS99_DEV_BLOG_WEBHOOK_URL` | Webhook for the `dev-blogs` channel. |
 | `REWARD_CUTOFFS_WEBHOOK_URL` | Optional fallback for the combined cutoff post if no cutoff channel ID is configured. |
 | `ROBLOX_STATUS_WEBHOOK_URL` | Optional fallback for the Roblox Status post if no status channel ID is configured. |
@@ -1079,6 +1081,12 @@ Assignments are stored per Discord channel/thread ID. Assigning the same
 destination again replaces its clan without affecting assignments in other
 servers. Luna posts a first board immediately, then one board per hour. Each
 assigned clan is collected independently.
+
+Use `GET /admin/hourly/status` with the Luna Discord Worker's admin token to
+verify stored assignments, due state, the last Discord error, and whether the
+required bot/API tokens are present. If `/hourly assign` works but no hourly
+post follows, make sure the worker receiving Discord interactions is the same
+deployed worker that has the `0 * * * *` cron trigger.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for

@@ -135,6 +135,11 @@ export default {
         }));
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/hourly/status") {
+        requireAdmin(request, env);
+        return json(await hourlyClanAssignmentStatus(env));
+      }
+
       if (request.method === "POST" && url.pathname === "/admin/register-all-commands") {
         requireAdmin(request, env);
         return await registerAllCommands(url, env);
@@ -894,6 +899,44 @@ function hourlyAssignmentDue(assignment, now = Date.now()) {
   return now - lastPosted >= HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000;
 }
 
+async function hourlyClanAssignmentStatus(env) {
+  const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+    query: { enabled: "true", limit: 1000 }
+  });
+  const assignments = Array.isArray(response.assignments) ? response.assignments : [];
+  const now = Date.now();
+  return {
+    ok: true,
+    checked_at: new Date(now).toISOString(),
+    configured: assignments.length,
+    due: assignments.filter(assignment => hourlyAssignmentDue(assignment, now)).length,
+    min_post_interval_minutes: HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES,
+    bot_token_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
+    clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
+    clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
+    cron_expected: "0 * * * *",
+    assignments: assignments.map(assignment => {
+      const lastPostedMs = new Date(assignment?.last_posted_at || 0).getTime();
+      const hasLastPosted = Number.isFinite(lastPostedMs) && lastPostedMs > 0;
+      const nextDueMs = hasLastPosted
+        ? lastPostedMs + HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000
+        : now;
+      return {
+        guild_id: String(assignment.guild_id || ""),
+        channel_id: String(assignment.channel_id || ""),
+        clan_name: String(assignment.clan_name || ""),
+        enabled: assignment.enabled !== false,
+        due: hourlyAssignmentDue(assignment, now),
+        last_posted_at: assignment.last_posted_at || null,
+        next_due_at: new Date(Math.max(now, nextDueMs)).toISOString(),
+        last_snapshot_at: assignment.last_snapshot_at || null,
+        last_message_id: assignment.last_message_id || null,
+        last_error: assignment.last_error || null
+      };
+    })
+  };
+}
+
 async function deliverHourlyClanAssignment(env, assignment, options = {}) {
   if (!options.force && !hourlyAssignmentDue(assignment)) {
     return { ok: true, skipped: true, reason: "not_due" };
@@ -1039,22 +1082,31 @@ async function renderHourlyClanBoardPng(current) {
   const fonts = await loadHistoryFonts();
   const width = 1500;
   const height = 860;
-  const canvas = new HistoryPixelCanvas(width, height, [7, 11, 17, 255], 1);
   const color = {
-    background: [7, 11, 17, 255],
-    panel: [14, 20, 30, 255],
-    inset: [18, 25, 37, 255],
-    line: [45, 57, 74, 255],
-    white: [238, 243, 250, 255],
-    muted: [155, 169, 188, 255],
-    quiet: [105, 121, 145, 255],
-    blue: [88, 166, 255, 255],
-    green: [72, 211, 132, 255],
-    yellow: [255, 196, 72, 255],
-    red: [255, 91, 109, 255],
-    zero: [206, 118, 129, 255],
-    bar: [49, 57, 72, 255]
+    background: [8, 9, 18, 255],
+    panel: [20, 23, 36, 255],
+    panelDeep: [13, 17, 27, 255],
+    inset: [25, 29, 44, 255],
+    row: [25, 29, 43, 255],
+    rowAlt: [18, 22, 34, 255],
+    line: [49, 59, 84, 255],
+    grid: [20, 31, 50, 255],
+    white: [242, 245, 252, 255],
+    muted: [160, 172, 195, 255],
+    quiet: [105, 119, 148, 255],
+    cyan: [52, 225, 239, 255],
+    violet: [112, 106, 255, 255],
+    pink: [255, 93, 178, 255],
+    green: [76, 211, 132, 255],
+    yellow: [247, 211, 83, 255],
+    orange: [238, 139, 53, 255],
+    red: [231, 79, 84, 255],
+    zero: [118, 127, 146, 255],
+    zeroText: [148, 159, 181, 255],
+    bar: [48, 55, 72, 255],
+    barZero: [45, 51, 65, 255]
   };
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const clan = String(current.clan_name || "Clan").trim() || "Clan";
   const rows = [...(current.rows || [])]
     .map(row => ({
@@ -1068,86 +1120,180 @@ async function renderHourlyClanBoardPng(current) {
   const active = rows.filter(row => row.gain > 0).length;
   const zero = rows.length - active;
   const maximum = Math.max(1, ...rows.map(row => row.gain));
+  const gainScale = hourlyGainScale(rows);
 
-  canvas.fillRect(30, 24, width - 60, height - 48, color.panel);
-  canvas.fillRect(48, 43, width - 96, 5, color.blue);
-  canvas.fillRect(48, 48, Math.floor((width - 96) / 3), 3, color.green);
-  canvas.fillRect(48 + Math.floor((width - 96) / 3), 48, Math.floor((width - 96) / 3), 3, color.yellow);
-  canvas.fillRect(48 + Math.floor((width - 96) * 2 / 3), 48, Math.ceil((width - 96) / 3), 3, color.red);
+  hourlyDrawGrid(canvas, width, height, color);
+  hourlyDrawSparkles(canvas, color);
+  hourlyDrawPanel(canvas, 32, 30, width - 64, height - 60, color.panel, color.line);
+  hourlyDrawHorizontalGradient(canvas, 56, 53, width - 112, 6, [
+    color.violet,
+    color.cyan,
+    color.green,
+    color.yellow,
+    color.orange,
+    color.pink
+  ]);
 
-  canvas.fillRect(52, 70, 96, 96, color.inset);
-  const clanInitial = historyCardText(clan.slice(0, 2).toUpperCase(), 2);
-  const initialWidth = canvas.measureFontText(fonts.bold, clanInitial, 35);
-  canvas.drawFontText(fonts.bold, clanInitial, 100 - initialWidth / 2, 99, 35, color.white, 80);
-  canvas.drawFontText(fonts.bold, `[${historyCardText(clan, 22)}]`, 172, 82, 45, color.white, 460);
+  hourlyDrawSigil(canvas, fonts, clan, 70, 82, 92, color);
+  hourlyDrawClanTitle(canvas, fonts, clan, 192, 96, color);
   canvas.drawFontText(
     fonts.regular,
     historyCardText(current.display_name || current.battle || "Current Clan Battle", 52),
-    174,
-    133,
-    16,
+    196,
+    149,
+    15,
     color.muted,
     520
   );
 
-  hourlyMetricCard(canvas, fonts, 700, 72, 170, 86, "CLAN RANK", rank(current.clan_rank), color.yellow, color);
-  hourlyMetricCard(canvas, fonts, 884, 72, 190, 86, "HOURLY POINTS", shortNumber(hourlyPoints), color.blue, color);
-  hourlyMetricCard(canvas, fonts, 1100, 72, 108, 86, "PLAYERS", fullNumber(rows.length), color.white, color);
-  hourlyMetricCard(canvas, fonts, 1220, 72, 108, 86, "ACTIVE", fullNumber(active), color.green, color);
-  hourlyMetricCard(canvas, fonts, 1340, 72, 108, 86, "ZERO", fullNumber(zero), color.red, color);
+  hourlyMetricCard(canvas, fonts, 690, 94, 152, 74, "CLAN RANK", rank(current.clan_rank), color.yellow, color);
+  hourlyMetricCard(canvas, fonts, 858, 94, 182, 74, "HOURLY POINTS", shortNumber(hourlyPoints), color.cyan, color);
+  hourlyMetricCard(canvas, fonts, 1076, 78, 118, 94, "PLAYERS", fullNumber(rows.length), color.white, color);
+  hourlyMetricCard(canvas, fonts, 1212, 78, 118, 94, "ACTIVE", fullNumber(active), color.green, color);
+  hourlyMetricCard(canvas, fonts, 1348, 78, 118, 94, "ZERO", fullNumber(zero), color.zeroText, color);
 
-  const columnXs = [55, 535, 1015];
-  const columnWidth = 430;
-  const columnTop = 195;
-  const rowHeight = 23;
+  const columnXs = [50, 515, 980];
+  const columnWidth = 438;
+  const columnTop = 214;
+  const rowHeight = 21;
   const rowsPerColumn = 25;
 
   for (let column = 0; column < 3; column += 1) {
     const x = columnXs[column];
-    canvas.fillRect(x, columnTop, columnWidth, rowHeight * rowsPerColumn + 38, color.background);
-    canvas.drawFontText(fonts.bold, `RANK ${column * rowsPerColumn + 1}-${(column + 1) * rowsPerColumn}`, x + 16, columnTop + 11, 11, color.quiet, 150);
-    canvas.drawFontText(fonts.bold, "1 HOUR", x + columnWidth - 84, columnTop + 11, 11, color.quiet, 70);
+    hourlyDrawPanel(canvas, x, columnTop, columnWidth, rowHeight * rowsPerColumn + 42, color.panelDeep, color.line);
+    canvas.drawFontText(fonts.bold, `RANK ${column * rowsPerColumn + 1}-${(column + 1) * rowsPerColumn}`, x + 16, columnTop + 12, 11, color.quiet, 150);
+    canvas.drawFontText(fonts.bold, "1 HOUR", x + columnWidth - 88, columnTop + 12, 11, color.quiet, 70);
 
     for (let rowIndex = 0; rowIndex < rowsPerColumn; rowIndex += 1) {
       const absoluteIndex = column * rowsPerColumn + rowIndex;
       const row = rows[absoluteIndex];
       const y = columnTop + 35 + rowIndex * rowHeight;
-      canvas.fillRect(x + 8, y, columnWidth - 16, rowHeight - 2, absoluteIndex % 2 ? color.panel : color.inset);
+      canvas.fillRect(x + 10, y, columnWidth - 20, rowHeight - 2, absoluteIndex % 2 ? color.rowAlt : color.row);
       if (!row) continue;
 
-      const tone = absoluteIndex === 0
-        ? color.green
-        : absoluteIndex === 1
-          ? color.yellow
-          : absoluteIndex === 2
-            ? color.red
-            : row.gain > 0
-              ? color.white
-              : color.zero;
+      const tone = hourlyGainColor(row.gain, gainScale, color);
+      const nameTone = row.gain > 0 ? color.white : color.zeroText;
       const rankText = String(absoluteIndex + 1).padStart(2, "0");
       const name = historyCardText(row.username || `User ${row.user_id || ""}`, 24);
       const gainText = shortNumber(row.gain);
       const barWidth = Math.max(row.gain > 0 ? 3 : 0, Math.round((row.gain / maximum) * 112));
 
-      canvas.drawFontText(fonts.bold, rankText, x + 15, y + 4, 12, tone, 30);
-      canvas.drawFontText(fonts.bold, name, x + 55, y + 4, 13, tone, 190);
-      canvas.fillRect(x + 258, y + 8, 112, 7, color.bar);
-      if (barWidth) canvas.fillRect(x + 258, y + 8, barWidth, 7, tone);
+      canvas.drawFontText(fonts.bold, rankText, x + 18, y + 4, 12, tone, 30);
+      canvas.drawFontText(fonts.bold, name, x + 58, y + 4, 13, nameTone, 190);
+      canvas.fillRect(x + 256, y + 8, 112, 7, row.gain > 0 ? color.bar : color.barZero);
+      if (barWidth) canvas.fillRect(x + 256, y + 8, barWidth, 7, tone);
       const gainWidth = canvas.measureFontText(fonts.bold, gainText, 12);
-      canvas.drawFontText(fonts.bold, gainText, x + columnWidth - 14 - gainWidth, y + 4, 12, tone, 68);
+      canvas.drawFontText(fonts.bold, gainText, x + columnWidth - 16 - gainWidth, y + 4, 12, tone, 68);
     }
   }
 
   const updated = hourlyBoardTimestamp(current.snapshot_at || current.generated_at);
-  canvas.drawFontText(fonts.regular, `Luna hourly clan report | Updated ${updated}`, 56, height - 56, 13, color.muted, 620);
+  canvas.drawFontText(fonts.regular, `Luna hourly aura | Updated ${updated}`, 56, height - 56, 13, color.muted, 620);
   canvas.drawFontText(fonts.regular, historyCardText(current.display_name || current.battle || "", 42), width - 420, height - 56, 13, color.quiet, 360);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
 function hourlyMetricCard(canvas, fonts, x, y, width, height, label, value, valueColor, color) {
-  canvas.fillRect(x, y, width, height, color.inset);
-  canvas.drawFontText(fonts.bold, label, x + 15, y + 13, 11, color.muted, width - 30);
-  canvas.drawFontText(fonts.bold, historyCardText(value, 22), x + 15, y + 41, 24, valueColor, width - 30);
+  hourlyDrawPanel(canvas, x, y, width, height, color.inset, valueColor);
+  canvas.drawFontText(fonts.bold, label, x + 16, y + 14, 10, color.muted, width - 36);
+  canvas.drawFontText(fonts.bold, historyCardText(value, 22), x + 16, y + Math.max(38, height - 39), height > 84 ? 31 : 23, valueColor, width - 38);
+  canvas.fillRect(x + width - 17, y + 20, 7, Math.max(28, height - 40), valueColor);
+}
+
+function hourlyDrawPanel(canvas, x, y, width, height, fill, stroke) {
+  canvas.fillRect(x, y, width, height, fill);
+  canvas.fillRect(x, y, width, 1, stroke);
+  canvas.fillRect(x, y + height - 1, width, 1, stroke);
+  canvas.fillRect(x, y, 1, height, stroke);
+  canvas.fillRect(x + width - 1, y, 1, height, stroke);
+}
+
+function hourlyDrawGrid(canvas, width, height, color) {
+  for (let x = 0; x < width; x += 58) canvas.fillRect(x, 0, 1, height, color.grid);
+  for (let y = 0; y < height; y += 58) canvas.fillRect(0, y, width, 1, color.grid);
+}
+
+function hourlyDrawSparkles(canvas, color) {
+  const sparkles = [
+    [172, 44, color.cyan], [344, 744, color.pink], [678, 42, color.yellow],
+    [790, 788, color.cyan], [1328, 44, color.violet], [1408, 744, color.pink],
+    [232, 804, color.yellow], [1236, 820, color.green]
+  ];
+  for (const [x, y, tone] of sparkles) {
+    canvas.fillRect(x - 5, y, 11, 1, tone);
+    canvas.fillRect(x, y - 5, 1, 11, tone);
+    canvas.fillRect(x - 2, y - 2, 5, 5, tone);
+  }
+}
+
+function hourlyDrawSigil(canvas, fonts, clan, x, y, size, color) {
+  hourlyDrawPanel(canvas, x - 8, y - 8, size + 16, size + 16, color.panelDeep, color.cyan);
+  canvas.fillRect(x, y, size, size, color.inset);
+  hourlyDrawHorizontalGradient(canvas, x, y, size, 5, [color.cyan, color.violet, color.pink, color.yellow]);
+  canvas.fillRect(x + Math.floor(size / 2) - 4, y + 16, 8, 24, color.yellow);
+  canvas.fillRect(x + Math.floor(size / 2) - 17, y + 29, 34, 8, color.yellow);
+  canvas.fillRect(x + 15, y + 56, size - 30, 5, color.cyan);
+  canvas.fillRect(x + 22, y + 66, size - 44, 5, color.violet);
+  const mark = historyCardText(clan.slice(0, 2).toUpperCase(), 2);
+  const markWidth = canvas.measureFontText(fonts.bold, mark, 24);
+  canvas.drawFontText(fonts.bold, mark, x + size / 2 - markWidth / 2, y + 39, 24, color.white, size - 18);
+}
+
+function hourlyDrawClanTitle(canvas, fonts, clan, x, y, color) {
+  const left = "[";
+  const name = historyCardText(clan, 22);
+  const right = "]";
+  let cursor = x;
+  cursor = canvas.drawFontText(fonts.bold, left, cursor, y, 43, color.cyan, 34);
+  cursor = canvas.drawFontText(fonts.bold, name, cursor, y, 43, color.green, 420);
+  canvas.drawFontText(fonts.bold, right, cursor, y, 43, color.orange, 34);
+}
+
+function hourlyDrawHorizontalGradient(canvas, x, y, width, height, stops) {
+  const columns = Math.max(1, Math.round(width));
+  for (let index = 0; index < columns; index += 1) {
+    const fraction = columns === 1 ? 1 : index / (columns - 1);
+    canvas.fillRect(x + index, y, 1, height, hourlyGradientColor(fraction, stops));
+  }
+}
+
+function hourlyGainScale(rows) {
+  const values = rows.map(row => Number(row.gain) || 0).filter(value => value > 0);
+  if (!values.length) return { min: 0, max: 0 };
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values)
+  };
+}
+
+function hourlyGainColor(gain, scale, color) {
+  const value = Number(gain) || 0;
+  if (value <= 0) return color.zero;
+  if (!scale || scale.max <= scale.min) return color.green;
+  const fraction = hourlyClamp((value - scale.min) / Math.max(1, scale.max - scale.min), 0, 1);
+  return hourlyGradientColor(fraction, [color.red, color.orange, color.yellow, color.green]);
+}
+
+function hourlyGradientColor(fraction, stops) {
+  const t = hourlyClamp(Number(fraction) || 0, 0, 1);
+  if (!Array.isArray(stops) || stops.length < 2) return stops?.[0] || [255, 255, 255, 255];
+  const scaled = t * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(scaled));
+  return hourlyMixColor(stops[index], stops[index + 1], scaled - index);
+}
+
+function hourlyMixColor(left, right, fraction) {
+  const t = hourlyClamp(Number(fraction) || 0, 0, 1);
+  return [
+    Math.round(left[0] + (right[0] - left[0]) * t),
+    Math.round(left[1] + (right[1] - left[1]) * t),
+    Math.round(left[2] + (right[2] - left[2]) * t),
+    Math.round((left[3] ?? 255) + ((right[3] ?? 255) - (left[3] ?? 255)) * t)
+  ];
+}
+
+function hourlyClamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function hourlyFilenamePart(value) {
