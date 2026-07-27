@@ -602,7 +602,7 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search`, `/history`, `/version`, and `/rewards` Worker
+## Discord `/search`, `/history`, `/version`, and reward command Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
@@ -638,9 +638,10 @@ Required Worker variables:
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
 | `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/rewards clans` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
-| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/lb rewards` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
+| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated `/league rewards` tiers. Defaults to `1,3,15,50,100,250,2000`. |
+| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/lb rewards` header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
 
@@ -696,10 +697,6 @@ Invoke-RestMethod -Method Post `
 
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-clan-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-duck-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod -Method Post `
@@ -776,36 +773,29 @@ The plain-text PS99 version command is:
 /version
 ```
 
-It reports the root PS99 place version, its release time, and the most recent
-completed version scan. It also appends the latest tracked Roblox released
-client version when `CLAN_API_BASE` can read `/api/roblox/versions`. Register it through the same admin script, or call
+It posts a Luna-style status card with the root PS99 place version, its release
+time, and the most recent completed version scan. It also includes the latest
+tracked Roblox released client version when `CLAN_API_BASE` can read
+`/api/roblox/versions`. Register it through the same admin script, or call
 `POST /admin/register-version-command?guild_id=YOUR_GUILD_ID` with the same
 admin bearer token.
-
-The chart commands are:
-
-```text
-/clan chart
-/duck chart
-```
-
-They render and post the current clan line chart or duck chart as a PNG
-attachment in Discord. Register them through the same admin script, or call
-`POST /admin/register-clan-command?guild_id=YOUR_GUILD_ID` and
-`POST /admin/register-duck-command?guild_id=YOUR_GUILD_ID`.
 
 The reward cutoff commands are:
 
 ```text
-/rewards players
-/rewards clans
+/lb rewards
+/clan rewards
+/league rewards
 ```
 
-They post the current point minimums for the reward ranks. Player defaults are
+They post the current point minimums for reward ranks. `/lb rewards` follows the
+active global leaderboard source, so it uses clan-battle global cutoffs during a
+Clan Battle and League-player cutoffs during a League event. Player defaults are
 `3,10,100,250,500,1000,10000`. Clan categories and labels are taken from the
 active battle's BIG Games `PlacementRewards` metadata; `CLAN_REWARD_CUTOFF_RANKS`
-is only a fallback when that metadata is unavailable. For a player command with
-no current-event label in the API payload, set
+is only a fallback when that metadata is unavailable. League defaults are
+`1,3,15,50,100,250,2000`. For a player command with no current-event label in
+the API payload, set
 `PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or
 `PS99_UPDATE_LABEL="Update 88"` on the Discord Worker.
 
@@ -888,6 +878,7 @@ Useful endpoints:
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
 | `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
+| `/api/leagues/player-milestones?ranks=3,10,100,250,500` | Current live League-player reward thresholds from the public Top 500 source. |
 | `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
 | `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
@@ -1054,9 +1045,11 @@ any PS99 clan:
 `channel` is optional and defaults to the channel or thread where the command
 is used. Text channels, announcement channels, and existing public, private,
 or announcement threads are supported. The command is registered globally, so
-there is no fixed guild allow list; a user still needs Discord **Manage Server**
-permission or the guild's configured Luna administrator role to assign a
-destination.
+there is no fixed guild allow list; a user needs the guild's configured Luna
+administrator role to assign a destination. The first `/luna admin role:<role>`
+setup is open when no Luna administrator role exists yet; after that, changing
+the Luna administrator role requires Discord **Manage Server** or
+**Administrator** permission.
 
 Run this migration first:
 

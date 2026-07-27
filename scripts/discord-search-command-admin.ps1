@@ -109,12 +109,11 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search, /version, /clan, /duck, and /lg..." -ForegroundColor Cyan
+  Write-Host "Registering /search, /version, /clan, and /lg..." -ForegroundColor Cyan
   $registerPaths = @(
     "/admin/register-search-command",
     "/admin/register-version-command",
     "/admin/register-clan-command",
-    "/admin/register-duck-command",
     "/admin/register-lg-command"
   )
   foreach ($path in $registerPaths) {

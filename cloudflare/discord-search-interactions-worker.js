@@ -25,6 +25,8 @@ const COMPONENT_TYPE_SEPARATOR = 14;
 const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
+const LUNA_GENIE_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/31/PS99_Huge_Genie_Fox_%28Golden%29.png";
+const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
 const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
 const HISTORY_VIEW_LABELS = {
@@ -35,6 +37,7 @@ const HISTORY_VIEW_LABELS = {
 const DEFAULT_HISTORY_PAGE_SIZE = 10;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 10, 100, 250, 500, 1000, 10000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
+const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
 const LEGACY_CLAN_REWARD_CUTOFF_RANKS = "3,10,50,100,500";
 const LEGACY_PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000";
 const CLAN_REWARD_CATEGORIES = [
@@ -94,9 +97,14 @@ export default {
         return await registerClanCommand(url, env);
       }
 
-      if (request.method === "POST" && url.pathname === "/admin/register-duck-command") {
+      if (request.method === "POST" && url.pathname === "/admin/register-league-command") {
         requireAdmin(request, env);
-        return await registerDuckCommand(url, env);
+        return await registerLeagueCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-lb-command") {
+        requireAdmin(request, env);
+        return await registerLbCommand(url, env);
       }
 
       if (request.method === "POST" && url.pathname === "/admin/register-lg-command") {
@@ -411,25 +419,51 @@ async function handleInteraction(request, env, ctx) {
 
   const commandName = String(interaction.data?.name || "").toLowerCase();
   if (commandName === "version") {
-    try {
-      return interactionJson(await buildVersionResponse(env));
-    } catch (err) {
-      return interactionJson(messageResponse(
-        `Version lookup failed: ${err?.message || String(err)}`,
-        true
-      ));
-    }
+    ctx.waitUntil(completeVersionInteraction(interaction, env));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {}
+    });
   }
 
   if (commandName === "rewards") {
-    try {
-      return interactionJson(await buildRewardsResponse(interaction, env));
-    } catch (err) {
-      return interactionJson(messageResponse(
-        `Rewards lookup failed: ${err?.message || String(err)}`,
-        true
-      ));
+    ctx.waitUntil(completeRewardsInteraction(interaction, env));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "lb") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "rewards") {
+      return interactionJson(messageResponse("Use `/lb rewards`.", true));
     }
+
+    ctx.waitUntil(completeRewardsInteraction(interaction, env, "leaderboard"));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "league") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "rewards") {
+      return interactionJson(messageResponse("Use `/league rewards`.", true));
+    }
+
+    ctx.waitUntil(completeRewardsInteraction(interaction, env, "leagues"));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
   }
 
   if (commandName === "history") {
@@ -457,20 +491,19 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
-  if (commandName === "clan" || commandName === "duck") {
+  if (commandName === "clan") {
     const subcommand = getSubcommandName(interaction);
-    if (subcommand !== "chart") {
-      return interactionJson(messageResponse(`Use \`/${commandName} chart\`.`, true));
+    if (subcommand === "rewards") {
+      ctx.waitUntil(completeRewardsInteraction(interaction, env, "clans"));
+      return interactionJson({
+        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+        data: {
+          flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+        }
+      });
     }
 
-    ctx.waitUntil(completeChartInteraction(interaction, env, commandName === "duck" ? "duck" : "clan"));
-
-    return interactionJson({
-      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
-      data: {
-        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
-      }
-    });
+    return interactionJson(messageResponse("Use `/clan rewards`.", true));
   }
 
   if (commandName === "lg") {
@@ -503,10 +536,12 @@ async function handleInteraction(request, env, ctx) {
       ));
     }
 
-    const permitted = await memberCanManageServerTracker(interaction, env);
+    const permitted = await memberCanManageServerTracker(interaction, env, {
+      allowDiscordManage: false
+    });
     if (!permitted) {
       return interactionJson(messageResponse(
-        "You need Manage Server permission or the configured Luna administrator role to manage hourly clan boards.",
+        "You need the configured Luna administrator role to manage hourly clan boards.",
         true
       ));
     }
@@ -523,14 +558,16 @@ async function handleInteraction(request, env, ctx) {
     const publicAction = commandName === "server" && subcommand === "who";
 
     if (!publicAction) {
-      const permitted = await memberCanManageServerTracker(interaction, env, {
-        allowConfiguredRole: commandName !== "luna"
-      });
+      const permitted = commandName === "luna"
+        ? await memberCanConfigureLunaAdminRole(interaction, env)
+        : await memberCanManageServerTracker(interaction, env, {
+          allowDiscordManage: false
+        });
       if (!permitted) {
         return interactionJson(messageResponse(
           commandName === "luna"
-            ? "You need Manage Server permission to configure Luna's administrator role."
-            : "You need Manage Server permission or the configured Luna administrator role to use this command.",
+            ? "Luna's administrator role is already set. You need Manage Server permission to change it."
+            : "You need the configured Luna administrator role to use this command.",
           true
         ));
       }
@@ -1557,7 +1594,7 @@ async function renderHourlyClanBoardPng(current) {
     [battleName, updated],
     hourlyGainReady
       ? [`Active: ${fullNumber(active)}`, `Inactive: ${fullNumber(zero)}`]
-      : [`Players: ${fullNumber(rows.length)}`, "Baseline: -"]
+      : [`Players: ${fullNumber(rows.length)}`, `Inactive: ${fullNumber(inactiveRows.length)}`]
   ];
 
   const columnTop = 206;
@@ -2137,12 +2174,12 @@ function parsePs99RestartAnalyticsCustomId(value) {
 
 async function handlePs99RestartAnalyticsComponent(interaction, env, ctx, state) {
   const permitted = await memberCanManageServerTracker(interaction, env, {
-    allowConfiguredRole: true
+    allowDiscordManage: false
   });
 
   if (!permitted) {
     return messageResponse(
-      "You need Manage Server permission or the configured Luna administrator role to manage restart analytics.",
+      "You need the configured Luna administrator role to manage restart analytics.",
       true
     );
   }
@@ -2332,12 +2369,12 @@ function parsePs99RestartReviewCustomId(value) {
 
 async function handlePs99RestartReviewComponent(interaction, env, ctx, state) {
   const permitted = await memberCanManageServerTracker(interaction, env, {
-    allowConfiguredRole: true
+    allowDiscordManage: false
   });
 
   if (!permitted) {
     return messageResponse(
-      "You need Manage Server permission or the configured Luna administrator role to review restart candidates.",
+      "You need the configured Luna administrator role to review restart candidates.",
       true
     );
   }
@@ -5202,7 +5239,7 @@ async function registerVersionCommand(url, env) {
 }
 
 async function registerRewardsCommand(url, env) {
-  return registerCommand(url, env, rewardsCommandPayload());
+  return registerRewardCommandSet(url, env);
 }
 
 async function registerHistoryCommand(url, env) {
@@ -5213,8 +5250,12 @@ async function registerClanCommand(url, env) {
   return registerCommand(url, env, clanCommandPayload());
 }
 
-async function registerDuckCommand(url, env) {
-  return registerCommand(url, env, duckCommandPayload());
+async function registerLeagueCommand(url, env) {
+  return registerCommand(url, env, leagueCommandPayload());
+}
+
+async function registerLbCommand(url, env) {
+  return registerCommand(url, env, lbCommandPayload());
 }
 
 async function registerLgCommand(url, env) {
@@ -5241,14 +5282,34 @@ async function registerHourlyCommand(url, env) {
   return registerCommand(url, env, hourlyCommandPayload());
 }
 
+async function registerRewardCommandSet(url, env) {
+  const payloads = rewardCommandPayloads();
+  const results = [];
+  for (const payload of payloads) {
+    const response = await registerCommand(url, env, payload, {
+      retryRateLimits: true,
+      maxAttempts: 5
+    });
+    const body = await response.json().catch(() => ({}));
+    results.push({
+      name: payload.name,
+      ok: response.ok && body.ok !== false,
+      status: response.status,
+      result: body
+    });
+    await sleep(450);
+  }
+
+  const ok = results.every(result => result.ok);
+  return json({ ok, results }, ok ? 200 : 502);
+}
+
 async function registerAllCommands(url, env) {
   const payloads = [
     searchCommandPayload(),
     versionCommandPayload(),
-    rewardsCommandPayload(),
+    ...rewardCommandPayloads(),
     historyCommandPayload(),
-    clanCommandPayload(),
-    duckCommandPayload(),
     lgCommandPayload(),
     lunaCommandPayload(),
     serverCommandPayload(),
@@ -5306,10 +5367,8 @@ async function syncGlobalCommands(url, env) {
   const commandPayloads = [
     searchCommandPayload(),
     versionCommandPayload(),
-    rewardsCommandPayload(),
+    ...rewardCommandPayloads(),
     historyCommandPayload(),
-    clanCommandPayload(),
-    duckCommandPayload(),
     lgCommandPayload(),
     lunaCommandPayload(),
     serverCommandPayload(),
@@ -5536,21 +5595,105 @@ async function buildVersionResponse(env) {
     return Number.isFinite(time) && time > latest.time ? { time, value } : latest;
   }, { time: 0, value: "" }).value;
   const version = plainInteger(rootPlace?.latest_version ?? payload.newest_version);
-  const release = formatPs99CommandDate(rootPlace?.latest_published_at);
-  const lastScanned = formatPs99CommandDate(lastScannedAt || rootPlace?.latest_checked_at);
+  const releaseAt = rootPlace?.latest_published_at || payload.newest_published_at || null;
+  const lastScannedIso = lastScannedAt || rootPlace?.latest_checked_at || payload.generated_at || new Date().toISOString();
   const roblox = await fetchRobloxReleasedVersionForCommand(env).catch(err => ({
     version: "-",
     upload: "-",
     scanned: "-",
     error: err?.message || String(err)
   }));
-  const robloxSuffix = roblox.error
-    ? ` | Roblox Released: unavailable`
-    : ` | Roblox Released: ${roblox.version} | Roblox Scan: ${roblox.scanned}`;
 
-  return messageResponse(
-    `Newest PS99 Version: ${version} | Release: ${release} | Last Scanned: ${lastScanned}${robloxSuffix}`
-  );
+  return {
+    type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+    data: versionStatusMessageData({
+      placeName: rootPlace?.place_name || rootPlace?.name || "Pet Simulator 99",
+      version,
+      releaseAt,
+      releaseLabel: formatPs99CommandDate(releaseAt),
+      lastScannedAt: lastScannedIso,
+      lastScannedLabel: formatPs99CommandDate(lastScannedIso),
+      roblox
+    })
+  };
+}
+
+async function completeVersionInteraction(interaction, env) {
+  try {
+    const response = await buildVersionResponse(env);
+    await editOriginalInteraction(interaction, response.data);
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Version lookup failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+function versionStatusMessageData(status) {
+  const roblox = status.roblox || {};
+  const robloxLine = roblox.error
+    ? "- `Roblox` unavailable"
+    : `- \`Roblox\` **${escapeDiscordMarkdown(roblox.version || "-")}**`;
+  const robloxScanLine = roblox.error
+    ? `-# Roblox scan unavailable: ${escapeDiscordMarkdown(truncateHistoryText(roblox.error, 180))}`
+    : `- \`Roblox Scan\` ${escapeDiscordMarkdown(roblox.scanned || "-")}`;
+
+  return {
+    flags: MESSAGE_FLAG_COMPONENTS_V2,
+    allowed_mentions: { parse: [] },
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0x34e1ef,
+        components: [
+          {
+            type: COMPONENT_TYPE_SECTION,
+            components: [
+              {
+                type: COMPONENT_TYPE_TEXT_DISPLAY,
+                content: [
+                  "## PS99 Version Monitor",
+                  `**${escapeDiscordMarkdown(status.placeName || "Pet Simulator 99")}**`,
+                  `-# updated ${versionTimeLabel(status.lastScannedAt, status.lastScannedLabel)}`
+                ].join("\n")
+              }
+            ],
+            accessory: {
+              type: COMPONENT_TYPE_THUMBNAIL,
+              media: { url: LUNA_GENIE_THUMBNAIL_URL },
+              description: "Golden Genie Fox"
+            }
+          },
+          { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+          {
+            type: COMPONENT_TYPE_TEXT_DISPLAY,
+            content: [
+              "### Current",
+              `- \`PS99\` **${escapeDiscordMarkdown(status.version || "-")}**`,
+              `- \`Release\` ${versionTimeLabel(status.releaseAt, status.releaseLabel)}`,
+              robloxLine,
+              robloxScanLine
+            ].join("\n")
+          },
+          { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+          {
+            type: COMPONENT_TYPE_TEXT_DISPLAY,
+            content: lunaCreditLine()
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function versionTimeLabel(value, fallback = "-") {
+  const time = new Date(value || 0).getTime();
+  if (Number.isFinite(time) && time > 0) return discordTime(value);
+  return escapeDiscordMarkdown(fallback || "-");
 }
 
 async function fetchRobloxReleasedVersionForCommand(env) {
@@ -5579,35 +5722,48 @@ async function fetchRobloxReleasedVersionForCommand(env) {
   };
 }
 
-async function buildRewardsResponse(interaction, env) {
-  const type = rewardCommandType(interaction);
+async function buildRewardsResponse(interaction, env, forcedType = null) {
+  const type = rewardCommandType(interaction, forcedType);
   const payload = await fetchRewardCutoffsPayload(type, env);
 
   if (!payload.ok) {
     return messageResponse(payload.message || "No reward cutoff data is available yet.", true);
   }
 
-  const embed = {
-    title: type === "clans" ? "Clan Reward Cutoffs" : "Player Reward Cutoffs",
-    color: type === "clans" ? 0xf2cc60 : 0x58a6ff,
-    description: rewardCutoffDescription(payload, type, env)
-  };
-
   return {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-    data: {
-      embeds: [embed]
-    }
+    data: rewardCutoffMessageData(payload, type, env)
   };
 }
 
+async function completeRewardsInteraction(interaction, env, forcedType = null) {
+  try {
+    const response = await buildRewardsResponse(interaction, env, forcedType);
+    await editOriginalInteraction(interaction, response.data);
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Rewards lookup failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
 async function fetchRewardCutoffsPayload(type, env) {
+  if (type === "leagues") return fetchLeagueRewardCutoffsPayload(env);
+  if (type === "leaderboard") return fetchGlobalLeaderboardRewardCutoffsPayload(env);
+  return fetchClanApiRewardCutoffsPayload(type, env);
+}
+
+async function fetchClanApiRewardCutoffsPayload(type, env) {
   const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/reward-cutoffs", apiBase);
-  apiUrl.searchParams.set("type", type);
+  apiUrl.searchParams.set("type", type === "clans" ? "clans" : "players");
 
-  if (type === "players") {
+  if (type !== "clans") {
     apiUrl.searchParams.set("clan", scanClan);
   }
 
@@ -5632,31 +5788,112 @@ async function fetchRewardCutoffsPayload(type, env) {
   return payload;
 }
 
-function rewardCutoffDescription(payload, type, env) {
-  const titleParts = [
-    rewardLeaderboardTitle(payload, type, env)
-  ];
+async function fetchGlobalLeaderboardRewardCutoffsPayload(env) {
+  const mode = await fetchGlobalLeaderboardRewardMode(env).catch(() => null);
+  if (mode === "leagues") return fetchLeaguePlayerRewardCutoffsPayload(env);
 
-  if (payload.snapshot_at) {
-    titleParts.push(`updated ${discordTime(payload.snapshot_at)}`);
+  const payload = await fetchClanApiRewardCutoffsPayload("players", env);
+  return {
+    ...payload,
+    reward_kind: "leaderboard",
+    pool_source: payload.pool_source || "clans"
+  };
+}
+
+async function fetchGlobalLeaderboardRewardMode(env) {
+  const configured = String(env.GLOBAL_LEADERBOARD_SOURCE || "").trim().toLowerCase();
+  if (["league", "leagues"].includes(configured)) return "leagues";
+  if (["clan", "clans", "battle", "clan-battle"].includes(configured)) return "clans";
+
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/global/leaderboard", apiBase);
+  apiUrl.searchParams.set("limit", "1");
+  apiUrl.searchParams.set("gains", "false");
+
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Rewards-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) return null;
+  return payload.source_mode === "leagues" ? "leagues" : "clans";
+}
+
+async function fetchLeagueRewardCutoffsPayload(env) {
+  const ranks = configuredRewardRanks("leagues", env);
+  const payload = await fetchLeagueMilestoneEndpoint(env, "/api/leagues/milestones", ranks);
+  return normalizeLeagueRewardPayload(payload, ranks, "leagues");
+}
+
+async function fetchLeaguePlayerRewardCutoffsPayload(env) {
+  const ranks = configuredRewardRanks("leaderboard", env);
+  const payload = await fetchLeagueMilestoneEndpoint(env, "/api/leagues/player-milestones", ranks);
+  return normalizeLeagueRewardPayload(payload, ranks, "leaderboard");
+}
+
+async function fetchLeagueMilestoneEndpoint(env, path, ranks) {
+  const apiBase = String(env.LEAGUE_API_BASE || "https://yamo-league-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = leagueApiUrl(env, path, apiBase);
+  apiUrl.searchParams.set("ranks", ranks.join(","));
+
+  const response = await fetchLeagueApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Rewards-Worker"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `League reward cutoff API failed (${response.status}).`);
   }
 
-  const lines = [
-    `**${titleParts.filter(Boolean).join(" | ")}**`,
-    ""
-  ];
+  return payload;
+}
 
-  for (const line of rewardCutoffLines(payload, type)) {
-    lines.push(line);
-  }
+function normalizeLeagueRewardPayload(payload, ranks, type) {
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const byRank = new Map(rows.map(row => [Number(row.rank), row]));
+  const cutoffs = ranks.map(rankValue => {
+    const row = byRank.get(Number(rankValue));
+    const available = Boolean(row && row.available !== false);
+    return {
+      rank: rankValue,
+      label: type === "leagues" ? leagueRewardLabel(rankValue) : rewardDefaultCutoffLabel(rankValue),
+      points: available ? finiteNumber(row.points ?? row.total_points) : null,
+      available,
+      holder: row?.username || row?.display_name
+        ? {
+            user_id: finiteNumber(row.user_id),
+            username: String(row.username || row.display_name || "").trim() || null,
+            league_name: String(row.league_name || "").trim() || null
+          }
+        : null
+    };
+  });
 
-  const unavailable = (payload.cutoffs || []).some(cutoff => cutoff.points === null || cutoff.points === undefined);
-  if (unavailable && payload.available_rank_max) {
-    lines.push("");
-    lines.push(`Only Top ${fullNumber(payload.available_rank_max)} is available from the latest stored scan.`);
-  }
-
-  return lines.join("\n");
+  return {
+    ok: true,
+    type: type === "leagues" ? "leagues" : "players",
+    reward_kind: type,
+    pool_source: type === "leagues" ? "leagues" : "league_players",
+    pool_is_partial: payload.pool_is_partial === true,
+    generated_at: payload.generated_at || new Date().toISOString(),
+    snapshot_at: payload.snapshot_at || null,
+    league_run_key: payload.league_run_key || null,
+    league_run_label: payload.league_run_label || payload.league_run_key || null,
+    league_end_at: payload.league_end_at || payload.league_run_end_at || null,
+    source: payload.source || null,
+    top_available: finiteNumber(payload.top_available),
+    total_ranked: finiteNumber(payload.total_players ?? payload.top_available),
+    available_rank_max: finiteNumber(payload.top_available) || rows.reduce((max, row) => Math.max(max, Number(row.rank) || 0), 0),
+    ranks,
+    cutoffs
+  };
 }
 
 function rewardCutoffLines(payload, type) {
@@ -5676,16 +5913,150 @@ function rewardCutoffLines(payload, type) {
 }
 
 function rewardCutoffLine(cutoff) {
-  const label = cutoff.label || `Top ${fullNumber(cutoff.rank)}`;
+  const label = cutoff.label || rewardDefaultCutoffLabel(cutoff.rank);
   if (cutoff.points === null || cutoff.points === undefined) {
-    return `**${label}:** not recorded yet`;
+    return `- ${discordInlineCode(label)} not recorded yet`;
   }
 
-  return `**${label}:** ${fullNumber(cutoff.points)} pts`;
+  return `- ${discordInlineCode(label)} **${fullNumber(cutoff.points)}** pts`;
+}
+
+function rewardCutoffMessageData(payload, type, env) {
+  const theme = rewardMessageTheme(payload, type);
+  const leaderboardTitle = rewardLeaderboardTitle(payload, type, env);
+  const metaLine = rewardMetaLine(payload, type);
+  const cutoffLines = rewardCutoffLines(payload, payload.reward_kind || type);
+  const note = rewardCutoffNote(payload);
+  const title = [
+    `## ${theme.title}`,
+    leaderboardTitle ? `**${escapeDiscordMarkdown(leaderboardTitle)}**` : "",
+    metaLine ? `-# ${metaLine}` : ""
+  ].filter(Boolean).join("\n");
+  const header = {
+    type: COMPONENT_TYPE_SECTION,
+    components: [
+      {
+        type: COMPONENT_TYPE_TEXT_DISPLAY,
+        content: title
+      }
+    ],
+    accessory: {
+      type: COMPONENT_TYPE_THUMBNAIL,
+      media: { url: LUNA_REWARD_THUMBNAIL_URL },
+      description: "Luna reward monitor"
+    }
+  };
+
+  const bodyLines = cutoffLines.length ? cutoffLines : ["- No reward cutoffs are available yet."];
+  const components = [
+    header,
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `### Cutoffs\n${bodyLines.join("\n")}`
+    }
+  ];
+
+  if (note) {
+    components.push(
+      { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+      {
+        type: COMPONENT_TYPE_TEXT_DISPLAY,
+        content: `-# ${note}`
+      }
+    );
+  }
+
+  components.push(
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: lunaCreditLine()
+    }
+  );
+
+  return {
+    flags: MESSAGE_FLAG_COMPONENTS_V2,
+    allowed_mentions: { parse: [] },
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: theme.accent,
+        components
+      }
+    ]
+  };
+}
+
+function rewardMessageTheme(payload, type) {
+  const kind = payload?.reward_kind || type;
+  if (kind === "clans") return { title: "Clan Reward Cutoffs", accent: 0xffd44d };
+  if (kind === "leagues") return { title: "League Reward Cutoffs", accent: 0x34e1ef };
+  if (payload?.pool_source === "league_players") return { title: "Global Leaderboard Rewards", accent: 0xff5db8 };
+  return { title: "Global Leaderboard Rewards", accent: 0x58a6ff };
+}
+
+function rewardMetaLine(payload, type) {
+  const parts = [];
+  if (payload.snapshot_at) parts.push(`updated ${discordTime(payload.snapshot_at)}`);
+  else if (payload.generated_at) parts.push(`generated ${discordTime(payload.generated_at)}`);
+
+  const poolSource = rewardPoolSourceLabel(payload, type);
+  if (poolSource) parts.push(poolSource);
+
+  const endsAtMs = new Date(payload.league_end_at || 0).getTime();
+  if (Number.isFinite(endsAtMs) && endsAtMs > 0) parts.push(`ends <t:${Math.floor(endsAtMs / 1000)}:R>`);
+  return parts.join(" | ");
+}
+
+function rewardPoolSourceLabel(payload, type) {
+  const kind = payload?.reward_kind || type;
+  if (kind === "clans") return "Clan leaderboard";
+  if (kind === "leagues") return "League leaderboard";
+  if (payload?.pool_source === "league_players") return "League player leaderboard";
+  return "Global leaderboard";
+}
+
+function rewardCutoffNote(payload) {
+  const unavailable = (payload.cutoffs || []).some(cutoff => cutoff.points === null || cutoff.points === undefined);
+  if (payload.pool_is_partial) {
+    return "The League player leaderboard source is partial; deeper reward ranks may not be available yet.";
+  }
+  return "";
+}
+
+function rewardDefaultCutoffLabel(rankValue) {
+  const rankNumber = Number(rankValue);
+  return Number.isFinite(rankNumber) && rankNumber > 0
+    ? `Top ${fullNumber(rankNumber)}`
+    : "Reward tier";
+}
+
+function leagueRewardLabel(rankValue) {
+  const rankNumber = Number(rankValue);
+  if (rankNumber === 1) return "#1";
+  return rewardDefaultCutoffLabel(rankNumber);
+}
+
+function discordInlineCode(value) {
+  return `\`${String(value || "").replace(/`/g, "'")}\``;
+}
+
+function lunaCreditLine() {
+  return "-# :woman_genie: Luna, A Pet Sim 99 Bot :rainbow_flag: ∙ by [Cinnamowopal](https://x.com/oapl_the_opal)";
 }
 
 function rewardLeaderboardTitle(payload, type, env) {
-  if (type === "players") {
+  const kind = payload?.reward_kind || type;
+  if (kind === "leagues") {
+    return payload.league_run_label || payload.league_run_key || "Current League";
+  }
+
+  if (kind === "leaderboard" || kind === "players") {
+    if (payload.pool_source === "league_players") {
+      return payload.league_run_label || payload.league_run_key || "League Player Leaderboard";
+    }
+
     const activeEventLabel = String(
       payload.event_name ||
       payload.display_name ||
@@ -5711,14 +6082,26 @@ function rewardLeaderboardTitle(payload, type, env) {
   return payload.event_name || payload.display_name || payload.battle || "Clan Leaderboard";
 }
 
-function rewardCommandType(interaction) {
+function rewardCommandType(interaction, forcedType = null) {
+  if (forcedType) return forcedType;
+  const commandName = String(interaction?.data?.name || "").toLowerCase();
+  if (commandName === "lb") return "leaderboard";
+  if (commandName === "clan") return "clans";
+  if (commandName === "league") return "leagues";
+
   const option = (interaction.data?.options || [])[0] || null;
   const name = String(option?.name || "").toLowerCase();
-  return name === "clans" ? "clans" : "players";
+  return name === "clans" ? "clans" : "leaderboard";
 }
 
 function configuredRewardRanks(type, env) {
-  const raw = String(type === "clans" ? env.CLAN_REWARD_CUTOFF_RANKS || "" : env.PLAYER_REWARD_CUTOFF_RANKS || "");
+  const raw = String(
+    type === "clans"
+      ? env.CLAN_REWARD_CUTOFF_RANKS || ""
+      : type === "leagues"
+        ? env.LEAGUE_REWARD_CUTOFF_RANKS || ""
+        : env.PLAYER_REWARD_CUTOFF_RANKS || ""
+  );
   const maxRank = type === "clans" ? 10000 : 100000;
   const parsed = raw
     .split(/[,\s]+/)
@@ -5730,6 +6113,8 @@ function configuredRewardRanks(type, env) {
     if (!raw.trim() || normalizedRaw === LEGACY_CLAN_REWARD_CUTOFF_RANKS) {
       return DEFAULT_CLAN_REWARD_CUTOFF_RANKS;
     }
+  } else if (type === "leagues") {
+    if (!raw.trim()) return DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS;
   } else if (!raw.trim() || normalizedRaw === LEGACY_PLAYER_REWARD_CUTOFF_RANKS) {
     return DEFAULT_PLAYER_REWARD_CUTOFF_RANKS;
   }
@@ -6203,25 +6588,12 @@ function versionCommandPayload() {
   };
 }
 
-function rewardsCommandPayload() {
-  return {
-    name: "rewards",
-    type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "Show current reward point cutoffs.",
-    dm_permission: false,
-    options: [
-      {
-        name: "players",
-        description: "Show player reward cutoff points from the global leaderboard.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
-      },
-      {
-        name: "clans",
-        description: "Show clan reward cutoff points from the clan leaderboard.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
-      }
-    ]
-  };
+function rewardCommandPayloads() {
+  return [
+    clanCommandPayload(),
+    leagueCommandPayload(),
+    lbCommandPayload()
+  ];
 }
 
 function historyCommandPayload() {
@@ -6249,24 +6621,40 @@ function clanCommandPayload() {
     dm_permission: false,
     options: [
       {
-        name: "chart",
-        description: "Post the current clan line chart as a PNG.",
+        name: "rewards",
+        description: "Show clan reward cutoff points from the clan leaderboard.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       }
     ]
   };
 }
 
-function duckCommandPayload() {
+function leagueCommandPayload() {
   return {
-    name: "duck",
+    name: "league",
     type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "Duck chart tools.",
+    description: "League tools.",
     dm_permission: false,
     options: [
       {
-        name: "chart",
-        description: "Post the current duck chart as a PNG.",
+        name: "rewards",
+        description: "Show league reward cutoff points from the league leaderboard.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
+function lbCommandPayload() {
+  return {
+    name: "lb",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Global leaderboard tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "rewards",
+        description: "Show global leaderboard reward cutoff points.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       }
     ]
@@ -6502,6 +6890,21 @@ function memberHasAllowedRole(interaction, env) {
 }
 
 async function memberCanManageServerTracker(interaction, env, options = {}) {
+  if (options.allowDiscordManage !== false && memberHasDiscordManagerPermission(interaction)) {
+    return true;
+  }
+
+  if (options.allowConfiguredRole === false) return false;
+
+  return memberHasConfiguredServerTrackerRole(interaction, env);
+}
+
+async function memberCanConfigureLunaAdminRole(interaction, env) {
+  if (memberHasDiscordManagerPermission(interaction)) return true;
+  return !(await lunaAdminRoleIsConfigured(interaction, env));
+}
+
+function memberHasDiscordManagerPermission(interaction) {
   let permissions = 0n;
   try {
     permissions = BigInt(String(interaction?.member?.permissions || "0"));
@@ -6509,12 +6912,10 @@ async function memberCanManageServerTracker(interaction, env, options = {}) {
 
   const administrator = 1n << 3n;
   const manageGuild = 1n << 5n;
-  if ((permissions & administrator) === administrator || (permissions & manageGuild) === manageGuild) {
-    return true;
-  }
+  return (permissions & administrator) === administrator || (permissions & manageGuild) === manageGuild;
+}
 
-  if (options.allowConfiguredRole === false) return false;
-
+async function memberHasConfiguredServerTrackerRole(interaction, env) {
   const guildId = String(interaction?.guild_id || "").trim();
   const memberRoles = Array.isArray(interaction?.member?.roles)
     ? interaction.member.roles.map(role => String(role))
@@ -6535,6 +6936,22 @@ async function memberCanManageServerTracker(interaction, env, options = {}) {
     return Boolean(configuredRoleId) && memberRoles.includes(configuredRoleId);
   } catch {
     return false;
+  }
+}
+
+async function lunaAdminRoleIsConfigured(interaction, env) {
+  if (parseCsv(env.SERVER_TRACKER_ADMIN_ROLE_IDS).length) return true;
+
+  const guildId = String(interaction?.guild_id || "").trim();
+  if (!guildId) return true;
+
+  try {
+    const payload = await serverTrackerApiRequest(env, "/api/tracker/admin-role", {
+      query: { guild_id: guildId }
+    });
+    return Boolean(String(payload.admin_role_id || payload.role_id || "").trim());
+  } catch {
+    return true;
   }
 }
 
