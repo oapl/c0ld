@@ -3,12 +3,19 @@ const ITEM_TABLE = "ps99_inventory_snapshot_items";
 const DISCORD_POSTS_TABLE = "ps99_inventory_discord_posts";
 const OAUTH_GRANTS_TABLE = "ps99_inventory_oauth_grants";
 const OAUTH_STATES_TABLE = "ps99_inventory_oauth_states";
+const HATCH_TRACKER_USERS_TABLE = "ps99_hatch_tracker_users";
+const HATCH_ALERTS_TABLE = "ps99_hatch_alerts";
+const HATCH_GUILD_CONFIG_TABLE = "ps99_hatch_tracker_guilds";
 const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
 const BIG_GAMES_PET_COLLECTION_URL = "https://ps99.biggamesapi.io/api/collection/Pets";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
+const DISCORD_API_BASE = "https://discord.com/api/v10";
+const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
+const HATCH_ALERT_COLOR = 0xff9b96;
+const HATCH_ALERT_FOOTER_TEXT = "Oapl's 3rd-Eye | Hatch Tracker";
 const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
@@ -16,6 +23,9 @@ const DEFAULT_USERNAME = "Cinnamowopal";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
 const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
+const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
+const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
+const INVENTORY_BUILD_ID = "inventory-htg-2026-07-27c";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -76,6 +86,7 @@ export default {
         response = json({
           ok: true,
           service: "ps99-inventory-detector",
+          build_id: INVENTORY_BUILD_ID,
           timezone: timeZone(env),
           min_fetch_interval_minutes: inventoryMinFetchIntervalMinutes(env),
           skip_duplicate_source: envBool(env.INVENTORY_SKIP_DUPLICATE_SOURCE, true),
@@ -84,7 +95,13 @@ export default {
           supabase_configured: !!(supabaseUrl(env) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)),
           big_games_oauth_configured: bigGamesOAuthConfigured(env),
           big_games_oauth_connected: oauth.connected,
-          big_games_oauth_expires_at: oauth.expires_at
+          big_games_oauth_expires_at: oauth.expires_at,
+          hatch_tracker: {
+            big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
+            channel_configured: Boolean(hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
+            bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
+            webhook_configured: Boolean(hatchAlertWebhookUrl(env))
+          }
         });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/oauth/start") {
         response = await handleOAuthStart(request, env);
@@ -111,6 +128,24 @@ export default {
         response = await handleDiff(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/hourly") {
         response = await handleHourlySeries(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/hatch/oauth/start") {
+        requireAdmin(request, env);
+        response = await handleHatchOAuthStart(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/hatch/tracker") {
+        requireAdmin(request, env);
+        response = await handleHatchTrackerCommand(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/hatch/tracker/status") {
+        requireAdmin(request, env);
+        response = await handleHatchTrackerStatus(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/hatch/guild-config") {
+        requireAdmin(request, env);
+        response = await handleHatchGuildConfigStatus(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/hatch/guild-config") {
+        requireAdmin(request, env);
+        response = await handleHatchGuildConfigCommand(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/hatch/alerts/check") {
+        requireAdmin(request, env);
+        response = await handleHatchAlertCheck(request, env);
       } else {
         response = json({ ok: false, message: "Not found" }, 404);
       }
@@ -129,6 +164,13 @@ export default {
       const results = await Promise.allSettled(users.map(async user => {
         if (!await inventoryScanIsDue(env, user, now, { synchronized: true })) return { skipped: true, user };
         const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
+        if (!result.skipped) {
+          result.hatch_alert = await postHatchAlertIfNeeded(env, user, result.snapshot, { source: "schedule" })
+            .catch(error => {
+              console.warn("Scheduled hatch alert check failed", error?.message || error);
+              return { posted: false, error: error?.message || String(error) };
+            });
+        }
         if (!result.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) await postHourlyDiffIfNeeded(env, user);
         return result;
       }));
@@ -140,6 +182,7 @@ export default {
 async function handleOAuthStart(request, env) {
   requireSupabase(env);
   requireBigGamesOAuth(env);
+  const oauthApp = bigGamesOAuthApp(env, "inventory");
 
   const url = new URL(request.url);
   const selfAuthorization = envBool(url.searchParams.get("self"), false);
@@ -166,7 +209,7 @@ async function handleOAuthStart(request, env) {
 
   await supabaseUpsert(env, OAUTH_STATES_TABLE, [{
     state_hash: await sha256Base64Url(state),
-    code_verifier_ciphertext: await sealSecret(verifier, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier"),
+    code_verifier_ciphertext: await sealSecret(verifier, oauthApp.clientSecret, "big-games-pkce-verifier"),
     expires_at: expiresAt,
     created_at: now.toISOString(),
     used_at: null,
@@ -177,8 +220,8 @@ async function handleOAuthStart(request, env) {
   }], "state_hash");
 
   const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
-  authorizeUrl.searchParams.set("client_id", String(env.BIG_GAMES_CLIENT_ID));
-  authorizeUrl.searchParams.set("redirect_uri", bigGamesRedirectUri(env));
+  authorizeUrl.searchParams.set("client_id", oauthApp.clientId);
+  authorizeUrl.searchParams.set("redirect_uri", oauthApp.redirectUri);
   authorizeUrl.searchParams.set("scope", BIG_GAMES_INVENTORY_SCOPE);
   authorizeUrl.searchParams.set("code_challenge", challenge);
   authorizeUrl.searchParams.set("code_challenge_method", "S256");
@@ -195,9 +238,68 @@ async function handleOAuthStart(request, env) {
   });
 }
 
+async function handleHatchOAuthStart(request, env) {
+  requireSupabase(env);
+  requireHatchBigGamesOAuth(env);
+  const oauthApp = bigGamesOAuthApp(env, "hatch_tracker");
+  const body = await readJsonOptional(request);
+  const discordUserId = requiredDiscordSnowflake(body.discord_user_id, "discord_user_id");
+  const discordUsername = firstString(body.discord_username);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const state = randomBase64Url(32);
+  const verifier = randomBase64Url(64);
+  const challenge = await sha256Base64Url(verifier);
+  const existing = await fetchHatchTrackerByDiscordUser(env, discordUserId);
+
+  await supabaseUpsert(env, HATCH_TRACKER_USERS_TABLE, [{
+    discord_user_id: discordUserId,
+    discord_username: discordUsername || existing?.discord_username || null,
+    roblox_user_id: existing?.roblox_user_id || null,
+    roblox_username: existing?.roblox_username || null,
+    enabled: existing?.enabled === true,
+    updated_at: now.toISOString(),
+    metadata: hatchTrackerMetadataWithTiers(existing?.metadata, hatchTrackerEnabledTiers(existing))
+  }], "discord_user_id");
+
+  await supabaseUpsert(env, OAUTH_STATES_TABLE, [{
+    state_hash: await sha256Base64Url(state),
+    code_verifier_ciphertext: await sealSecret(verifier, oauthApp.clientSecret, "big-games-pkce-verifier"),
+    expires_at: expiresAt,
+    created_at: now.toISOString(),
+    used_at: null,
+    target_roblox_user_id: null,
+    target_roblox_username: null,
+    return_url: hatchOAuthReturnUrl(env) || null,
+    force_ingest: true,
+    metadata: {
+      purpose: "hatch_tracker",
+      oauth_app: "hatch_tracker",
+      oauth_client_id: oauthApp.clientId,
+      discord_user_id: discordUserId,
+      discord_username: discordUsername || null
+    }
+  }], "state_hash");
+
+  const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
+  authorizeUrl.searchParams.set("client_id", oauthApp.clientId);
+  authorizeUrl.searchParams.set("redirect_uri", oauthApp.redirectUri);
+  authorizeUrl.searchParams.set("scope", BIG_GAMES_INVENTORY_SCOPE);
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("state", state);
+
+  return json({
+    ok: true,
+    authorize_url: authorizeUrl.toString(),
+    expires_at: expiresAt,
+    tracker: await hatchTrackerStatus(env, discordUserId),
+    message: "Open authorize_url and approve access within 10 minutes."
+  });
+}
+
 async function handleOAuthCallback(request, env) {
   requireSupabase(env);
-  requireBigGamesOAuth(env);
   const url = new URL(request.url);
   const code = String(url.searchParams.get("code") || "");
   const state = String(url.searchParams.get("state") || "");
@@ -205,7 +307,7 @@ async function handleOAuthCallback(request, env) {
 
   const stateHash = await sha256Base64Url(state);
   const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
-    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest",
+    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest,metadata",
     state_hash: `eq.${stateHash}`,
     limit: "1"
   });
@@ -220,14 +322,15 @@ async function handleOAuthCallback(request, env) {
   }
   if (!code) return oauthCompletion(pending, false, "The callback did not include an authorization code.");
 
-  const verifier = await openSecret(pending.code_verifier_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-pkce-verifier");
+  const oauthApp = bigGamesOAuthAppForPendingState(env, pending);
+  const verifier = await openSecret(pending.code_verifier_ciphertext, oauthApp.clientSecret, "big-games-pkce-verifier");
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: bigGamesRedirectUri(env),
+    redirect_uri: oauthApp.redirectUri,
     code_verifier: verifier
   });
-  const basic = btoa(`${env.BIG_GAMES_CLIENT_ID}:${env.BIG_GAMES_CLIENT_SECRET}`);
+  const basic = btoa(`${oauthApp.clientId}:${oauthApp.clientSecret}`);
   const tokenResponse = await fetch(BIG_GAMES_TOKEN_URL, {
     method: "POST",
     headers: {
@@ -279,6 +382,12 @@ async function handleOAuthCallback(request, env) {
       expiresAt,
       expiresIn,
       identityVerified: tokenAccount.user_id === targetUserId
+    });
+    await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
+      userId: targetUserId,
+      username: tokenAccount.username || pending.target_roblox_username || null,
+      authorizedAt,
+      expiresAt
     });
   }
 
@@ -338,6 +447,12 @@ async function handleOAuthCallback(request, env) {
     expiresIn,
     identityVerified: account.user_id === targetUserId
   });
+  await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
+    userId: targetUserId,
+    username: account.username || tokenAccount.username || pending.target_roblox_username || null,
+    authorizedAt,
+    expiresAt
+  });
   const user = {
     user_id: targetUserId,
     username: account.username || pending.target_roblox_username || targetUserId
@@ -389,6 +504,301 @@ async function handleOAuthStatus(request, env) {
     ...readiness,
     connection_state: !access.connected ? "disconnected" : readiness.snapshot_ready ? "ready" : "pending_snapshot"
   });
+}
+
+async function handleHatchTrackerStatus(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const discordUserId = requiredDiscordSnowflake(url.searchParams.get("discord_user_id"), "discord_user_id");
+  return json({ ok: true, tracker: await hatchTrackerStatus(env, discordUserId) });
+}
+
+async function handleHatchGuildConfigStatus(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const guildId = requiredDiscordSnowflake(url.searchParams.get("guild_id"), "guild_id");
+  return json({
+    ok: true,
+    config: await fetchHatchGuildConfig(env, guildId)
+  });
+}
+
+async function handleHatchGuildConfigCommand(request, env) {
+  requireSupabase(env);
+  const body = await readJsonOptional(request);
+  const guildId = requiredDiscordSnowflake(body.guild_id, "guild_id");
+  const channelId = requiredDiscordSnowflake(body.channel_id, "channel_id");
+  const assignedBy = firstString(body.assigned_by);
+  const now = new Date().toISOString();
+  const rows = await supabaseUpsert(env, HATCH_GUILD_CONFIG_TABLE, [{
+    guild_id: guildId,
+    channel_id: channelId,
+    channel_type: Number.isFinite(Number(body.channel_type)) ? Number(body.channel_type) : null,
+    assigned_by: assignedBy || null,
+    enabled: body.enabled !== false,
+    updated_at: now
+  }], "guild_id");
+
+  return json({
+    ok: true,
+    config: rows[0] || await fetchHatchGuildConfig(env, guildId)
+  });
+}
+
+async function handleHatchTrackerCommand(request, env) {
+  requireSupabase(env);
+  requireHatchBigGamesOAuth(env);
+  const body = await readJsonOptional(request);
+  const discordUserId = requiredDiscordSnowflake(body.discord_user_id, "discord_user_id");
+  const discordUsername = firstString(body.discord_username);
+  const action = String(body.action || "").trim().toLowerCase();
+  const selectedTier = normalizeHatchTierSelection(body.tier || "all");
+  if (!["enable", "disable"].includes(action)) throw httpError(400, "action must be enable or disable.");
+
+  const now = new Date().toISOString();
+  const existing = await fetchHatchTrackerByDiscordUser(env, discordUserId);
+  const currentTiers = hatchTrackerEnabledTiers(existing);
+  const nextTiers = action === "enable"
+    ? mergeHatchTierSelection(currentTiers, selectedTier)
+    : removeHatchTierSelection(currentTiers, selectedTier);
+  const nextEnabled = nextTiers.length > 0;
+
+  if (action === "disable") {
+    await supabaseUpsert(env, HATCH_TRACKER_USERS_TABLE, [{
+      discord_user_id: discordUserId,
+      discord_username: discordUsername || existing?.discord_username || null,
+      roblox_user_id: existing?.roblox_user_id || null,
+      roblox_username: existing?.roblox_username || null,
+      enabled: nextEnabled,
+      disabled_at: nextEnabled ? existing?.disabled_at || null : now,
+      updated_at: now,
+      metadata: hatchTrackerMetadataWithTiers(existing?.metadata, nextTiers)
+    }], "discord_user_id");
+    return json({
+      ok: true,
+      action,
+      tier: selectedTier,
+      tracker: await hatchTrackerStatus(env, discordUserId),
+      message: nextEnabled
+        ? `${hatchTierResponseLabel(selectedTier)} hatch alerts were disabled for your Discord account.`
+        : "Hatch alerts are disabled for your Discord account."
+    });
+  }
+
+  if (!existing?.roblox_user_id) {
+    await supabaseUpsert(env, HATCH_TRACKER_USERS_TABLE, [{
+      discord_user_id: discordUserId,
+      discord_username: discordUsername || existing?.discord_username || null,
+      roblox_user_id: existing?.roblox_user_id || null,
+      roblox_username: existing?.roblox_username || null,
+      enabled: true,
+      last_enabled_at: now,
+      disabled_at: null,
+      updated_at: now,
+      metadata: hatchTrackerMetadataWithTiers(existing?.metadata, nextTiers)
+    }], "discord_user_id");
+    const auth = await createHatchOAuthStartForDiscord(env, {
+      discord_user_id: discordUserId,
+      discord_username: discordUsername
+    });
+    return json({
+      ok: true,
+      action,
+      tier: selectedTier,
+      needs_auth: true,
+      authorize_url: auth.authorize_url,
+      expires_at: auth.expires_at,
+      tracker: await hatchTrackerStatus(env, discordUserId),
+      message: `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued. Connect Big Games inventory to start tracking.`
+    });
+  }
+
+  const access = await oauthStatus(env, existing.roblox_user_id);
+  if (!access.connected) {
+    await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, { discord_user_id: `eq.${discordUserId}` }, {
+      discord_username: discordUsername || existing.discord_username || null,
+      enabled: true,
+      last_enabled_at: now,
+      disabled_at: null,
+      updated_at: now,
+      metadata: hatchTrackerMetadataWithTiers(existing?.metadata, nextTiers)
+    });
+    const auth = await createHatchOAuthStartForDiscord(env, {
+      discord_user_id: discordUserId,
+      discord_username: discordUsername || existing.discord_username
+    });
+    return json({
+      ok: true,
+      action,
+      tier: selectedTier,
+      needs_auth: true,
+      authorize_url: auth.authorize_url,
+      expires_at: auth.expires_at,
+      tracker: await hatchTrackerStatus(env, discordUserId),
+      message: `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued, but your Big Games authorization needs to be refreshed.`
+    });
+  }
+
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, { discord_user_id: `eq.${discordUserId}` }, {
+    discord_username: discordUsername || existing.discord_username || null,
+    enabled: true,
+    last_enabled_at: now,
+    disabled_at: null,
+    updated_at: now,
+    metadata: hatchTrackerMetadataWithTiers(existing?.metadata, nextTiers)
+  });
+
+  return json({
+    ok: true,
+    action,
+    tier: selectedTier,
+    tracker: await hatchTrackerStatus(env, discordUserId),
+    message: `${hatchTierResponseLabel(selectedTier)} hatch alerts are enabled for your Discord account.`
+  });
+}
+
+async function handleHatchAlertCheck(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const user = requestUser(url);
+  const latest = await getLatestSnapshot(env, user.user_id);
+  if (!latest) return json({ ok: false, message: "No inventory snapshot exists for that user yet." }, 404);
+  return json({
+    ok: true,
+    ...(await postHatchAlertIfNeeded(env, user, latest, {
+      source: "manual",
+      force: parseBool(url.searchParams.get("force")) === true
+    }))
+  });
+}
+
+async function createHatchOAuthStartForDiscord(env, identity) {
+  const response = await handleHatchOAuthStart(new Request("https://inventory.local/api/hatch/oauth/start", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(identity || {})
+  }), env);
+  return response.json();
+}
+
+async function maybeUpsertHatchTrackerUserFromOAuth(env, pending, details) {
+  const metadata = pending?.metadata && typeof pending.metadata === "object" ? pending.metadata : {};
+  if (metadata.purpose !== "hatch_tracker") return;
+  const discordUserId = String(metadata.discord_user_id || "").trim();
+  if (!discordUserId) return;
+  const existing = await fetchHatchTrackerByDiscordUser(env, discordUserId);
+  const tiers = hatchTrackerEnabledTiers(existing);
+  const now = new Date().toISOString();
+  await supabaseUpsert(env, HATCH_TRACKER_USERS_TABLE, [{
+    discord_user_id: discordUserId,
+    discord_username: firstString(metadata.discord_username, existing?.discord_username) || null,
+    roblox_user_id: Number(details.userId),
+    roblox_username: firstString(details.username, existing?.roblox_username, details.userId) || null,
+    enabled: existing?.enabled === true,
+    authorized_at: details.authorizedAt.toISOString(),
+    authorization_expires_at: details.expiresAt,
+    disabled_at: existing?.enabled === true ? null : existing?.disabled_at || null,
+    updated_at: now,
+    metadata: hatchTrackerMetadataWithTiers(existing?.metadata, tiers)
+  }], "discord_user_id");
+}
+
+async function hatchTrackerStatus(env, discordUserId) {
+  const row = await fetchHatchTrackerByDiscordUser(env, discordUserId);
+  const access = row?.roblox_user_id ? await oauthStatus(env, row.roblox_user_id) : { connected: false };
+  return {
+    discord_user_id: discordUserId,
+    discord_username: row?.discord_username || null,
+    roblox_user_id: row?.roblox_user_id || null,
+    roblox_username: row?.roblox_username || null,
+    enabled: Boolean(row?.enabled),
+    enabled_tiers: hatchTrackerEnabledTiers(row),
+    connected: Boolean(access.connected),
+    authorized_at: row?.authorized_at || access.authorized_at || null,
+    authorization_expires_at: row?.authorization_expires_at || access.expires_at || null,
+    last_checked_at: row?.last_checked_at || null,
+    last_alert_at: row?.last_alert_at || null
+  };
+}
+
+async function fetchHatchTrackerByDiscordUser(env, discordUserId) {
+  const rows = await supabaseSelect(env, HATCH_TRACKER_USERS_TABLE, {
+    select: "*",
+    discord_user_id: `eq.${discordUserId}`,
+    limit: "1"
+  });
+  return rows[0] || null;
+}
+
+async function fetchHatchTrackerByRobloxUser(env, userId) {
+  const rows = await supabaseSelect(env, HATCH_TRACKER_USERS_TABLE, {
+    select: "*",
+    roblox_user_id: `eq.${userId}`,
+    enabled: "eq.true",
+    limit: "1"
+  });
+  return rows[0] || null;
+}
+
+async function fetchHatchGuildConfig(env, guildId) {
+  const rows = await supabaseSelect(env, HATCH_GUILD_CONFIG_TABLE, {
+    select: "*",
+    guild_id: `eq.${guildId}`,
+    limit: "1"
+  });
+  return rows[0] || null;
+}
+
+async function fetchEnabledHatchGuildConfigs(env) {
+  return supabaseSelectAll(env, HATCH_GUILD_CONFIG_TABLE, {
+    select: "*",
+    enabled: "eq.true",
+    order: "updated_at.desc"
+  }, 250);
+}
+
+function normalizeHatchTierSelection(value) {
+  const normalized = normalizeHatchTierValue(value || "all");
+  if (!normalized || normalized === "all") return "all";
+  if (HATCH_TRACKER_TIERS.includes(normalized)) return normalized;
+  throw httpError(400, "tier must be huge, titanic, gargantuan, or all.");
+}
+
+function hatchTrackerEnabledTiers(row) {
+  if (!row || row.enabled !== true) return [];
+  const configured = Array.isArray(row.metadata?.enabled_tiers)
+    ? row.metadata.enabled_tiers.map(normalizeHatchTierValue).filter(tier => tier && tier !== "all")
+    : [];
+  return configured.length ? [...new Set(configured)].filter(tier => HATCH_TRACKER_TIERS.includes(tier)) : [...HATCH_TRACKER_TIERS];
+}
+
+function normalizeHatchTierValue(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (!normalized || normalized === "all") return normalized || "";
+  if (normalized === "garg" || normalized === "gargantuan") return "gargantuan";
+  return HATCH_TRACKER_TIERS.includes(normalized) ? normalized : "";
+}
+
+function mergeHatchTierSelection(currentTiers, selection) {
+  if (selection === "all") return [...HATCH_TRACKER_TIERS];
+  return [...new Set([...(currentTiers || []), selection])].filter(tier => HATCH_TRACKER_TIERS.includes(tier));
+}
+
+function removeHatchTierSelection(currentTiers, selection) {
+  if (selection === "all") return [];
+  const current = currentTiers?.length ? currentTiers : [];
+  return current.filter(tier => tier !== selection);
+}
+
+function hatchTrackerMetadataWithTiers(metadata, tiers) {
+  return {
+    ...((metadata && typeof metadata === "object" && !Array.isArray(metadata)) ? metadata : {}),
+    enabled_tiers: [...new Set(tiers || [])].filter(tier => HATCH_TRACKER_TIERS.includes(tier))
+  };
+}
+
+function hatchTierResponseLabel(selection) {
+  return selection === "all" ? "All" : hatchTierLabel(selection);
 }
 
 async function handleInventoryRetry(request, env) {
@@ -549,11 +959,76 @@ function oauthGrantKey(userId) {
 }
 
 function bigGamesOAuthConfigured(env) {
-  return !!(env.BIG_GAMES_CLIENT_ID && env.BIG_GAMES_CLIENT_SECRET && bigGamesRedirectUri(env));
+  return bigGamesOAuthMissing(env, "inventory").length === 0;
+}
+
+function hatchBigGamesOAuthConfigured(env) {
+  return bigGamesOAuthMissing(env, "hatch_tracker").length === 0;
 }
 
 function requireBigGamesOAuth(env) {
-  if (!bigGamesOAuthConfigured(env)) throw httpError(500, "Missing BIG_GAMES_CLIENT_ID, BIG_GAMES_CLIENT_SECRET, or BIG_GAMES_REDIRECT_URI.");
+  const missing = bigGamesOAuthMissing(env, "inventory");
+  if (missing.length) throw httpError(500, `Missing ${missing.join(", ")}.`);
+}
+
+function requireHatchBigGamesOAuth(env) {
+  const missing = bigGamesOAuthMissing(env, "hatch_tracker");
+  if (missing.length) throw httpError(500, `Missing ${missing.join(", ")} on the inventory Worker for HTG Big Games auth.`);
+}
+
+function bigGamesOAuthMissing(env, purpose = "inventory") {
+  const app = bigGamesOAuthApp(env, purpose, { allowMissing: true });
+  const names = bigGamesOAuthEnvNames(purpose);
+  const missing = [];
+  if (!app.clientId) missing.push(names.clientId);
+  if (!app.clientSecret) missing.push(names.clientSecret);
+  if (!app.redirectUri) missing.push(names.redirectUri);
+  return missing;
+}
+
+function bigGamesOAuthAppForPendingState(env, pending) {
+  const metadata = pending?.metadata && typeof pending.metadata === "object" ? pending.metadata : {};
+  const purpose = metadata.purpose === "hatch_tracker" || metadata.oauth_app === "hatch_tracker"
+    ? "hatch_tracker"
+    : "inventory";
+  return bigGamesOAuthApp(env, purpose);
+}
+
+function bigGamesOAuthApp(env, purpose = "inventory", options = {}) {
+  const names = bigGamesOAuthEnvNames(purpose);
+  const app = {
+    purpose,
+    clientId: String(env[names.clientId] || "").trim(),
+    clientSecret: String(env[names.clientSecret] || "").trim(),
+    redirectUri: String(env[names.redirectUri] || "").trim()
+  };
+  if (!options.allowMissing) {
+    const missing = [];
+    if (!app.clientId) missing.push(names.clientId);
+    if (!app.clientSecret) missing.push(names.clientSecret);
+    if (!app.redirectUri) missing.push(names.redirectUri);
+    if (missing.length) throw httpError(500, `Missing ${missing.join(", ")}.`);
+  }
+  return app;
+}
+
+function bigGamesOAuthEnvNames(purpose = "inventory") {
+  if (purpose === "hatch_tracker") {
+    return {
+      clientId: "HATCH_BIG_GAMES_CLIENT_ID",
+      clientSecret: "HATCH_BIG_GAMES_CLIENT_SECRET",
+      redirectUri: "HATCH_BIG_GAMES_REDIRECT_URI"
+    };
+  }
+  return {
+    clientId: "BIG_GAMES_CLIENT_ID",
+    clientSecret: "BIG_GAMES_CLIENT_SECRET",
+    redirectUri: "BIG_GAMES_REDIRECT_URI"
+  };
+}
+
+function inventoryCredentialSecret(env) {
+  return String(env.INVENTORY_TOKEN_ENCRYPTION_SECRET || env.BIG_GAMES_TOKEN_ENCRYPTION_SECRET || env.BIG_GAMES_CLIENT_SECRET || env.HATCH_BIG_GAMES_CLIENT_SECRET || "").trim();
 }
 
 function bigGamesRedirectUri(env) {
@@ -604,7 +1079,7 @@ async function saveOAuthGrant(env, { userId, username, token, scopes, authorized
   await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
     grant_key: oauthGrantKey(userId),
     roblox_user_id: Number(userId),
-    access_token_ciphertext: await sealSecret(token.access_token, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token"),
+    access_token_ciphertext: await sealSecret(token.access_token, inventoryCredentialSecret(env), "big-games-access-token"),
     token_type: token.token_type || "Bearer",
     scope: scopes.join(" "),
     authorized_at: authorizedAt.toISOString(),
@@ -897,6 +1372,339 @@ async function postHourlyDiffIfNeeded(env, user, options = {}) {
   return { posted: true, post_key: postKey, totals: payload.totals };
 }
 
+async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
+  if (!latestSnapshot?.id) return { posted: false, reason: "No latest snapshot was provided." };
+  const userId = String(user.user_id || latestSnapshot.roblox_user_id || "").trim();
+  if (!userId) return { posted: false, reason: "No Roblox user_id was provided." };
+
+  const tracker = await fetchHatchTrackerByRobloxUser(env, userId);
+  if (!tracker) return { posted: false, reason: "Hatch tracker is not enabled for this Roblox account." };
+  if (!options.force && String(tracker.last_checked_snapshot_id || "") === String(latestSnapshot.id)) {
+    return { posted: false, reason: "Snapshot was already checked.", snapshot_id: latestSnapshot.id };
+  }
+
+  const snapshots = sortAsc(await getUserSnapshots(env, userId, 10));
+  const endIndex = snapshots.findIndex(snapshot => String(snapshot.id) === String(latestSnapshot.id));
+  const end = endIndex >= 0 ? snapshots[endIndex] : snapshots[snapshots.length - 1];
+  const start = endIndex > 0 ? snapshots[endIndex - 1] : snapshots[snapshots.length - 2];
+  if (!start || !end || start.id === end.id) {
+    await markHatchSnapshotChecked(env, tracker.discord_user_id, latestSnapshot.id);
+    return { posted: false, reason: "Need at least two snapshots before hatch alerts can compare inventory.", snapshot_id: latestSnapshot.id };
+  }
+
+  const diff = await buildDiffFromSnapshots(env, start, end);
+  const enabledTiers = new Set(hatchTrackerEnabledTiers(tracker));
+  const hatched = hatchAlertCandidates(diff.gained || [])
+    .filter(row => enabledTiers.has(row.tier));
+  if (!hatched.length) {
+    await markHatchSnapshotChecked(env, tracker.discord_user_id, latestSnapshot.id);
+    return { posted: false, reason: "No enabled Huge, Titanic, or Gargantuan gains were detected.", snapshot_id: latestSnapshot.id };
+  }
+
+  const featured = pickFeaturedHatch(hatched);
+  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, hatched, { start, end });
+  const discordResponse = await sendHatchAlert(env, payload);
+  const now = new Date().toISOString();
+
+  await supabaseInsert(env, HATCH_ALERTS_TABLE, [{
+    discord_user_id: tracker.discord_user_id,
+    roblox_user_id: Number(userId),
+    roblox_username: firstString(user.username, tracker.roblox_username, latestSnapshot.roblox_username, userId),
+    snapshot_start_id: start.id,
+    snapshot_end_id: end.id,
+    period_start: start.captured_at,
+    period_end: end.captured_at,
+    tier: featured.tier,
+    item_key: featured.item_key,
+    item_class: featured.item_class,
+    item_id: featured.item_id,
+    display_name: featured.display_name,
+    variant: featured.variant,
+    delta: featured.delta,
+    rap: featured.rap || 0,
+    icon: featured.icon || null,
+    image_url: featured.image_url || null,
+    all_gained: hatched.map(compactHatchCandidate),
+    discord_response: discordResponse || {},
+    created_at: now
+  }], "minimal");
+
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, { discord_user_id: `eq.${tracker.discord_user_id}` }, {
+    last_checked_snapshot_id: latestSnapshot.id,
+    last_checked_at: now,
+    last_alert_snapshot_id: latestSnapshot.id,
+    last_alert_at: now,
+    updated_at: now
+  });
+
+  return {
+    posted: true,
+    tier: featured.tier,
+    item: featured.display_name,
+    delta: featured.delta,
+    snapshot_id: latestSnapshot.id
+  };
+}
+
+function hatchAlertCandidates(rows) {
+  return (rows || [])
+    .map(row => {
+      const tier = hatchTier(row);
+      return tier ? {
+        ...row,
+        tier,
+        tier_priority: HATCH_TIER_PRIORITY[tier] || 0,
+        image_url: inventoryImageUrl(row.icon)
+      } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      b.tier_priority - a.tier_priority ||
+      Number(b.rap || 0) - Number(a.rap || 0) ||
+      Number(b.delta || 0) - Number(a.delta || 0) ||
+      String(a.display_name || "").localeCompare(String(b.display_name || ""))
+    );
+}
+
+function hatchTier(row) {
+  if (!isPetInventoryRow(row)) return "";
+  const name = normalizeHatchName(firstString(row.display_name, row.item_id, row.item_key));
+  if (!name) return "";
+  if (/\bgargantuan\b|\bgarg\b/.test(name)) return "gargantuan";
+  if (/\btitanic\b/.test(name)) return "titanic";
+  if (/\bhuge\b/.test(name)) return "huge";
+  return "";
+}
+
+function isPetInventoryRow(row) {
+  const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
+  const values = [
+    row?.item_class,
+    row?.item_category,
+    raw.class,
+    raw.category,
+    raw.collection,
+    raw.type,
+    raw.kind
+  ].map(value => String(value || "").toLowerCase());
+  const text = values.join(" ");
+  if (/\b(enchant|potion|fruit|booth|hoverboard|ultimate|misc|currency|egg)\b/.test(text)) return false;
+  if (values.some(value => value === "pet" || value === "pets" || value.includes("pet"))) return true;
+  return /^(huge|titanic|gargantuan|garg)\b/i.test(firstString(row?.display_name, row?.item_id));
+}
+
+function normalizeHatchName(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function pickFeaturedHatch(rows) {
+  return rows[0];
+}
+
+function compactHatchCandidate(row) {
+  return {
+    tier: row.tier,
+    item_key: row.item_key,
+    display_name: row.display_name,
+    variant: row.variant,
+    delta: row.delta,
+    rap: row.rap || 0,
+    image_url: row.image_url || null
+  };
+}
+
+function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapshots) {
+  const discordUserId = String(tracker.discord_user_id || "").trim();
+  const username = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
+  const displayItem = hatchDisplayItemName(featured);
+  const tier = hatchTierLabel(featured.tier);
+  const tierEmoji = featured.tier === "gargantuan" ? "💎" : featured.tier === "titanic" ? "🌌" : "✨";
+  const imageUrl = featured.image_url || "";
+  const rapLine = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
+  const extra = hatched.length > 1
+    ? `\n-# Also detected: ${hatched.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${hatchDisplayItemName(row)} x${shortInventoryNumber(row.delta)}`).join(", ")}`
+    : "";
+  const timestamp = snapshots?.end?.captured_at || new Date().toISOString();
+  const unix = Math.floor(new Date(timestamp).getTime() / 1000);
+  const templateContext = {
+    username: escapeDiscordMarkdown(username),
+    displayItem: escapeDiscordMarkdown(displayItem),
+    tier,
+    tierEmoji,
+    rapLine,
+    quantityText: Number(featured.delta) > 1 ? ` x${shortInventoryNumber(featured.delta)}` : "",
+    extra
+  };
+  const alertText = hatchAlertTemplate(featured.tier, templateContext);
+
+  return {
+    username: "Oapl's 3rd-Eye",
+    allowed_mentions: discordUserId ? { users: [discordUserId] } : { parse: [] },
+    flags: DISCORD_COMPONENTS_V2_FLAG,
+    components: [
+      {
+        type: 17,
+        accent_color: HATCH_ALERT_COLOR,
+        components: [
+          { type: 10, content: `## HATCHING ALERTS ${discordUserId ? `||<@${discordUserId}>||` : ""}` },
+          { type: 14, divider: true, spacing: 1 },
+          imageUrl
+            ? {
+                type: 9,
+                components: [{ type: 10, content: alertText }],
+                accessory: {
+                  type: 11,
+                  media: { url: imageUrl },
+                  description: `${tier} ${displayItem}`
+                }
+              }
+            : { type: 10, content: alertText },
+          { type: 14, divider: true, spacing: 1 },
+          { type: 10, content: `-# **${HATCH_ALERT_FOOTER_TEXT}** · <t:${unix}:R>` }
+        ]
+      }
+    ]
+  };
+}
+
+function hatchAlertTemplate(tier, context) {
+  if (tier === "gargantuan") return gargantuanHatchAlertTemplate(context);
+  if (tier === "titanic") return titanicHatchAlertTemplate(context);
+  return hugeHatchAlertTemplate(context);
+}
+
+function hugeHatchAlertTemplate(context) {
+  return [
+    ".⋆˚࿔𖥔 ݁ ˖𓂃.˖✧˖.𓂃˖ ࣪ ⊹✶°⋆.",
+    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
+    `💎 **RAP:** ${context.rapLine}`,
+    "┊         ┊       ┊   ┊    ┊        ┊",
+    "┊         ┊       ┊   ┊   ˚★⋆｡˚  ⋆",
+    "┊         ┊       ┊   ⋆",
+    "┊         ┊       ★⋆",
+    "┊ ◦",
+    "★⋆      ┊ .  ˚",
+    "           ˚★",
+    context.extra
+  ].filter(Boolean).join("\n");
+}
+
+function titanicHatchAlertTemplate(context) {
+  return [
+    "✦・ﾟ: *✧･ﾟ:* TITANIC HATCH *:･ﾟ✧*:･ﾟ✦",
+    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
+    `💎 **RAP:** ${context.rapLine}`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    "˚₊‧꒰ა ☆ ໒꒱ ‧₊˚",
+    context.extra
+  ].filter(Boolean).join("\n");
+}
+
+function gargantuanHatchAlertTemplate(context) {
+  return [
+    "✧･ﾟ: *✧･ﾟ:* GARGANTUAN HATCH *:･ﾟ✧*:･ﾟ✧",
+    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
+    `💎 **RAP:** ${context.rapLine}`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    "⋆｡ﾟ☁︎｡⋆｡ ﾟ☾ ﾟ｡⋆",
+    context.extra
+  ].filter(Boolean).join("\n");
+}
+
+async function sendHatchAlert(env, payload) {
+  const assignedConfigs = await fetchEnabledHatchGuildConfigs(env).catch(() => []);
+  const botToken = String(env.DISCORD_BOT_TOKEN || "").trim();
+  if (assignedConfigs.length) {
+    if (!botToken) {
+      throw httpError(500, "HTG hatch-alert channels are assigned, but DISCORD_BOT_TOKEN is not set on the inventory Worker.");
+    }
+    const destinations = [];
+    for (const config of assignedConfigs) {
+      const channelId = String(config.channel_id || "").trim();
+      if (!channelId) continue;
+      const posted = await sendHatchAlertBotMessage(channelId, botToken, payload);
+      destinations.push({
+        guild_id: config.guild_id || null,
+        channel_id: channelId,
+        response: posted
+      });
+    }
+    if (!destinations.length) throw httpError(500, "HTG hatch-alert assignments exist, but none contain a channel_id.");
+    return { ok: true, mode: "assigned_channels", destinations };
+  }
+
+  const channelId = hatchAlertChannelId(env);
+  if (channelId && botToken) {
+    return sendHatchAlertBotMessage(channelId, botToken, payload);
+  }
+
+  const webhookUrl = hatchAlertWebhookUrl(env);
+  if (!webhookUrl) throw httpError(500, "Set HATCH_ALERT_CHANNEL_ID + DISCORD_BOT_TOKEN or HATCH_ALERT_WEBHOOK_URL on the inventory Worker.");
+  const url = new URL(webhookUrl);
+  url.searchParams.set("wait", "true");
+  return sendDiscordWebhook(url.toString(), payload);
+}
+
+async function sendHatchAlertBotMessage(channelId, botToken, payload) {
+  const { username, ...botPayload } = payload;
+  const res = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${botToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(botPayload)
+  });
+  const text = await res.text();
+  if (!res.ok) throw httpError(res.status, `Discord hatch alert bot post failed: ${text.slice(0, 500)}`);
+  try { return text ? JSON.parse(text) : { ok: true }; } catch { return { ok: true, response: text }; }
+}
+
+async function markHatchSnapshotChecked(env, discordUserId, snapshotId) {
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, { discord_user_id: `eq.${discordUserId}` }, {
+    last_checked_snapshot_id: snapshotId,
+    last_checked_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+}
+
+function hatchDisplayItemName(row) {
+  const raw = String(firstString(row.display_name, row.item_id, row.item_key, "pet")).trim();
+  return raw.replace(/^(Huge|Titanic|Gargantuan|Garg)\s+/i, "").trim() || raw;
+}
+
+function hatchTierLabel(tier) {
+  const normalized = String(tier || "").toLowerCase();
+  if (normalized === "gargantuan") return "GARGANTUAN";
+  if (normalized === "titanic") return "TITANIC";
+  return "HUGE";
+}
+
+function inventoryImageUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+  return `https://ps99.biggamesapi.io/image/${encodeURIComponent(text)}`;
+}
+
+function hatchAlertChannelId(env) {
+  return String(env.HATCH_ALERT_CHANNEL_ID || env.HATCHING_ALERTS_CHANNEL_ID || "").trim();
+}
+
+function hatchAlertWebhookUrl(env) {
+  return String(env.HATCH_ALERT_WEBHOOK_URL || env.HATCHING_ALERTS_WEBHOOK_URL || "").trim();
+}
+
+function hatchOAuthReturnUrl(env) {
+  return String(env.HATCH_TRACKER_RETURN_URL || env.INVENTORY_OAUTH_RETURN_URL || "").trim();
+}
+
 function buildDiscordPayload(user, diffPayload) {
   const gained = diffPayload.gained || [];
   const lost = diffPayload.lost || [];
@@ -1077,7 +1885,7 @@ function pickPreviousSnapshots(snapshots) {
 }
 
 async function fetchAuthorizedInventory(env, grant, options = {}) {
-  const accessToken = await openSecret(grant.access_token_ciphertext, env.BIG_GAMES_CLIENT_SECRET, "big-games-access-token");
+  const accessToken = await openSecret(grant.access_token_ciphertext, inventoryCredentialSecret(env), "big-games-access-token");
   let payload;
   try {
     payload = await fetchInventoryWithAccessToken(env, accessToken, options);
@@ -1848,6 +2656,11 @@ function parseBool(v) { if (v === null || v === undefined || v === "") return nu
 function envBool(value, fallback = false) { const parsed = parseBool(value); return parsed === null ? fallback : parsed; }
 function fmtNumber(n) { return Number(n || 0).toLocaleString("en-US"); }
 function formatDiscordTime(iso) { return new Date(iso).toLocaleString("en-US", { timeZone: DEFAULT_TIME_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+function firstString(...values) { for (const value of values) { const text = String(value ?? "").trim(); if (text) return text; } return ""; }
+function requiredDiscordSnowflake(value, label) { const text = firstString(value); if (!/^\d{10,24}$/.test(text)) throw httpError(400, `A valid ${label || "Discord ID"} is required.`); return text; }
+function shortInventoryNumber(value) { const number = Number(value); if (!Number.isFinite(number)) return "-"; const abs = Math.abs(number); if (abs >= 1e12) return `${(number / 1e12).toFixed(2).replace(/\.?0+$/, "")}T`; if (abs >= 1e9) return `${(number / 1e9).toFixed(2).replace(/\.?0+$/, "")}B`; if (abs >= 1e6) return `${(number / 1e6).toFixed(2).replace(/\.?0+$/, "")}M`; if (abs >= 1e3) return `${(number / 1e3).toFixed(2).replace(/\.?0+$/, "")}K`; return Math.round(number).toLocaleString("en-US"); }
+function escapeDiscordMarkdown(value) { return String(value || "").replace(/([\\`*_~|])/g, "\\$1"); }
+async function readJsonOptional(request) { const text = await request.text().catch(() => ""); if (!String(text || "").trim()) return {}; try { const parsed = JSON.parse(text); return parsed && typeof parsed === "object" ? parsed : {}; } catch { throw httpError(400, "Request body must be valid JSON."); } }
 function randomBase64Url(byteLength) { const bytes = new Uint8Array(byteLength); crypto.getRandomValues(bytes); return bytesToBase64Url(bytes); }
 async function sha256Base64Url(value) { return bytesToBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value))))); }
 async function secretKey(secret, context) { const material = new TextEncoder().encode(`${context}:${secret}`); const digest = await crypto.subtle.digest("SHA-256", material); return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]); }

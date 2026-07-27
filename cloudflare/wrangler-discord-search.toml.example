@@ -9,6 +9,14 @@ crons = ["0 * * * *"]
 CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
 LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev"
 SERVERS_API_BASE = "https://c0ld-servers-worker.opal-dde.workers.dev"
+# The service binding below is preferred for HTG; public Worker-to-Worker fetches
+# can fail with Cloudflare 1042 on same-zone workers.dev routes.
+INVENTORY_API_BASE = ""
+INVENTORY_API_USE_SERVICE_BINDING = "true"
+# Optional. Comma-separated image URLs for the /htg setup pages.
+HTG_SETUP_STEP_IMAGE_URLS = ""
+# Optional. Small image shown in the /htg setup header.
+HTG_SETUP_THUMBNAIL_URL = ""
 # Missing or older league snapshots are refreshed on demand by /lg info.
 LEAGUE_ON_DEMAND_MAX_AGE_SECONDS = "1800"
 PROFILE_DATA_BASE = "https://c0ld-clan.com/Data/players"
@@ -50,9 +58,14 @@ service = "yamo-league-api-worker"
 binding = "SERVERS_API_WORKER"
 service = "c0ld-servers-worker"
 
+[[services]]
+binding = "INVENTORY_API_WORKER"
+service = "inventory-detector-worker"
+
 # Set these with `wrangler secret put ...` or in Cloudflare Worker settings:
 # DISCORD_PUBLIC_KEY
 # DISCORD_BOT_TOKEN
 # REGISTER_ADMIN_TOKEN
 # LEAGUE_INGEST_ADMIN_TOKEN (must match the league Worker's INGEST_ADMIN_TOKEN)
 # CLAN_API_ADMIN_TOKEN (must match the clan API Worker's INGEST_ADMIN_TOKEN)
+# INVENTORY_API_TOKEN (must match the inventory Worker's INGEST_ADMIN_TOKEN)

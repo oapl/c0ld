@@ -25,7 +25,7 @@ const COMPONENT_TYPE_SEPARATOR = 14;
 const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
-const LUNA_GENIE_THUMBNAIL_URL = "https://static.wikia.nocookie.net/pet-simulator/images/3/31/PS99_Huge_Genie_Fox_%28Golden%29.png";
+const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
 const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
@@ -57,6 +57,8 @@ const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
+const HTG_BUILD_ID = "htg-debug-2026-07-27e";
+const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/jSkBQzx.png", "", ""];
 let chartDuckImagePromise = null;
 
 export default {
@@ -135,6 +137,16 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-hourly-command") {
         requireAdmin(request, env);
         return await registerHourlyCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-htg-command") {
+        requireAdmin(request, env);
+        return await registerHtgCommand(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/htg/status") {
+        requireAdmin(request, env);
+        return json(await htgApiStatus(env));
       }
 
       if (request.method === "POST" && url.pathname === "/admin/hourly/run") {
@@ -410,6 +422,11 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(handleLeagueChartComponent(interaction, env, ctx));
     }
 
+    const hatchSetup = parseHtgSetupCustomId(interaction.data?.custom_id);
+    if (hatchSetup) {
+      return interactionJson(handleHtgSetupComponent(interaction, env, ctx, hatchSetup));
+    }
+
     return interactionJson(handleHistoryComponent(interaction, env, ctx));
   }
 
@@ -553,6 +570,34 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "htg") {
+    const subcommand = getSubcommandName(interaction);
+    const hatchSubcommand = subcommand === "setup" || subcommand === "alert" ? "tracker" : subcommand;
+    if (!["tracker", "enable", "disable", "assign"].includes(hatchSubcommand)) {
+      return interactionJson(messageResponse("Use `/htg setup`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
+    }
+
+    if (hatchSubcommand === "assign") {
+      const permitted = await memberCanManageServerTracker(interaction, env, {
+        allowDiscordManage: false
+      });
+      if (!permitted) {
+        return interactionJson(messageResponse(
+          "You need the configured Luna administrator role to assign the HTG hatch-alert channel.",
+          true
+        ));
+      }
+    }
+
+    ctx.waitUntil(completeHatchInteraction(interaction, env, hatchSubcommand));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: MESSAGE_FLAG_EPHEMERAL
+      }
+    });
+  }
+
   if (["server", "add", "remove", "luna"].includes(commandName)) {
     const subcommand = getSubcommandName(interaction);
     const publicAction = commandName === "server" && subcommand === "who";
@@ -595,14 +640,13 @@ async function handleInteraction(request, env, ctx) {
     return interactionJson(messageResponse("Use `/search username:<roblox username>`.", true));
   }
 
-  try {
-    return interactionJson(await buildSearchResponse(username, env));
-  } catch (err) {
-    return interactionJson(messageResponse(
-      `Search failed: ${err?.message || String(err)}`,
-      true
-    ));
-  }
+  ctx.waitUntil(completeSearchInteraction(interaction, env, username));
+  return interactionJson({
+    type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+    data: {
+      flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+    }
+  });
 }
 
 async function buildSearchResponse(query, env) {
@@ -617,6 +661,7 @@ async function buildSearchResponse(query, env) {
   }
 
   const row = payload.row;
+  const avatarUrl = await searchAvatarUrl(row, env);
   const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
@@ -644,17 +689,72 @@ async function buildSearchResponse(query, env) {
     ].filter(line => line !== null).join("\n")
   };
 
-  if (row.avatar_url) {
-    embed.thumbnail = { url: row.avatar_url };
+  if (avatarUrl) {
+    embed.thumbnail = { url: avatarUrl };
   }
 
   return {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
     data: {
       embeds: [embed],
-      flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
+      allowed_mentions: { parse: [] }
     }
   };
+}
+
+async function completeSearchInteraction(interaction, env, query) {
+  try {
+    const response = await buildSearchResponse(query, env);
+    await editOriginalInteraction(interaction, normalizeDeferredSearchData(response.data, env));
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Search failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+function normalizeDeferredSearchData(data, env) {
+  const normalized = { ...(data || {}) };
+  normalized.flags = ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined;
+  normalized.allowed_mentions = normalized.allowed_mentions || { parse: [] };
+  return normalized;
+}
+
+async function searchAvatarUrl(row, env) {
+  const existing = absoluteProfileAssetUrl(
+    row?.avatar_url || row?.avatarUrl || row?.thumbnail_url || row?.thumbnailUrl,
+    env
+  );
+  if (existing) return existing;
+
+  const userId = positiveInteger(row?.user_id || row?.roblox_user_id || row?.robloxUserId || row?.id);
+  if (!userId) return null;
+
+  const url = new URL("https://thumbnails.roblox.com/v1/users/avatar-headshot");
+  url.searchParams.set("userIds", String(userId));
+  url.searchParams.set("size", "150x150");
+  url.searchParams.set("format", "Png");
+  url.searchParams.set("isCircular", "false");
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "c0ld-Discord-Search-Avatar"
+      }
+    });
+    const payload = await res.json().catch(() => ({}));
+    const item = Array.isArray(payload.data) ? payload.data.find(entry => entry?.imageUrl) : null;
+    const imageUrl = String(item?.imageUrl || "").trim();
+    return /^https?:\/\//i.test(imageUrl) ? imageUrl : null;
+  } catch (err) {
+    return null;
+  }
 }
 
 async function completeServerTrackerInteraction(interaction, env, commandName, subcommand) {
@@ -791,6 +891,436 @@ function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
     components: [],
     allowed_mentions: { parse: [] }
   };
+}
+
+async function completeHatchInteraction(interaction, env, subcommand) {
+  let discordUserId = "";
+  let discordUsername = "";
+  try {
+    discordUserId = interactionUserId(interaction);
+    discordUsername = interactionUsername(interaction);
+    if (!discordUserId) throw httpError(400, "Discord user identity was not included in the interaction.");
+
+    let payload;
+    if (subcommand === "tracker") {
+      payload = await hatchApiRequest(env, "/api/hatch/oauth/start", {
+        method: "POST",
+        body: {
+          discord_user_id: discordUserId,
+          discord_username: discordUsername
+        }
+      });
+      await editOriginalInteraction(interaction, buildHatchSetupMessage(payload, { discordUserId, page: 0, env }));
+      return;
+    }
+
+    if (subcommand === "assign") {
+      const guildId = String(interaction.guild_id || "").trim();
+      const sourceChannelId = String(interaction.channel_id || "").trim();
+      const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
+      if (!guildId) throw httpError(400, "HTG hatch alerts can only be assigned inside a Discord server.");
+      const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
+      if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel.type))) {
+        throw httpError(400, "Select a text channel, announcement channel, or existing Discord thread.");
+      }
+
+      payload = await hatchApiRequest(env, "/api/hatch/guild-config", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: requestedChannelId,
+          channel_type: Number(channel.type),
+          assigned_by: discordUserId,
+          enabled: true
+        }
+      });
+
+      await editOriginalInteraction(interaction, {
+        content: payload.config
+          ? `HTG hatch alerts are assigned to <#${requestedChannelId}>. Hatch alerts will only post to assigned HTG channels.`
+          : `HTG hatch-alert assignment was saved for <#${requestedChannelId}>.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] },
+        flags: MESSAGE_FLAG_EPHEMERAL
+      });
+      return;
+    }
+
+    payload = await hatchApiRequest(env, "/api/hatch/tracker", {
+      method: "POST",
+      body: {
+        action: subcommand,
+        tier: getCommandOption(interaction, "tier") || "all",
+        discord_user_id: discordUserId,
+        discord_username: discordUsername
+      }
+    });
+    await editOriginalInteraction(interaction, buildHatchTrackerMessage(payload, {
+      mode: subcommand,
+      discordUserId
+    }));
+  } catch (err) {
+    if (subcommand === "tracker") {
+      await editOriginalInteraction(interaction, buildHatchSetupMessage({
+        ok: false,
+        tracker: {},
+        setup_error: err?.message || String(err)
+      }, {
+        discordUserId,
+        page: 0,
+        env
+      })).catch(() => null);
+      return;
+    }
+
+    await editOriginalInteraction(interaction, {
+      content: `Hatch tracker failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] },
+      flags: MESSAGE_FLAG_EPHEMERAL
+    }).catch(() => null);
+  }
+}
+
+function handleHtgSetupComponent(interaction, env, ctx, state) {
+  const userId = interactionUserId(interaction);
+  if (!userId || userId !== state.ownerId) {
+    return messageResponse("Only the person who ran `/htg setup` can use these setup controls.", true);
+  }
+
+  ctx.waitUntil(completeHtgSetupPageInteraction(interaction, env, state));
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completeHtgSetupPageInteraction(interaction, env, state) {
+  const discordUserId = interactionUserId(interaction);
+  const discordUsername = interactionUsername(interaction);
+  const page = normalizedHtgSetupPage(state.page);
+  let payload;
+
+  try {
+    payload = page === 0
+      ? await hatchApiRequest(env, "/api/hatch/oauth/start", {
+        method: "POST",
+        body: {
+          discord_user_id: discordUserId,
+          discord_username: discordUsername
+        }
+      })
+      : await hatchApiRequest(env, "/api/hatch/tracker/status", {
+        query: { discord_user_id: discordUserId }
+      });
+  } catch (err) {
+    payload = {
+      ok: false,
+      tracker: {},
+      setup_error: err?.message || String(err)
+    };
+  }
+
+  await editOriginalInteraction(interaction, buildHatchSetupMessage(payload, {
+    discordUserId,
+    page,
+    env
+  }));
+}
+
+function buildHatchSetupMessage(payload, context = {}) {
+  const page = normalizedHtgSetupPage(context.page);
+  const pages = htgSetupPages(payload, context);
+  const current = pages[page];
+  const authUrl = String(payload.authorize_url || "").trim();
+  const setupError = String(payload.setup_error || "").trim();
+  const imageUrl = htgSetupPageImageUrl(context.env, page);
+  const thumbnailUrl = String(context.env?.HTG_SETUP_THUMBNAIL_URL || LUNA_REWARD_THUMBNAIL_URL || "").trim();
+  const footerLines = [];
+  if (page === 0 && authUrl) {
+    footerLines.push("-# The private auth link expires in about 10 minutes. *(the button link)*");
+  } else if (page === 0 && setupError) {
+    footerLines.push(`-# Setup issue: ${escapeDiscordMarkdown(setupError)}`);
+  }
+
+  const titleText = {
+    type: COMPONENT_TYPE_TEXT_DISPLAY,
+    content: [
+      "## HTG Hatch Alert Setup",
+      `**Step ${page + 1} of ${pages.length}: ${current.title}**`
+    ].join("\n")
+  };
+  const bodyText = {
+    type: COMPONENT_TYPE_TEXT_DISPLAY,
+    content: current.body
+  };
+  const components = [
+    thumbnailUrl
+      ? {
+          type: COMPONENT_TYPE_SECTION,
+          components: [titleText],
+          accessory: {
+            type: COMPONENT_TYPE_THUMBNAIL,
+            media: { url: thumbnailUrl },
+            description: "HTG hatch tracker"
+          }
+        }
+      : titleText,
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    bodyText
+  ];
+
+  if (imageUrl) {
+    components.push(
+      { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+      {
+        type: COMPONENT_TYPE_MEDIA_GALLERY,
+        items: [
+          {
+            media: { url: imageUrl },
+            description: `HTG setup step ${page + 1}`
+          }
+        ]
+      }
+    );
+  }
+
+  const afterImageBody = String(current.afterImageBody || "").trim();
+  if (afterImageBody) {
+    components.push(
+      { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+      {
+        type: COMPONENT_TYPE_TEXT_DISPLAY,
+        content: afterImageBody
+      }
+    );
+  }
+
+  components.push(
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_ACTION_ROW,
+      components: htgSetupButtons({
+        ownerId: context.discordUserId,
+        page,
+        pageCount: pages.length,
+        authUrl
+      })
+    }
+  );
+
+  if (footerLines.length) {
+    components.push({
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: footerLines.join("\n")
+    });
+  }
+
+  return {
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: setupError ? 0xff6b72 : 0xff9f43,
+        components
+      }
+    ],
+    embeds: [],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | MESSAGE_FLAG_EPHEMERAL
+  };
+}
+
+function htgSetupPages(payload, context = {}) {
+  return [
+    {
+      title: "Connect to Big Games DB",
+      body: [
+        "If you haven't already linked your ROBLOX account to the Big Games DB then you will need to for this feature to work: <https://db.biggames.io/>",
+        "",
+        "Then you'll need to allow this bot to see your inventory by clicking the \"Connect Big Games DB\" button.",
+        "-# It can only view your inventory to detect the huges, titanics, etc...",
+        "",
+        "If comfortable, click **Approve Access**."
+      ].join("\n"),
+      afterImageBody: "This will **NOT** require you to make your inventory public, nor will it make the inventory public view."
+    },
+    {
+      title: "Approve Inventory Access",
+      body: [
+        "On the Big Games page, approve the Pet Simulator 99 inventory permission for this tracker.",
+        "This uses OAuth. It does **not** ask for `.ROBLOSECURITY`, and it only connects the Discord account that ran this command."
+      ].join("\n")
+    },
+    {
+      title: "Enable The Alerts",
+      body: [
+        "After the browser says the inventory tracker connected, return here and choose what you want tracked.",
+        "Use `/htg enable tier:all`, or enable only `huge`, `titanic`, or `gargantuan`.",
+        "Use `/htg disable tier:<choice>` any time to turn off one tier or all tiers for yourself."
+      ].join("\n")
+    }
+  ];
+}
+
+function htgSetupButtons({ ownerId, page, pageCount, authUrl }) {
+  const controls = [];
+  if (page > 0) {
+    controls.push({
+      type: COMPONENT_TYPE_BUTTON,
+      style: BUTTON_STYLE_SECONDARY,
+      label: "Back",
+      custom_id: htgSetupCustomId(ownerId, page - 1)
+    });
+  }
+
+  if (authUrl) {
+    controls.push({
+      type: COMPONENT_TYPE_BUTTON,
+      style: BUTTON_STYLE_LINK,
+      label: "Connect Big Games DB",
+      url: authUrl
+    });
+  }
+
+  if (page < pageCount - 1) {
+    controls.push({
+      type: COMPONENT_TYPE_BUTTON,
+      style: BUTTON_STYLE_PRIMARY,
+      label: "Next",
+      custom_id: htgSetupCustomId(ownerId, page + 1)
+    });
+  }
+
+  if (!controls.length) {
+    controls.push({
+      type: COMPONENT_TYPE_BUTTON,
+      style: BUTTON_STYLE_SECONDARY,
+      label: "Start Over",
+      custom_id: htgSetupCustomId(ownerId, 0)
+    });
+  }
+
+  return controls.slice(0, 5);
+}
+
+function parseHtgSetupCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts[0] !== "htgsetup") return null;
+  const ownerId = String(parts[1] || "").trim();
+  const page = normalizedHtgSetupPage(parts[2]);
+  return ownerId ? { ownerId, page } : null;
+}
+
+function htgSetupCustomId(ownerId, page) {
+  return `htgsetup|${String(ownerId || "").trim()}|${normalizedHtgSetupPage(page)}`;
+}
+
+function normalizedHtgSetupPage(value) {
+  const page = Math.round(Number(value));
+  if (!Number.isFinite(page) || page < 0) return 0;
+  return Math.min(2, page);
+}
+
+function htgSetupPageImageUrl(env, page) {
+  const urls = htgSetupImageUrls(env);
+  return urls[normalizedHtgSetupPage(page)] || "";
+}
+
+function htgSetupImageUrls(env) {
+  const defaults = [...DEFAULT_HTG_SETUP_STEP_IMAGE_URLS];
+  const jsonText = String(env?.HTG_SETUP_STEP_IMAGES_JSON || "").trim();
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (Array.isArray(parsed)) {
+        return [0, 1, 2].map(index => String(parsed[index] || defaults[index] || "").trim());
+      }
+      if (parsed && typeof parsed === "object") {
+        return [0, 1, 2].map(index => String(parsed[index + 1] || parsed[index] || defaults[index] || "").trim());
+      }
+    } catch {}
+  }
+
+  const configured = parseCsv(env?.HTG_SETUP_STEP_IMAGE_URLS)
+    .map(value => String(value || "").trim());
+  return [0, 1, 2].map(index => configured[index] || defaults[index] || "");
+}
+
+function buildHatchTrackerMessage(payload, context = {}) {
+  const tracker = payload.tracker || {};
+  const connected = Boolean(tracker.connected);
+  const enabled = Boolean(tracker.enabled);
+  const authUrl = String(payload.authorize_url || "").trim();
+  const robloxName = tracker.roblox_username || tracker.roblox_user_id || "not connected";
+  const enabledTiers = Array.isArray(tracker.enabled_tiers) && tracker.enabled_tiers.length
+    ? tracker.enabled_tiers.map(hatchTierDisplayName).join(", ")
+    : "None";
+  const statusLine = connected
+    ? `**Connected Roblox:** ${escapeDiscordMarkdown(String(robloxName))}${tracker.roblox_user_id ? ` (${tracker.roblox_user_id})` : ""}`
+    : "**Connected Roblox:** Not connected";
+  const enabledLine = `**Alerts:** ${enabled ? "Enabled" : "Disabled"}`;
+  const tierLine = `**Tracked tiers:** ${enabledTiers}`;
+  const expiryLine = tracker.authorization_expires_at
+    ? `**Big Games access expires:** ${discordTime(tracker.authorization_expires_at)}`
+    : "**Big Games access expires:** Not connected";
+  const intro = context.mode === "tracker"
+    ? "Connect your Big Games DB inventory access, then enable hatch alerts when ready."
+    : payload.message || "Hatch tracker updated.";
+
+  const components = [
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: [
+        "## Huge / Titanic / Gargantuan Tracker",
+        intro,
+        "",
+        statusLine,
+        enabledLine,
+        tierLine,
+        expiryLine,
+        "",
+        "`/htg enable tier:<choice>` turns alerts on for your Discord account only.",
+        "`/htg disable tier:<choice>` turns alerts off for your Discord account only."
+      ].join("\n")
+    }
+  ];
+
+  if (authUrl) {
+    components.push(
+      { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+      {
+        type: COMPONENT_TYPE_ACTION_ROW,
+        components: [
+          {
+            type: COMPONENT_TYPE_BUTTON,
+            style: BUTTON_STYLE_LINK,
+            label: "Connect Big Games DB",
+            url: authUrl
+          }
+        ]
+      }
+    );
+  }
+
+  return {
+    components: [
+      {
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0xff9b96,
+        components
+      }
+    ],
+    embeds: [],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | MESSAGE_FLAG_EPHEMERAL
+  };
+}
+
+function hatchTierDisplayName(tier) {
+  const normalized = String(tier || "").toLowerCase();
+  if (normalized === "gargantuan") return "Gargantuan";
+  if (normalized === "titanic") return "Titanic";
+  if (normalized === "huge") return "Huge";
+  return normalized || "Unknown";
 }
 
 async function completeHourlyClanInteraction(interaction, env) {
@@ -5282,6 +5812,10 @@ async function registerHourlyCommand(url, env) {
   return registerCommand(url, env, hourlyCommandPayload());
 }
 
+async function registerHtgCommand(url, env) {
+  return registerCommand(url, env, htgCommandPayload());
+}
+
 async function registerRewardCommandSet(url, env) {
   const payloads = rewardCommandPayloads();
   const results = [];
@@ -5315,7 +5849,8 @@ async function registerAllCommands(url, env) {
     serverCommandPayload(),
     addCommandPayload(),
     removeCommandPayload(),
-    hourlyCommandPayload()
+    hourlyCommandPayload(),
+    htgCommandPayload()
   ];
 
   const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
@@ -5374,7 +5909,8 @@ async function syncGlobalCommands(url, env) {
     serverCommandPayload(),
     addCommandPayload(),
     removeCommandPayload(),
-    hourlyCommandPayload()
+    hourlyCommandPayload(),
+    htgCommandPayload()
   ];
 
   const deletedGuildCommands = [];
@@ -5600,6 +6136,7 @@ async function buildVersionResponse(env) {
   const roblox = await fetchRobloxReleasedVersionForCommand(env).catch(err => ({
     version: "-",
     upload: "-",
+    uploadLabel: "-",
     scanned: "-",
     error: err?.message || String(err)
   }));
@@ -5635,12 +6172,12 @@ async function completeVersionInteraction(interaction, env) {
 
 function versionStatusMessageData(status) {
   const roblox = status.roblox || {};
-  const robloxLine = roblox.error
-    ? "- `Roblox` unavailable"
-    : `- \`Roblox\` **${escapeDiscordMarkdown(roblox.version || "-")}**`;
-  const robloxScanLine = roblox.error
-    ? `-# Roblox scan unavailable: ${escapeDiscordMarkdown(truncateHistoryText(roblox.error, 180))}`
-    : `- \`Roblox Scan\` ${escapeDiscordMarkdown(roblox.scanned || "-")}`;
+  const robloxLines = roblox.error
+    ? [`**Roblox:** -`, `**Released:** unavailable`, `-# Roblox lookup failed: ${escapeDiscordMarkdown(truncateHistoryText(roblox.error, 180))}`]
+    : [
+        `**Roblox:** ${escapeDiscordMarkdown(roblox.version || "-")}`,
+        `**Released:** ${versionTimeLabel(roblox.releaseAt, roblox.releaseLabel)}`
+      ];
 
   return {
     flags: MESSAGE_FLAG_COMPONENTS_V2,
@@ -5657,15 +6194,14 @@ function versionStatusMessageData(status) {
                 type: COMPONENT_TYPE_TEXT_DISPLAY,
                 content: [
                   "## PS99 Version Monitor",
-                  `**${escapeDiscordMarkdown(status.placeName || "Pet Simulator 99")}**`,
                   `-# updated ${versionTimeLabel(status.lastScannedAt, status.lastScannedLabel)}`
                 ].join("\n")
               }
             ],
             accessory: {
               type: COMPONENT_TYPE_THUMBNAIL,
-              media: { url: LUNA_GENIE_THUMBNAIL_URL },
-              description: "Golden Genie Fox"
+              media: { url: LUNA_REWARD_THUMBNAIL_URL },
+              description: "Luna reward icon"
             }
           },
           { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
@@ -5673,10 +6209,10 @@ function versionStatusMessageData(status) {
             type: COMPONENT_TYPE_TEXT_DISPLAY,
             content: [
               "### Current",
-              `- \`PS99\` **${escapeDiscordMarkdown(status.version || "-")}**`,
-              `- \`Release\` ${versionTimeLabel(status.releaseAt, status.releaseLabel)}`,
-              robloxLine,
-              robloxScanLine
+              `**PS99:** ${escapeDiscordMarkdown(status.version || "-")}`,
+              `**Released:** ${versionTimeLabel(status.releaseAt, status.releaseLabel)}`,
+              "",
+              ...robloxLines
             ].join("\n")
           },
           { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
@@ -5715,11 +6251,35 @@ async function fetchRobloxReleasedVersionForCommand(env) {
   }
 
   const state = Array.isArray(payload.states) ? payload.states[0] : null;
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  const version = state?.current_version || payload.current_version || "-";
+  const matchingEvent = events.find(event => String(event?.current_version || "") === String(version || "")) || events[0] || null;
+  const upload = state?.client_version_upload || payload.client_version_upload || matchingEvent?.current_client_version_upload || "-";
+  const releaseAt = firstValidDateValue(
+    state?.client_version_upload,
+    payload.client_version_upload,
+    matchingEvent?.current_client_version_upload,
+    matchingEvent?.detected_at,
+    payload.newest_detected_at,
+    state?.last_checked_at
+  );
   return {
-    version: state?.current_version || payload.current_version || "-",
-    upload: state?.client_version_upload || payload.client_version_upload || "-",
+    version,
+    upload,
+    releaseAt,
+    releaseLabel: formatPs99CommandDate(releaseAt),
     scanned: formatPs99CommandDate(state?.last_checked_at || payload.newest_detected_at)
   };
+}
+
+function firstValidDateValue(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    const time = new Date(text).getTime();
+    if (Number.isFinite(time) && time > 0) return text;
+  }
+  return "";
 }
 
 async function buildRewardsResponse(interaction, env, forcedType = null) {
@@ -6286,6 +6846,7 @@ async function fetchGlobalSearchPayload(query, env) {
   const apiUrl = clanApiUrl(env, "/api/global/search", apiBase);
   apiUrl.searchParams.set("clan", scanClan);
   apiUrl.searchParams.set("q", query);
+  apiUrl.searchParams.set("avatars", "1");
 
   const res = await fetchClanApi(env, apiUrl, {
     headers: {
@@ -6351,6 +6912,7 @@ async function fetchGlobalCurrentFallback(env, apiBase, scanClan, query) {
   const currentUrl = clanApiUrl(env, "/api/global/current", apiBase);
   currentUrl.searchParams.set("clan", scanClan);
   currentUrl.searchParams.set("limit", "1000");
+  currentUrl.searchParams.set("avatars", "1");
 
   const res = await fetchClanApi(env, currentUrl, {
     headers: {
@@ -6482,6 +7044,162 @@ async function serverTrackerApiRequest(env, path, options = {}) {
 
 function hasServersApiServiceBinding(env) {
   return Boolean(env?.SERVERS_API_WORKER && typeof env.SERVERS_API_WORKER.fetch === "function");
+}
+
+async function htgApiStatus(env) {
+  const token = String(env.INVENTORY_API_TOKEN || env.HATCH_TRACKER_API_TOKEN || "").trim();
+  const configuredBase = String(env.INVENTORY_API_BASE || "").trim().replace(/\/$/, "");
+  const explicitServiceBinding = String(env.INVENTORY_API_USE_SERVICE_BINDING || "").trim().toLowerCase();
+  const hasServiceBinding = hasInventoryApiServiceBinding(env);
+  const useServiceBinding = hasServiceBinding;
+  const base = useServiceBinding
+    ? "https://inventory-detector-worker.service"
+    : configuredBase || "https://inventory-detector-worker.opal-dde.workers.dev";
+  const result = {
+    ok: false,
+    build_id: HTG_BUILD_ID,
+    configured: {
+      inventory_api_base: configuredBase || null,
+      inventory_api_token_configured: Boolean(token),
+      inventory_api_worker_binding_present: hasServiceBinding,
+      inventory_api_use_service_binding_value: explicitServiceBinding || null,
+      inventory_api_use_service_binding: useServiceBinding,
+      requested_url: useServiceBinding
+        ? "https://inventory-detector-worker.service"
+        : base
+    }
+  };
+
+  if (!token) {
+    return {
+      ...result,
+      message: "Missing INVENTORY_API_TOKEN on the Discord interactions Worker."
+    };
+  }
+
+  try {
+    const health = await htgApiProbe(env, useServiceBinding, base, "/api/inventory/health", {
+      method: "GET"
+    });
+    const trackerStatus = await htgApiProbe(env, useServiceBinding, base, "/api/hatch/tracker/status", {
+      method: "GET",
+      query: { discord_user_id: "123456789012345678" },
+      token
+    });
+    const oauthStart = await htgApiProbe(env, useServiceBinding, base, "/api/hatch/oauth/start", {
+      method: "POST",
+      token,
+      body: {
+        discord_user_id: "123456789012345678",
+        discord_username: "debug"
+      }
+    });
+    return {
+      ...result,
+      ok: health.ok && trackerStatus.ok && oauthStart.ok,
+      probes: {
+        health,
+        tracker_status: trackerStatus,
+        oauth_start: oauthStart
+      }
+    };
+  } catch (err) {
+    return {
+      ...result,
+      message: err?.message || String(err)
+    };
+  }
+}
+
+async function htgApiProbe(env, useServiceBinding, base, path, options = {}) {
+  const url = new URL(path, base);
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const headers = {
+    Accept: "application/json",
+    "User-Agent": "c0ld-Discord-HTG-Debug"
+  };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+
+  const request = new Request(url.toString(), {
+    method: options.method || "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+
+  const response = useServiceBinding
+    ? await env.INVENTORY_API_WORKER.fetch(request)
+    : await fetch(request);
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch (err) {
+    payload = { parse_error: err?.message || String(err), body_preview: text.slice(0, 500) };
+  }
+
+  return {
+    ok: response.ok && payload?.ok !== false,
+    status: response.status,
+    response_ok: response.ok,
+    path,
+    payload
+  };
+}
+
+async function hatchApiRequest(env, path, options = {}) {
+  const token = String(env.INVENTORY_API_TOKEN || env.HATCH_TRACKER_API_TOKEN || "").trim();
+  if (!token) throw httpError(500, "Missing INVENTORY_API_TOKEN on the Discord interactions Worker.");
+
+  const configuredBase = String(env.INVENTORY_API_BASE || "").trim().replace(/\/$/, "");
+  const useServiceBinding = hasInventoryApiServiceBinding(env);
+  const base = useServiceBinding
+    ? "https://inventory-detector-worker.service"
+    : configuredBase || "https://inventory-detector-worker.opal-dde.workers.dev";
+  const url = new URL(path, base);
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const init = {
+    method: options.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-HTG-Tracker"
+    }
+  };
+  if (options.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  }
+
+  const request = new Request(url.toString(), init);
+  const response = useServiceBinding
+    ? await env.INVENTORY_API_WORKER.fetch(request)
+    : await fetch(request);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    const source = useServiceBinding
+      ? "INVENTORY_API_WORKER service binding"
+      : url.origin;
+    throw httpError(
+      response.status || 502,
+      `${payload.message || `HTG tracker API failed (${response.status}).`} Source: ${source}${url.pathname}`
+    );
+  }
+  return payload;
+}
+
+function hasInventoryApiServiceBinding(env) {
+  return Boolean(env?.INVENTORY_API_WORKER && typeof env.INVENTORY_API_WORKER.fetch === "function");
 }
 
 async function fetchDiscordDebugEndpoint(env, path) {
@@ -6845,6 +7563,61 @@ function hourlyCommandPayload() {
           {
             name: "channel",
             description: "Text channel or thread; defaults to the current destination",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function htgCommandPayload() {
+  const tierOption = {
+    name: "tier",
+    description: "Alert tier to change",
+    type: APPLICATION_COMMAND_OPTION_STRING,
+    required: true,
+    choices: [
+      { name: "Huge", value: "huge" },
+      { name: "Titanic", value: "titanic" },
+      { name: "Gargantuan", value: "gargantuan" },
+      { name: "All", value: "all" }
+    ]
+  };
+
+  return {
+    name: "htg",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Huge, Titanic, and Gargantuan hatch alert tracker.",
+    dm_permission: false,
+    options: [
+      {
+        name: "setup",
+        description: "Show your private Big Games auth link and hatch alert instructions.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "enable",
+        description: "Enable hatch alerts for your own connected Big Games inventory.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [tierOption]
+      },
+      {
+        name: "disable",
+        description: "Disable hatch alerts for your own connected Big Games inventory.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [tierOption]
+      },
+      {
+        name: "assign",
+        description: "Assign the only channel where HTG hatch alerts can post.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "channel",
+            description: "Text channel or thread; defaults to the current channel",
             type: APPLICATION_COMMAND_OPTION_CHANNEL,
             required: false,
             channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]

@@ -1019,6 +1019,71 @@ Games refresh-quota slot, so reserve it for explicit tests. Big Games access
 tokens expire after 30 days and must then be authorized again; there is no
 refresh-token endpoint.
 
+### Hatch alert tracker
+
+The Discord `/htg` command uses the same Big Games OAuth callback and hourly
+inventory snapshots to post Huge, Titanic, and Gargantuan hatch alerts. Apply:
+
+```text
+supabase/migrations/035_hatch_tracker.sql
+supabase/migrations/036_hatch_tracker_guild_channels.sql
+```
+
+Set these on `inventory-detector-worker`. The regular `BIG_GAMES_*` app can
+remain the inventory monitor app; HTG uses the separate `HATCH_BIG_GAMES_*` app
+so `/htg setup` opens the Luna Bot app instead.
+
+| Setting | Purpose |
+|---|---|
+| `BIG_GAMES_CLIENT_ID` | Client ID from the existing inventory monitor Big Games DB app. |
+| `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
+| `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
+| `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
+| `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
+| `HATCH_TRACKER_RETURN_URL` | Optional page to open after OAuth completes. |
+
+Required/optional secrets on `inventory-detector-worker`:
+
+| Secret | Purpose |
+|---|---|
+| `BIG_GAMES_CLIENT_SECRET` | Secret from the existing inventory monitor Big Games DB app. |
+| `HATCH_BIG_GAMES_CLIENT_SECRET` | Secret from the Luna Bot HTG Big Games DB app. |
+| `INVENTORY_TOKEN_ENCRYPTION_SECRET` | Optional stable encryption secret for saved grants. |
+| `INGEST_ADMIN_TOKEN` | Shared private token used by the Discord interaction Worker. |
+| `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
+| `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
+
+Set these on `c0ld-discord-search`:
+
+| Setting | Purpose |
+|---|---|
+| `INVENTORY_API_BASE` | Public URL for the inventory Worker if no service binding is used. |
+| `INVENTORY_API_WORKER` | Recommended service binding to `inventory-detector-worker`. |
+| `INVENTORY_API_TOKEN` | Secret matching `INGEST_ADMIN_TOKEN` on the inventory Worker. |
+| `HTG_SETUP_STEP_IMAGE_URLS` | Optional comma-separated image URLs for the `/htg setup` Step 1/2/3 setup pages. |
+| `HTG_SETUP_STEP_IMAGES_JSON` | Optional JSON alternative for setup page images, either an array or an object keyed by `1`, `2`, `3`. |
+| `HTG_SETUP_THUMBNAIL_URL` | Optional small header image for the `/htg setup` setup card. |
+
+The user flow is:
+
+- `/htg setup` creates a private paginated Components V2 setup message with a
+  Big Games DB connect button.
+- `/htg assign channel:<channel>` sets the only hatch-alert destination for the
+  Discord server. Once one or more assigned channels exist, the inventory Worker
+  posts only to those assigned channels and ignores the legacy channel/webhook
+  fallback.
+- `/htg enable tier:<huge|titanic|gargantuan|all>` enables selected alerts
+  only for the Discord account that ran it.
+- `/htg disable tier:<huge|titanic|gargantuan|all>` disables selected alerts
+  only for the Discord account that ran it.
+
+Scheduled scans compare the newest owned-inventory snapshot against the
+previous snapshot. If multiple special pets are detected in one window, the
+alert image priority is Gargantuan, then Titanic, then Huge, after applying
+the user's enabled tier preferences. The three alert body functions are
+separate in `inventory-detector-worker.js` so Huge, Titanic, and Gargantuan can
+each receive their own final template.
+
 ## WMSY hourly Discord board
 
 `wmsy-hourly-worker.js` is the Discord image board Worker that posts the

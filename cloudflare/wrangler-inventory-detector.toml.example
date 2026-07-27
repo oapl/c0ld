@@ -15,7 +15,13 @@ INVENTORY_SYNC_COHORT = "true"
 LEAGUE_API_BASE = "https://yamo-league-api-worker.YOUR-SUBDOMAIN.workers.dev"
 BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_ME"
 BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
+HATCH_BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_WITH_LUNA_HTG_APP"
+HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
 INVENTORY_OAUTH_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
+HATCH_TRACKER_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
+# Legacy fallback only. Prefer `/htg assign channel:<channel>` after deploying
+# the Discord command worker and applying migration 036.
+HATCH_ALERT_CHANNEL_ID = ""
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
@@ -28,6 +34,10 @@ crons = ["17 * * * *"]
 # wrangler secret put SUPABASE_SERVICE_KEY
 # wrangler secret put INGEST_ADMIN_TOKEN
 # wrangler secret put BIG_GAMES_CLIENT_SECRET
+# wrangler secret put HATCH_BIG_GAMES_CLIENT_SECRET
 #
 # Optional:
 # wrangler secret put DISCORD_WEBHOOK_URL
+# wrangler secret put DISCORD_BOT_TOKEN
+# wrangler secret put HATCH_ALERT_WEBHOOK_URL
+# wrangler secret put INVENTORY_TOKEN_ENCRYPTION_SECRET

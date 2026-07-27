@@ -7,7 +7,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Token,
 
-  [string[]]$DeleteCommands = @("machine", "stock", "vend"),
+  [string[]]$DeleteCommands = @("machine", "stock", "vend", "hatch", "tracker"),
 
   [ValidateSet("both", "guild", "global")]
   [string]$Scope = "both",
@@ -179,16 +179,17 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search, /version, /clan, and /lg..." -ForegroundColor Cyan
+  Write-Host "Registering /search, /version, /clan, /lg, and /htg..." -ForegroundColor Cyan
   $registerPaths = @(
     "/admin/register-search-command",
     "/admin/register-version-command",
     "/admin/register-clan-command",
-    "/admin/register-lg-command"
+    "/admin/register-lg-command",
+    "/admin/register-htg-command"
   )
   foreach ($path in $registerPaths) {
     $registerPath = if ($RegisterGlobal) {
-      $path
+      "${path}?scope=global"
     } else {
       $query = New-QueryString @{ guild_id = $GuildId }
       "$path$query"
