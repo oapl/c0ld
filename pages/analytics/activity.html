@@ -435,7 +435,16 @@ const canvas = document.getElementById("chart");
 const ctx = canvas.getContext("2d");
 
 function getClan() {
-  return (new URLSearchParams(location.search).get("clan") || "c0ld")
+  const params = new URLSearchParams(location.search);
+  let selected = params.get("clan");
+  if (!selected) {
+    try {
+      selected = localStorage.getItem("c0ld:site-clan-mode");
+    } catch {
+      selected = "";
+    }
+  }
+  return (selected || "c0ld")
     .replace(/[^a-z0-9_-]/gi, "") || "c0ld";
 }
 

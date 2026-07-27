@@ -161,6 +161,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | Variable | Example |
 |---|---|
 | `CLAN_NAME` | `c0ld` |
+| `CLAN_NAMES` | Optional comma-separated clans whose member snapshots are collected by each scheduled battle-data pull. Use `c0ld,WMSY` for both website modes. |
+| `WMSY_MODE_ENABLED` | Optional. Defaults to `true`; guarantees the WMSY companion feed is collected even when an older deployment still has `CLAN_NAMES=c0ld`. Set to `false` only to disable WMSY ingestion. |
 | `CURRENT_BATTLE_NAME` | `auto`; lets the Worker avoid stale hard-coded battle keys. Set this to a specific API battle key only when you intentionally want to force one battle. |
 | `AUTO_DETECT_BATTLE` | `true`; lets the Worker pick the active/latest API battle automatically. Set to `false` only when you want to force `CURRENT_BATTLE_NAME`. |
 | `ACTIVE_BATTLE_LOOKUP` | Optional. Defaults to `true`; reads Big Games' active battle metadata for display/start/end times. |
@@ -201,11 +203,11 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
 | `GLOBAL_RANK_LEADERBOARD_LABEL` | Optional leaderboard placement label, such as `Update 84 Leaderboard`; preferred for profile Leaderboard History. |
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/api/reward-cutoffs?type=players` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/api/reward-cutoffs?type=clans` ranks. Active-battle categories are read from BIG Games `PlacementRewards`; the fallback defaults to `1,3,10,30,50,250,500`. |
 | `LEAGUE_API_BASE` | League Worker base URL used to calculate league reward cutoffs. Defaults to the production YAMO league Worker. A `LEAGUE_API_WORKER` service binding is preferred when both Workers share an account. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated league reward tiers. Defaults to `1,3,15,50,100,250,2000`. |
-| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `15`; interval used to refresh the three persistent Discord posts. |
+| `REWARD_CUTOFFS_SCHEDULE_MINUTES` | Optional. Defaults to `5`; interval used to refresh the three persistent Discord posts. |
 | `REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the persistent-post schedule interval. |
 | `REWARD_CUTOFFS_CHANNEL_ID` | Discord channel ID for one combined post containing player, clan, and league reward cutoffs. |
 | `ROBLOX_STATUS_CHANNEL_ID` | Discord channel ID for the persistent official Roblox platform-status post. |
@@ -262,10 +264,10 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_RESTART_REQUIRE_VERSION_CORRELATION` | Optional. Defaults to `true`; suppresses server-turnover restart events unless they line up with a PS99 place version change or recent version event. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
 | `PS99_RESTART_CACHE_SECONDS` | Optional. Defaults to `PUBLIC_CACHE_SECONDS`; cache time for `/api/ps99/restarts`. |
-| `ROBLOX_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for Roblox client-release alerts. |
+| `ROBLOX_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for Roblox client-release alerts. Defaults to `1529578783131177131`. |
 | `PS99_UPDATES_ROLE_ID` | Optional Discord role ID mentioned only for PS99 place-version alerts. |
 | `PS99_FFLAGS_ROLE_ID` | Optional Discord role ID mentioned only for public client-settings changes. |
-| `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. |
+| `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. Defaults to `1529578783131177131`. |
 | `PS99_DEV_BLOG_ROLE_ID` | Optional Discord role ID mentioned only for official BIG Games post alerts. |
 | `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migration `025` to allow profile-page CW_Bot message-link imports. |
 | `CW_BOT_USER_ID` | Optional. Defaults to `1219229814150398003`; Discord user/app ID that imported messages must be authored by. |
@@ -298,9 +300,11 @@ The stop day and time come from the active battle metadata returned by the Big G
 | `INGEST_ADMIN_TOKEN` | Any long random string. Required for manual ingest requests. |
 | `PS99_RESTART_PROBE_TOKEN` | A separate long random string shared only by the dedicated restart-sentinel reporters. |
 | `ROBLOX_UPDATES_WEBHOOK_URL` | Webhook for the `roblox-updates` channel. |
+| `ROBLOX_UPDATES_ROLE_ID` | Optional role to mention on Roblox client update detector posts. Defaults to `1529578783131177131`. |
 | `PS99_UPDATES_WEBHOOK_URL` | Webhook for the `pet-sim-updates` channel. |
 | `PS99_FFLAGS_WEBHOOK_URL` | Webhook for the `pet-sim-fflags-update` channel. |
 | `PS99_RESTARTS_WEBHOOK_URL` | Webhook for the `pet-sim-restarts` channel. |
+| `PS99_RESTARTS_ROLE_ID` | Optional role to mention on restart detector posts. Defaults to `1529578783131177131`. |
 | `PS99_DEV_BLOG_WEBHOOK_URL` | Webhook for the `dev-blogs` channel. |
 | `REWARD_CUTOFFS_WEBHOOK_URL` | Optional fallback for the combined cutoff post if no cutoff channel ID is configured. |
 | `ROBLOX_STATUS_WEBHOOK_URL` | Optional fallback for the Roblox Status post if no status channel ID is configured. |
@@ -519,7 +523,7 @@ optional fallback when the matching channel ID is absent.
 
 The existing clan Worker cron is sufficient; do not add a second cron just for
 this feature. The Worker checks the cutoff schedule whenever its normal cron
-runs. `REWARD_CUTOFFS_SCHEDULE_MINUTES` defaults to `15`. The health endpoint
+runs. `REWARD_CUTOFFS_SCHEDULE_MINUTES` defaults to `5`. The health endpoint
 and protected status endpoint report the active schedule.
 
 An optional `LEAGUE_API_WORKER` service binding targeting
@@ -598,7 +602,7 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search`, `/history`, `/version`, and `/rewards` Worker
+## Discord `/search`, `/history`, `/version`, and reward command Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
@@ -634,9 +638,10 @@ Required Worker variables:
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
 | `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards players` tiers. Defaults to `3,100,1000,1050,1150,6150,30000`. |
-| `CLAN_REWARD_CUTOFF_RANKS` | Optional comma-separated `/rewards clans` tiers. Defaults to `1,3,10,30,50,250,500`. |
-| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/rewards players` header, such as `Update 88 Leaderboard`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/lb rewards` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
+| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated `/league rewards` tiers. Defaults to `1,3,15,50,100,250,2000`. |
+| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/lb rewards` header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
 
@@ -656,8 +661,9 @@ Required Worker secrets:
 | Secret | Purpose |
 |---|---|
 | `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
-| `DISCORD_BOT_TOKEN` | Bot token used only by the admin registration endpoint to create/update the slash command. |
+| `DISCORD_BOT_TOKEN` | Bot token used to register commands and post Luna's scheduled hourly clan images. |
 | `REGISTER_ADMIN_TOKEN` | Your private bearer token for the command-registration endpoints. |
+| `CLAN_API_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the Clan API Worker. Required by `/hourly`. |
 
 In the Discord Developer Portal, open the application's **General Information**
 page and set the **Interactions Endpoint URL** to:
@@ -691,10 +697,6 @@ Invoke-RestMethod -Method Post `
 
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-clan-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-duck-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod -Method Post `
@@ -765,35 +767,29 @@ The plain-text PS99 version command is:
 /version
 ```
 
-It reports the root PS99 place version, its release time, and the most recent
-completed version scan. It also appends the latest tracked Roblox released
-client version when `CLAN_API_BASE` can read `/api/roblox/versions`. Register it through the same admin script, or call
+It posts a Luna-style status card with the root PS99 place version, its release
+time, and the most recent completed version scan. It also includes the latest
+tracked Roblox released client version when `CLAN_API_BASE` can read
+`/api/roblox/versions`. Register it through the same admin script, or call
 `POST /admin/register-version-command?guild_id=YOUR_GUILD_ID` with the same
 admin bearer token.
-
-The chart commands are:
-
-```text
-/clan chart
-/duck chart
-```
-
-They render and post the current clan line chart or duck chart as a PNG
-attachment in Discord. Register them through the same admin script, or call
-`POST /admin/register-clan-command?guild_id=YOUR_GUILD_ID` and
-`POST /admin/register-duck-command?guild_id=YOUR_GUILD_ID`.
 
 The reward cutoff commands are:
 
 ```text
-/rewards players
-/rewards clans
+/lb rewards
+/clan rewards
+/league rewards
 ```
 
-They post the current point minimums for the configured reward ranks. Defaults
-are `3,100,1000,1050,1150,6150,30000` for players and `1,3,10,30,50,250,500` for
-clans. Override with `PLAYER_REWARD_CUTOFF_RANKS` and
-`CLAN_REWARD_CUTOFF_RANKS` on either Worker. For the player command header, set
+They post the current point minimums for reward ranks. `/lb rewards` follows the
+active global leaderboard source, so it uses clan-battle global cutoffs during a
+Clan Battle and League-player cutoffs during a League event. Player defaults are
+`3,10,100,250,500,1000,10000`. Clan categories and labels are taken from the
+active battle's BIG Games `PlacementRewards` metadata; `CLAN_REWARD_CUTOFF_RANKS`
+is only a fallback when that metadata is unavailable. League defaults are
+`1,3,15,50,100,250,2000`. For a player command with no current-event label in
+the API payload, set
 `PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or
 `PS99_UPDATE_LABEL="Update 88"` on the Discord Worker.
 
@@ -878,9 +874,7 @@ Useful endpoints:
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
 | `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
-| `/api/leagues/player-milestones?ranks=3,100,1000,1050,1150,6150,30000` | Individual League-player thresholds used by the persistent post. Ranks 1-100 come directly from BIG Games; extended ranks come from the latest completed Top-X League roster pool. |
-| `/api/leagues/player-pool/status` | Metadata for the latest completed extended League-player pool. |
-| `POST /api/leagues/player-pool/ingest` | Protected, resumable Top-X roster-pool batch ingest used by `scripts/ingest-league-player-pool.ps1`. |
+| `/api/leagues/player-milestones?ranks=3,10,100,250,500` | Current live League-player reward thresholds from the public Top 500 source. |
 | `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
 | `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored League-team point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
@@ -1052,6 +1046,58 @@ the lookup response, tries individual user lookups for missing IDs, and falls
 back to the previous Supabase username/display name before showing a raw user
 ID. `/debug` includes `usernameLookupMisses` and `previousUsernameFallbacks`
 inside `board.summary`.
+
+## Luna global `/hourly` clan boards
+
+The Luna Discord interactions Worker supports the hourly image-board idea for
+any PS99 clan:
+
+```text
+/hourly assign clan:WMSY channel:#hourly-gains
+```
+
+`channel` is optional and defaults to the channel or thread where the command
+is used. Text channels, announcement channels, and existing public, private,
+or announcement threads are supported. The command is registered globally, so
+there is no fixed guild allow list; a user needs the guild's configured Luna
+administrator role to assign a destination. The first `/luna admin role:<role>`
+setup is open when no Luna administrator role exists yet; after that, changing
+the Luna administrator role requires Discord **Manage Server** or
+**Administrator** permission.
+
+Run this migration first:
+
+```text
+supabase/migrations/033_discord_hourly_clan_assignments.sql
+```
+
+Add this secret to `discord-search-interactions-worker.js`:
+
+| Secret | Purpose |
+|---|---|
+| `CLAN_API_ADMIN_TOKEN` | Must equal `INGEST_ADMIN_TOKEN` on `c0ld-clan-api-worker`. It lets Luna collect an assigned clan's current battle snapshot and manage saved destinations. |
+
+Keep the existing `CLAN_API_WORKER` service binding when possible. The Luna
+Worker needs an hourly cron trigger:
+
+```text
+0 * * * *
+```
+
+Assignments are stored per Discord channel/thread ID. Assigning the same
+destination again replaces its clan without affecting assignments in other
+servers. Luna posts a first board immediately, then one board per hour. Each
+assigned clan is collected independently.
+
+Use `GET /admin/hourly/status` with the Luna Discord Worker's admin token to
+verify stored assignments, due state, the last Discord error, and whether the
+required bot/API tokens are present. If `/hourly assign` works but no hourly
+post follows, make sure the worker receiving Discord interactions is the same
+deployed worker that has the `0 * * * *` cron trigger.
+
+Register the command globally with
+`scripts/register-discord-hourly-command.ps1`. Force an immediate post for
+every configured destination with `scripts/test-discord-hourly-clans.ps1`.
 
 ## Servers Worker
 

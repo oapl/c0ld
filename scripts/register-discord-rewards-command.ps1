@@ -1,31 +1,21 @@
-﻿# Edit these values, then run this script from PowerShell.
-$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev/"
-$GuildId = "1457088639006670979"
-$AdminToken = "v8iP++UjyNfw2YwapYWWToz1Gd626FqAKIjvmDJWuxjIR2VzwF6p8XgRjS9JU6Hk"
-
-# Set this to $true only when you want a global Discord command instead of a
-# guild command. Guild commands usually appear immediately while testing.
-$RegisterGlobal = $false
+param(
+  [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev/",
+  [Parameter(Mandatory = $true)]
+  [string]$Token,
+  [string]$GuildId = "",
+  [switch]$Global,
+  [switch]$KeepLegacyRewards,
+  [switch]$KeepLegacyCharts,
+  [switch]$SkipList
+)
 
 $ErrorActionPreference = "Stop"
 
-if ($WorkerUrl -match "YOUR-DISCORD-WORKER" -or [string]::IsNullOrWhiteSpace($WorkerUrl)) {
-  throw "Set `$WorkerUrl to your Discord interaction Worker URL."
-}
-
-if ($AdminToken -eq "PASTE_REGISTER_ADMIN_TOKEN_HERE" -or [string]::IsNullOrWhiteSpace($AdminToken)) {
-  throw "Set `$AdminToken to your REGISTER_ADMIN_TOKEN value."
-}
-
-if (-not $RegisterGlobal -and ($GuildId -eq "YOUR_GUILD_ID" -or [string]::IsNullOrWhiteSpace($GuildId))) {
-  throw "Set `$GuildId, or set `$RegisterGlobal = `$true to register the global command."
-}
-
 $base = $WorkerUrl.TrimEnd("/")
-$token = $AdminToken.Trim()
+$Token = $Token.Trim()
 $headers = @{
-  Authorization = "Bearer $token"
-  "X-C0LD-Admin-Token" = $token
+  Authorization = "Bearer $Token"
+  "X-C0LD-Admin-Token" = $Token
 }
 
 function New-QueryString {
@@ -34,22 +24,18 @@ function New-QueryString {
   $parts = @()
   foreach ($key in $Values.Keys) {
     $value = [string]$Values[$key]
-    if ([string]::IsNullOrWhiteSpace($value)) { continue }
-
-    $encodedKey = [uri]::EscapeDataString($key)
-    $encodedValue = [uri]::EscapeDataString($value.Trim())
-    $parts += "$encodedKey=$encodedValue"
+    if ($value.Trim() -eq "") { continue }
+    $parts += "$([uri]::EscapeDataString($key))=$([uri]::EscapeDataString($value.Trim()))"
   }
 
   if ($parts.Count -eq 0) { return "" }
   return "?" + ($parts -join "&")
 }
 
-function Invoke-C0ldDiscordAdmin {
+function Invoke-WorkerAdmin {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Path,
-
     [ValidateSet("GET", "POST")]
     [string]$Method = "GET"
   )
@@ -68,17 +54,11 @@ function Invoke-C0ldDiscordAdmin {
       $statusCode = $null
     }
 
-    if ($statusCode -eq 401) {
-      Write-Host ""
-      Write-Host "401 Unauthorized. Check that AdminToken matches REGISTER_ADMIN_TOKEN on this Worker." -ForegroundColor Yellow
-      Write-Host ""
-    }
-
     if ($statusCode -eq 404 -or $body -match '"message"\s*:\s*"Not found"') {
       Write-Host ""
       Write-Host "404 Not Found from the Worker admin route." -ForegroundColor Yellow
-      Write-Host "That means the live Discord Worker does not have /admin/register-rewards-command deployed yet." -ForegroundColor Yellow
-      Write-Host "Deploy or paste the updated cloudflare/discord-search-interactions-worker.js first, then run this script again." -ForegroundColor Yellow
+      Write-Host "Deploy or paste the updated cloudflare/discord-search-interactions-worker.js to the Discord interactions Worker first." -ForegroundColor Yellow
+      Write-Host "Also check that -WorkerUrl points to the Discord interactions Worker, not the clan API or another Worker." -ForegroundColor Yellow
       Write-Host ""
     }
 
@@ -86,25 +66,48 @@ function Invoke-C0ldDiscordAdmin {
   }
 }
 
-Write-Host "Checking Worker health..." -ForegroundColor Green
-Invoke-RestMethod -Uri "$base/" | ConvertTo-Json -Depth 8
-
-$registerQuery = if ($RegisterGlobal) {
-  ""
+$query = if ($Global) {
+  New-QueryString @{ scope = "global" }
 } else {
   New-QueryString @{ guild_id = $GuildId }
 }
 
-Write-Host "Registering /rewards..." -ForegroundColor Green
-Invoke-C0ldDiscordAdmin -Method POST -Path "/admin/register-rewards-command$registerQuery" |
-  ConvertTo-Json -Depth 10
+Write-Host "Registering reward commands: /clan rewards, /league rewards, /lb rewards..." -ForegroundColor Green
+Invoke-WorkerAdmin -Method POST -Path "/admin/register-rewards-command$query" |
+  ConvertTo-Json -Depth 12
 
-$listQuery = if ($RegisterGlobal) {
-  New-QueryString @{ scope = "global" }
-} else {
-  New-QueryString @{ scope = "guild"; guild_id = $GuildId }
+if (-not $KeepLegacyRewards) {
+  $deleteQuery = if ($Global) {
+    New-QueryString @{ scope = "global"; name = "rewards" }
+  } else {
+    New-QueryString @{ scope = "guild"; guild_id = $GuildId; name = "rewards" }
+  }
+
+  Write-Host "Removing legacy /rewards command in the same scope..." -ForegroundColor Yellow
+  Invoke-WorkerAdmin -Method POST -Path "/admin/delete-command$deleteQuery" |
+    ConvertTo-Json -Depth 12
 }
 
-Write-Host "Registered commands now visible to the Worker:" -ForegroundColor Green
-Invoke-C0ldDiscordAdmin -Path "/admin/commands$listQuery" |
-  ConvertTo-Json -Depth 10
+if (-not $KeepLegacyCharts) {
+  $deleteDuckQuery = if ($Global) {
+    New-QueryString @{ scope = "global"; name = "duck" }
+  } else {
+    New-QueryString @{ scope = "guild"; guild_id = $GuildId; name = "duck" }
+  }
+
+  Write-Host "Removing legacy /duck chart command in the same scope..." -ForegroundColor Yellow
+  Invoke-WorkerAdmin -Method POST -Path "/admin/delete-command$deleteDuckQuery" |
+    ConvertTo-Json -Depth 12
+}
+
+if (-not $SkipList) {
+  $listQuery = if ($Global) {
+    New-QueryString @{ scope = "global" }
+  } else {
+    New-QueryString @{ scope = "guild"; guild_id = $GuildId }
+  }
+
+  Write-Host "Commands after update..." -ForegroundColor Cyan
+  Invoke-WorkerAdmin -Path "/admin/commands$listQuery" |
+    ConvertTo-Json -Depth 12
+}

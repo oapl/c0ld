@@ -68,6 +68,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          head_tags = [
+              '  <script src="assets/clan-theme-bootstrap.js"></script>\n',
+          ]
+
           script_tags = [
               '  <script src="assets/site-navigation.js"></script>\n',
               '  <script src="assets/ps99-version-chart-markers.js"></script>\n',
@@ -85,6 +89,16 @@ jobs:
 
           for path in Path('_site').glob('*.html'):
               text = path.read_text(encoding='utf-8')
+
+              head_inject = ''
+              for tag in head_tags:
+                  marker = tag.split('src="', 1)[1].split('"', 1)[0]
+                  if marker not in text:
+                      head_inject += tag
+
+              if head_inject and '</head>' in text:
+                  text = text.replace('</head>', head_inject + '</head>', 1)
+
               if '</body>' not in text:
                   continue
 

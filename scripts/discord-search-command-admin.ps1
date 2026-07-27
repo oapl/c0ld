@@ -179,24 +179,13 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  $registerPaths = if ($TrackerOnly) {
-    Write-Host "Registering /server and /tracking..." -ForegroundColor Cyan
-    @(
-      "/admin/register-server-command",
-      "/admin/register-tracking-command"
-    )
-  } else {
-    Write-Host "Registering /search, /version, /clan, /duck, /lg, /server, and /tracking..." -ForegroundColor Cyan
-    @(
-      "/admin/register-search-command",
-      "/admin/register-version-command",
-      "/admin/register-clan-command",
-      "/admin/register-duck-command",
-      "/admin/register-lg-command",
-      "/admin/register-server-command",
-      "/admin/register-tracking-command"
-    )
-  }
+  Write-Host "Registering /search, /version, /clan, and /lg..." -ForegroundColor Cyan
+  $registerPaths = @(
+    "/admin/register-search-command",
+    "/admin/register-version-command",
+    "/admin/register-clan-command",
+    "/admin/register-lg-command"
+  )
   foreach ($path in $registerPaths) {
     $registerPath = if ($RegisterGlobal) {
       $path

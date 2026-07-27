@@ -542,7 +542,16 @@
     let isLoading = false;
 
     function getRequestedClanName() {
-      const raw = new URLSearchParams(window.location.search).get("clan") || "c0ld";
+      const params = new URLSearchParams(window.location.search);
+      let raw = params.get("clan");
+      if (!raw) {
+        try {
+          raw = window.localStorage.getItem("c0ld:site-clan-mode");
+        } catch {
+          raw = "";
+        }
+      }
+      raw ||= "c0ld";
       return String(raw).trim().replace(/[^a-z0-9_-]/gi, "") || "c0ld";
     }
 
@@ -1583,7 +1592,7 @@
         };
       } else {
         const liveBattle = await fetchLiveJson(
-          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle, avatars: "false", downtime: "false" }),
+          withClanQuery(MEMBER_API_CURRENT_URL, { battle: selected.battle, avatars: "true", downtime: "false" }),
           `${TRACKED_CLAN_DISPLAY} ${battleDisplayName(selected)} leaderboard`
         );
 
@@ -1676,7 +1685,7 @@
         await applyBattleSelection();
 
         if (activeBattle === "current") {
-          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "false" }), `live ${TRACKED_CLAN_DISPLAY} downtime`, forceFresh)
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "true" }), `live ${TRACKED_CLAN_DISPLAY} details`, forceFresh)
             .then(fullCurrentJson => {
               if (!fullCurrentJson || !Array.isArray(fullCurrentJson.rows) || activeBattle !== "current") return;
               currentData = {

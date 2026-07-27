@@ -48,7 +48,8 @@ These remain available by direct URL after deploy:
 
 ## League Pages
 
-These are hidden from the main menu for now but remain available by direct URL:
+The primary League pages are grouped under the shared **Leagues** menu. Support,
+legacy, and redirect routes remain available by direct URL:
 
 | Source file | Public URL | Purpose |
 |---|---|---|

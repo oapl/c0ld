@@ -231,7 +231,7 @@ let chartCache=null;
 
 function normalize(value){return String(value||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
 function normalizeProfile(value){return String(value||"").trim().toLowerCase().replace(/\s+/g,"").replace(/[^a-z0-9_]/g,"")}
-function clan(){return CLANS[normalize(new URLSearchParams(location.search).get("clan"))]||CLANS.c0ld}
+function clan(){const p=new URLSearchParams(location.search);let key=p.get("clan");if(!key){try{key=localStorage.getItem("c0ld:site-clan-mode")}catch{key=""}}return CLANS[normalize(key)]||CLANS.c0ld}
 function profileId(){return new URLSearchParams(location.search).get("id")||""}
 function isEmbedded(){return new URLSearchParams(location.search).get("embed")==="1"}
 function prettifyBattleName(value){return String(value||"").trim().replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/(\D)(20\d{2})$/i,"$1 $2").replace(/\s+/g," ").trim()}

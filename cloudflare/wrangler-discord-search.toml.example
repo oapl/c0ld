@@ -2,6 +2,9 @@ name = "c0ld-discord-search"
 main = "discord-search-interactions-worker.js"
 compatibility_date = "2026-07-14"
 
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 CLAN_API_BASE = "https://c0ld-clan-api-worker.opal-dde.workers.dev"
 LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev"
@@ -28,7 +31,7 @@ SERVER_TRACKER_ADMIN_ROLE_IDS = ""
 # Generates a c0ld-styled PNG for /history. Set false for the text-only fallback.
 HISTORY_IMAGE_RESPONSES = "true"
 # Optional. Comma-separated reward cutoff ranks used by /rewards.
-PLAYER_REWARD_CUTOFF_RANKS = "3,100,1000,1050,1150,6150,30000"
+PLAYER_REWARD_CUTOFF_RANKS = "3,10,100,250,500,1000,10000"
 CLAN_REWARD_CUTOFF_RANKS = "1,3,10,30,50,250,500"
 # Optional player rewards header. Either set the full label or just the update.
 PLAYER_REWARD_LEADERBOARD_LABEL = ""
@@ -52,4 +55,4 @@ service = "c0ld-servers-worker"
 # DISCORD_BOT_TOKEN
 # REGISTER_ADMIN_TOKEN
 # LEAGUE_INGEST_ADMIN_TOKEN (must match the league Worker's INGEST_ADMIN_TOKEN)
-# SERVERS_API_TOKEN (must match SERVERS_ADMIN_TOKEN on the c0ld servers Worker)
+# CLAN_API_ADMIN_TOKEN (must match the clan API Worker's INGEST_ADMIN_TOKEN)

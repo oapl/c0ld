@@ -49,7 +49,15 @@
 
   function currentClanKey() {
     const params = new URLSearchParams(window.location.search);
-    return normalize(params.get("clan")) === "wmsy" ? "wmsy" : "c0ld";
+    if (params.has("clan")) {
+      return normalize(params.get("clan")) === "wmsy" ? "wmsy" : "c0ld";
+    }
+
+    try {
+      return normalize(window.localStorage.getItem("c0ld:site-clan-mode")) === "wmsy" ? "wmsy" : "c0ld";
+    } catch {
+      return "c0ld";
+    }
   }
 
   function clanColor(name, fallback = COLORS.default) {

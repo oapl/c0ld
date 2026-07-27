@@ -17,24 +17,8 @@
   const MEMBER_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/current";
   const MEMBER_API_HISTORY_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/history";
   const CLANS_API_CURRENT_URL = "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/clans/current";
+  const CLAN_MODE_STORAGE_KEY = "c0ld:site-clan-mode";
 
-  const DEFAULT_AVATAR_SVG =
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
-        <rect width="150" height="150" rx="16" fill="#21262d"/>
-        <circle cx="75" cy="58" r="26" fill="#6e7681"/>
-        <path d="M36 123c8-20 24-32 39-32s31 12 39 32" fill="#6e7681"/>
-      </svg>
-    `);
-
-  let wmsyRows = [];
-  let wmsyData = null;
-  let wmsySortKey = "rank";
-  let wmsySortAsc = true;
-  let wmsySearch = "";
-  let wmsyLoading = false;
-  let wmsyRendering = false;
   let clansCurrentPromise = null;
   let profileChartPromise = null;
   let profileChartDataKey = "";
@@ -54,9 +38,32 @@
     return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
 
+  function storedClanKey() {
+    try {
+      return normalizeClanKey(window.localStorage.getItem(CLAN_MODE_STORAGE_KEY)) === "wmsy"
+        ? "wmsy"
+        : "c0ld";
+    } catch {
+      return "c0ld";
+    }
+  }
+
+  function rememberClan(clan) {
+    try {
+      window.localStorage.setItem(CLAN_MODE_STORAGE_KEY, clan.key);
+    } catch {
+      // URL propagation still keeps the selected mode when storage is blocked.
+    }
+  }
+
   function currentClan() {
     const params = new URLSearchParams(window.location.search);
-    return normalizeClanKey(params.get("clan")) === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+    if (params.has("clan")) {
+      const selected = normalizeClanKey(params.get("clan")) === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+      rememberClan(selected);
+      return selected;
+    }
+    return storedClanKey() === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
   }
 
   function currentPage() {
@@ -109,22 +116,10 @@
 
     const params = new URLSearchParams(parts.query);
 
-    if (clan.key === "wmsy") {
-      params.set("clan", clan.label);
-    } else {
-      params.delete("clan");
-    }
+    params.set("clan", clan.label);
 
     const query = params.toString();
     return `${page}${query ? `?${query}` : ""}${parts.hash}`;
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
   }
 
   function finiteNumber(value) {
@@ -167,15 +162,7 @@
 
   function formatRank(value) {
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? `#${n}` : "—";
-  }
-
-  function profileUrl(row) {
-    const id = String(row.profile_key || row.user_id || row.username || "").trim();
-    const params = new URLSearchParams();
-    params.set("id", id);
-    params.set("clan", "WMSY");
-    return `profile.html?${params.toString()}`;
+    return Number.isFinite(n) && n > 0 ? `#${n.toLocaleString("en-US")}` : "—";
   }
 
   async function fetchJson(url) {
@@ -235,7 +222,10 @@
       .menu-bar .menu-btn.active,
       .tab-btn.active,
       button.active,
-      [data-tab].active {
+      [data-tab].active,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-control.active,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-menu > .site-nav-control.active,
+      html[data-clan="wmsy"] header .site-nav-panel > .site-nav-link.active {
         border-color: rgba(72, 187, 120, 0.78) !important;
         color: #74d99f !important;
         background: rgba(72, 187, 120, 0.14) !important;
@@ -257,7 +247,10 @@
       .menu-bar .menu-btn.active:hover,
       .tab-btn.active:hover,
       button.active:hover,
-      [data-tab].active:hover {
+      [data-tab].active:hover,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-control.active:hover,
+      html[data-clan="wmsy"] header .c0ld-primary-nav > .site-nav-menu > .site-nav-control.active:hover,
+      html[data-clan="wmsy"] header .site-nav-panel > .site-nav-link.active:hover {
         background: rgba(72, 187, 120, 0.22) !important;
       }
 
@@ -349,91 +342,6 @@
     });
   }
 
-  function sortWmsyRows(rows) {
-    const list = rows.slice();
-    list.sort((a, b) => {
-      const av = a[wmsySortKey];
-      const bv = b[wmsySortKey];
-      const an = Number(av);
-      const bn = Number(bv);
-      const result = !Number.isNaN(an) && !Number.isNaN(bn)
-        ? an - bn
-        : String(av || "").localeCompare(String(bv || ""));
-      return wmsySortAsc ? result : -result;
-    });
-    return list;
-  }
-
-  function visibleWmsyRows() {
-    let rows = wmsyRows.slice();
-    const q = wmsySearch.trim().toLowerCase();
-
-    if (q) {
-      rows = rows.filter(row =>
-        String(row.username || "").toLowerCase().includes(q) ||
-        String(row.user_id || "").includes(q)
-      );
-    }
-
-    return sortWmsyRows(rows);
-  }
-
-  function renderWmsyLeaderboard() {
-    if (!isWmsy() || !isIndexPage()) return;
-
-    const tbody = document.getElementById("leaderboard-body");
-    if (!tbody) return;
-
-    const rows = visibleWmsyRows();
-    wmsyRendering = true;
-
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:#8b949e;">No WMSY players found.</td></tr>`;
-      window.setTimeout(() => { wmsyRendering = false; }, 0);
-      return;
-    }
-
-    tbody.innerHTML = rows.map(row => {
-      const avatar = escapeHtml(row.avatar_url || DEFAULT_AVATAR_SVG);
-      const fallback = escapeHtml(DEFAULT_AVATAR_SVG);
-
-      return `
-        <tr>
-          <td class="rank">#${escapeHtml(row.rank ?? "—")}</td>
-          <td>
-            <a class="player-cell" href="${escapeHtml(profileUrl(row))}">
-              <img class="avatar" src="${avatar}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallback}';">
-              <div><div class="player-name">${escapeHtml(row.username || "Unknown")}</div></div>
-            </a>
-          </td>
-          <td class="num" title="${fmtNum(row.total_points)}">${fmtShortNum(row.total_points)}</td>
-          <td class="num" title="${fmtNum(row.gain_5m)}">${fmtShortNum(row.gain_5m)}</td>
-          <td class="num" title="${fmtNum(row.gain_1h)}">${fmtShortNum(row.gain_1h)}</td>
-          <td class="num" title="${fmtNum(row.gain_12h)}">${fmtShortNum(row.gain_12h)}</td>
-          <td class="num" title="${fmtNum(row.gain_24h)}">${fmtShortNum(row.gain_24h)}</td>
-        </tr>
-      `;
-    }).join("");
-
-    window.setTimeout(() => { wmsyRendering = false; }, 0);
-  }
-
-  async function loadWmsyLeaderboard() {
-    if (!isWmsy() || !isIndexPage() || wmsyLoading) return;
-
-    wmsyLoading = true;
-    try {
-      wmsyData = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=WMSY`);
-      wmsyRows = Array.isArray(wmsyData?.rows) ? wmsyData.rows.slice() : [];
-      renderWmsyLeaderboard();
-      applyTrackedClanCards();
-    } catch (err) {
-      console.warn("WMSY leaderboard refresh failed", err);
-    } finally {
-      wmsyLoading = false;
-    }
-  }
-
   function updateRankCardLabels(clan) {
     const trackedLabel = document.getElementById("tracked-rank-label");
     if (trackedLabel) trackedLabel.textContent = `${clan.label} Current Rank`;
@@ -459,8 +367,8 @@
 
     if (clan.key !== "wmsy") return;
 
-    let rank = wmsyData?.clan_rank ?? null;
-    let projectedRank = wmsyData?.projected_rank ?? null;
+    let rank = null;
+    let projectedRank = null;
 
     try {
       const data = await getClansCurrent();
@@ -1044,62 +952,53 @@
     }
   }
 
-  function wireWmsyControls() {
-    if (!isWmsy() || !isIndexPage() || document.body.dataset.wmsyControlsWired === "1") return;
-    document.body.dataset.wmsyControlsWired = "1";
-
-    const search = document.getElementById("search");
-    if (search) {
-      search.addEventListener("input", () => {
-        wmsySearch = search.value || "";
-        window.setTimeout(renderWmsyLeaderboard, 0);
-      });
-    }
-
-    const refresh = document.getElementById("refresh");
-    if (refresh) {
-      refresh.addEventListener("click", () => {
-        wmsyRows = [];
-        wmsyData = null;
-        loadWmsyLeaderboard();
-      });
-    }
-
-    document.querySelectorAll("th[data-sort]").forEach(th => {
-      th.addEventListener("click", () => {
-        const key = th.dataset.sort;
-        if (wmsySortKey === key) {
-          wmsySortAsc = !wmsySortAsc;
-        } else {
-          wmsySortKey = key;
-          wmsySortAsc = key === "username";
-        }
-        window.setTimeout(renderWmsyLeaderboard, 0);
-      });
-    });
-  }
-
   function applyChrome() {
     const clan = currentClan();
+    const switchClan = clan.key === "wmsy" ? CLANS.c0ld : CLANS.wmsy;
+
+    document.documentElement.dataset.clan = clan.key;
+    if (document.body) document.body.dataset.clan = clan.key;
 
     applyWmsyTheme();
     applyProfileRedScheme();
 
-    const logo = document.querySelector("#site-mascot, .site-logo");
+    const logo = document.querySelector("#site-mascot, header .site-logo, header .brand-img, header img.logo");
     if (logo) {
       logo.src = clan.mascot;
       logo.alt = clan.label;
     }
 
-    const logoLink = document.querySelector("#clan-mascot-link, .site-logo-link");
+    let logoLink = document.querySelector("#clan-mascot-link, .site-logo-link")
+      || logo?.closest?.("a")
+      || document.querySelector("header .logo-wrap a, header .header-inner a");
+    if (!logoLink && logo?.parentNode) {
+      logoLink = document.createElement("a");
+      logoLink.className = "site-logo-link";
+      logo.parentNode.insertBefore(logoLink, logo);
+      logoLink.appendChild(logo);
+    }
     if (logoLink) {
-      logoLink.href = clan.switchHome;
-      logoLink.setAttribute("aria-label", `Switch to ${clan.key === "wmsy" ? "c0ld" : "WMSY"} leaderboard`);
-      logoLink.title = `Switch to ${clan.key === "wmsy" ? "c0ld" : "WMSY"} leaderboard`;
+      logoLink.classList.add("site-logo-link");
+      logoLink.href = withClanParam(
+        `${currentPage()}${window.location.search || ""}${window.location.hash || ""}`,
+        switchClan
+      );
+      logoLink.setAttribute("aria-label", `Switch to ${switchClan.label} mode`);
+      logoLink.title = `Switch to ${switchClan.label} mode`;
+      logoLink.dataset.clanSwitchTarget = switchClan.key;
+      if (logoLink.dataset.clanSwitchWired !== "1") {
+        logoLink.dataset.clanSwitchWired = "1";
+        logoLink.addEventListener("click", () => {
+          const target = logoLink.dataset.clanSwitchTarget === "wmsy" ? CLANS.wmsy : CLANS.c0ld;
+          rememberClan(target);
+        });
+      }
     }
 
-    document.querySelectorAll(".menu-bar a, [data-clan-link]").forEach(link => {
+    document.querySelectorAll("a[href]").forEach(link => {
+      if (link === logoLink) return;
       const href = link.getAttribute("href") || "";
+      if (!isLocalHtmlLink(href)) return;
       link.href = withClanParam(href, clan);
 
       const text = String(link.textContent || "").trim();
@@ -1114,15 +1013,14 @@
     applyTrackedClanCards();
     applyClanLookupProjectedRank();
     highlightTrackedClanRows();
-    wireWmsyControls();
-    loadWmsyLeaderboard();
-    renderWmsyLeaderboard();
     applyProfileChartToggles();
   }
 
   function scheduleApply() {
     applyAll();
-    [250, 1000, 2500, 5000].forEach(delay => window.setTimeout(applyAll, delay));
+    if (!isIndexPage()) {
+      [250, 1000, 2500, 5000].forEach(delay => window.setTimeout(applyAll, delay));
+    }
   }
 
   if (document.readyState === "loading") {
@@ -1136,14 +1034,7 @@
     window.setTimeout(redrawEnhancedProfileChart, 0);
   });
 
-  const observer = new MutationObserver(mutations => {
-    if (wmsyRendering) return;
-
-    const touchedWmsyTable = isWmsy() && isIndexPage() && mutations.some(mutation => {
-      const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
-      return Boolean(target?.closest?.("#leaderboard-body"));
-    });
-
+  const observer = new MutationObserver(() => {
     window.clearTimeout(applyTimer);
     applyTimer = window.setTimeout(() => {
       applyChrome();
@@ -1152,12 +1043,10 @@
       highlightTrackedClanRows();
       applyWmsyTheme();
       applyProfileChartToggles();
-
-      if (touchedWmsyTable) {
-        renderWmsyLeaderboard();
-      }
     }, 100);
   });
 
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  if (!isIndexPage()) {
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  }
 })();
