@@ -21,6 +21,7 @@ HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN
 # from trade, booth, or mail gains. Register them on the Luna HTG Big Games app.
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
+HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 INVENTORY_OAUTH_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
 # HTG is Discord-bot only. Leave this blank unless you build a dedicated HTG return page.

@@ -60,6 +60,8 @@ const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const HTG_BUILD_ID = "htg-debug-2026-07-27i";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
+const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
+const SELF_TIMEOUT_DAYS = 7;
 let chartDuckImagePromise = null;
 
 export default {
@@ -145,6 +147,16 @@ export default {
         return await registerHtgCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-offline-command") {
+        requireAdmin(request, env);
+        return await registerOfflineCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-kms-command") {
+        requireAdmin(request, env);
+        return await registerKmsCommand(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/htg/status") {
         requireAdmin(request, env);
         return json(await htgApiStatus(env));
@@ -155,6 +167,18 @@ export default {
         return json(await runHourlyClanAssignments(env, {
           force: ["1", "true", "yes"].includes(String(url.searchParams.get("force") || "").toLowerCase())
         }));
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/hourly/run-one") {
+        requireAdmin(request, env);
+        return json(await runOneHourlyClanAssignment(url, env, {
+          force: ["1", "true", "yes"].includes(String(url.searchParams.get("force") || "").toLowerCase())
+        }));
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/hourly/remove-assignment") {
+        requireAdmin(request, env);
+        return json(await removeHourlyClanAssignment(url, env));
       }
 
       if (request.method === "GET" && url.pathname === "/admin/hourly/status") {
@@ -571,6 +595,41 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "offline") {
+    const subcommand = getSubcommandName(interaction);
+    if (!["assign", "minutes", "clan", "user", "users", "remove-user", "remove-users", "post-rate", "check"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign`, `/offline minutes`, `/offline clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, or `/offline check`.", true));
+    }
+
+    const permitted = await memberCanManageServerTracker(interaction, env, {
+      allowDiscordManage: false
+    });
+    if (!permitted) {
+      return interactionJson(messageResponse(
+        "You need the configured Luna administrator role to manage offline pings.",
+        true
+      ));
+    }
+
+    ctx.waitUntil(completeOfflinePingInteraction(interaction, env));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: MESSAGE_FLAG_EPHEMERAL }
+    });
+  }
+
+  if (commandName === "kms") {
+    if (!interaction.guild_id) {
+      return interactionJson(messageResponse("This command can only be used inside a Discord server.", true));
+    }
+
+    ctx.waitUntil(completeSelfTimeoutInteraction(interaction, env));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: MESSAGE_FLAG_EPHEMERAL }
+    });
+  }
+
   if (commandName === "htg") {
     const subcommand = getSubcommandName(interaction);
     const hatchSubcommand = subcommand === "setup" || subcommand === "alert" ? "tracker" : subcommand;
@@ -702,7 +761,7 @@ async function buildSearchResponse(query, env) {
 
   if (searchChartEnabled(env)) {
     try {
-      const chart = await buildSearchChartAttachment(payload, row, env);
+      const chart = await buildSearchChartAttachment(payload, row, env, avatarUrl);
       if (chart?.bytes?.byteLength) {
         embed.image = { url: `attachment://${chart.filename}` };
         data._file = { filename: chart.filename, contentType: "image/png", bytes: chart.bytes };
@@ -776,14 +835,24 @@ function searchChartEnabled(env) {
   return String(env.SEARCH_CHART_ENABLED || "true").toLowerCase() !== "false";
 }
 
-async function buildSearchChartAttachment(payload, row, env) {
+function searchChartHistoryHours(env) {
+  const configured = Number(env.SEARCH_CHART_HISTORY_HOURS || 24);
+  return Math.max(1, Math.min(168, Number.isFinite(configured) ? configured : 24));
+}
+
+function searchChartHistoryLimit(env) {
+  const configured = Number(env.SEARCH_CHART_HISTORY_LIMIT || 300);
+  return Math.max(24, Math.min(1000, Math.round(Number.isFinite(configured) ? configured : 300)));
+}
+
+async function buildSearchChartAttachment(payload, row, env, avatarUrl = null) {
   const samples = searchChartSamples(payload, row);
   if (!samples.length) return null;
 
   const minT = Math.min(...samples.map(item => item.t));
   const maxT = Math.max(...samples.map(item => item.t));
   const markers = await fetchSearchChartMarkers(env, minT, maxT).catch(() => ({ updates: [], restarts: [] }));
-  const bytes = await renderSearchProfileChartPng(payload, row, samples, markers);
+  const bytes = await renderSearchProfileChartPng(payload, row, samples, markers, avatarUrl || row.avatar_url || row.avatarUrl || null);
   const filename = `global-search-${chartFilenamePart(displayName(row))}-${chartFilenamePart(row.event_name || row.battle_key || "current")}.png`;
   return { filename, bytes };
 }
@@ -882,70 +951,97 @@ function chartMarkerTime(value) {
   return Number.isFinite(t) && t > 0 ? t : null;
 }
 
-async function renderSearchProfileChartPng(payload, row, samples, markers = {}) {
-  const fonts = await loadHistoryFonts();
+async function renderSearchProfileChartPng(payload, row, samples, markers = {}, avatarUrl = null) {
+  const [loadedFonts, avatar] = await Promise.all([
+    loadHistoryFonts(),
+    loadHistoryAvatar(avatarUrl || row?.avatar_url || row?.avatarUrl).catch(() => null)
+  ]);
+  const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
-  const height = 720;
-  const canvas = new HistoryPixelCanvas(width, height, [15, 20, 27, 255], 2);
-  const color = chartColors();
-  const accent = [242, 204, 96, 255];
-  const rankColor = [255, 123, 114, 255];
-  const activeColor = [63, 185, 80, 255];
-  const downtimeColor = [255, 100, 105, 255];
-  const updateColor = [88, 166, 255, 255];
-  const restartColor = [210, 168, 255, 255];
-  const name = displayName(row);
+  const height = 900;
+  const color = searchChartBoardColors();
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
+  const pointColor = color.red;
+  const rankColor = color.yellow;
+  const activeColor = color.green;
+  const downtimeColor = color.red;
+  const unknownColor = color.zero;
+  const updateColor = color.cyan;
+  const restartColor = color.orange;
+  const name = row.username || row.display_name || `user_${row.user_id}`;
   const eventName = row.event_name || row.battle_display_name || row.battle_key || "Current Event";
   const clan = String(row.source_clan || row.clan_name || payload?.clan_name || "Clan").toUpperCase();
   const updatedAt = row.fetched_at || row.updated_at || payload?.run?.finished_at;
-  const panel = { x: 20, y: 20, w: width - 40, h: height - 40 };
-  canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
-  canvas.fillRect(panel.x, panel.y, panel.w, 1, color.line);
-  canvas.fillRect(panel.x, panel.y + panel.h - 1, panel.w, 1, color.line);
-  canvas.fillRect(panel.x, panel.y, 1, panel.h, color.line);
-  canvas.fillRect(panel.x + panel.w - 1, panel.y, 1, panel.h, color.line);
-
   const latest = samples[samples.length - 1] || {};
+
   const rawMinT = Math.min(...samples.map(item => item.t));
   const rawMaxT = Math.max(...samples.map(item => item.t));
   const singleSample = rawMaxT === rawMinT;
   const chartMaxT = singleSample ? rawMaxT + 60 * 60 * 1000 : rawMaxT;
-  const chartMinT = singleSample ? rawMinT - 60 * 60 * 1000 : Math.max(rawMinT, rawMaxT - 24 * 60 * 60 * 1000);
+  const chartMinT = chartMaxT - 24 * 60 * 60 * 1000;
   const visibleSamples = samples.filter(item => item.t >= chartMinT && item.t <= chartMaxT);
-  const chartMetrics = searchChartMetrics(visibleSamples);
-  const rankDelta = searchChartRankDelta(visibleSamples, 60);
+  const chartMetrics = searchChartMetrics(visibleSamples, chartMinT, chartMaxT);
   const pointGain1h = searchChartGain(visibleSamples, 60);
-  const plot = { x: 116, y: 116, w: 1438, h: 516 };
+  const pointGain6h = searchChartGain(visibleSamples, 360);
+  const pointGain12h = searchChartGain(visibleSamples, 720);
+  const pointGain24h = searchChartGain(visibleSamples, 1440);
+  const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
+  const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
+  const currentPoints = latest.points ?? row.global_points ?? row.clan_points;
+  const currentRank = latest.rank ?? row.global_rank;
+  const totalPlayers = finiteNumber(row.total_global_players ?? payload?.run?.total_global_players ?? payload?.run?.candidate_player_count);
+  const clanRank = row.member_rank || row.clan_rank || row.source_clan_rank || null;
 
-  const title = `${historyCardText(name, 26)} - Global Search`;
-  const subtitle = `${clan} - ${historyCardText(eventName, 42)}`;
-  const updated = `Updated ${chartDate(updatedAt)}`;
-  const updatedWidth = canvas.measureFontText(fonts.regular, updated, 14);
-  canvas.drawFontText(fonts.bold, title, 42, 31, 34, color.white, 620);
-  canvas.drawFontText(fonts.regular, subtitle, 44, 72, 16, color.muted, 700);
-  canvas.drawFontText(fonts.regular, updated, panel.x + panel.w - updatedWidth - 22, 43, 14, color.muted, updatedWidth + 2);
+  canvas.fillRect(32, 30, width - 64, height - 60, color.panel);
+  hourlyDrawMysticSmoke(canvas, width, height, color);
+  hourlyDrawPanelFrame(canvas, 32, 30, width - 64, height - 60, color.line);
+  searchChartDrawRainbowBar(canvas, 54, 42, width - 108, 5, color);
+  hourlyDrawHeaderOrnaments(canvas, width / 2, 116, color);
+  searchChartDrawAvatarBadge(canvas, fonts, name, avatar, width / 2 - 47, 70, 94, color);
+  searchChartDrawPlayerHeader(canvas, fonts, name, rank(currentRank), width / 2, 91, color);
 
-  const legend = [
-    { label: `Points: ${shortNumber(latest.points ?? row.global_points ?? row.clan_points)} (+${shortNumber(pointGain1h)} / 1h)`, color: accent },
-    { label: `Rank: ${rank(latest.rank ?? row.global_rank)}${rankDelta === null ? "" : ` (${searchChartSignedLabel(rankDelta)} / 1h)`}`, color: rankColor },
-    { label: `Active: ${searchChartDurationLabel(chartMetrics.activeMs)}`, color: activeColor },
-    { label: `Downtime: ${searchChartDurationLabel(chartMetrics.downtimeMs)}`, color: downtimeColor }
+  const leftPanel = { x: 54, y: 206, w: 488, h: 614 };
+  const chartPanelArea = { x: 556, y: 206, w: 990, h: 614 };
+
+  hourlyDrawPanel(canvas, leftPanel.x, leftPanel.y, leftPanel.w, leftPanel.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, leftPanel.x, leftPanel.y, leftPanel.w, leftPanel.h, 0, color);
+  hourlyDrawColumnHeader(canvas, fonts, leftPanel.x, leftPanel.y, leftPanel.w, 50, [eventName, hourlyBoardCompactTimestamp(updatedAt)], 0, color);
+
+  const metricRows = [
+    ["Global Rank", `${rank(currentRank)}${totalPlayers ? ` / ${shortNumber(totalPlayers)}` : ""}`, rankColor],
+    ["Points", shortNumber(currentPoints), pointColor],
+    ["Clan", clan, color.green],
+    ["Clan Rank", clanRank ? rank(clanRank) : "-", color.yellow],
+    ["1 Hour", `+${shortNumber(pointGain1h)}`, pointGain1h > 0 ? color.green : color.zeroText],
+    ["6 Hours", `+${shortNumber(pointGain6h)}`, pointGain6h > 0 ? color.green : color.zeroText],
+    ["12 Hours", `+${shortNumber(pointGain12h)}`, pointGain12h > 0 ? color.green : color.zeroText],
+    ["24 Hours", `+${shortNumber(pointGain24h)}`, pointGain24h > 0 ? color.green : color.zeroText],
+    ["Uptime", searchChartDurationLabel(chartMetrics.activeMs), activeColor],
+    ["Downtime", searchChartDurationLabel(chartMetrics.downtimeMs), downtimeColor],
+    ["Unknown", searchChartDurationLabel(chartMetrics.unknownMs), color.zeroText],
+    ["Markers", `${fullNumber(visibleUpdates.length)} updates / ${fullNumber(visibleRestarts.length)} restarts`, color.cyan]
   ];
-  const legendGap = 34;
-  const legendWidths = legend.map(item => Math.min(350, canvas.measureFontText(fonts.bold, item.label, 15) + 42));
-  const legendTotalWidth = legendWidths.reduce((sum, itemWidth) => sum + itemWidth, 0) + legendGap * Math.max(0, legendWidths.length - 1);
-  let legendX = panel.x + Math.max(22, (panel.w - legendTotalWidth) / 2);
-  legend.forEach((item, index) => {
-    const itemWidth = legendWidths[index];
-    const label = canvas.fitFontText(fonts.bold, item.label, 15, itemWidth - 38);
-    canvas.fillRect(legendX, 91, 24, 4, item.color);
-    canvas.drawFontText(fonts.bold, label, legendX + 34, 79, 15, color.white, itemWidth - 38);
-    legendX += itemWidth + legendGap;
+
+  const metricTop = leftPanel.y + 66;
+  const metricRowHeight = 38;
+  const metricMaxGain = Math.max(1, pointGain1h, pointGain6h, pointGain12h, pointGain24h);
+  metricRows.forEach((metric, index) => {
+    const gainValue = index >= 4 && index <= 7 ? [pointGain1h, pointGain6h, pointGain12h, pointGain24h][index - 4] : null;
+    searchChartDrawMetricRow(canvas, fonts, leftPanel.x + 12, metricTop + index * metricRowHeight, leftPanel.w - 24, metricRowHeight - 4, {
+      label: metric[0],
+      value: metric[1],
+      tone: metric[2],
+      barFraction: gainValue === null ? null : Math.max(0.04, gainValue / metricMaxGain)
+    }, index, color);
   });
 
-  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
-  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
-  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+  hourlyDrawPanel(canvas, chartPanelArea.x, chartPanelArea.y, chartPanelArea.w, chartPanelArea.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, chartPanelArea.x, chartPanelArea.y, chartPanelArea.w, chartPanelArea.h, 1, color);
+  hourlyDrawColumnHeader(canvas, fonts, chartPanelArea.x, chartPanelArea.y, chartPanelArea.w, 50, ["Rank / Points", "Last 24 Hours"], 1, color);
+
+  const plot = { x: chartPanelArea.x + 56, y: chartPanelArea.y + 84, w: chartPanelArea.w - 104, h: 386 };
+  hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 10, color.inset, 230);
+  hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
 
   const pointsSamples = visibleSamples.filter(item => item.points !== null);
   const rankSamples = visibleSamples.filter(item => item.rank !== null);
@@ -969,13 +1065,10 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}) 
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
     const pointsValue = yPointsMax - (i / 4) * (yPointsMax - yPointsMin);
-    const rankValue = yRankMin + (i / 4) * (yRankMax - yRankMin);
     const pointsLabel = shortNumber(pointsValue);
-    const rankLabel = `#${Math.round(rankValue).toLocaleString("en-US")}`;
-    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    canvas.fillRect(plot.x, yy, plot.w, 1, [42, 50, 70, 255]);
     const labelWidth = canvas.measureFontText(fonts.regular, pointsLabel, 12);
     canvas.drawFontText(fonts.regular, pointsLabel, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
-    searchChartDrawRightText(canvas, fonts.regular, rankLabel, plot.x + plot.w + 76, yy - 8, 12, rankColor, 76, color.panel);
   }
 
   const spanHours = Math.max(1, (chartMaxT - chartMinT) / (60 * 60 * 1000));
@@ -990,7 +1083,7 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}) 
       : i === xTickCount
         ? plot.x + plot.w - tickWidth
         : Math.max(plot.x, Math.min(plot.x + plot.w - tickWidth, xx - tickWidth / 2));
-    canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
+    canvas.fillRect(xx, plot.y, 1, plot.h, [30, 37, 53, 255]);
     canvas.drawFontText(fonts.regular, tickLabel, tickX, plot.y + plot.h + 23, 12, color.muted, tickWidth + 6);
   }
 
@@ -1003,23 +1096,168 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}) 
     searchChartDrawDashedVertical(canvas, xForTime(marker.t), plot.y, plot.y + plot.h, restartColor, 10, 5);
   }
 
-  searchChartDrawPolyline(canvas, pointsSamples, xFor, yForPoints, accent, 3);
+  searchChartDrawPolyline(canvas, pointsSamples, xFor, yForPoints, pointColor, 3);
   searchChartDrawPolyline(canvas, rankSamples, xFor, yForRank, rankColor, 3);
-  searchChartDrawActivityBar(canvas, visibleSamples, plot, xForTime, activeColor, downtimeColor, color, {
+  searchChartDrawActivityBar(canvas, visibleSamples, plot, xForTime, activeColor, downtimeColor, unknownColor, color, {
     y: plot.y + plot.h - 12,
-    height: 7
+    height: 7,
+    rangeStart: chartMinT,
+    rangeEnd: chartMaxT
   });
 
-  const footerLeft = "Points and rank history - last 24 hours";
-  const footerRight = [
-    `Updates: ${fullNumber((markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT).length)}`,
-    `Restarts: ${fullNumber((markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT).length)}`
-  ].join("  |  ");
-  const footerRightWidth = canvas.measureFontText(fonts.regular, footerRight, 12);
-  canvas.drawFontText(fonts.regular, footerLeft, 42, height - 48, 12, color.muted, 420);
-  canvas.drawFontText(fonts.regular, footerRight, panel.x + panel.w - footerRightWidth - 22, height - 48, 12, color.muted, footerRightWidth + 4);
+  const legendY = chartPanelArea.y + chartPanelArea.h - 102;
+  const chartLegend = [
+    ["Rank", rankColor],
+    ["Points", pointColor],
+    ["Uptime", activeColor],
+    ["Downtime", downtimeColor],
+    ["Game Updates", updateColor],
+    ["Restarts", restartColor]
+  ];
+  let chartLegendX = chartPanelArea.x + 34;
+  for (const [label, tone] of chartLegend) {
+    const labelWidth = canvas.measureFontText(fonts.rowBold, label, 15);
+    canvas.fillRect(chartLegendX, legendY + 7, 28, 5, tone);
+    hourlyDrawFittedText(canvas, fonts.rowBold, label, chartLegendX + 38, legendY, 15, color.white, labelWidth + 4);
+    chartLegendX += Math.min(170, labelWidth + 78);
+  }
+
+  const recentRows = searchChartIntervalRows(visibleSamples).slice(-4);
+  const recentTop = chartPanelArea.y + chartPanelArea.h - 66;
+  for (let index = 0; index < 4; index += 1) {
+    const recent = recentRows[index];
+    const rowX = chartPanelArea.x + 34 + Math.floor(index / 2) * 452;
+    const rowY = recentTop + (index % 2) * 22;
+    if (!recent) continue;
+    searchChartDrawTinyInterval(canvas, fonts, rowX, rowY, 418, recent, index, color);
+  }
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function searchChartBoardColors() {
+  return {
+    background: [8, 9, 18, 255],
+    panel: [20, 23, 36, 255],
+    panelDeep: [13, 17, 27, 255],
+    inset: [25, 29, 44, 255],
+    row: [25, 29, 43, 255],
+    rowAlt: [18, 22, 34, 255],
+    line: [54, 64, 100, 255],
+    white: [242, 245, 252, 255],
+    muted: [160, 172, 195, 255],
+    quiet: [105, 119, 148, 255],
+    cyan: [52, 225, 239, 255],
+    violet: [112, 106, 255, 255],
+    pink: [255, 93, 178, 255],
+    green: [76, 211, 132, 255],
+    yellow: [247, 211, 83, 255],
+    orange: [255, 145, 28, 255],
+    red: [231, 79, 84, 255],
+    zero: [118, 127, 146, 255],
+    zeroText: [148, 159, 181, 255],
+    bar: [48, 55, 72, 255],
+    barZero: [45, 51, 65, 255],
+    smokeCyan: [51, 230, 241, 255],
+    smokeViolet: [118, 72, 255, 255],
+    smokePink: [255, 92, 183, 255]
+  };
+}
+
+function searchChartDrawRainbowBar(canvas, x, y, width, height, color, options = {}) {
+  const segments = [color.violet, color.cyan, color.green, color.yellow, color.orange, color.red];
+  const segmentWidth = width / segments.length;
+  const gapCenter = Number(options.gapCenter);
+  const gapWidth = Math.max(0, Number(options.gapWidth) || 0);
+  const gapStart = Number.isFinite(gapCenter) && gapWidth > 0 ? gapCenter - gapWidth / 2 : null;
+  const gapEnd = Number.isFinite(gapCenter) && gapWidth > 0 ? gapCenter + gapWidth / 2 : null;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segmentX = x + index * segmentWidth;
+    const segmentRight = segmentX + segmentWidth + 1;
+    if (gapStart === null || gapEnd === null) {
+      canvas.fillRect(segmentX, y, segmentWidth + 1, height, segments[index]);
+      continue;
+    }
+
+    const leftWidth = Math.max(0, Math.min(segmentRight, gapStart) - segmentX);
+    if (leftWidth > 0) canvas.fillRect(segmentX, y, leftWidth, height, segments[index]);
+    const rightX = Math.max(segmentX, gapEnd);
+    const rightWidth = Math.max(0, segmentRight - rightX);
+    if (rightWidth > 0) canvas.fillRect(rightX, y, rightWidth, height, segments[index]);
+  }
+}
+
+function searchChartDrawAvatarBadge(canvas, fonts, playerName, avatar, x, y, size, color) {
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  hourlyBlendCircle(canvas, cx, cy, size / 2 + 13, color.orange, 15);
+  hourlyBlendCircle(canvas, cx, cy, size / 2 + 9, color.cyan, 16);
+  hourlyBlendCircle(canvas, cx, cy, size / 2 + 6, color.violet, 12);
+  chartFillCircle(canvas, cx, cy, size / 2 + 3, color.cyan);
+  chartFillCircle(canvas, cx, cy, size / 2 + 1, color.orange);
+  chartFillCircle(canvas, cx, cy, size / 2 - 2, color.panelDeep);
+  if (avatar) {
+    canvas.drawImageCover(avatar, x + 3, y + 3, size - 6, size - 6, true);
+  } else {
+    const initials = historyCardText(String(playerName || "??").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "??", 2);
+    const initialsWidth = canvas.measureFontText(fonts.bold, initials, 27);
+    canvas.drawFontText(fonts.bold, initials, cx - initialsWidth / 2, y + 42, 27, color.white, size - 12);
+  }
+  hourlyBlendCircle(canvas, cx - size * 0.21, cy - size * 0.24, 5, color.white, 45);
+}
+
+function searchChartDrawPlayerHeader(canvas, fonts, playerName, rankText, centerX, y, color) {
+  const size = 38;
+  const name = String(playerName || "").trim() || "Unknown";
+  const rankLabel = rankText === "Unranked" ? "Unranked" : `Rank ${String(rankText || "").trim()}`;
+  const nameWidth = canvas.measureFontText(fonts.bold, name, size);
+  const rankWidth = canvas.measureFontText(fonts.bold, rankLabel, size);
+  const nameX = centerX - 86 - nameWidth;
+  const rankX = centerX + 86;
+
+  hourlyDrawOutlinedText(canvas, fonts.bold, name, nameX, y, size, color.green, [7, 18, 31, 235], nameWidth + 4);
+  hourlyDrawOutlinedText(canvas, fonts.bold, rankLabel, rankX, y, size, color.yellow, [48, 32, 9, 235], rankWidth + 4);
+}
+
+function searchChartDrawMetricRow(canvas, fonts, x, y, width, height, metric, index, color) {
+  hourlyDrawPlayerRowShell(canvas, x, y, width, height, index, metric.barFraction !== null && metric.barFraction > 0.04, color);
+  const rowFont = fonts.rowBold || fonts.bold;
+  const textY = hourlyFontRowY(rowFont, y, height, 16);
+  hourlyDrawFittedText(canvas, rowFont, metric.label, x + 16, textY, 16, color.muted, 150);
+
+  if (metric.barFraction !== null) {
+    const barX = x + 178;
+    const barY = y + Math.max(9, Math.floor(height / 2) - 4);
+    const barW = 112;
+    canvas.fillRect(barX, barY, barW, 8, color.bar);
+    canvas.fillRect(barX, barY, Math.max(3, Math.min(barW, Math.round(barW * metric.barFraction))), 8, metric.tone);
+  }
+
+  hourlyDrawRightText(canvas, rowFont, metric.value, x + width - 14, textY, 16, metric.tone, width - 190);
+}
+
+function searchChartIntervalRows(samples) {
+  const rows = [];
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (previous.points === null || current.points === null) continue;
+    rows.push({
+      time: current.t,
+      gain: Math.max(0, current.points - previous.points),
+      rank: current.rank
+    });
+  }
+  return rows;
+}
+
+function searchChartDrawTinyInterval(canvas, fonts, x, y, width, row, index, color) {
+  hourlyDrawPlayerRowShell(canvas, x, y, width, 19, index, row.gain > 0, color);
+  const textY = hourlyFontRowY(fonts.rowBold || fonts.bold, y, 19, 13);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, chartTimeOfDayAxisLabel(row.time), x + 10, textY, 13, color.muted, 94);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, `+${shortNumber(row.gain)}`, x + 122, textY, 13, row.gain > 0 ? color.green : color.zeroText, 108);
+  hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, rank(row.rank), x + width - 10, textY, 13, color.red, 98);
 }
 
 function searchChartDrawPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
@@ -1042,46 +1280,98 @@ function searchChartDrawRightText(canvas, font, value, rightX, y, size, rgba, ma
   chartDrawBackedText(canvas, font, fitted, rightX - width, y, size, rgba, width + 2, background);
 }
 
-function searchChartDrawActivityBar(canvas, samples, plot, xForTime, activeColor, downtimeColor, color, options = {}) {
+function searchChartDrawActivityBar(canvas, samples, plot, xForTime, activeColor, downtimeColor, unknownColor, color, options = {}) {
   const barY = options.y ?? plot.y + plot.h + 54;
   const barHeight = options.height ?? 11;
-  canvas.fillRect(plot.x, barY, plot.w, barHeight, color.line);
+  const rangeStart = Number.isFinite(options.rangeStart) ? options.rangeStart : samples[0]?.t;
+  const rangeEnd = Number.isFinite(options.rangeEnd) ? options.rangeEnd : samples[samples.length - 1]?.t;
+  const gapColor = unknownColor || color.zero;
+  const maxGapMs = Number.isFinite(options.maxGapMs) ? options.maxGapMs : SEARCH_CHART_MAX_OBSERVED_GAP_MS;
+  canvas.fillRect(plot.x, barY, plot.w, barHeight, gapColor);
 
-  if (samples.length < 2) {
-    canvas.fillRect(plot.x, barY, plot.w, barHeight, [88, 96, 112, 255]);
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
     return;
   }
 
-  for (let index = 1; index < samples.length; index += 1) {
-    const previous = samples[index - 1];
-    const current = samples[index];
-    const x1 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(previous.t)));
-    const x2 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(current.t)));
-    const width = Math.max(2, x2 - x1);
+  const orderedSamples = samples
+    .filter(sample => Number.isFinite(sample?.t))
+    .sort((left, right) => left.t - right.t);
+
+  if (orderedSamples.length < 2) {
+    return;
+  }
+
+  for (let index = 1; index < orderedSamples.length; index += 1) {
+    const previous = orderedSamples[index - 1];
+    const current = orderedSamples[index];
+    if (!Number.isFinite(previous.t) || !Number.isFinite(current.t) || current.t <= previous.t) continue;
+    if (current.t - previous.t > maxGapMs) continue;
+
+    const x1 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(Math.max(rangeStart, previous.t))));
+    const x2 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(Math.min(rangeEnd, current.t))));
+    if (x2 <= x1) continue;
+    const width = Math.max(1, x2 - x1);
     const gained = current.points !== null && previous.points !== null && current.points > previous.points;
     canvas.fillRect(x1, barY, width, barHeight, gained ? activeColor : downtimeColor);
   }
 }
 
-function searchChartMetrics(samples) {
+function searchChartMetrics(samples, rangeStart = null, rangeEnd = null) {
   let activeMs = 0;
   let downtimeMs = 0;
+  let unknownMs = 0;
+  const start = Number.isFinite(rangeStart) ? rangeStart : samples[0]?.t;
+  const end = Number.isFinite(rangeEnd) ? rangeEnd : samples[samples.length - 1]?.t;
 
-  for (let index = 1; index < samples.length; index += 1) {
-    const previous = samples[index - 1];
-    const current = samples[index];
-    const duration = Math.max(0, current.t - previous.t);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return { activeMs: 0, downtimeMs: 0, unknownMs: 0, activePct: 0, downtimePct: 0, unknownPct: 0 };
+  }
+
+  const orderedSamples = samples
+    .filter(sample => Number.isFinite(sample?.t))
+    .sort((left, right) => left.t - right.t);
+
+  if (orderedSamples.length < 2) {
+    return { activeMs: 0, downtimeMs: 0, unknownMs: Math.max(0, end - start), activePct: 0, downtimePct: 0, unknownPct: 100 };
+  }
+
+  const first = orderedSamples[0];
+  if (Number.isFinite(first?.t) && first.t > start) {
+    unknownMs += Math.max(0, Math.min(end, first.t) - start);
+  }
+
+  for (let index = 1; index < orderedSamples.length; index += 1) {
+    const previous = orderedSamples[index - 1];
+    const current = orderedSamples[index];
+    if (!Number.isFinite(previous.t) || !Number.isFinite(current.t) || current.t <= previous.t) continue;
+
+    const intervalStart = Math.max(start, previous.t);
+    const intervalEnd = Math.min(end, current.t);
+    const duration = Math.max(0, intervalEnd - intervalStart);
+    if (!duration) continue;
+    if (current.t - previous.t > SEARCH_CHART_MAX_OBSERVED_GAP_MS) {
+      unknownMs += duration;
+      continue;
+    }
+
     const gained = current.points !== null && previous.points !== null && current.points > previous.points;
     if (gained) activeMs += duration;
     else downtimeMs += duration;
   }
 
-  const total = activeMs + downtimeMs;
+  const last = orderedSamples[orderedSamples.length - 1];
+  if (Number.isFinite(last?.t) && last.t < end) {
+    unknownMs += Math.max(0, end - Math.max(start, last.t));
+  }
+
+  const total = activeMs + downtimeMs + unknownMs;
   return {
     activeMs,
     downtimeMs,
+    unknownMs,
     activePct: total ? (activeMs / total) * 100 : 0,
-    downtimePct: total ? (downtimeMs / total) * 100 : 0
+    downtimePct: total ? (downtimeMs / total) * 100 : 0,
+    unknownPct: total ? (unknownMs / total) * 100 : 0
   };
 }
 
@@ -1321,7 +1611,7 @@ async function completeHatchInteraction(interaction, env, subcommand) {
 
     if (subcommand === "assign") {
       const guildId = String(interaction.guild_id || "").trim();
-      const sourceChannelId = String(interaction.channel_id || "").trim();
+      const sourceChannelId = interactionSourceChannelId(interaction);
       const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
       if (!guildId) throw httpError(400, "HTG hatch alerts can only be assigned inside a Discord server.");
       const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
@@ -1758,7 +2048,7 @@ async function completeHourlyClanInteraction(interaction, env) {
   try {
     const subcommand = getSubcommandName(interaction);
     const guildId = String(interaction.guild_id || "").trim();
-    const sourceChannelId = String(interaction.channel_id || "").trim();
+    const sourceChannelId = interactionSourceChannelId(interaction);
     const actorId = interactionUserId(interaction);
     const clan = String(getCommandOption(interaction, "clan") || "").trim();
     const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
@@ -1874,6 +2164,446 @@ async function completeHourlyClanInteraction(interaction, env) {
   }
 }
 
+async function completeOfflinePingInteraction(interaction, env) {
+  try {
+    const subcommand = getSubcommandName(interaction);
+    const guildId = String(interaction.guild_id || "").trim();
+    const sourceChannelId = interactionSourceChannelId(interaction);
+    const actorId = interactionUserId(interaction);
+
+    if (!guildId) throw httpError(400, "Offline pings can only be configured inside a Discord server.");
+
+    if (subcommand === "assign") {
+      const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
+      const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
+      if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel.type))) {
+        throw httpError(400, "Select a text channel, announcement channel, or existing Discord thread.");
+      }
+
+      const payload = await hourlyClanApiRequest(env, "/api/offline/config", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: requestedChannelId,
+          channel_type: Number(channel.type),
+          assigned_by: actorId,
+          updated_by: actorId,
+          enabled: true
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline pings are assigned to <#${requestedChannelId}>. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "minutes") {
+      const minutes = Number(getCommandOption(interaction, "number") || getCommandOption(interaction, "minutes"));
+      if (!Number.isFinite(minutes) || minutes < 1) throw httpError(400, "Use `/offline minutes number:<minutes>`.");
+      const payload = await hourlyClanApiRequest(env, "/api/offline/config", {
+        method: "PATCH",
+        body: {
+          guild_id: guildId,
+          minutes_threshold: Math.trunc(minutes),
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline threshold is now **${payload.config?.minutes_threshold || Math.trunc(minutes)} minutes** with no point gain.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "post-rate") {
+      const minutes = Number(getCommandOption(interaction, "minutes"));
+      if (!Number.isFinite(minutes) || minutes < 1) throw httpError(400, "Use `/offline post-rate minutes:<minutes>`.");
+      const payload = await hourlyClanApiRequest(env, "/api/offline/config", {
+        method: "PATCH",
+        body: {
+          guild_id: guildId,
+          post_rate_minutes: Math.trunc(minutes),
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline re-alert post rate is now **${payload.config?.post_rate_minutes || Math.trunc(minutes)} minutes**.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "clan") {
+      const clan = String(getCommandOption(interaction, "name") || "").trim();
+      if (!clan) throw httpError(400, "Use `/offline clan name:<clan>`.");
+      await hourlyClanApiRequest(env, "/api/offline/clans", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          clan_name: clan,
+          created_by: actorId,
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline pings will watch every tracked member in **${escapeDiscordMarkdown(clan)}**.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "user") {
+      const username = String(getCommandOption(interaction, "username") || "").trim();
+      const discordUserId = String(getCommandOption(interaction, "discord") || "").trim();
+      const clan = String(getCommandOption(interaction, "clan") || "").trim();
+      if (!username || !discordUserId) {
+        throw httpError(400, "Use `/offline user username:<roblox name> discord:<Discord user>`.");
+      }
+      const label = offlineDiscordUserLabel(interaction, discordUserId);
+      const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          username,
+          discord_user_id: discordUserId,
+          discord_label: label,
+          clan_name: clan || null,
+          created_by: actorId,
+          updated_by: actorId
+        }
+      });
+      const warningText = payload.warnings?.length ? `\n-# ${payload.warnings.join(" ")}` : "";
+      await editOriginalInteraction(interaction, {
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** → <@${discordUserId}>.${warningText}`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "users") {
+      const entriesText = String(getCommandOption(interaction, "entries") || "").trim();
+      const clan = String(getCommandOption(interaction, "clan") || "").trim();
+      const resolvedBulk = await resolveOfflineBulkDiscordUsers(
+        parseOfflineBulkUserEntries(entriesText),
+        interaction,
+        env
+      );
+      const users = resolvedBulk.users.map(entry => ({
+        ...entry,
+        clan_name: entry.clan_name || clan || null
+      }));
+      if (!users.length) {
+        throw httpError(400, "Paste pairs like `username: Cinnamowopal discord: @oaple username: BEARDED_DRAGONGUY discord: @BEARDED_DRAGONGUY`.");
+      }
+      const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          users,
+          created_by: actorId,
+          updated_by: actorId
+        }
+      });
+      const warnings = [...(resolvedBulk.warnings || []), ...(payload.warnings || [])];
+      const warningText = warnings.length ? `\n-# ${warnings.slice(0, 5).join(" ")}` : "";
+      await editOriginalInteraction(interaction, {
+        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"}.${warningText}`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "remove-user") {
+      const username = String(getCommandOption(interaction, "username") || "").trim();
+      if (!username) {
+        throw httpError(400, "Use `/offline remove-user username:<roblox name or user id>`.");
+      }
+      const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
+        method: "DELETE",
+        body: {
+          guild_id: guildId,
+          username,
+          updated_by: actorId
+        }
+      });
+      const removedCount = payload.removed_count || 0;
+      const warningText = payload.warnings?.length ? `\n-# ${payload.warnings.join(" ")}` : "";
+      await editOriginalInteraction(interaction, {
+        content: removedCount
+          ? `Removed **${removedCount}** offline ping assignment${removedCount === 1 ? "" : "s"} for **${escapeDiscordMarkdown(username)}**.${warningText}`
+          : `No offline ping assignment was found for **${escapeDiscordMarkdown(username)}**.${warningText}`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "remove-users") {
+      const entriesText = String(getCommandOption(interaction, "entries") || "").trim();
+      const users = parseOfflineBulkRemoveUserEntries(entriesText);
+      if (!users.length) {
+        throw httpError(400, "Paste Roblox names or IDs, or use entries like `username: Cinnamowopal username: BEARDED_DRAGONGUY`.");
+      }
+      const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
+        method: "DELETE",
+        body: {
+          guild_id: guildId,
+          users,
+          updated_by: actorId
+        }
+      });
+      const removedCount = payload.removed_count || 0;
+      const warningText = payload.warnings?.length ? `\n-# ${payload.warnings.slice(0, 5).join(" ")}` : "";
+      await editOriginalInteraction(interaction, {
+        content: `Removed **${removedCount}** offline ping assignment${removedCount === 1 ? "" : "s"}.${warningText}`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
+    if (subcommand === "check") {
+      const query = new URLSearchParams({ guild_id: guildId, force: "1" });
+      const payload = await hourlyClanApiRequest(env, `/api/offline/check?${query}`, {
+        method: "POST"
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline check completed. Guilds checked: **${payload.guilds_checked || 0}** · candidates: **${payload.offline_candidates || 0}** · posts: **${payload.alerts_posted || 0}**.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+    }
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Offline ping setup failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+  }
+}
+
+async function completeSelfTimeoutInteraction(interaction, env) {
+  const guildId = String(interaction.guild_id || "").trim();
+  const userId = interactionUserId(interaction);
+  if (!guildId || !userId) {
+    await editOriginalInteraction(interaction, {
+      content: "Self-timeout failed: missing Discord guild or user ID.",
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+    return;
+  }
+
+  const until = new Date(Date.now() + SELF_TIMEOUT_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const result = await setDiscordMemberTimeout(env, guildId, userId, until, `Self-timeout requested with /kms by ${userId}`);
+  if (!result.ok) {
+    await editOriginalInteraction(interaction, {
+      content: `Self-timeout failed: ${result.error}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+    return;
+  }
+
+  await editOriginalInteraction(interaction, {
+    content: `You have been timed out until <t:${Math.floor(new Date(until).getTime() / 1000)}:F>.`,
+    embeds: [],
+    components: [],
+    allowed_mentions: { parse: [] }
+  }).catch(() => null);
+}
+
+async function setDiscordMemberTimeout(env, guildId, userId, untilIso, reason = "") {
+  const url = `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`;
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: discordBotHeaders(env, {
+      "Content-Type": "application/json",
+      "X-Audit-Log-Reason": encodeURIComponent(reason).slice(0, 512)
+    }),
+    body: JSON.stringify({
+      communication_disabled_until: untilIso
+    })
+  });
+  const text = await response.text();
+  const payload = parseJsonObject(text) || {};
+  if (response.ok) return { ok: true, status: response.status, payload };
+
+  const message = payload.message || text || `Discord returned HTTP ${response.status}.`;
+  return {
+    ok: false,
+    status: response.status,
+    error: discordMemberTimeoutErrorMessage(response.status, message, payload)
+  };
+}
+
+function discordMemberTimeoutErrorMessage(status, message, payload = {}) {
+  if (status === 403 || payload.code === 50013) {
+    return "Discord rejected it. Luna needs Moderate Members permission, and Luna's role must be above your highest role.";
+  }
+  if (status === 404) {
+    return "Discord could not find your member record in this server.";
+  }
+  return String(message || "Discord member timeout failed.").slice(0, 500);
+}
+
+function offlineDiscordUserLabel(interaction, userId) {
+  const user = interaction?.data?.resolved?.users?.[String(userId)] || null;
+  return user?.global_name || user?.username || String(userId || "");
+}
+
+function parseOfflineBulkUserEntries(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const entries = [];
+  const pattern = /username\s*:\s*([^\s]+)\s+discord\s*:\s*(<@!?\d{5,30}>|\d{5,30}|[^\s]+)/gi;
+  let match;
+  while ((match = pattern.exec(text))) {
+    const username = String(match[1] || "").trim();
+    const discordValue = String(match[2] || "").trim();
+    const mentionMatch = discordValue.match(/^<@!?(\d{5,30})>$/);
+    const discordUserId = mentionMatch ? mentionMatch[1] : (/^\d{5,30}$/.test(discordValue) ? discordValue : "");
+    if (!username) continue;
+    entries.push({
+      username,
+      discord_user_id: discordUserId || null,
+      discord_label: discordUserId ? null : discordValue
+    });
+  }
+
+  return entries;
+}
+
+function parseOfflineBulkRemoveUserEntries(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const entries = [];
+  const pattern = /username\s*:\s*([^\s,]+)/gi;
+  let match;
+  while ((match = pattern.exec(text))) {
+    const username = String(match[1] || "").trim();
+    if (username) entries.push({ username });
+  }
+
+  if (entries.length) return dedupeOfflineRemoveEntries(entries);
+
+  return dedupeOfflineRemoveEntries(
+    text
+      .split(/[\s,;\r\n]+/)
+      .map(username => username.trim())
+      .filter(Boolean)
+      .map(username => ({ username }))
+  );
+}
+
+function dedupeOfflineRemoveEntries(entries) {
+  const seen = new Set();
+  const output = [];
+  for (const entry of entries || []) {
+    const username = String(entry?.username || "").trim();
+    const key = normalizeSearchKey(username);
+    if (!username || !key || seen.has(key)) continue;
+    seen.add(key);
+    output.push({ username });
+  }
+  return output;
+}
+
+async function resolveOfflineBulkDiscordUsers(entries, interaction, env) {
+  const guildId = String(interaction?.guild_id || "").trim();
+  const users = [];
+  const warnings = [];
+
+  for (const entry of entries || []) {
+    const next = { ...entry };
+    const directId = parseDiscordUserId(next.discord_user_id);
+    if (directId) {
+      next.discord_user_id = directId;
+      next.discord_label = next.discord_label || offlineDiscordUserLabel(interaction, directId);
+      users.push(next);
+      continue;
+    }
+
+    const label = String(next.discord_label || "").replace(/^@+/, "").trim();
+    if (!label || !guildId) {
+      users.push(next);
+      continue;
+    }
+
+    const member = await searchDiscordGuildMemberByName(env, guildId, label).catch(err => {
+      warnings.push(`Could not resolve Discord member ${label}: ${err?.message || err}. Use a mention or numeric ID if needed.`);
+      return null;
+    });
+    const userId = member?.user?.id ? String(member.user.id) : "";
+    if (userId) {
+      next.discord_user_id = userId;
+      next.discord_label = member.nick || member.user.global_name || member.user.username || label;
+    } else {
+      warnings.push(`Discord member ${label} was saved as a label only; use a mention or numeric ID to guarantee a ping.`);
+    }
+    users.push(next);
+  }
+
+  return { users, warnings };
+}
+
+async function searchDiscordGuildMemberByName(env, guildId, value) {
+  const query = String(value || "").trim();
+  if (!query) return null;
+
+  const url = new URL(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members/search`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("limit", "10");
+  const response = await fetch(url.toString(), {
+    headers: discordBotHeaders(env)
+  });
+  const payload = await response.json().catch(() => []);
+  if (!response.ok) {
+    const message = payload?.message || `Discord member lookup failed (${response.status}).`;
+    throw httpError(response.status, message);
+  }
+
+  const normalized = normalizeDiscordLookupName(query);
+  const members = Array.isArray(payload) ? payload : [];
+  return members.find(member => {
+    const user = member?.user || {};
+    return [
+      member.nick,
+      user.global_name,
+      user.username,
+      user.id
+    ].some(name => normalizeDiscordLookupName(name) === normalized);
+  }) || members[0] || null;
+}
+
+function normalizeDiscordLookupName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
 async function resolveHourlyClanChannel(interaction, env, channelId) {
   const resolved = interaction?.data?.resolved?.channels?.[channelId];
   if (resolved) return resolved;
@@ -1889,6 +2619,10 @@ async function resolveHourlyClanChannel(interaction, env, channelId) {
     );
   }
   return payload;
+}
+
+function interactionSourceChannelId(interaction) {
+  return String(interaction?.channel?.id || interaction?.channel_id || "").trim();
 }
 
 async function runHourlyClanAssignments(env, options = {}) {
@@ -1948,6 +2682,45 @@ async function runHourlyClanAssignments(env, options = {}) {
   };
 }
 
+async function runOneHourlyClanAssignment(url, env, options = {}) {
+  const channelId = String(url.searchParams.get("channel_id") || "").trim();
+  if (!/^\d{5,30}$/.test(channelId)) {
+    throw httpError(400, "A valid channel_id is required.");
+  }
+
+  const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+    query: { channel_id: channelId, limit: 1 }
+  });
+  const assignment = Array.isArray(response.assignments) ? response.assignments[0] : null;
+  if (!assignment) {
+    return {
+      ok: false,
+      channel_id: channelId,
+      message: "No hourly assignment was found for that channel_id."
+    };
+  }
+
+  const result = await deliverHourlyClanAssignment(env, assignment, options);
+  return {
+    ok: result.ok,
+    channel_id: channelId,
+    assignment,
+    result
+  };
+}
+
+async function removeHourlyClanAssignment(url, env) {
+  const channelId = String(url.searchParams.get("channel_id") || "").trim();
+  if (!/^\d{5,30}$/.test(channelId)) {
+    throw httpError(400, "A valid channel_id is required.");
+  }
+
+  return hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
+    method: "DELETE",
+    body: { channel_id: channelId }
+  });
+}
+
 function hourlyAssignmentDue(assignment, now = Date.now()) {
   const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
   if (!Number.isFinite(lastPosted) || lastPosted <= 0) return true;
@@ -1979,6 +2752,8 @@ async function hourlyClanAssignmentStatus(env) {
       return {
         guild_id: String(assignment.guild_id || ""),
         channel_id: String(assignment.channel_id || ""),
+        channel_type: assignment.channel_type ?? null,
+        channel_type_name: discordChannelTypeName(assignment.channel_type),
         clan_name: String(assignment.clan_name || ""),
         enabled: assignment.enabled !== false,
         due: hourlyAssignmentDue(assignment, now),
@@ -1990,6 +2765,16 @@ async function hourlyClanAssignmentStatus(env) {
       };
     })
   };
+}
+
+function discordChannelTypeName(value) {
+  const type = Number(value);
+  if (type === 0) return "text";
+  if (type === 5) return "announcement";
+  if (type === 10) return "announcement_thread";
+  if (type === 11) return "public_thread";
+  if (type === 12) return "private_thread";
+  return Number.isFinite(type) ? `type_${type}` : "unknown";
 }
 
 async function deliverHourlyClanAssignment(env, assignment, options = {}) {
@@ -6290,6 +7075,14 @@ async function registerHtgCommand(url, env) {
   return registerCommand(url, env, htgCommandPayload());
 }
 
+async function registerOfflineCommand(url, env) {
+  return registerCommand(url, env, offlineCommandPayload());
+}
+
+async function registerKmsCommand(url, env) {
+  return registerCommand(url, env, kmsCommandPayload());
+}
+
 async function registerRewardCommandSet(url, env) {
   const payloads = rewardCommandPayloads();
   const results = [];
@@ -6324,7 +7117,9 @@ async function registerAllCommands(url, env) {
     addCommandPayload(),
     removeCommandPayload(),
     hourlyCommandPayload(),
-    htgCommandPayload()
+    htgCommandPayload(),
+    offlineCommandPayload(),
+    kmsCommandPayload()
   ];
 
   const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
@@ -6384,7 +7179,9 @@ async function syncGlobalCommands(url, env) {
     addCommandPayload(),
     removeCommandPayload(),
     hourlyCommandPayload(),
-    htgCommandPayload()
+    htgCommandPayload(),
+    offlineCommandPayload(),
+    kmsCommandPayload()
   ];
 
   const deletedGuildCommands = [];
@@ -7321,6 +8118,8 @@ async function fetchGlobalSearchPayload(query, env) {
   apiUrl.searchParams.set("clan", scanClan);
   apiUrl.searchParams.set("q", query);
   apiUrl.searchParams.set("avatars", "1");
+  apiUrl.searchParams.set("history_hours", String(searchChartHistoryHours(env)));
+  apiUrl.searchParams.set("history_limit", String(searchChartHistoryLimit(env)));
 
   const res = await fetchClanApi(env, apiUrl, {
     headers: {
@@ -8117,6 +8916,172 @@ function htgCommandPayload() {
         ]
       }
     ]
+  };
+}
+
+function offlineCommandPayload() {
+  return {
+    name: "offline",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Configure Luna offline/no-gain pings.",
+    dm_permission: false,
+    options: [
+      {
+        name: "assign",
+        description: "Assign the channel where offline pings are posted.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "channel",
+            description: "Text channel or thread; defaults to the current channel",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          }
+        ]
+      },
+      {
+        name: "minutes",
+        description: "Set how many minutes with no point gain should trigger an alert.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "number",
+            description: "Minutes with no point gain before Luna alerts",
+            type: APPLICATION_COMMAND_OPTION_INTEGER,
+            required: true,
+            min_value: 1,
+            max_value: 1440
+          }
+        ]
+      },
+      {
+        name: "clan",
+        description: "Watch an entire clan for no-gain offline alerts.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "PS99 clan name, for example c0ld or WMSY",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "user",
+        description: "Map one Roblox username to one Discord user for direct pings.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Roblox username to watch",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          },
+          {
+            name: "discord",
+            description: "Discord user to mention when this Roblox account stops gaining",
+            type: APPLICATION_COMMAND_OPTION_USER,
+            required: true
+          },
+          {
+            name: "clan",
+            description: "Optional clan hint if this player is not in the primary clan",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "users",
+        description: "Bulk-add pasted username/Discord pairs.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "entries",
+            description: "Pairs like: username: Cinnamowopal discord: @oaple username: Foo discord: @Foo",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 4000
+          },
+          {
+            name: "clan",
+            description: "Optional clan hint applied to every pasted user",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "remove-user",
+        description: "Remove one Roblox user from direct offline pings.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Roblox username or numeric user ID to remove",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "remove-users",
+        description: "Bulk-remove direct offline ping assignments.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "entries",
+            description: "Roblox names/IDs, or: username: Cinnamowopal username: Foo",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 4000
+          }
+        ]
+      },
+      {
+        name: "post-rate",
+        description: "Set how often repeated offline alerts may repost.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "minutes",
+            description: "Minimum minutes between repeat alerts for the same player",
+            type: APPLICATION_COMMAND_OPTION_INTEGER,
+            required: true,
+            min_value: 1,
+            max_value: 1440
+          }
+        ]
+      },
+      {
+        name: "check",
+        description: "Run the offline ping check now for this server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      }
+    ]
+  };
+}
+
+function kmsCommandPayload() {
+  return {
+    name: "kms",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Remove Pride Theme.",
+    dm_permission: false
   };
 }
 

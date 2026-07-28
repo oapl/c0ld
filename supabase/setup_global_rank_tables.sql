@@ -71,8 +71,8 @@ create table if not exists public.c0ld_global_rank_history (
   raw_global            jsonb       not null default '{}'::jsonb,
   created_at            timestamptz not null default now(),
 
-  constraint c0ld_global_rank_history_run_user_key
-    unique (run_key, user_id)
+  constraint c0ld_global_rank_history_run_clan_user_key
+    unique (run_key, clan_name, user_id)
 );
 
 alter table public.c0ld_global_rank_runs
@@ -148,7 +148,7 @@ comment on table public.c0ld_global_ranks_current is
   'Latest global rank cache for current c0ld members and Discord search results.';
 
 comment on table public.c0ld_global_rank_history is
-  'Append-only global rank history for members found during global scans.';
+  'Append-only global rank history for members found during global scans, keyed per tracked clan roster.';
 
 comment on table public.c0ld_global_rank_candidates is
   'Temporary candidate player contribution rows collected while scanning ranked clans for global ranks.';

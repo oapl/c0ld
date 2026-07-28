@@ -179,13 +179,15 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search, /version, /clan, /lg, and /htg..." -ForegroundColor Cyan
+  Write-Host "Registering /search, /version, /clan, /lg, /htg, /offline, and /kms..." -ForegroundColor Cyan
   $registerPaths = @(
     "/admin/register-search-command",
     "/admin/register-version-command",
     "/admin/register-clan-command",
     "/admin/register-lg-command",
-    "/admin/register-htg-command"
+    "/admin/register-htg-command",
+    "/admin/register-offline-command",
+    "/admin/register-kms-command"
   )
   foreach ($path in $registerPaths) {
     $registerPath = if ($RegisterGlobal) {

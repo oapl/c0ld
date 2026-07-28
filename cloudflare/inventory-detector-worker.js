@@ -45,7 +45,7 @@ const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
 const HATCH_SOURCE_WINDOW_PADDING_MINUTES = 10;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-2026-07-27k";
+const INVENTORY_BUILD_ID = "inventory-htg-2026-07-28a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -103,6 +103,8 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/api/inventory/health") {
         const oauth = await oauthStatus(env);
+        const assignedHatchConfigs = await fetchEnabledHatchGuildConfigs(env).catch(() => []);
+        const assignedHatchChannelCount = assignedHatchConfigs.filter(config => String(config.channel_id || "").trim()).length;
         response = json({
           ok: true,
           service: "ps99-inventory-detector",
@@ -118,7 +120,9 @@ export default {
           big_games_oauth_expires_at: oauth.expires_at,
           hatch_tracker: {
             big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
-            channel_configured: Boolean(hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
+            force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
+            channel_configured: Boolean(assignedHatchChannelCount || hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
+            assigned_channel_count: assignedHatchChannelCount,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
             webhook_configured: Boolean(hatchAlertWebhookUrl(env))
           }
@@ -157,6 +161,9 @@ export default {
       } else if (request.method === "GET" && url.pathname === "/api/hatch/tracker/status") {
         requireAdmin(request, env);
         response = await handleHatchTrackerStatus(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/hatch/diagnostics") {
+        requireAdmin(request, env);
+        response = await handleHatchDiagnostics(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/hatch/guild-config") {
         requireAdmin(request, env);
         response = await handleHatchGuildConfigStatus(request, env);
@@ -183,9 +190,14 @@ export default {
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
       const results = await Promise.allSettled(users.map(async user => {
         if (!await inventoryScanIsDue(env, user, now, { synchronized: true })) return { skipped: true, user };
-        const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env));
-        if (!result.skipped) {
-          result.hatch_alert = await postHatchAlertIfNeeded(env, user, result.snapshot, { source: "schedule" })
+        const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id).catch(error => {
+          console.warn("Scheduled hatch tracker lookup failed", error?.message || error);
+          return null;
+        });
+        const forceHatchRefresh = !!tracker && envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true);
+        const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env), { force: forceHatchRefresh });
+        if (tracker && result.snapshot?.id) {
+          result.hatch_alert = await postHatchAlertIfNeeded(env, user, result.snapshot, { source: "schedule", tracker })
             .catch(error => {
               console.warn("Scheduled hatch alert check failed", error?.message || error);
               return { posted: false, error: error?.message || String(error) };
@@ -764,6 +776,100 @@ async function handleHatchAlertCheck(request, env) {
     ...(await postHatchAlertIfNeeded(env, user, latest, {
       source: "manual",
       force: parseBool(url.searchParams.get("force")) === true
+    }))
+  });
+}
+
+async function handleHatchDiagnostics(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const user = requestUser(url);
+  const itemQuery = String(url.searchParams.get("item") || "Huge Turnip Hamster").trim();
+  const snapshotLimit = Math.max(2, Math.min(30, Number(url.searchParams.get("limit") || 12)));
+  const includeDiffs = parseBool(url.searchParams.get("include_diffs")) !== false;
+  const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id, { includeDisabled: true });
+  const trackerStatus = tracker?.discord_user_id ? await hatchTrackerStatus(env, tracker.discord_user_id) : null;
+  const snapshots = sortAsc(await getUserSnapshots(env, user.user_id, snapshotLimit));
+  const itemTimeline = [];
+  const snapshotItems = new Map();
+
+  for (const snapshot of snapshots) {
+    const items = await getSnapshotItems(env, snapshot.id);
+    snapshotItems.set(snapshot.id, items);
+    const matches = items.filter(item => hatchDiagnosticItemMatches(item, itemQuery));
+    itemTimeline.push({
+      snapshot_id: snapshot.id,
+      captured_at: snapshot.captured_at,
+      source: snapshot.source,
+      source_fetched_at: snapshot.raw?.source_fetched_at || null,
+      inventory_selection_method: snapshot.raw?.inventory_selection_method || null,
+      item_count: snapshot.item_count,
+      matched_count: matches.reduce((total, item) => total + Number(item.count || 0), 0),
+      matches: matches.slice(0, 12).map(compactInventoryItemForDiagnostics)
+    });
+  }
+
+  const recentDiffs = [];
+  if (includeDiffs) {
+    for (let i = 1; i < snapshots.length; i++) {
+      const start = snapshots[i - 1];
+      const end = snapshots[i];
+      const diff = buildDiff(snapshotItems.get(start.id), snapshotItems.get(end.id));
+      const hatchCandidates = hatchAlertCandidates(diff.gained || []);
+      const queryCandidates = hatchCandidates.filter(item => hatchDiagnosticItemMatches(item, itemQuery));
+      recentDiffs.push({
+        period_start: start.captured_at,
+        period_end: end.captured_at,
+        snapshot_start_id: start.id,
+        snapshot_end_id: end.id,
+        hatch_candidate_count: hatchCandidates.length,
+        matching_hatch_candidates: queryCandidates.map(compactHatchCandidate),
+        top_hatch_candidates: hatchCandidates.slice(0, 10).map(compactHatchCandidate)
+      });
+    }
+  }
+
+  const alertRows = await supabaseSelectAll(env, HATCH_ALERTS_TABLE, {
+    select: "id,tracker_id,discord_user_id,roblox_user_id,roblox_username,period_start,period_end,tier,display_name,variant,delta,rap,snapshot_start_id,snapshot_end_id,discord_response,all_gained,created_at",
+    roblox_user_id: `eq.${user.user_id}`,
+    order: "created_at.desc"
+  }, 25).catch(error => [{ error: error?.message || String(error) }]);
+  const guildConfigs = await fetchEnabledHatchGuildConfigs(env).catch(error => [{ error: error?.message || String(error) }]);
+  const latest = snapshots[snapshots.length - 1] || null;
+  const uncheckedLatest = !!tracker && !!latest && String(tracker.last_checked_snapshot_id || "") !== String(latest.id || "");
+
+  return json({
+    ok: true,
+    user,
+    item_query: itemQuery,
+    tracker: tracker ? {
+      id: tracker.id || null,
+      discord_user_id: tracker.discord_user_id || null,
+      discord_username: tracker.discord_username || null,
+      roblox_user_id: tracker.roblox_user_id || null,
+      roblox_username: tracker.roblox_username || null,
+      enabled: Boolean(tracker.enabled),
+      enabled_tiers: hatchTrackerEnabledTiers(tracker),
+      authorized_at: tracker.authorized_at || null,
+      authorization_expires_at: tracker.authorization_expires_at || null,
+      last_checked_snapshot_id: tracker.last_checked_snapshot_id || null,
+      last_checked_at: tracker.last_checked_at || null,
+      last_alert_snapshot_id: tracker.last_alert_snapshot_id || null,
+      last_alert_at: tracker.last_alert_at || null,
+      latest_snapshot_unchecked: uncheckedLatest
+    } : null,
+    tracker_status: trackerStatus,
+    latest_snapshot: latest ? lightSnapshot(latest) : null,
+    snapshot_count: snapshots.length,
+    item_timeline: itemTimeline,
+    recent_diffs: recentDiffs,
+    alert_rows: alertRows,
+    enabled_guild_configs: guildConfigs.map(config => ({
+      guild_id: config.guild_id || null,
+      channel_id: config.channel_id || null,
+      enabled: config.enabled ?? null,
+      updated_at: config.updated_at || null,
+      error: config.error || null
     }))
   });
 }
@@ -2036,7 +2142,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
   const userId = String(user.user_id || latestSnapshot.roblox_user_id || "").trim();
   if (!userId) return { posted: false, reason: "No Roblox user_id was provided." };
 
-  const tracker = await fetchHatchTrackerByRobloxUser(env, userId);
+  const tracker = options.tracker || await fetchHatchTrackerByRobloxUser(env, userId);
   if (!tracker) return { posted: false, reason: "Hatch tracker is not enabled for this Roblox account." };
   if (!options.force && String(tracker.last_checked_snapshot_id || "") === String(latestSnapshot.id)) {
     return { posted: false, reason: "Snapshot was already checked.", snapshot_id: latestSnapshot.id };
@@ -3071,6 +3177,44 @@ function compactInventoryItem(item) {
     top_keys: keys.slice(0, 30),
     catalog_signals: CATALOG_ITEM_KEYS.filter(key => keys.includes(key))
   };
+}
+
+function compactInventoryItemForDiagnostics(item) {
+  return {
+    item_key: item?.item_key || null,
+    item_class: item?.item_class || null,
+    item_id: item?.item_id || null,
+    display_name: item?.display_name || null,
+    variant: item?.variant || null,
+    count: Number(item?.count || 0),
+    rap: Number(item?.rap || 0),
+    tier: hatchTier(item) || null
+  };
+}
+
+function hatchDiagnosticItemMatches(item, query) {
+  const terms = String(query || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = [
+    item?.display_name,
+    item?.item_id,
+    item?.item_key,
+    item?.variant,
+    item?.raw?.displayName,
+    item?.raw?.name,
+    item?.raw?.id,
+    item?.raw?.itemId,
+    item?.raw?.configName,
+    item?.raw?.stackKey,
+    item?.raw?.stack_key,
+    item?.raw?.rawData?.id
+  ].map(value => String(value || "").toLowerCase()).join(" ");
+  return terms.every(term => haystack.includes(term));
 }
 
 function inventoryPayloadShape(raw) {

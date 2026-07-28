@@ -182,8 +182,10 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `SNAPSHOT_RETENTION_HOURS` | Optional. Leave blank/omit to preserve archived battle snapshots. Set a positive hour count only if you intentionally want rolling pruning. |
 | `HISTORY_MAX_HOURS` | Optional. Defaults to `100000`; caps `/api/history` and `/api/clans/history` lookback requests. |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
+| `MEMBER_SNAPSHOT_MIN_INTERVAL_MINUTES` | Optional. Defaults to `5`; prevents scheduled or accidental duplicate member snapshot writes for the same clan/battle when the latest snapshot is newer than this. `force=1` bypasses it. |
 | `INGEST_CLANS_LEADERBOARD` | `true` |
 | `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
+| `CLANS_SNAPSHOT_MIN_INTERVAL_MINUTES` | Optional. Defaults to `5`; prevents scheduled or accidental duplicate all-clans leaderboard snapshot writes for the same battle when the latest snapshot is newer than this. `force=1` bypasses it. |
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
 | `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
@@ -224,6 +226,12 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
 | `CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES` | Optional. Defaults to `25`; skips activity ingests when the latest roster snapshot for the same battle is newer than this. Use `bypass_recent=1` on a protected manual URL only when you intentionally want to override it. |
 | `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
+| `INGEST_OFFLINE_ALERTS` | Optional. Defaults to `false`. Set to `true` after running migration `040` to let scheduled clan pulls evaluate Discord no-gain/offline pings. |
+| `OFFLINE_DEFAULT_MINUTES` | Optional. Defaults to `30`; initial no-gain threshold for a guild until `/offline minutes` changes it. |
+| `OFFLINE_DEFAULT_POST_RATE_MINUTES` | Optional. Defaults to `30`; initial minimum interval between repeat alerts for the same offline player. |
+| `OFFLINE_ALERT_SCHEDULE_MINUTES` | Optional. Defaults to `5`; how often the clan Worker evaluates configured offline pings. Keep the Cloudflare cron at least this frequent. |
+| `OFFLINE_ALERT_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the offline alert schedule interval. |
+| `OFFLINE_LOOKBACK_BUFFER_MINUTES` | Optional. Defaults to `30`; extra history read beyond the guild threshold so downtime can be calculated from stored snapshots. |
 | `INGEST_PS99_VERSION_HISTORY` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `021` so PS99 place version checks continue outside clan battles. |
 | `PS99_UNIVERSE_ID` | Optional. Defaults to `3317771874`. |
 | `PS99_ROOT_PLACE_ID` | Optional. Defaults to `8737899170`. |
@@ -1058,6 +1066,7 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish hatches from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
+| `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new hatches are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
@@ -1197,6 +1206,70 @@ deployed worker that has the `0 * * * *` cron trigger.
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for
 every configured destination with `scripts/test-discord-hourly-clans.ps1`.
+
+## Discord Offline Pings
+
+Offline pings are configured through the Luna Discord Worker and evaluated by
+`c0ld-clan-api-worker`. The signal is **no battle point gain for N minutes**;
+it does not use Discord presence or Roblox live presence.
+
+Run this migration first:
+
+```text
+supabase/migrations/040_discord_offline_ping.sql
+```
+
+Register `/offline` with `scripts/discord-search-command-admin.ps1`, or call
+`POST /admin/register-offline-command` on the Discord interactions Worker with
+the same admin token used for the other command registrations.
+
+Commands:
+
+```text
+/offline assign channel:<channel>
+/offline minutes number:<minutes>
+/offline clan name:<clan>
+/offline user username:<roblox username> discord:<Discord user> clan:<optional clan hint>
+/offline users entries:<username: Foo discord: @Foo username: Bar discord: @Bar> clan:<optional clan hint>
+/offline post-rate minutes:<minutes>
+/offline check
+```
+
+The Discord Worker needs `CLAN_API_ADMIN_TOKEN` and the `CLAN_API_WORKER`
+service binding, same as `/hourly`. The clan API Worker needs
+`DISCORD_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and
+`INGEST_OFFLINE_ALERTS=true` once you are ready for scheduled checks. Manual
+checks can be triggered with:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/offline/check?guild_id=YOUR_GUILD_ID&force=1" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Preview the alarm format without waiting for a real no-gain alert:
+
+```powershell
+$body = @{
+  webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
+  clan_name = "c0ld"
+  username = "Cinnamowopal"
+  minutes = 30
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://c0ld-clan-api-worker.opal-dde.workers.dev/api/offline/test-post" `
+  -Headers @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" } `
+  -Body $body
+```
+
+To preview in the assigned Discord channel instead of a webhook, send
+`guild_id` or `channel_id` in the body and omit `webhook_url`.
+
+Bloxlink note: Discord interaction payloads include Discord role IDs, but they
+do not include Bloxlink's Roblox-account mapping. To auto-map verified Roblox
+names later, add a Bloxlink API integration or continue using explicit
+`/offline user` mappings.
 
 ## Servers Worker
 

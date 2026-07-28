@@ -1,6 +1,6 @@
 # Paste the Luna Discord Worker's REGISTER_ADMIN_TOKEN below, then run this file.
 # This forces all currently assigned /hourly boards to post immediately.
-$WorkerUrl = "https://c0ld-discord-search.opal-dde.workers.dev/"
+$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev/"
 $AdminToken = "PASTE_REGISTER_ADMIN_TOKEN_HERE"
 
 $ErrorActionPreference = "Stop"
