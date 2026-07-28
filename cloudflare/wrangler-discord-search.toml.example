@@ -26,6 +26,8 @@ SITE_BASE_URL = "https://c0ld-clan.com"
 # latest global clan scan.
 GLOBAL_SCAN_CLAN = "c0ld"
 DISCORD_EPHEMERAL_RESPONSES = "false"
+SEARCH_CHART_ENABLED = "true"
+SEARCH_CHART_RESTART_MARKERS = "false"
 DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
 # Optional. Use this while testing so the command appears in one server quickly.
 DISCORD_GUILD_ID = ""

@@ -198,6 +198,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_CLAN_DELAY_MS` | Optional. Defaults to `1000`; delay between clan detail pulls to avoid hammering the API. |
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
+| `GLOBAL_RANK_NAME_SCAN_LIMIT` | Optional. Defaults to `50000`; maximum latest global-rank candidate rows to scan by stored raw username/display name when Roblox username lookup is unavailable or returns no match. |
 | `GLOBAL_RANK_RETENTION_HOURS` | Optional. Defaults to `24`; completed global-rank run data older than this is pruned while the battle/update is active. |
 | `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `true`; set `false` to disable global-rank run cleanup. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
@@ -260,6 +261,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_RESTART_BATCH_SIZE` | Optional. Defaults to `100`; public servers fetched from Roblox per page. Roblox accepts `10`, `25`, `50`, or `100`. |
 | `PS99_RESTART_PAGE_COUNT` | Optional. Defaults to `5`; public server-list pages checked per one-minute observation before a tracked ID is considered missing. |
 | `PS99_RESTART_SAMPLE_SIZE` | Optional. Defaults to `10`; persistent high-occupancy public-server IDs used as the reference sample. |
+| `PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES` | Optional. Defaults to `60`; restart candidate cards treat PS99 version changes in this lookback window as recent-version corroboration rather than requiring an instant version flip. |
+| `PS99_RESTART_INTEL_TURNOVER_PERCENT` | Optional. Defaults to `50`; public-server turnover must be at least this high to appear as a supporting review-card flag. Values below `50` are clamped to `50`, and turnover alone never opens a candidate. |
 | `PS99_RESTART_CONFIRMATIONS` | Optional. Defaults to `2`; consecutive one-minute observations required before a restart event is confirmed. |
 | `PS99_RESTART_REQUIRE_VERSION_CORRELATION` | Optional. Defaults to `true`; suppresses server-turnover restart events unless they line up with a PS99 place version change or recent version event. |
 | `PS99_RESTART_COOLDOWN_MINUTES` | Optional. Defaults to `10`; stabilization period after a confirmed restart before a new reference sample is registered. |
@@ -323,7 +326,18 @@ The public Roblox server list does not include server creation time or a true
 per-server place version. More importantly, a tracked server disappearing from
 the pages fetched by this Worker does **not** prove that the server died. In the
 default `sentinel` mode, public-list turnover is recorded only as supporting
-evidence and is never allowed to create a restart alert.
+evidence and is never allowed to create a restart alert or review candidate by
+itself. Restart-intelligence cards only include a public-turnover flag at 50% or
+higher, and only non-turnover signals can open a candidate.
+
+For version rollouts, the Worker also tracks public-server **version cohorts**.
+Roblox does not expose a true per-public-server place version, so this is an
+inference: a public server ID is tagged with the root-place version that was
+current when the Worker first saw that server ID. After a new PS99 version is
+released, review cards can show whether old-version cohort server IDs are still
+present, whether they fully drained out, and whether new-version cohort IDs grew.
+That cohort drain can corroborate a version-migration review without treating
+plain public-server turnover as a restart.
 
 Strong confirmation comes from dedicated, otherwise-idle Roblox clients kept
 inside the PS99 root place. Each Windows reporter reads its own Roblox log and
@@ -634,6 +648,8 @@ Required Worker variables:
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` and `/history` replies visible only to the user. |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`. Leave blank to allow everyone. |
+| `SEARCH_CHART_ENABLED` | Optional. Defaults to `true`; attaches a generated points/rank activity chart to `/search` responses. |
+| `SEARCH_CHART_RESTART_MARKERS` | Optional. Defaults to `false`; when set to `true`, overlays stored PS99 restart events on the `/search` chart. PS99 version update markers are shown automatically when available. |
 | `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |

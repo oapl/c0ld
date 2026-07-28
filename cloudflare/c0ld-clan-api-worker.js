@@ -123,8 +123,9 @@ const DEFAULT_PS99_RESTART_INTEL_POST_MINUTES = 15;
 const DEFAULT_PS99_RESTART_INTEL_MERGE_MINUTES = 90;
 const DEFAULT_PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT = 5;
 const DEFAULT_PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT = 8;
-const DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT = 20;
+const DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT = 50;
 const DEFAULT_PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS = 20;
+const DEFAULT_PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES = 60;
 const PS99_RESTART_CRONS = new Set([
   "* * * * *",
   "*/1 * * * *"
@@ -3997,7 +3998,10 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
     };
   }
 
-  const lookup = await resolveGlobalSearchIdentity(query, env);
+  const lookup = await resolveGlobalSearchIdentity(query, env, {
+    clan,
+    runKey: run.run_key
+  });
   if (!lookup.user_id) {
     return {
       ok: false,
@@ -4023,6 +4027,7 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
       message: `No player matched "${query}" in the latest scanned global pool.`,
       query,
       clan_name: clan,
+      resolved_user: lookup,
       run
     };
   }
@@ -7877,11 +7882,159 @@ function ps99RestartIntelligenceRuntimeConfig(env) {
     merge_minutes: clamp(Number(env.PS99_RESTART_INTEL_MERGE_MINUTES || DEFAULT_PS99_RESTART_INTEL_MERGE_MINUTES), 15, 180),
     ccu_drop_3m_percent: clamp(Number(env.PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT || DEFAULT_PS99_RESTART_INTEL_CCU_DROP_3M_PERCENT), 1, 50),
     ccu_drop_10m_percent: clamp(Number(env.PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT || DEFAULT_PS99_RESTART_INTEL_CCU_DROP_10M_PERCENT), 1, 50),
-    turnover_percent: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_PERCENT || DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT), 1, 100),
+    turnover_percent: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_PERCENT || DEFAULT_PS99_RESTART_INTEL_TURNOVER_PERCENT), 50, 100),
     min_public_servers: clamp(Number(env.PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS || DEFAULT_PS99_RESTART_INTEL_MIN_PUBLIC_SERVERS), 5, 1000),
-    turnover_only_open_percent: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_ONLY_OPEN_PERCENT || 90), 50, 100),
-    turnover_only_consecutive_observations: clamp(Number(env.PS99_RESTART_INTEL_TURNOVER_ONLY_CONSECUTIVE || 2), 2, 6),
     require_corroboration: String(env.PS99_RESTART_INTEL_REQUIRE_CORROBORATION || "true").toLowerCase() !== "false"
+  };
+}
+
+function ps99RestartRecentVersionWindowMinutes(env) {
+  return clamp(
+    Number(env.PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES || DEFAULT_PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES),
+    5,
+    180
+  );
+}
+
+function buildPs99PublicServerVersionCohort(servers, recentRows, observedAt, currentVersion, versionContext = {}) {
+  const currentVersionNumber = toNumber(currentVersion);
+  const priorById = new Map();
+  const orderedRows = [...(recentRows || [])].reverse();
+
+  for (const row of orderedRows) {
+    const raw = parseJsonObject(row.raw_observation);
+    const priorServers = Array.isArray(raw?.servers) ? raw.servers : [];
+    for (const priorServer of priorServers) {
+      const serverId = stringOrNull(priorServer?.server_id || priorServer?.id);
+      if (!serverId) continue;
+
+      const previous = priorById.get(serverId) || {};
+      const firstSeenAt = safeIso(previous.first_seen_at) ||
+        safeIso(priorServer.first_seen_at) ||
+        safeIso(row.observed_at);
+      const firstSeenVersion = toNumber(previous.first_seen_place_version) ??
+        toNumber(priorServer.first_seen_place_version) ??
+        toNumber(priorServer.observed_place_version) ??
+        toNumber(priorServer.current_scan_place_version) ??
+        toNumber(row.place_version);
+
+      priorById.set(serverId, {
+        ...previous,
+        server_id: serverId,
+        first_seen_at: firstSeenAt,
+        first_seen_place_version: firstSeenVersion,
+        last_seen_at: safeIso(priorServer.last_seen_at) || safeIso(row.observed_at),
+        last_scan_place_version: toNumber(priorServer.current_scan_place_version) ?? toNumber(row.place_version)
+      });
+    }
+  }
+
+  const annotatedServers = (servers || []).map(server => {
+    const serverId = stringOrNull(server?.server_id || server?.id);
+    const prior = priorById.get(serverId) || {};
+    const firstSeenVersion = toNumber(prior.first_seen_place_version) ?? currentVersionNumber;
+    const cohort = firstSeenVersion === null || currentVersionNumber === null
+      ? "unknown"
+      : firstSeenVersion < currentVersionNumber
+        ? "old"
+        : firstSeenVersion === currentVersionNumber
+          ? "current"
+          : "newer";
+
+    return {
+      ...server,
+      server_id: serverId,
+      first_seen_at: safeIso(prior.first_seen_at) || observedAt,
+      last_seen_at: observedAt,
+      first_seen_place_version: firstSeenVersion,
+      observed_place_version: firstSeenVersion,
+      current_scan_place_version: currentVersionNumber,
+      version_cohort: cohort
+    };
+  }).filter(server => server.server_id);
+
+  const currentOldIds = new Set(
+    annotatedServers
+      .filter(server => (
+        currentVersionNumber !== null &&
+        toNumber(server.first_seen_place_version) !== null &&
+        toNumber(server.first_seen_place_version) < currentVersionNumber
+      ))
+      .map(server => server.server_id)
+  );
+  const currentVersionIds = new Set(
+    annotatedServers
+      .filter(server => (
+        currentVersionNumber !== null &&
+        toNumber(server.first_seen_place_version) === currentVersionNumber
+      ))
+      .map(server => server.server_id)
+  );
+
+  const recentOldIds = new Set();
+  const latestPreviousOldIds = new Set();
+  const latestPreviousCurrentIds = new Set();
+  const latestPreviousRaw = parseJsonObject((recentRows || [])[0]?.raw_observation);
+  const latestPreviousSummary = parseJsonObject(latestPreviousRaw?.public_server_version_cohort);
+  const latestPreviousServers = Array.isArray(latestPreviousRaw?.servers) ? latestPreviousRaw.servers : [];
+
+  for (const [serverId, prior] of priorById.entries()) {
+    const priorVersion = toNumber(prior.first_seen_place_version);
+    if (currentVersionNumber !== null && priorVersion !== null && priorVersion < currentVersionNumber) {
+      recentOldIds.add(serverId);
+    }
+  }
+
+  for (const priorServer of latestPreviousServers) {
+    const serverId = stringOrNull(priorServer?.server_id || priorServer?.id);
+    const priorVersion = toNumber(priorServer?.first_seen_place_version) ??
+      toNumber(priorServer?.observed_place_version);
+    if (!serverId || currentVersionNumber === null || priorVersion === null) continue;
+    if (priorVersion < currentVersionNumber) latestPreviousOldIds.add(serverId);
+    if (priorVersion === currentVersionNumber) latestPreviousCurrentIds.add(serverId);
+  }
+
+  const carriedOldReferenceCount = Math.max(0, toNumber(latestPreviousSummary?.old_cohort_recent_count) || 0);
+  const oldReferenceCount = Math.max(recentOldIds.size, latestPreviousOldIds.size, carriedOldReferenceCount);
+  const oldDrainPercent = oldReferenceCount
+    ? roundMetric(Math.max(0, Math.min(100, ((oldReferenceCount - currentOldIds.size) / oldReferenceCount) * 100)), 2)
+    : null;
+  const currentVersionNewDelta = currentVersionIds.size - latestPreviousCurrentIds.size;
+  const oldVersionsRemaining = [...new Set(
+    annotatedServers
+      .map(server => toNumber(server.first_seen_place_version))
+      .filter(version => currentVersionNumber !== null && version !== null && version < currentVersionNumber)
+  )].sort((a, b) => a - b);
+  const oldVersionsRecent = [...new Set(
+    [
+      ...[...priorById.values()].map(server => toNumber(server.first_seen_place_version)),
+      ...(Array.isArray(latestPreviousSummary?.old_cohort_versions_recent)
+        ? latestPreviousSummary.old_cohort_versions_recent.map(toNumber)
+        : [])
+    ]
+      .filter(version => currentVersionNumber !== null && version !== null && version < currentVersionNumber)
+  )].sort((a, b) => a - b);
+
+  return {
+    servers: annotatedServers,
+    summary: {
+      current_place_version: currentVersionNumber,
+      previous_place_version: toNumber(versionContext?.previousVersion),
+      version_event_detected_at: safeIso(versionContext?.detectedAt),
+      observed_server_count: annotatedServers.length,
+      old_cohort_recent_count: oldReferenceCount,
+      old_cohort_previous_count: latestPreviousOldIds.size,
+      old_cohort_remaining_count: currentOldIds.size,
+      old_cohort_absent: Boolean(currentVersionNumber !== null && oldReferenceCount > 0 && currentOldIds.size === 0),
+      old_cohort_drain_percent: oldDrainPercent,
+      old_cohort_versions_recent: oldVersionsRecent,
+      old_cohort_versions_remaining: oldVersionsRemaining,
+      current_version_new_count: currentVersionIds.size,
+      current_version_new_delta: currentVersionNewDelta,
+      current_version_new_percent: annotatedServers.length
+        ? roundMetric((currentVersionIds.size / annotatedServers.length) * 100, 2)
+        : null
+    }
   };
 }
 
@@ -7889,14 +8042,22 @@ async function capturePs99RestartIntelligenceObservation(env, context) {
   const config = ps99RestartIntelligenceRuntimeConfig(env);
   const observedAt = safeIso(context.checkedAt) || new Date().toISOString();
   const servers = Array.isArray(context.serverObservation?.servers) ? context.serverObservation.servers : [];
-  const serverIds = servers.map(row => String(row.server_id || "")).filter(Boolean);
   const previousRows = await supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
-    select: "observation_id,observed_at,ccu,place_version,public_server_ids,public_server_count,sentinel_summary",
+    select: "observation_id,observed_at,ccu,place_version,public_server_ids,public_server_count,sentinel_summary,raw_observation",
     place_id: `eq.${context.placeId}`,
     observed_at: `lt.${observedAt}`,
     order: "observed_at.desc",
     limit: "12"
   }).catch(() => []);
+  const publicVersionCohort = buildPs99PublicServerVersionCohort(
+    servers,
+    previousRows,
+    observedAt,
+    context.currentVersion,
+    context.versionContext
+  );
+  const cohortServers = publicVersionCohort.servers;
+  const serverIds = cohortServers.map(row => String(row.server_id || "")).filter(Boolean);
   const previous = previousRows[0] || null;
   const previousIds = new Set(parseJsonArray(previous?.public_server_ids).map(String));
   const currentIds = new Set(serverIds);
@@ -7933,10 +8094,12 @@ async function capturePs99RestartIntelligenceObservation(env, context) {
       pages_fetched: toNumber(context.serverObservation?.scan?.pages_fetched),
       page_size: toNumber(context.serverObservation?.scan?.page_size),
       exhausted: context.serverObservation?.scan?.exhausted ?? null,
+      public_server_version_cohort: publicVersionCohort.summary,
       ccu_error: context.ccuError || null
     },
     raw_observation: {
-      servers,
+      servers: cohortServers,
+      public_server_version_cohort: publicVersionCohort.summary,
       tracked_servers: context.trackedServers || [],
       candidate_servers: context.candidateServers || [],
       version_context: context.versionContext || {},
@@ -8005,6 +8168,30 @@ async function buildPs99RestartIntelligenceTriggers(env, row, recentRows) {
   if (toNumber(row.public_server_count) >= config.min_public_servers && toNumber(row.public_turnover_percent) >= config.turnover_percent) {
     triggers.push({ type: "public_turnover", severity: "medium", percent: toNumber(row.public_turnover_percent), observed_servers: toNumber(row.public_server_count) });
   }
+  const publicVersionCohort = parseJsonObject(row.raw_observation)?.public_server_version_cohort ||
+    parseJsonObject(row.api_metrics)?.public_server_version_cohort ||
+    {};
+  const oldCohortRecentCount = Math.max(0, toNumber(publicVersionCohort.old_cohort_recent_count) || 0);
+  const oldCohortRemainingCount = Math.max(0, toNumber(publicVersionCohort.old_cohort_remaining_count) || 0);
+  const oldCohortDrainPercent = Math.max(0, toNumber(publicVersionCohort.old_cohort_drain_percent) || 0);
+  const currentVersionNewCount = Math.max(0, toNumber(publicVersionCohort.current_version_new_count) || 0);
+  const currentVersionNewDelta = toNumber(publicVersionCohort.current_version_new_delta) || 0;
+  const cohortHasEnoughSample = oldCohortRecentCount >= config.min_public_servers;
+  const cohortDrained = publicVersionCohort.old_cohort_absent === true ||
+    (oldCohortRecentCount > 0 && oldCohortDrainPercent >= 75);
+  if (cohortHasEnoughSample && cohortDrained) {
+    triggers.push({
+      type: "public_version_cohort_drain",
+      severity: publicVersionCohort.old_cohort_absent === true ? "high" : "medium",
+      previous: toNumber(publicVersionCohort.previous_place_version),
+      current: toNumber(publicVersionCohort.current_place_version),
+      old_recent: oldCohortRecentCount,
+      old_remaining: oldCohortRemainingCount,
+      old_drain_percent: oldCohortDrainPercent,
+      new_version_servers: currentVersionNewCount,
+      new_version_delta: currentVersionNewDelta
+    });
+  }
   const sentinel = parseJsonObject(row.sentinel_summary) || row.sentinel_summary || {};
   const changed = toNumber(sentinel.changed_probe_count) || 0;
   if (changed >= 1) triggers.push({ type: "sentinel_transition", severity: changed >= 2 ? "high" : "medium", changed_probes: changed, machines: toNumber(sentinel.machine_count) || 0 });
@@ -8027,66 +8214,31 @@ function ps99RestartCandidateOpeningDecision(config, row, recentRows, triggers) 
     "version_changed",
     "ccu_drop_3m",
     "ccu_drop_10m",
+    "public_version_cohort_drain",
     "sentinel_transition",
     "sentinel_version_conflict"
   ]);
   const strongTriggers = triggers.filter(trigger => strongTypes.has(String(trigger?.type || "")));
 
-  if (!config.require_corroboration || strongTriggers.length) {
+  if (strongTriggers.length) {
     return {
       open: true,
-      reason: strongTriggers.length ? "corroborating_signal" : "corroboration_disabled",
+      reason: "corroborating_signal",
       strong_trigger_types: strongTriggers.map(trigger => trigger.type),
       turnover_consecutive_count: 0
     };
   }
 
-  const turnoverTrigger = triggers.find(trigger => trigger?.type === "public_turnover");
-  if (!turnoverTrigger) {
-    return {
-      open: false,
-      reason: "no_corroborating_signal",
-      strong_trigger_types: [],
-      turnover_consecutive_count: 0
-    };
-  }
-
-  const threshold = config.turnover_only_open_percent;
-  const required = config.turnover_only_consecutive_observations;
-  const samples = [
-    {
-      percent: toNumber(row.public_turnover_percent) || 0,
-      server_count: toNumber(row.public_server_count) || 0
-    },
-    ...(recentRows || []).map(prior => ({
-      percent: toNumber(prior.public_turnover_percent) || 0,
-      server_count: toNumber(prior.public_server_count) || 0
-    }))
-  ];
-
-  let consecutive = 0;
-  for (const sample of samples) {
-    if (
-      sample.percent >= threshold &&
-      sample.server_count >= config.min_public_servers
-    ) {
-      consecutive += 1;
-      if (consecutive >= required) break;
-    } else {
-      break;
-    }
-  }
-
   return {
-    open: consecutive >= required,
-    reason: consecutive >= required
-      ? "sustained_extreme_turnover"
-      : "turnover_only_not_sustained",
+    open: false,
+    reason: triggers.some(trigger => trigger?.type === "public_turnover")
+      ? "public_turnover_supporting_only"
+      : "no_corroborating_signal",
     strong_trigger_types: [],
     turnover_percent: toNumber(row.public_turnover_percent) || 0,
-    turnover_threshold: threshold,
-    turnover_consecutive_count: consecutive,
-    turnover_consecutive_required: required
+    turnover_threshold: config.turnover_percent,
+    turnover_consecutive_count: 0,
+    turnover_consecutive_required: 0
   };
 }
 
@@ -8210,7 +8362,13 @@ function mergeRestartIntelTriggers(existing, incoming) {
   for (const trigger of [...(existing || []), ...(incoming || [])]) {
     const key = String(trigger?.type || "unknown");
     const prior = map.get(key);
-    if (!prior || (toNumber(trigger?.percent) || 0) > (toNumber(prior?.percent) || 0) || (toNumber(trigger?.changed_probes) || 0) > (toNumber(prior?.changed_probes) || 0)) map.set(key, trigger);
+    if (
+      !prior ||
+      (toNumber(trigger?.percent) || 0) > (toNumber(prior?.percent) || 0) ||
+      (toNumber(trigger?.changed_probes) || 0) > (toNumber(prior?.changed_probes) || 0) ||
+      (toNumber(trigger?.old_drain_percent) || 0) > (toNumber(prior?.old_drain_percent) || 0) ||
+      (toNumber(trigger?.new_version_delta) || 0) > (toNumber(prior?.new_version_delta) || 0)
+    ) map.set(key, trigger);
   }
   return [...map.values()];
 }
@@ -8329,22 +8487,54 @@ async function finalizeDuePs99RestartCandidates(env, nowAt) {
 }
 
 async function summarizePs99RestartCandidate(env, candidate) {
-  const observations = await supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
-    select: "observation_id,observed_at,ccu,place_version,public_server_count,public_disappeared_count,public_appeared_count,public_turnover_percent,detector_status,sentinel_summary,api_metrics",
-    place_id: `eq.${candidate.place_id}`,
-    observed_at: [`gte.${candidate.pre_window_start}`, `lte.${candidate.post_window_end}`],
-    order: "observed_at.asc",
-    limit: "500"
-  });
+  const openedMs = isoToMs(candidate.opened_at || candidate.first_trigger_at || candidate.pre_window_start) || Date.now();
+  const recentVersionWindowMinutes = ps99RestartRecentVersionWindowMinutes(env);
+  const recentVersionStart = new Date(openedMs - recentVersionWindowMinutes * 60000).toISOString();
+  const recentVersionEnd = safeIso(candidate.post_window_end || candidate.finalized_at || candidate.updated_at || candidate.opened_at) ||
+    new Date(openedMs).toISOString();
+  const [observations, recentVersionEvents] = await Promise.all([
+    supabaseSelect(env, PS99_RESTART_OBSERVATIONS_TABLE, {
+      select: "observation_id,observed_at,ccu,place_version,public_server_count,public_disappeared_count,public_appeared_count,public_turnover_percent,detector_status,sentinel_summary,api_metrics,raw_observation",
+      place_id: `eq.${candidate.place_id}`,
+      observed_at: [`gte.${candidate.pre_window_start}`, `lte.${candidate.post_window_end}`],
+      order: "observed_at.asc",
+      limit: "500"
+    }),
+    supabaseSelect(env, PS99_VERSION_EVENTS_TABLE, {
+      select: "event_id,place_id,place_name,previous_version,current_version,detected_at,current_published_at",
+      universe_id: `eq.${toNumber(candidate.universe_id) || ps99UniverseId(env)}`,
+      detected_at: [`gte.${recentVersionStart}`, `lte.${recentVersionEnd}`],
+      order: "detected_at.desc",
+      limit: "25"
+    }).catch(() => [])
+  ]);
   const ccus = observations.map(row => toNumber(row.ccu)).filter(value => value !== null);
   const firstCcu = ccus[0] ?? null;
   const minCcu = ccus.length ? Math.min(...ccus) : null;
   const lastCcu = ccus.length ? ccus[ccus.length - 1] : null;
   const maxCcuDropPercent = firstCcu && minCcu !== null && minCcu < firstCcu ? Math.round(((firstCcu - minCcu) / firstCcu) * 10000) / 100 : 0;
   const versions = [...new Set(observations.map(row => toNumber(row.place_version)).filter(value => value !== null))];
+  const latestRecentVersionEvent = recentVersionEvents[0] || null;
+  const latestRecentVersionMs = isoToMs(latestRecentVersionEvent?.detected_at || latestRecentVersionEvent?.current_published_at);
+  const recentVersionAgeMinutes = latestRecentVersionMs === null
+    ? null
+    : Math.max(0, Math.round((openedMs - latestRecentVersionMs) / 60000));
   const maxTurnover = observations.reduce((max, row) => Math.max(max, toNumber(row.public_turnover_percent) || 0), 0);
   const maxSentinelChanged = observations.reduce((max, row) => Math.max(max, toNumber((parseJsonObject(row.sentinel_summary) || {}).changed_probe_count) || 0), 0);
   const maxMachines = observations.reduce((max, row) => Math.max(max, toNumber((parseJsonObject(row.sentinel_summary) || {}).machine_count) || 0), 0);
+  const cohortSummaries = observations
+    .map(row => parseJsonObject(row.raw_observation)?.public_server_version_cohort || parseJsonObject(row.api_metrics)?.public_server_version_cohort)
+    .filter(item => item && typeof item === "object");
+  const latestCohortSummary = cohortSummaries[cohortSummaries.length - 1] || null;
+  const maxOldCohortDrain = cohortSummaries.reduce(
+    (max, item) => Math.max(max, toNumber(item.max_old_cohort_drain_percent) || toNumber(item.old_cohort_drain_percent) || 0),
+    0
+  );
+  const maxNewVersionDelta = cohortSummaries.reduce(
+    (max, item) => Math.max(max, toNumber(item.current_version_new_delta) || 0),
+    0
+  );
+  const oldCohortAbsent = cohortSummaries.some(item => item.old_cohort_absent === true);
   return {
     observation_count: observations.length,
     ccu_before: firstCcu,
@@ -8354,6 +8544,36 @@ async function summarizePs99RestartCandidate(env, candidate) {
     version_before: versions[0] ?? null,
     version_after: versions.length ? versions[versions.length - 1] : null,
     version_changed: versions.length > 1,
+    recent_version_changed: Boolean(recentVersionEvents.length),
+    recent_version_window_minutes: recentVersionWindowMinutes,
+    recent_version_latest_at: safeIso(latestRecentVersionEvent?.detected_at || latestRecentVersionEvent?.current_published_at),
+    recent_version_age_minutes: recentVersionAgeMinutes,
+    recent_version_place_count: new Set(recentVersionEvents.map(row => toNumber(row.place_id)).filter(value => value !== null)).size,
+    recent_version_events: recentVersionEvents.slice(0, 10).map(row => ({
+      place_id: toNumber(row.place_id),
+      place_name: row.place_name || null,
+      previous_version: toNumber(row.previous_version),
+      current_version: toNumber(row.current_version),
+      detected_at: safeIso(row.detected_at),
+      current_published_at: safeIso(row.current_published_at)
+    })),
+    public_version_cohort: latestCohortSummary ? {
+      current_place_version: toNumber(latestCohortSummary.current_place_version),
+      previous_place_version: toNumber(latestCohortSummary.previous_place_version),
+      version_event_detected_at: safeIso(latestCohortSummary.version_event_detected_at),
+      old_cohort_absent: oldCohortAbsent,
+      old_cohort_recent_count: toNumber(latestCohortSummary.old_cohort_recent_count),
+      old_cohort_previous_count: toNumber(latestCohortSummary.old_cohort_previous_count),
+      old_cohort_remaining_count: toNumber(latestCohortSummary.old_cohort_remaining_count),
+      old_cohort_drain_percent: toNumber(latestCohortSummary.old_cohort_drain_percent),
+      max_old_cohort_drain_percent: maxOldCohortDrain,
+      old_cohort_versions_recent: Array.isArray(latestCohortSummary.old_cohort_versions_recent) ? latestCohortSummary.old_cohort_versions_recent : [],
+      old_cohort_versions_remaining: Array.isArray(latestCohortSummary.old_cohort_versions_remaining) ? latestCohortSummary.old_cohort_versions_remaining : [],
+      current_version_new_count: toNumber(latestCohortSummary.current_version_new_count),
+      current_version_new_delta: toNumber(latestCohortSummary.current_version_new_delta),
+      current_version_new_percent: toNumber(latestCohortSummary.current_version_new_percent),
+      max_current_version_new_delta: maxNewVersionDelta
+    } : null,
     maximum_public_turnover_percent: Math.round(maxTurnover * 100) / 100,
     maximum_sentinel_changes: maxSentinelChanged,
     maximum_independent_machines: maxMachines,
@@ -8398,6 +8618,9 @@ async function buildPs99RestartCandidateTextReport(env, candidate, summary = nul
     `CCU before / minimum / after: ${finalSummary.ccu_before ?? "Unknown"} / ${finalSummary.ccu_minimum ?? "Unknown"} / ${finalSummary.ccu_after ?? "Unknown"}`,
     `Maximum CCU drop: ${finalSummary.maximum_ccu_drop_percent ?? 0}%`,
     `Version before / after: ${finalSummary.version_before ?? "Unknown"} / ${finalSummary.version_after ?? "Unknown"}`,
+    `Recent version change: ${finalSummary.recent_version_changed ? `${finalSummary.recent_version_latest_at || "Yes"} within ${finalSummary.recent_version_window_minutes || 60} minutes` : "No"}`,
+    `Pattern: ${ps99RestartPatternLabel(finalSummary)}`,
+    `Old-version public cohort: ${stripPs99RestartEvidenceIcon(ps99RestartPublicCohortAssessmentLine(ps99RestartConfidenceAssessment(finalSummary)))}`,
     `Maximum public turnover: ${finalSummary.maximum_public_turnover_percent ?? 0}%`,
     `Maximum sentinel changes: ${finalSummary.maximum_sentinel_changes ?? 0}`,
     `Maximum independent machines: ${finalSummary.maximum_independent_machines ?? 0}`,
@@ -8420,6 +8643,9 @@ async function buildPs99RestartCandidateTextReport(env, candidate, summary = nul
       `Disappeared=${toNumber(row.public_disappeared_count) ?? 0}`,
       `Appeared=${toNumber(row.public_appeared_count) ?? 0}`,
       `Turnover=${toNumber(row.public_turnover_percent) ?? 0}%`,
+      `OldCohortRemaining=${toNumber((parseJsonObject(row.raw_observation)?.public_server_version_cohort || {}).old_cohort_remaining_count) ?? "Unknown"}`,
+      `OldCohortDrain=${toNumber((parseJsonObject(row.raw_observation)?.public_server_version_cohort || {}).old_cohort_drain_percent) ?? "Unknown"}%`,
+      `NewVersionServers=${toNumber((parseJsonObject(row.raw_observation)?.public_server_version_cohort || {}).current_version_new_count) ?? "Unknown"}`,
       `SentinelChanged=${toNumber(sentinel.changed_probe_count) ?? 0}`,
       `Machines=${toNumber(sentinel.machine_count) ?? 0}`,
       `Decision=${sentinel.decision || "none"}`,
@@ -8449,6 +8675,24 @@ function ps99RestartConfidenceAssessment(summary) {
     safe.version_changed ||
     (versionBefore !== null && versionAfter !== null && versionBefore !== versionAfter)
   );
+  const recentVersionChanged = Boolean(versionChanged || safe.recent_version_changed);
+  const recentVersionWindowMinutes = toNumber(safe.recent_version_window_minutes) ||
+    DEFAULT_PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES;
+  const recentVersionAgeMinutes = toNumber(safe.recent_version_age_minutes);
+  const recentVersionPlaceCount = Math.max(0, toNumber(safe.recent_version_place_count) || 0);
+  const publicVersionCohort = parseJsonObject(safe.public_version_cohort) || {};
+  const oldCohortAbsent = publicVersionCohort.old_cohort_absent === true;
+  const oldCohortDrainPercent = Math.max(
+    0,
+    toNumber(publicVersionCohort.max_old_cohort_drain_percent) ||
+      toNumber(publicVersionCohort.old_cohort_drain_percent) ||
+      0
+  );
+  const oldCohortRecentCount = Math.max(0, toNumber(publicVersionCohort.old_cohort_recent_count) || 0);
+  const oldCohortRemainingCount = Math.max(0, toNumber(publicVersionCohort.old_cohort_remaining_count) || 0);
+  const newVersionServerCount = Math.max(0, toNumber(publicVersionCohort.current_version_new_count) || 0);
+  const newVersionServerDelta = toNumber(publicVersionCohort.max_current_version_new_delta) ??
+    toNumber(publicVersionCohort.current_version_new_delta);
   const ccuDrop = Math.max(0, toNumber(safe.maximum_ccu_drop_percent) || 0);
   const turnover = Math.max(0, toNumber(safe.maximum_public_turnover_percent) || 0);
   const sentinelChanges = Math.max(0, toNumber(safe.maximum_sentinel_changes) || 0);
@@ -8456,6 +8700,9 @@ function ps99RestartConfidenceAssessment(summary) {
 
   let score = 0;
   if (versionChanged) score += 50;
+  else if (recentVersionChanged) score += 28;
+  if (recentVersionChanged && oldCohortAbsent) score += 22;
+  else if (recentVersionChanged && oldCohortDrainPercent >= 75) score += 14;
   if (ccuDrop >= 35) score += 30;
   else if (ccuDrop >= 20) score += 24;
   else if (ccuDrop >= 10) score += 14;
@@ -8469,13 +8716,18 @@ function ps99RestartConfidenceAssessment(summary) {
   else if (sentinelChanges >= 2) score += 13;
   else if (sentinelChanges >= 1) score += 6;
 
-  // Public server turnover is a weak signal because Roblox's public-server
-  // listing is sampled and can rotate without a true game restart.
-  if (turnover >= 85) score += 15;
-  else if (turnover >= 70) score += 11;
-  else if (turnover >= 50) score += 7;
-  else if (turnover >= 30) score += 4;
-  else if (turnover >= 15) score += 2;
+  // Public server turnover is supporting evidence only. The Roblox public
+  // server list rotates heavily enough that turnover alone is not reliable.
+  const hasPrimarySignal = versionChanged ||
+    recentVersionChanged ||
+    ccuDrop >= 5 ||
+    machines > 0 ||
+    sentinelChanges > 0;
+  if (hasPrimarySignal) {
+    if (turnover >= 85) score += 15;
+    else if (turnover >= 70) score += 11;
+    else if (turnover >= 50) score += 7;
+  }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const label = score >= 80
@@ -8488,7 +8740,99 @@ function ps99RestartConfidenceAssessment(summary) {
           ? "Low"
           : "Very Low";
 
-  return { score, label, versionChanged, ccuDrop, turnover, sentinelChanges, machines };
+  return {
+    score,
+    label,
+    versionChanged,
+    recentVersionChanged,
+    recentVersionWindowMinutes,
+    recentVersionAgeMinutes,
+    recentVersionPlaceCount,
+    oldCohortAbsent,
+    oldCohortDrainPercent,
+    oldCohortRecentCount,
+    oldCohortRemainingCount,
+    newVersionServerCount,
+    newVersionServerDelta,
+    ccuDrop,
+    turnover,
+    sentinelChanges,
+    machines
+  };
+}
+
+function ps99RestartVersionWindowLabel(minutes) {
+  const value = Math.max(1, Math.round(Number(minutes) || DEFAULT_PS99_RESTART_RECENT_VERSION_WINDOW_MINUTES));
+  if (value >= 60 && value % 60 === 0) return `${value / 60}h`;
+  return `${value}m`;
+}
+
+function ps99RestartRecentVersionAssessmentLine(assessment) {
+  if (assessment.versionChanged) {
+    return "✅ Place version changed during this evidence window";
+  }
+
+  const windowLabel = ps99RestartVersionWindowLabel(assessment.recentVersionWindowMinutes);
+  if (assessment.recentVersionChanged) {
+    const age = assessment.recentVersionAgeMinutes;
+    const ageText = age === null
+      ? `within ${windowLabel}`
+      : age <= 0
+        ? "during/after this candidate opened"
+        : `${age}m before this candidate opened`;
+    const placeText = assessment.recentVersionPlaceCount > 1
+      ? ` across ${assessment.recentVersionPlaceCount} places`
+      : "";
+    return `✅ Place version changed recently (${ageText}${placeText})`;
+  }
+
+  return `❌ No recent place-version change within ${windowLabel}`;
+}
+
+function ps99RestartPublicCohortAssessmentLine(assessment) {
+  if (!assessment.oldCohortRecentCount) {
+    return "⚪ Old-version public cohort: no previous old-version public server cohort sampled";
+  }
+
+  const base = `old cohort remaining ${assessment.oldCohortRemainingCount}/${assessment.oldCohortRecentCount}, drained ${ps99RestartFormatNumber(assessment.oldCohortDrainPercent)}%`;
+  const newText = assessment.newVersionServerDelta !== null && assessment.newVersionServerDelta !== undefined
+    ? `; new-version public IDs ${assessment.newVersionServerCount} (${assessment.newVersionServerDelta >= 0 ? "+" : ""}${assessment.newVersionServerDelta})`
+    : `; new-version public IDs ${assessment.newVersionServerCount}`;
+
+  if (assessment.oldCohortAbsent) {
+    return `✅ Old-version public cohort cleared: ${base}${newText}`;
+  }
+  if (assessment.oldCohortDrainPercent >= 75) {
+    return `⚠️ Old-version public cohort mostly drained: ${base}${newText}`;
+  }
+  return `❌ Old-version public cohort still present: ${base}${newText}`;
+}
+
+function stripPs99RestartEvidenceIcon(value) {
+  return String(value || "").replace(/^(?:✅|❌|⚠️|⚪)\s*/, "");
+}
+
+function ps99RestartPatternLabel(summary) {
+  const assessment = ps99RestartConfidenceAssessment(summary);
+  if (assessment.versionChanged && assessment.ccuDrop >= 20) {
+    return "Global restart candidate";
+  }
+  if (assessment.recentVersionChanged && assessment.oldCohortAbsent) {
+    return "Likely version-rollout server migration";
+  }
+  if (assessment.recentVersionChanged && assessment.oldCohortDrainPercent >= 75) {
+    return "Possible version-rollout server migration";
+  }
+  if (assessment.recentVersionChanged && !assessment.versionChanged && assessment.ccuDrop >= 10) {
+    return "Possible version-rollout server migration";
+  }
+  if (assessment.ccuDrop >= 10) {
+    return "Uncorroborated CCU dip";
+  }
+  if (assessment.turnover >= 50) {
+    return "Turnover-only public-server churn";
+  }
+  return "Low-signal candidate";
 }
 
 function ps99RestartEvidenceAssessmentLines(summary) {
@@ -8496,17 +8840,24 @@ function ps99RestartEvidenceAssessmentLines(summary) {
   return [
     "## Evidence Assessment",
     `**Automated Confidence:** ${assessment.score}% — ${assessment.label}`,
-    `${assessment.versionChanged ? "✅" : "❌"} ${assessment.versionChanged ? "Place version changed" : "No place-version change"}`,
+    ps99RestartRecentVersionAssessmentLine(assessment),
+    ps99RestartPublicCohortAssessmentLine(assessment),
     `${assessment.ccuDrop >= 10 ? "✅" : "❌"} ${assessment.ccuDrop >= 10 ? `Material CCU drop: ${ps99RestartFormatNumber(assessment.ccuDrop)}%` : `No material CCU drop: ${ps99RestartFormatNumber(assessment.ccuDrop)}%`}`,
     `${assessment.sentinelChanges > 0 ? "✅" : "❌"} ${assessment.sentinelChanges > 0 ? `Sentinel transitions: ${assessment.sentinelChanges}` : "No sentinel transitions"}`,
     `${assessment.machines > 0 ? "✅" : "❌"} ${assessment.machines > 0 ? `Independent machines: ${assessment.machines}` : "No independent-machine confirmation"}`,
-    `⚠️ Public-server turnover: ${ps99RestartFormatNumber(assessment.turnover)}% — weak when uncorroborated`
+    `⚠️ Public-server turnover: ${ps99RestartFormatNumber(assessment.turnover)}% — supporting evidence only; ignored alone`
   ];
+}
+
+function isPs99RestartFinalReviewStatus(status) {
+  return ["confirmed_restart", "not_a_restart", "unsure", "version_migration"].includes(
+    String(status || "").trim().toLowerCase()
+  );
 }
 
 function ps99RestartCandidateDiscordTitle(candidate, finalized) {
   const reviewStatus = String(candidate?.review_status || "unreviewed").trim().toLowerCase();
-  const reviewed = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+  const reviewed = isPs99RestartFinalReviewStatus(reviewStatus);
 
   if (reviewed) {
     return `${restartIntelReviewStatusEmoji(reviewStatus)} PS99 Restart Candidate — ${restartIntelReviewStatusLabel(reviewStatus)}`;
@@ -8522,7 +8873,7 @@ function ps99RestartCandidateDiscordTitle(candidate, finalized) {
 
 function ps99RestartCandidateDiscordPayload(candidate, summary, finalized) {
   const reviewStatus = String(candidate.review_status || "unreviewed").trim().toLowerCase();
-  const reviewed = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+  const reviewed = isPs99RestartFinalReviewStatus(reviewStatus);
   const needsMoreEvidence = reviewStatus === "needs_more_evidence";
   const status = reviewed
     ? restartIntelReviewStatusLabel(reviewStatus)
@@ -8544,12 +8895,14 @@ function ps99RestartCandidateDiscordPayload(candidate, summary, finalized) {
   ];
   if (summary) sections.push([
     "## Evidence Summary",
+    `**Pattern:** ${ps99RestartPatternLabel(summary)}`,
     `**CCU:** ${ps99AlertCcu(summary.ccu_before)} → ${ps99AlertCcu(summary.ccu_minimum)} → ${ps99AlertCcu(summary.ccu_after)}`,
     `**Maximum CCU Drop:** ${toNumber(summary.maximum_ccu_drop_percent) || 0}%`,
     `**Public Turnover:** ${toNumber(summary.maximum_public_turnover_percent) || 0}%`,
     `**Sentinels Changed:** ${toNumber(summary.maximum_sentinel_changes) || 0}`,
     `**Independent Machines:** ${toNumber(summary.maximum_independent_machines) || 0}`,
     `**Version:** ${summary.version_before ?? "Unknown"} → ${summary.version_after ?? "Unknown"}`,
+    `**Old-Version Public Cohort:** ${stripPs99RestartEvidenceIcon(ps99RestartPublicCohortAssessmentLine(ps99RestartConfidenceAssessment(summary)))}`,
     "",
     ...ps99RestartEvidenceAssessmentLines(summary),
     "",
@@ -8592,6 +8945,7 @@ function restartIntelReviewStatusLabel(status) {
   if (status === "confirmed_restart") return "Confirmed Restart";
   if (status === "not_a_restart") return "Not a Restart";
   if (status === "unsure") return "Unsure";
+  if (status === "version_migration") return "Version Migration";
   if (status === "needs_more_evidence") return "Needs More Evidence";
   return "Ready for Review";
 }
@@ -8600,6 +8954,7 @@ function restartIntelReviewStatusEmoji(status) {
   if (status === "confirmed_restart") return "🟢";
   if (status === "not_a_restart") return "🔴";
   if (status === "unsure") return "⚪";
+  if (status === "version_migration") return "🟣";
   if (status === "needs_more_evidence") return "🔵";
   return "🟠";
 }
@@ -8610,7 +8965,7 @@ function ps99RestartReviewCustomId(action, candidateId) {
 
 function ps99RestartReviewDiscordComponents(candidate) {
   const reviewStatus = String(candidate.review_status || "unreviewed").trim().toLowerCase();
-  const finalDecision = ["confirmed_restart", "not_a_restart", "unsure"].includes(reviewStatus);
+  const finalDecision = isPs99RestartFinalReviewStatus(reviewStatus);
   const disabled = finalDecision;
   return [
     {
@@ -8635,6 +8990,13 @@ function ps99RestartReviewDiscordComponents(candidate) {
           style: 2,
           label: "Unsure",
           custom_id: ps99RestartReviewCustomId("unsure", candidate.candidate_id),
+          disabled
+        },
+        {
+          type: 2,
+          style: 1,
+          label: "Version Migration",
+          custom_id: ps99RestartReviewCustomId("version_migration", candidate.candidate_id),
           disabled
         },
         {
@@ -8665,6 +9027,14 @@ function restartIntelTriggerDescription(trigger) {
   if (trigger.type === "version_changed") return `${trigger.previous} → ${trigger.current}`;
   if (trigger.type.startsWith("ccu_drop")) return `${trigger.percent}% (${trigger.before} → ${trigger.current})`;
   if (trigger.type === "public_turnover") return `${trigger.percent}% across ${trigger.observed_servers} observed servers`;
+  if (trigger.type === "public_version_cohort_drain") {
+    const oldText = `${trigger.old_remaining ?? "?"}/${trigger.old_recent ?? "?"} old-cohort public servers remain`;
+    const drainText = `${trigger.old_drain_percent ?? 0}% drained`;
+    const delta = trigger.new_version_delta === null || trigger.new_version_delta === undefined
+      ? ""
+      : ` (${trigger.new_version_delta >= 0 ? "+" : ""}${trigger.new_version_delta})`;
+    return `${trigger.previous ?? "old"} → ${trigger.current ?? "current"}; ${oldText}; ${drainText}; new-version public IDs ${trigger.new_version_servers ?? "?"}${delta}`;
+  }
   if (trigger.type === "sentinel_transition") return `${trigger.changed_probes || 0} probes across ${trigger.machines || 0} machines`;
   return stableJsonStringify(trigger);
 }
@@ -8682,6 +9052,7 @@ async function postPs99RestartCandidateReviewMessage(env, candidate, reportText 
   const channelId = String(
     candidate.discord_channel_id ||
     env.PS99_RESTART_REVIEW_CHANNEL_ID ||
+    env.PS99_RESTART_ANALYTICS_CHANNEL_ID ||
     ""
   ).trim();
   if (!channelId) {
@@ -8888,12 +9259,28 @@ async function handlePs99RestartIntelligenceRefreshAll(request, env) {
   const limit = clamp(Number(body.limit || 100), 1, 500);
   const includeWithoutMessage = body.include_without_message === true;
   const attachReport = body.attach_report === true;
+  const status = String(body.status || "").trim().toLowerCase();
+  const pendingOnly = body.pending_only === true;
+  const forcedChannelId = String(body.channel_id || body.discord_channel_id || "").trim();
+  const allowPartialSuccess = body.allow_partial_success === true;
+  const refreshSummary = body.refresh_summary === true;
 
-  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, {
+  if (status && !["collecting", "ready_for_review", "needs_more_evidence", "reviewed"].includes(status)) {
+    throw httpError(400, "status must be collecting, ready_for_review, needs_more_evidence, or reviewed.");
+  }
+
+  const query = {
     select: "*",
     order: "opened_at.desc",
     limit: String(limit)
-  });
+  };
+  if (status) query.status = `eq.${status}`;
+  if (pendingOnly) {
+    query.archived_at = "is.null";
+    query.review_status = "in.(unreviewed,needs_more_evidence)";
+  }
+
+  const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, query);
 
   const candidates = rows.filter(candidate =>
     includeWithoutMessage || String(candidate.discord_message_id || "").trim()
@@ -8902,13 +9289,35 @@ async function handlePs99RestartIntelligenceRefreshAll(request, env) {
 
   for (const candidate of candidates) {
     try {
+      let candidateForPost = candidate;
+      if (refreshSummary) {
+        const summary = await summarizePs99RestartCandidate(env, candidate);
+        const refreshedAt = new Date().toISOString();
+        await supabasePatch(
+          env,
+          PS99_RESTART_CANDIDATES_TABLE,
+          { candidate_id: `eq.${candidate.candidate_id}` },
+          {
+            summary,
+            updated_at: refreshedAt
+          }
+        );
+        candidateForPost = {
+          ...candidate,
+          summary,
+          updated_at: refreshedAt
+        };
+      }
+
       const finalized = String(candidate.status || "").toLowerCase() !== "collecting";
       const reportText = attachReport
-        ? (candidate.report_text || await buildPs99RestartCandidateTextReport(env, candidate))
+        ? (candidateForPost.report_text || await buildPs99RestartCandidateTextReport(env, candidateForPost))
         : null;
       const discord = await postPs99RestartCandidateReviewMessage(
         env,
-        candidate,
+        forcedChannelId
+          ? { ...candidateForPost, discord_channel_id: forcedChannelId }
+          : candidateForPost,
         reportText,
         finalized
       );
@@ -8943,14 +9352,25 @@ async function handlePs99RestartIntelligenceRefreshAll(request, env) {
     }
   }
 
+  const allSucceeded = results.every(result => result.ok);
+  const anySucceeded = results.some(result => result.ok);
+  const ok = allSucceeded || (allowPartialSuccess && anySucceeded);
+
   return json({
-    ok: results.every(result => result.ok),
+    ok,
     requested_limit: limit,
     processed: results.length,
     succeeded: results.filter(result => result.ok).length,
     failed: results.filter(result => !result.ok).length,
+    filters: {
+      status: status || null,
+      pending_only: pendingOnly,
+      channel_id: forcedChannelId || null,
+      allow_partial_success: allowPartialSuccess,
+      refresh_summary: refreshSummary
+    },
     results
-  }, results.every(result => result.ok) ? 200 : 207, { "Cache-Control": "no-store" });
+  }, ok ? 200 : 207, { "Cache-Control": "no-store" });
 }
 
 async function handlePs99RestartIntelligenceReview(request, env) {
@@ -8958,9 +9378,9 @@ async function handlePs99RestartIntelligenceReview(request, env) {
   const body = await readJsonRequest(request);
   const candidateId = String(body.candidate_id || "").trim();
   const reviewStatus = String(body.status || body.review_status || "").trim().toLowerCase();
-  const allowed = new Set(["confirmed_restart", "not_a_restart", "unsure", "needs_more_evidence"]);
+  const allowed = new Set(["confirmed_restart", "not_a_restart", "unsure", "version_migration", "needs_more_evidence"]);
   if (!candidateId) throw httpError(400, "Missing candidate_id.");
-  if (!allowed.has(reviewStatus)) throw httpError(400, "status must be confirmed_restart, not_a_restart, unsure, or needs_more_evidence.");
+  if (!allowed.has(reviewStatus)) throw httpError(400, "status must be confirmed_restart, not_a_restart, unsure, version_migration, or needs_more_evidence.");
   const rows = await supabaseSelect(env, PS99_RESTART_CANDIDATES_TABLE, { select: "*", candidate_id: `eq.${candidateId}`, limit: "1" });
   const candidate = rows[0];
   if (!candidate) throw httpError(404, "Restart candidate not found.");
@@ -9044,6 +9464,7 @@ function ps99RestartAnalyticsReviewClass(candidate) {
   if (review === "confirmed_restart") return "confirmed";
   if (review === "not_a_restart") return "rejected";
   if (review === "unsure") return "unsure";
+  if (review === "version_migration") return "version_migration";
   if (review === "needs_more_evidence") return "needs_more_evidence";
   return "unreviewed";
 }
@@ -9109,11 +9530,12 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
   });
 
   const reviewed = normalized.filter(row =>
-    ["confirmed", "rejected", "unsure"].includes(row.classification)
+    ["confirmed", "rejected", "unsure", "version_migration"].includes(row.classification)
   );
   const confirmed = normalized.filter(row => row.classification === "confirmed");
   const rejected = normalized.filter(row => row.classification === "rejected");
   const unsure = normalized.filter(row => row.classification === "unsure");
+  const versionMigrations = normalized.filter(row => row.classification === "version_migration");
   const needsMore = normalized.filter(row => row.classification === "needs_more_evidence");
   const archived = normalized.filter(row => row.classification === "archived");
   const pending = normalized.filter(row => row.classification === "unreviewed");
@@ -9128,6 +9550,7 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
       confirmed: rows.filter(row => row.classification === "confirmed").length,
       rejected: rows.filter(row => row.classification === "rejected").length,
       unsure: rows.filter(row => row.classification === "unsure").length,
+      version_migrations: rows.filter(row => row.classification === "version_migration").length,
       pending: rows.filter(row => ["unreviewed", "needs_more_evidence"].includes(row.classification)).length
     };
   };
@@ -9149,6 +9572,7 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
       confirmed: bandConfirmed,
       rejected: rows.filter(row => row.classification === "rejected").length,
       unsure: rows.filter(row => row.classification === "unsure").length,
+      version_migrations: rows.filter(row => row.classification === "version_migration").length,
       actual_confirmation_rate: ps99RestartAnalyticsPercent(bandConfirmed, rows.length)
     };
   });
@@ -9156,7 +9580,7 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
   const triggerMap = new Map();
   for (const row of reviewed) {
     for (const type of row.triggerTypes) {
-      const item = triggerMap.get(type) || { trigger: type, candidates: 0, confirmed: 0, rejected: 0, unsure: 0 };
+      const item = triggerMap.get(type) || { trigger: type, candidates: 0, confirmed: 0, rejected: 0, unsure: 0, version_migration: 0 };
       item.candidates += 1;
       item[row.classification] += 1;
       triggerMap.set(type, item);
@@ -9176,7 +9600,8 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
       candidates: 0,
       confirmed: 0,
       rejected: 0,
-      unsure: 0
+      unsure: 0,
+      version_migration: 0
     };
     item.candidates += 1;
     item[row.classification] += 1;
@@ -9194,10 +9619,12 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
     if (!row.openedMs) continue;
     const date = new Date(row.openedMs);
     const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-    const item = monthlyMap.get(month) || { month, candidates: 0, confirmed: 0, rejected: 0 };
+    const item = monthlyMap.get(month) || { month, candidates: 0, confirmed: 0, rejected: 0, unsure: 0, version_migrations: 0 };
     item.candidates += 1;
     if (row.classification === "confirmed") item.confirmed += 1;
     if (row.classification === "rejected") item.rejected += 1;
+    if (row.classification === "unsure") item.unsure += 1;
+    if (row.classification === "version_migration") item.version_migrations += 1;
     monthlyMap.set(month, item);
   }
   const monthlyTrend = [...monthlyMap.values()]
@@ -9248,6 +9675,7 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
       confirmed: confirmed.length,
       rejected: rejected.length,
       unsure: unsure.length,
+      version_migrations: versionMigrations.length,
       needs_more_evidence: needsMore.length,
       archived: archived.length,
       pending_review: pending.length,
@@ -9262,7 +9690,8 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
       ),
       average_confirmed: ps99RestartAnalyticsAverage(confirmed.map(row => row.confidence)),
       average_rejected: ps99RestartAnalyticsAverage(rejected.map(row => row.confidence)),
-      average_unsure: ps99RestartAnalyticsAverage(unsure.map(row => row.confidence))
+      average_unsure: ps99RestartAnalyticsAverage(unsure.map(row => row.confidence)),
+      average_version_migration: ps99RestartAnalyticsAverage(versionMigrations.map(row => row.confidence))
     },
     recent: {
       last_7_days: recentSummary(sevenDaysAgo),
@@ -9386,6 +9815,7 @@ function buildPs99RestartHistoricalAnalytics(candidates, generatedAt = new Date(
         confirmed: row.confirmed,
         rejected: row.rejected,
         unsure: row.unsure,
+        version_migrations: row.version_migrations,
         confirmation_rate: row.actual_confirmation_rate
       })),
     recommendations
@@ -9397,10 +9827,31 @@ function ps99RestartAnalyticsMetric(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
+const PS99_RESTART_ANALYTICS_TRIGGER_LABELS = {
+  ccu_drop_3m: "3-Minute CCU Drop",
+  ccu_drop_10m: "10-Minute CCU Drop",
+  public_turnover: "Public Server Turnover",
+  public_version_cohort_drain: "Old-Version Public Server Drain",
+  sentinel_transition: "Sentinel Server Transition",
+  sentinel_version_conflict: "Sentinel Version Conflict",
+  version_changed: "Place Version Changed",
+  no_trigger_metadata: "No Trigger Metadata"
+};
+
 function ps99RestartAnalyticsTriggerLabel(value) {
-  return String(value || "")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, character => character.toUpperCase());
+  const raw = String(value || "").trim();
+  if (!raw) return "Unknown Signal";
+  return raw
+    .split(/\s+\+\s+/)
+    .map(part => {
+      const key = part.trim();
+      return PS99_RESTART_ANALYTICS_TRIGGER_LABELS[key] ||
+        key
+          .replaceAll("_", " ")
+          .replace(/\bccu\b/gi, "CCU")
+          .replace(/\b\w/g, character => character.toUpperCase());
+    })
+    .join(" + ");
 }
 
 function ps99RestartAnalyticsHealthIndicator(value, warningAt, criticalAt, lowerIsBetter = true) {
@@ -9546,10 +9997,10 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
 
   const populatedCalibration = (analytics.calibration || []).filter(row => row.candidates > 0);
   const calibrationLines = populatedCalibration.map(row =>
-    `**${row.band}:** ${row.candidates} reviewed • ${row.confirmed} confirmed • ${ps99RestartAnalyticsMetric(row.actual_confirmation_rate, "%")} actual`
+    `**${row.band}:** ${row.candidates} reviewed • ${row.confirmed} confirmed • ${row.version_migrations || 0} migrations • ${ps99RestartAnalyticsMetric(row.actual_confirmation_rate, "%")} actual`
   );
   const agreementLines = (analytics.review_agreement || []).map(row =>
-    `**${row.band}:** ${row.confirmed} confirmed • ${row.rejected} rejected • ${row.unsure} unsure`
+    `**${row.band}:** ${row.confirmed} confirmed • ${row.rejected} rejected • ${row.version_migrations || 0} migrations • ${row.unsure} unsure`
   );
 
   const meaningfulSignals = [...(analytics.trigger_performance || [])]
@@ -9578,7 +10029,7 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
     : ["Trigger-combination rankings require at least 5 reviewed cases."];
 
   const monthLines = (analytics.monthly_trend || []).map(row =>
-    `**${row.month}:** ${row.candidates} candidates • ${row.confirmed} confirmed • ${row.rejected} rejected`
+    `**${row.month}:** ${row.candidates} candidates • ${row.confirmed} confirmed • ${row.rejected} rejected • ${row.version_migrations || 0} migrations`
   );
   const recommendationLines = analytics.recommendations.length
     ? analytics.recommendations.slice(0, 5).map(item =>
@@ -9634,6 +10085,7 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
       `**Reviewed:** ${lifetime.reviewed}`,
       `**Confirmed:** ${lifetime.confirmed}`,
       `**Rejected:** ${lifetime.rejected}`,
+      `**Version Migrations:** ${lifetime.version_migrations || 0}`,
       `**Unsure:** ${lifetime.unsure}`,
       `**Archived:** ${lifetime.archived || 0}`,
       `**Pending:** ${lifetime.pending_review}`,
@@ -9650,6 +10102,9 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
       ...(confidence.average_unsure !== null
         ? [`**Average — Unsure:** ${ps99RestartAnalyticsMetric(confidence.average_unsure, "%")}`]
         : []),
+      ...(confidence.average_version_migration !== null
+        ? [`**Average — Version Migration:** ${ps99RestartAnalyticsMetric(confidence.average_version_migration, "%")}`]
+        : []),
       "",
       "**Current Distribution**",
       ...(distributionLines.length ? distributionLines : ["No confidence data yet."])
@@ -9657,8 +10112,8 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
 
     [
       "## Recent Activity",
-      `**Last 7 Days:** ${recent7.candidates} candidates • ${recent7.confirmed} confirmed • ${recent7.rejected} rejected • ${recent7.pending} pending`,
-      `**Last 30 Days:** ${recent30.candidates} candidates • ${recent30.confirmed} confirmed • ${recent30.rejected} rejected • ${recent30.pending} pending`
+      `**Last 7 Days:** ${recent7.candidates} candidates • ${recent7.confirmed} confirmed • ${recent7.rejected} rejected • ${recent7.version_migrations || 0} migrations • ${recent7.pending} pending`,
+      `**Last 30 Days:** ${recent30.candidates} candidates • ${recent30.confirmed} confirmed • ${recent30.rejected} rejected • ${recent30.version_migrations || 0} migrations • ${recent30.pending} pending`
     ].join("\n"),
 
     ...(calibrationLines.length
@@ -9698,6 +10153,13 @@ function ps99RestartAnalyticsDashboardPayload(analytics) {
             label: `Preview / Archive Recommended (${maintenanceQueue.length})`,
             custom_id: "ps99a|archive_low_turnover|prompt",
             disabled: maintenanceQueue.length === 0
+          },
+          {
+            type: 2,
+            style: 1,
+            label: "Post Review Cards",
+            custom_id: "ps99a|post_review_cards|run",
+            disabled: priorityQueue.length === 0
           },
           {
             type: 2,
@@ -9911,10 +10373,11 @@ async function resolvePs99RestartPendingCandidates(env, options = {}) {
     "confirmed_restart",
     "not_a_restart",
     "unsure",
+    "version_migration",
     "needs_more_evidence"
   ]);
   if (!allowedResolutions.has(requestedResolution)) {
-    throw httpError(400, "resolution must be archived, confirmed_restart, not_a_restart, unsure, or needs_more_evidence.");
+    throw httpError(400, "resolution must be archived, confirmed_restart, not_a_restart, unsure, version_migration, or needs_more_evidence.");
   }
 
   const candidates = await supabaseSelectPaged(env, PS99_RESTART_CANDIDATES_TABLE, {
@@ -16011,7 +16474,7 @@ function isUsableCompletedGlobalRankRun(run) {
   return true;
 }
 
-async function resolveGlobalSearchIdentity(query, env) {
+async function resolveGlobalSearchIdentity(query, env, options = {}) {
   const text = String(query || "").trim();
   const directId = toNumber(text);
 
@@ -16038,20 +16501,174 @@ async function resolveGlobalSearchIdentity(query, env) {
       })
     });
 
-    if (!res.ok) return { user_id: null, username: null, display_name: null };
+    if (res.ok) {
+      const payload = await res.json();
+      const user = firstArray(payload?.data)[0] || null;
+      const id = toNumber(user?.id);
 
-    const payload = await res.json();
-    const user = firstArray(payload?.data)[0] || null;
-    const id = toNumber(user?.id);
-
-    return {
-      user_id: id,
-      username: user?.name || text,
-      display_name: user?.displayName || null
-    };
+      if (id) {
+        const identity = {
+          user_id: id,
+          username: user?.name || text,
+          display_name: user?.displayName || null
+        };
+        await cacheGlobalSearchIdentity(env, identity).catch(() => {});
+        return identity;
+      }
+    }
   } catch {
-    return { user_id: null, username: null, display_name: null };
+    // Fall through to local stored-data lookup below.
   }
+
+  const stored = await resolveGlobalSearchIdentityFromStoredData(text, env, options).catch(() => null);
+  return stored || { user_id: null, username: null, display_name: null };
+}
+
+async function resolveGlobalSearchIdentityFromStoredData(query, env, options = {}) {
+  const text = String(query || "").trim();
+  const key = normalizeGlobalSearchKey(text);
+  if (!key) return null;
+
+  const cacheIdentity = await findStoredGlobalSearchIdentity(env, USER_LOOKUP_CACHE_TABLE, text, key, {
+    select: "user_id,username,display_name,avatar_url,updated_at",
+    order: "updated_at.desc"
+  });
+  if (cacheIdentity) return cacheIdentity;
+
+  const currentFilters = {};
+  const clan = String(options.clan || "").trim();
+  if (clan) currentFilters.clan_name = `eq.${clan}`;
+
+  const currentIdentity = await findStoredGlobalSearchIdentity(env, GLOBAL_RANK_CURRENT_TABLE, text, key, {
+    select: "user_id,username,display_name,avatar_url,clan_name,updated_at",
+    order: "updated_at.desc",
+    filters: currentFilters
+  });
+  if (currentIdentity) return currentIdentity;
+
+  const historyIdentity = await findStoredGlobalSearchIdentity(env, GLOBAL_RANK_HISTORY_TABLE, text, key, {
+    select: "user_id,username,display_name,avatar_url,clan_name,fetched_at",
+    order: "fetched_at.desc",
+    filters: currentFilters
+  });
+  if (historyIdentity) return historyIdentity;
+
+  const candidateIdentity = await findGlobalCandidateIdentityByRawName(env, options.runKey, key);
+  if (candidateIdentity) return candidateIdentity;
+
+  return null;
+}
+
+async function findStoredGlobalSearchIdentity(env, tableName, query, queryKey, options = {}) {
+  const filters = options.filters || {};
+  const baseParams = {
+    select: options.select || "user_id,username,display_name,avatar_url",
+    ...filters,
+    order: options.order || "updated_at.desc",
+    limit: "10"
+  };
+
+  const checks = [
+    { username: `ilike.${query}` },
+    { display_name: `ilike.${query}` }
+  ];
+
+  for (const check of checks) {
+    const rows = await supabaseSelect(env, tableName, {
+      ...baseParams,
+      ...check
+    }).catch(() => []);
+    const identity = pickGlobalSearchIdentityFromRows(rows, queryKey);
+    if (identity) {
+      await cacheGlobalSearchIdentity(env, identity).catch(() => {});
+      return identity;
+    }
+  }
+
+  return null;
+}
+
+function pickGlobalSearchIdentityFromRows(rows, queryKey) {
+  for (const row of rows || []) {
+    const userId = toNumber(row.user_id);
+    if (!userId) continue;
+
+    const username = stringOrNull(row.username);
+    const displayName = stringOrNull(row.display_name);
+    const usernameMatches = username && normalizeGlobalSearchKey(username) === queryKey;
+    const displayMatches = displayName && normalizeGlobalSearchKey(displayName) === queryKey;
+
+    if (usernameMatches || displayMatches) {
+      return {
+        user_id: userId,
+        username: username || displayName || `user_${userId}`,
+        display_name: displayName || null,
+        avatar_url: stringOrNull(row.avatar_url)
+      };
+    }
+  }
+
+  return null;
+}
+
+async function findGlobalCandidateIdentityByRawName(env, runKey, queryKey) {
+  const run = String(runKey || "").trim();
+  if (!run || !queryKey) return null;
+
+  const maxRows = clamp(Number(env.GLOBAL_RANK_NAME_SCAN_LIMIT || 50000), 1000, 200000);
+  const pageSize = 1000;
+  let offset = 0;
+
+  while (offset < maxRows) {
+    const pageLimit = Math.min(pageSize, maxRows - offset);
+    const rows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      select: "user_id,points,source_clan,raw_candidate,fetched_at,updated_at",
+      run_key: `eq.${run}`,
+      order: "points.desc,user_id.asc",
+      limit: String(pageLimit),
+      offset: String(offset)
+    });
+
+    for (const row of rows || []) {
+      const userId = toNumber(row.user_id);
+      if (!userId) continue;
+
+      const rawUsername = globalCandidateRawUsername(row);
+      const displayName = globalCandidateDisplayName(row);
+      const usernameMatches = rawUsername && normalizeGlobalSearchKey(rawUsername) === queryKey;
+      const displayMatches = displayName && normalizeGlobalSearchKey(displayName) === queryKey;
+
+      if (usernameMatches || displayMatches) {
+        const identity = {
+          user_id: userId,
+          username: rawUsername || displayName || `user_${userId}`,
+          display_name: displayName || null,
+          avatar_url: null
+        };
+        await cacheGlobalSearchIdentity(env, identity).catch(() => {});
+        return identity;
+      }
+    }
+
+    if (!Array.isArray(rows) || rows.length < pageLimit) break;
+    offset += rows.length;
+  }
+
+  return null;
+}
+
+async function cacheGlobalSearchIdentity(env, identity) {
+  const userId = toNumber(identity?.user_id);
+  const username = stringOrNull(identity?.username);
+  if (!userId || !username || isFallbackUsername(username, userId)) return;
+
+  await upsertUserLookupCache(env, [{
+    user_id: userId,
+    username,
+    display_name: stringOrNull(identity?.display_name),
+    avatar_url: stringOrNull(identity?.avatar_url),
+    updated_at: new Date().toISOString()
+  }]);
 }
 
 function globalRankEventName(env, latest) {

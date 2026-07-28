@@ -25,6 +25,7 @@ const COMPONENT_TYPE_SEPARATOR = 14;
 const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
+const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
@@ -693,13 +694,27 @@ async function buildSearchResponse(query, env) {
     embed.thumbnail = { url: avatarUrl };
   }
 
+  const data = {
+    embeds: [embed],
+    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
+    allowed_mentions: { parse: [] }
+  };
+
+  if (searchChartEnabled(env)) {
+    try {
+      const chart = await buildSearchChartAttachment(payload, row, env);
+      if (chart?.bytes?.byteLength) {
+        embed.image = { url: `attachment://${chart.filename}` };
+        data._file = { filename: chart.filename, contentType: "image/png", bytes: chart.bytes };
+      }
+    } catch {
+      // Search text should still answer if chart rendering is unavailable.
+    }
+  }
+
   return {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-    data: {
-      embeds: [embed],
-      flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
-      allowed_mentions: { parse: [] }
-    }
+    data
   };
 }
 
@@ -755,6 +770,374 @@ async function searchAvatarUrl(row, env) {
   } catch (err) {
     return null;
   }
+}
+
+function searchChartEnabled(env) {
+  return String(env.SEARCH_CHART_ENABLED || "true").toLowerCase() !== "false";
+}
+
+async function buildSearchChartAttachment(payload, row, env) {
+  const samples = searchChartSamples(payload, row);
+  if (!samples.length) return null;
+
+  const minT = Math.min(...samples.map(item => item.t));
+  const maxT = Math.max(...samples.map(item => item.t));
+  const markers = await fetchSearchChartMarkers(env, minT, maxT).catch(() => ({ updates: [], restarts: [] }));
+  const bytes = await renderSearchProfileChartPng(payload, row, samples, markers);
+  const filename = `global-search-${chartFilenamePart(displayName(row))}-${chartFilenamePart(row.event_name || row.battle_key || "current")}.png`;
+  return { filename, bytes };
+}
+
+function searchChartSamples(payload, row) {
+  const rows = [
+    ...(Array.isArray(payload?.history) ? payload.history : []),
+    row
+  ];
+  const byTime = new Map();
+
+  for (const item of rows) {
+    const timeValue = item?.fetched_at || item?.updated_at || item?.finished_at || item?.created_at;
+    const t = new Date(timeValue || 0).getTime();
+    if (!Number.isFinite(t) || t <= 0) continue;
+
+    const points = finiteNumber(item.global_points ?? item.member_points ?? item.clan_points ?? item.points);
+    const rankValue = finiteNumber(item.global_rank);
+    if (points === null && rankValue === null) continue;
+
+    byTime.set(String(t), {
+      t,
+      rawT: new Date(t).toISOString(),
+      points,
+      rank: rankValue
+    });
+  }
+
+  return [...byTime.values()].sort((a, b) => a.t - b.t);
+}
+
+async function fetchSearchChartMarkers(env, minT, maxT) {
+  const updates = await fetchSearchChartVersionMarkers(env, minT, maxT).catch(() => []);
+  const restarts = await fetchSearchChartRestartMarkers(env, minT, maxT).catch(() => []);
+  return { updates, restarts };
+}
+
+async function fetchSearchChartVersionMarkers(env, minT, maxT) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/ps99/versions", apiBase);
+  apiUrl.searchParams.set("limit", "200");
+
+  const res = await fetchClanApi(env, apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "c0ld-Discord-Search-Chart-Worker" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok || payload.ok === false) return [];
+
+  const rootPlaceId = String(payload.root_place_id || "").trim();
+  return (Array.isArray(payload.events) ? payload.events : [])
+    .filter(event => !rootPlaceId || String(event?.place_id || "").trim() === rootPlaceId)
+    .map(event => {
+      const t = chartMarkerTime(event.current_published_at || event.detected_at || event.created_at);
+      return {
+        type: "update",
+        t,
+        label: `Update ${plainInteger(event.current_version) || ""}`.trim(),
+        version: plainInteger(event.current_version)
+      };
+    })
+    .filter(event => Number.isFinite(event.t) && event.t >= minT && event.t <= maxT)
+    .sort((a, b) => a.t - b.t);
+}
+
+async function fetchSearchChartRestartMarkers(env, minT, maxT) {
+  if (String(env.SEARCH_CHART_RESTART_MARKERS || "false").toLowerCase() !== "true") return [];
+
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/ps99/restarts", apiBase);
+  apiUrl.searchParams.set("limit", "100");
+
+  const res = await fetchClanApi(env, apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "c0ld-Discord-Search-Chart-Worker" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok || payload.ok === false) return [];
+
+  return (Array.isArray(payload.events) ? payload.events : [])
+    .map(event => {
+      const t = chartMarkerTime(event.detected_at || event.candidate_started_at || event.created_at);
+      return {
+        type: "restart",
+        t,
+        label: "Restart",
+        confidence: finiteNumber(event.confidence)
+      };
+    })
+    .filter(event => Number.isFinite(event.t) && event.t >= minT && event.t <= maxT)
+    .sort((a, b) => a.t - b.t);
+}
+
+function chartMarkerTime(value) {
+  const t = new Date(value || 0).getTime();
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+async function renderSearchProfileChartPng(payload, row, samples, markers = {}) {
+  const fonts = await loadHistoryFonts();
+  const width = 1600;
+  const height = 720;
+  const canvas = new HistoryPixelCanvas(width, height, [15, 20, 27, 255], 2);
+  const color = chartColors();
+  const accent = [242, 204, 96, 255];
+  const rankColor = [255, 123, 114, 255];
+  const activeColor = [63, 185, 80, 255];
+  const downtimeColor = [255, 100, 105, 255];
+  const updateColor = [88, 166, 255, 255];
+  const restartColor = [210, 168, 255, 255];
+  const name = displayName(row);
+  const eventName = row.event_name || row.battle_display_name || row.battle_key || "Current Event";
+  const clan = String(row.source_clan || row.clan_name || payload?.clan_name || "Clan").toUpperCase();
+  const updatedAt = row.fetched_at || row.updated_at || payload?.run?.finished_at;
+  const panel = { x: 20, y: 20, w: width - 40, h: height - 40 };
+  canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
+  canvas.fillRect(panel.x, panel.y, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y + panel.h - 1, panel.w, 1, color.line);
+  canvas.fillRect(panel.x, panel.y, 1, panel.h, color.line);
+  canvas.fillRect(panel.x + panel.w - 1, panel.y, 1, panel.h, color.line);
+
+  const latest = samples[samples.length - 1] || {};
+  const rawMinT = Math.min(...samples.map(item => item.t));
+  const rawMaxT = Math.max(...samples.map(item => item.t));
+  const singleSample = rawMaxT === rawMinT;
+  const chartMaxT = singleSample ? rawMaxT + 60 * 60 * 1000 : rawMaxT;
+  const chartMinT = singleSample ? rawMinT - 60 * 60 * 1000 : Math.max(rawMinT, rawMaxT - 24 * 60 * 60 * 1000);
+  const visibleSamples = samples.filter(item => item.t >= chartMinT && item.t <= chartMaxT);
+  const chartMetrics = searchChartMetrics(visibleSamples);
+  const rankDelta = searchChartRankDelta(visibleSamples, 60);
+  const pointGain1h = searchChartGain(visibleSamples, 60);
+  const plot = { x: 116, y: 116, w: 1438, h: 516 };
+
+  const title = `${historyCardText(name, 26)} - Global Search`;
+  const subtitle = `${clan} - ${historyCardText(eventName, 42)}`;
+  const updated = `Updated ${chartDate(updatedAt)}`;
+  const updatedWidth = canvas.measureFontText(fonts.regular, updated, 14);
+  canvas.drawFontText(fonts.bold, title, 42, 31, 34, color.white, 620);
+  canvas.drawFontText(fonts.regular, subtitle, 44, 72, 16, color.muted, 700);
+  canvas.drawFontText(fonts.regular, updated, panel.x + panel.w - updatedWidth - 22, 43, 14, color.muted, updatedWidth + 2);
+
+  const legend = [
+    { label: `Points: ${shortNumber(latest.points ?? row.global_points ?? row.clan_points)} (+${shortNumber(pointGain1h)} / 1h)`, color: accent },
+    { label: `Rank: ${rank(latest.rank ?? row.global_rank)}${rankDelta === null ? "" : ` (${searchChartSignedLabel(rankDelta)} / 1h)`}`, color: rankColor },
+    { label: `Active: ${searchChartDurationLabel(chartMetrics.activeMs)}`, color: activeColor },
+    { label: `Downtime: ${searchChartDurationLabel(chartMetrics.downtimeMs)}`, color: downtimeColor }
+  ];
+  const legendGap = 34;
+  const legendWidths = legend.map(item => Math.min(350, canvas.measureFontText(fonts.bold, item.label, 15) + 42));
+  const legendTotalWidth = legendWidths.reduce((sum, itemWidth) => sum + itemWidth, 0) + legendGap * Math.max(0, legendWidths.length - 1);
+  let legendX = panel.x + Math.max(22, (panel.w - legendTotalWidth) / 2);
+  legend.forEach((item, index) => {
+    const itemWidth = legendWidths[index];
+    const label = canvas.fitFontText(fonts.bold, item.label, 15, itemWidth - 38);
+    canvas.fillRect(legendX, 91, 24, 4, item.color);
+    canvas.drawFontText(fonts.bold, label, legendX + 34, 79, 15, color.white, itemWidth - 38);
+    legendX += itemWidth + legendGap;
+  });
+
+  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
+  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+
+  const pointsSamples = visibleSamples.filter(item => item.points !== null);
+  const rankSamples = visibleSamples.filter(item => item.rank !== null);
+  const pointValues = pointsSamples.map(item => item.points).filter(Number.isFinite);
+  const rankValues = rankSamples.map(item => item.rank).filter(Number.isFinite);
+  const pointsMin = pointValues.length ? Math.min(...pointValues) : 0;
+  const pointsMax = pointValues.length ? Math.max(...pointValues) : 1;
+  const pointPad = Math.max(1, (pointsMax - pointsMin) * 0.12);
+  const yPointsMin = Math.max(0, pointsMin - pointPad);
+  const yPointsMax = pointsMax + pointPad;
+  const rankMin = rankValues.length ? Math.min(...rankValues) : 1;
+  const rankMax = rankValues.length ? Math.max(...rankValues) : 1;
+  const rankPad = Math.max(1, (rankMax - rankMin) * 0.18);
+  const yRankMin = Math.max(1, rankMin - rankPad);
+  const yRankMax = rankMax + rankPad;
+  const xFor = item => plot.x + ((item.t - chartMinT) / Math.max(1, chartMaxT - chartMinT)) * plot.w;
+  const xForTime = t => plot.x + ((t - chartMinT) / Math.max(1, chartMaxT - chartMinT)) * plot.w;
+  const yForPoints = item => plot.y + (1 - ((item.points - yPointsMin) / Math.max(1, yPointsMax - yPointsMin))) * plot.h;
+  const yForRank = item => plot.y + ((item.rank - yRankMin) / Math.max(1, yRankMax - yRankMin)) * plot.h;
+
+  for (let i = 0; i <= 4; i += 1) {
+    const yy = plot.y + (i / 4) * plot.h;
+    const pointsValue = yPointsMax - (i / 4) * (yPointsMax - yPointsMin);
+    const rankValue = yRankMin + (i / 4) * (yRankMax - yRankMin);
+    const pointsLabel = shortNumber(pointsValue);
+    const rankLabel = `#${Math.round(rankValue).toLocaleString("en-US")}`;
+    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    const labelWidth = canvas.measureFontText(fonts.regular, pointsLabel, 12);
+    canvas.drawFontText(fonts.regular, pointsLabel, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
+    searchChartDrawRightText(canvas, fonts.regular, rankLabel, plot.x + plot.w + 76, yy - 8, 12, rankColor, 76, color.panel);
+  }
+
+  const spanHours = Math.max(1, (chartMaxT - chartMinT) / (60 * 60 * 1000));
+  const xTickCount = spanHours <= 1 ? 4 : Math.min(12, Math.ceil(spanHours / 2));
+  for (let i = 0; i <= xTickCount; i += 1) {
+    const xx = plot.x + (i / xTickCount) * plot.w;
+    const tickTime = chartMinT + (i / xTickCount) * (chartMaxT - chartMinT);
+    const tickLabel = spanHours <= 1 ? chartTimeOfDayAxisLabel(tickTime) : chartHourAxisLabel(tickTime);
+    const tickWidth = canvas.measureFontText(fonts.regular, tickLabel, 12);
+    const tickX = i === 0
+      ? plot.x
+      : i === xTickCount
+        ? plot.x + plot.w - tickWidth
+        : Math.max(plot.x, Math.min(plot.x + plot.w - tickWidth, xx - tickWidth / 2));
+    canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
+    canvas.drawFontText(fonts.regular, tickLabel, tickX, plot.y + plot.h + 23, 12, color.muted, tickWidth + 6);
+  }
+
+  for (const marker of markers.updates || []) {
+    if (marker.t < chartMinT || marker.t > chartMaxT) continue;
+    searchChartDrawDashedVertical(canvas, xForTime(marker.t), plot.y, plot.y + plot.h, updateColor, 7, 6);
+  }
+  for (const marker of markers.restarts || []) {
+    if (marker.t < chartMinT || marker.t > chartMaxT) continue;
+    searchChartDrawDashedVertical(canvas, xForTime(marker.t), plot.y, plot.y + plot.h, restartColor, 10, 5);
+  }
+
+  searchChartDrawPolyline(canvas, pointsSamples, xFor, yForPoints, accent, 3);
+  searchChartDrawPolyline(canvas, rankSamples, xFor, yForRank, rankColor, 3);
+  searchChartDrawActivityBar(canvas, visibleSamples, plot, xForTime, activeColor, downtimeColor, color, {
+    y: plot.y + plot.h - 12,
+    height: 7
+  });
+
+  const footerLeft = "Points and rank history - last 24 hours";
+  const footerRight = [
+    `Updates: ${fullNumber((markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT).length)}`,
+    `Restarts: ${fullNumber((markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT).length)}`
+  ].join("  |  ");
+  const footerRightWidth = canvas.measureFontText(fonts.regular, footerRight, 12);
+  canvas.drawFontText(fonts.regular, footerLeft, 42, height - 48, 12, color.muted, 420);
+  canvas.drawFontText(fonts.regular, footerRight, panel.x + panel.w - footerRightWidth - 22, height - 48, 12, color.muted, footerRightWidth + 4);
+
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function searchChartDrawPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
+  if (!Array.isArray(points) || points.length < 2) return;
+  for (let index = 1; index < points.length; index += 1) {
+    chartDrawLine(canvas, xFor(points[index - 1]), yFor(points[index - 1]), xFor(points[index]), yFor(points[index]), rgba, width);
+  }
+}
+
+function searchChartDrawDashedVertical(canvas, x, y1, y2, rgba, dash = 8, gap = 6) {
+  const left = Math.round(x);
+  for (let y = y1; y < y2; y += dash + gap) {
+    canvas.fillRect(left, y, 2, Math.min(dash, y2 - y), rgba);
+  }
+}
+
+function searchChartDrawRightText(canvas, font, value, rightX, y, size, rgba, maxWidth, background) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
+  const width = canvas.measureFontText(font, fitted, size);
+  chartDrawBackedText(canvas, font, fitted, rightX - width, y, size, rgba, width + 2, background);
+}
+
+function searchChartDrawActivityBar(canvas, samples, plot, xForTime, activeColor, downtimeColor, color, options = {}) {
+  const barY = options.y ?? plot.y + plot.h + 54;
+  const barHeight = options.height ?? 11;
+  canvas.fillRect(plot.x, barY, plot.w, barHeight, color.line);
+
+  if (samples.length < 2) {
+    canvas.fillRect(plot.x, barY, plot.w, barHeight, [88, 96, 112, 255]);
+    return;
+  }
+
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const x1 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(previous.t)));
+    const x2 = Math.max(plot.x, Math.min(plot.x + plot.w, xForTime(current.t)));
+    const width = Math.max(2, x2 - x1);
+    const gained = current.points !== null && previous.points !== null && current.points > previous.points;
+    canvas.fillRect(x1, barY, width, barHeight, gained ? activeColor : downtimeColor);
+  }
+}
+
+function searchChartMetrics(samples) {
+  let activeMs = 0;
+  let downtimeMs = 0;
+
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const duration = Math.max(0, current.t - previous.t);
+    const gained = current.points !== null && previous.points !== null && current.points > previous.points;
+    if (gained) activeMs += duration;
+    else downtimeMs += duration;
+  }
+
+  const total = activeMs + downtimeMs;
+  return {
+    activeMs,
+    downtimeMs,
+    activePct: total ? (activeMs / total) * 100 : 0,
+    downtimePct: total ? (downtimeMs / total) * 100 : 0
+  };
+}
+
+function searchChartGain(samples, minutes) {
+  if (!samples.length) return 0;
+  const latest = samples[samples.length - 1];
+  if (latest.points === null) return 0;
+
+  const target = latest.t - minutes * 60 * 1000;
+  let baseline = null;
+  for (const sample of samples) {
+    if (sample.t <= target && sample.points !== null) baseline = sample;
+  }
+  if (!baseline) baseline = samples.find(sample => sample.points !== null) || null;
+  return Math.max(0, latest.points - (baseline?.points ?? latest.points));
+}
+
+function searchChartRankDelta(samples, minutes) {
+  if (!samples.length) return null;
+  const latest = [...samples].reverse().find(sample => sample.rank !== null);
+  if (!latest) return null;
+
+  const target = latest.t - minutes * 60 * 1000;
+  let baseline = null;
+  for (const sample of samples) {
+    if (sample.t <= target && sample.rank !== null) baseline = sample;
+  }
+  if (!baseline) baseline = samples.find(sample => sample.rank !== null) || null;
+  if (!baseline || baseline === latest) return null;
+  return baseline.rank - latest.rank;
+}
+
+function searchChartSignedLabel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return "0";
+  const prefix = number > 0 ? "+" : "";
+  return `${prefix}${Math.round(number).toLocaleString("en-US")}`;
+}
+
+function searchChartDurationLabel(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m";
+  const minutes = Math.round(ms / 60000);
+  const hours = Math.floor(minutes / 60);
+  const leftover = minutes % 60;
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const dayHours = hours % 24;
+    return dayHours ? `${days}d ${dayHours}h` : `${days}d`;
+  }
+  if (hours > 0) return leftover ? `${hours}h ${leftover}m` : `${hours}h`;
+  return `${minutes}m`;
+}
+
+function searchChartPercentLabel(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(1)}%` : "-";
 }
 
 async function completeServerTrackerInteraction(interaction, env, commandName, subcommand) {
@@ -2745,7 +3128,7 @@ function parsePs99RestartAnalyticsCustomId(value) {
   if (parts.length !== 3 || parts[0] !== "ps99a") return null;
   const action = String(parts[1] || "").trim().toLowerCase();
   const stage = String(parts[2] || "").trim().toLowerCase();
-  if (!["archive_low_turnover", "archive_duplicates", "refresh"].includes(action)) return null;
+  if (!["archive_low_turnover", "archive_duplicates", "post_review_cards", "refresh"].includes(action)) return null;
   if (!["prompt", "confirm", "cancel", "run"].includes(stage)) return null;
   return { action, stage };
 }
@@ -2895,6 +3278,39 @@ async function completePs99RestartAnalyticsAction(interaction, env, state) {
       return;
     }
 
+    if (state.action === "post_review_cards") {
+      result = await ps99RestartIntelligenceApiRequest(
+        env,
+        "/api/ps99/restart-intelligence/refresh-all",
+        {
+          method: "POST",
+          body: {
+            limit: 5,
+            channel_id: "1530459886654197790",
+            status: "ready_for_review",
+            pending_only: true,
+            include_without_message: true,
+            attach_report: false,
+            allow_partial_success: true,
+            refresh_summary: true
+          }
+        }
+      );
+      await editOriginalInteraction(interaction, {
+        content: [
+          `Posted or refreshed **${result?.succeeded ?? 0}** ready-for-review candidate card(s).`,
+          result?.failed
+            ? `**${result.failed}** failed. Check the Worker response/logs for details.`
+            : "The review cards should now show the Confirm Restart / Not a Restart / Unsure / Version Migration buttons."
+        ].join("\n"),
+        embeds: [],
+        components: [],
+        attachments: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
     result = await ps99RestartIntelligenceApiRequest(
       env,
       "/api/ps99/restart-intelligence/resolve-pending",
@@ -2938,6 +3354,7 @@ function parsePs99RestartReviewCustomId(value) {
     "confirmed_restart",
     "not_a_restart",
     "unsure",
+    "version_migration",
     "needs_more_evidence",
     "report"
   ]);
@@ -3804,6 +4221,15 @@ async function loadHistoryCommandData(query, env) {
     username: displayName(globalPayload.row),
     avatarUrl: globalPayload.row.avatar_url || null
   } : null;
+  const resolvedUser = search.payload?.resolved_user || search.payload?.resolvedUser || null;
+
+  if (!subject?.userId && resolvedUser?.user_id) {
+    subject = {
+      userId: positiveInteger(resolvedUser.user_id),
+      username: resolvedUser.username || resolvedUser.display_name || `user_${resolvedUser.user_id}`,
+      avatarUrl: resolvedUser.avatar_url || null
+    };
+  }
 
   if (!subject?.userId) {
     subject = await resolveRobloxHistorySubject(query);
