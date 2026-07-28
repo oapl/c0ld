@@ -17,8 +17,12 @@ BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_ME"
 BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
 HATCH_BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_WITH_LUNA_HTG_APP"
 HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
+# HTG requests inventory by default. Add profile/trades/booth/mail here only after
+# those exact scopes are registered on the Luna HTG Big Games developer app.
+# HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read"
 INVENTORY_OAUTH_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
-HATCH_TRACKER_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
+# HTG is Discord-bot only. Leave this blank unless you build a dedicated HTG return page.
+HATCH_TRACKER_RETURN_URL = ""
 # Legacy fallback only. Prefer `/htg assign channel:<channel>` after deploying
 # the Discord command worker and applying migration 036.
 HATCH_ALERT_CHANNEL_ID = ""

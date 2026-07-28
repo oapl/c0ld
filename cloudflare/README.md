@@ -1017,7 +1017,8 @@ After connection, normal hourly scans use `GET /v1/account/inventory`. A manual
 `POST /api/inventory/ingest?force=1` adds `refresh=true` and consumes a Big
 Games refresh-quota slot, so reserve it for explicit tests. Big Games access
 tokens expire after 30 days and must then be authorized again; there is no
-refresh-token endpoint.
+refresh-token endpoint. Re-running the setup/authorization flow issues a new
+token for the selected linked Roblox account; users do not need to revoke first.
 
 ### Hatch alert tracker
 
@@ -1027,6 +1028,7 @@ inventory snapshots to post Huge, Titanic, and Gargantuan hatch alerts. Apply:
 ```text
 supabase/migrations/035_hatch_tracker.sql
 supabase/migrations/036_hatch_tracker_guild_channels.sql
+supabase/migrations/037_hatch_tracker_multi_account.sql
 ```
 
 Set these on `inventory-detector-worker`. The regular `BIG_GAMES_*` app can
@@ -1039,8 +1041,9 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
+| `HATCH_BIG_GAMES_SCOPES` | Optional space/comma-separated scopes requested by the HTG app. Defaults to inventory only: `player-data:pet-simulator-99:inventory:read`. Only add `profile`, `trades`, `booth`, or `mail` scopes after those exact scopes are registered on the Luna HTG Big Games developer app. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
-| `HATCH_TRACKER_RETURN_URL` | Optional page to open after OAuth completes. |
+| `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
 
 Required/optional secrets on `inventory-detector-worker`:
 
@@ -1067,15 +1070,19 @@ Set these on `c0ld-discord-search`:
 The user flow is:
 
 - `/htg setup` creates a private paginated Components V2 setup message with a
-  Big Games DB connect button.
+  Big Games DB connect button. Run it once for each linked Roblox account the
+  user wants Luna to track.
+- `/htg accounts` lists every Roblox account connected to the user's Discord
+  account.
 - `/htg assign channel:<channel>` sets the only hatch-alert destination for the
   Discord server. Once one or more assigned channels exist, the inventory Worker
   posts only to those assigned channels and ignores the legacy channel/webhook
   fallback.
-- `/htg enable tier:<huge|titanic|gargantuan|all>` enables selected alerts
-  only for the Discord account that ran it.
+- `/htg enable tier:<huge|titanic|gargantuan|all>` enables selected alerts for
+  every connected Roblox account on that Discord user by default. Add
+  `account:<roblox username or user_id>` to target one alt.
 - `/htg disable tier:<huge|titanic|gargantuan|all>` disables selected alerts
-  only for the Discord account that ran it.
+  with the same optional `account:` selector.
 
 Scheduled scans compare the newest owned-inventory snapshot against the
 previous snapshot. If multiple special pets are detected in one window, the

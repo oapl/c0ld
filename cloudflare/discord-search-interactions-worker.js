@@ -573,8 +573,8 @@ async function handleInteraction(request, env, ctx) {
   if (commandName === "htg") {
     const subcommand = getSubcommandName(interaction);
     const hatchSubcommand = subcommand === "setup" || subcommand === "alert" ? "tracker" : subcommand;
-    if (!["tracker", "enable", "disable", "assign"].includes(hatchSubcommand)) {
-      return interactionJson(messageResponse("Use `/htg setup`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
+    if (!["tracker", "accounts", "enable", "disable", "assign"].includes(hatchSubcommand)) {
+      return interactionJson(messageResponse("Use `/htg setup`, `/htg accounts`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
     }
 
     if (hatchSubcommand === "assign") {
@@ -914,6 +914,17 @@ async function completeHatchInteraction(interaction, env, subcommand) {
       return;
     }
 
+    if (subcommand === "accounts") {
+      payload = await hatchApiRequest(env, "/api/hatch/tracker/status", {
+        query: { discord_user_id: discordUserId }
+      });
+      await editOriginalInteraction(interaction, buildHatchTrackerMessage(payload, {
+        mode: subcommand,
+        discordUserId
+      }));
+      return;
+    }
+
     if (subcommand === "assign") {
       const guildId = String(interaction.guild_id || "").trim();
       const sourceChannelId = String(interaction.channel_id || "").trim();
@@ -952,6 +963,7 @@ async function completeHatchInteraction(interaction, env, subcommand) {
       body: {
         action: subcommand,
         tier: getCommandOption(interaction, "tier") || "all",
+        account: getCommandOption(interaction, "account") || "all",
         discord_user_id: discordUserId,
         discord_username: discordUsername
       }
@@ -1136,8 +1148,9 @@ function htgSetupPages(payload, context = {}) {
       body: [
         "If you haven't already linked your ROBLOX account to the Big Games DB then you will need to for this feature to work: <https://db.biggames.io/>",
         "",
-        "Then you'll need to allow this bot to see your inventory by clicking the \"Connect Big Games DB\" button.",
+        "Then you'll need to allow this bot to see your inventory. For alt accounts, use `/htg enable tier:all account:<roblox name or id>` so Luna knows which approval belongs to which account.",
         "-# It can only view your inventory to detect the huges, titanics, etc...",
+        "-# If Big Games shows multiple linked Roblox accounts, connect each alt with `/htg enable tier:all account:<roblox name or id>` instead of the generic setup button.",
         "",
         "If comfortable, click **Approve Access**."
       ].join("\n"),
@@ -1154,8 +1167,9 @@ function htgSetupPages(payload, context = {}) {
       title: "Enable The Alerts",
       body: [
         "After the browser says the inventory tracker connected, return here and choose what you want tracked.",
-        "Use `/htg enable tier:all`, or enable only `huge`, `titanic`, or `gargantuan`.",
-        "Use `/htg disable tier:<choice>` any time to turn off one tier or all tiers for yourself."
+        "Use `/htg accounts` to see every connected alt.",
+        "Use `/htg enable tier:all` to enable all connected alts, or add `account:<name or id>` for one account.",
+        "Use `/htg disable tier:<choice>` any time to turn off one tier or all tiers."
       ].join("\n")
     }
   ];
@@ -1247,23 +1261,18 @@ function htgSetupImageUrls(env) {
 
 function buildHatchTrackerMessage(payload, context = {}) {
   const tracker = payload.tracker || {};
-  const connected = Boolean(tracker.connected);
-  const enabled = Boolean(tracker.enabled);
   const authUrl = String(payload.authorize_url || "").trim();
-  const robloxName = tracker.roblox_username || tracker.roblox_user_id || "not connected";
-  const enabledTiers = Array.isArray(tracker.enabled_tiers) && tracker.enabled_tiers.length
-    ? tracker.enabled_tiers.map(hatchTierDisplayName).join(", ")
-    : "None";
-  const statusLine = connected
-    ? `**Connected Roblox:** ${escapeDiscordMarkdown(String(robloxName))}${tracker.roblox_user_id ? ` (${tracker.roblox_user_id})` : ""}`
-    : "**Connected Roblox:** Not connected";
-  const enabledLine = `**Alerts:** ${enabled ? "Enabled" : "Disabled"}`;
-  const tierLine = `**Tracked tiers:** ${enabledTiers}`;
-  const expiryLine = tracker.authorization_expires_at
-    ? `**Big Games access expires:** ${discordTime(tracker.authorization_expires_at)}`
-    : "**Big Games access expires:** Not connected";
+  const accounts = Array.isArray(tracker.accounts) ? tracker.accounts : [];
+  const accountLines = accounts.length
+    ? accounts.slice(0, 12).map(hatchTrackerAccountLine)
+    : ["No Roblox accounts are connected yet."];
+  if (accounts.length > 12) {
+    accountLines.push(`-# ${accounts.length - 12} more connected account${accounts.length - 12 === 1 ? "" : "s"} hidden.`);
+  }
   const intro = context.mode === "tracker"
     ? "Connect your Big Games DB inventory access, then enable hatch alerts when ready."
+    : context.mode === "accounts"
+      ? "These are the Roblox accounts Luna has connected for your Discord account."
     : payload.message || "Hatch tracker updated.";
 
   const components = [
@@ -1273,13 +1282,14 @@ function buildHatchTrackerMessage(payload, context = {}) {
         "## Huge / Titanic / Gargantuan Tracker",
         intro,
         "",
-        statusLine,
-        enabledLine,
-        tierLine,
-        expiryLine,
+        `**Connected accounts:** ${tracker.connected_account_count || 0}/${tracker.account_count || 0}`,
+        `**Enabled accounts:** ${tracker.enabled_account_count || 0}`,
         "",
-        "`/htg enable tier:<choice>` turns alerts on for your Discord account only.",
-        "`/htg disable tier:<choice>` turns alerts off for your Discord account only."
+        ...accountLines,
+        "",
+        "`/htg enable tier:<choice>` turns alerts on for all connected alts by default.",
+        "`/htg enable tier:<choice> account:<name or id>` changes only one alt.",
+        "`/htg disable tier:<choice>` works the same way."
       ].join("\n")
     }
   ];
@@ -1313,6 +1323,20 @@ function buildHatchTrackerMessage(payload, context = {}) {
     allowed_mentions: { parse: [] },
     flags: MESSAGE_FLAG_COMPONENTS_V2 | MESSAGE_FLAG_EPHEMERAL
   };
+}
+
+function hatchTrackerAccountLine(account) {
+  const name = escapeDiscordMarkdown(String(account.roblox_username || account.roblox_user_id || "Unknown"));
+  const id = account.roblox_user_id ? ` (${account.roblox_user_id})` : "";
+  const tiers = Array.isArray(account.enabled_tiers) && account.enabled_tiers.length
+    ? account.enabled_tiers.map(hatchTierDisplayName).join(", ")
+    : "None";
+  const auth = account.connected
+    ? account.authorization_expires_at
+      ? `auth expires ${discordTime(account.authorization_expires_at)}`
+      : "auth active"
+    : "auth expired";
+  return `- **${name}${id}:** ${account.enabled ? "Enabled" : "Disabled"} | ${tiers} | ${auth}`;
 }
 
 function hatchTierDisplayName(tier) {
@@ -7586,6 +7610,12 @@ function htgCommandPayload() {
       { name: "All", value: "all" }
     ]
   };
+  const accountOption = {
+    name: "account",
+    description: "Roblox username/user ID to change; omit or use all for every connected alt",
+    type: APPLICATION_COMMAND_OPTION_STRING,
+    required: false
+  };
 
   return {
     name: "htg",
@@ -7599,16 +7629,21 @@ function htgCommandPayload() {
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       },
       {
+        name: "accounts",
+        description: "List the Roblox accounts connected to your HTG tracker.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
         name: "enable",
         description: "Enable hatch alerts for your own connected Big Games inventory.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-        options: [tierOption]
+        options: [tierOption, accountOption]
       },
       {
         name: "disable",
         description: "Disable hatch alerts for your own connected Big Games inventory.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-        options: [tierOption]
+        options: [tierOption, accountOption]
       },
       {
         name: "assign",
