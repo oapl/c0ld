@@ -10,12 +10,26 @@ const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
 const BIG_GAMES_PROFILE_URL = "https://ps99.biggamesapi.io/v1/account/profile";
+const BIG_GAMES_TRADES_URL = "https://ps99.biggamesapi.io/v1/account/trades";
+const BIG_GAMES_BOOTH_URL = "https://ps99.biggamesapi.io/v1/account/booth";
+const BIG_GAMES_MAIL_URL = "https://ps99.biggamesapi.io/v1/account/mail";
 const BIG_GAMES_PET_COLLECTION_URL = "https://ps99.biggamesapi.io/api/collection/Pets";
 const BIG_GAMES_INVENTORY_SCOPE = "player-data:pet-simulator-99:inventory:read";
 const BIG_GAMES_PROFILE_SCOPE = "player-data:pet-simulator-99:profile:read";
 const BIG_GAMES_TRADE_SCOPE = "player-data:pet-simulator-99:trades:read";
 const BIG_GAMES_BOOTH_SCOPE = "player-data:pet-simulator-99:booth:read";
 const BIG_GAMES_MAIL_SCOPE = "player-data:pet-simulator-99:mail:read";
+const BIG_GAMES_HATCH_TRACKER_SCOPES = Object.freeze([
+  BIG_GAMES_INVENTORY_SCOPE,
+  BIG_GAMES_TRADE_SCOPE,
+  BIG_GAMES_BOOTH_SCOPE,
+  BIG_GAMES_MAIL_SCOPE
+]);
+const HATCH_SOURCE_ENDPOINTS = Object.freeze([
+  { key: "trades", label: "trade", scope: BIG_GAMES_TRADE_SCOPE, envUrl: "BIG_GAMES_TRADES_URL", defaultUrl: BIG_GAMES_TRADES_URL },
+  { key: "booth", label: "booth", scope: BIG_GAMES_BOOTH_SCOPE, envUrl: "BIG_GAMES_BOOTH_URL", defaultUrl: BIG_GAMES_BOOTH_URL },
+  { key: "mail", label: "mail", scope: BIG_GAMES_MAIL_SCOPE, envUrl: "BIG_GAMES_MAIL_URL", defaultUrl: BIG_GAMES_MAIL_URL }
+]);
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
@@ -28,9 +42,10 @@ const DEFAULT_USERNAME = "Cinnamowopal";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
 const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
+const HATCH_SOURCE_WINDOW_PADDING_MINUTES = 10;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-2026-07-27c";
+const INVENTORY_BUILD_ID = "inventory-htg-2026-07-27k";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -257,7 +272,7 @@ async function handleHatchOAuthStart(request, env) {
   const challenge = await sha256Base64Url(verifier);
   const selectedTier = normalizeHatchTierSelection(body.tier || "all");
   const enableAfterAuth = body.enable_after_auth === true;
-  const targetAccount = await resolveHatchOAuthTargetAccount(firstString(body.roblox_user_id, body.user_id, body.account, body.username));
+  const targetAccount = await resolveHatchOAuthTargetAccount(firstString(body.roblox_user_id, body.user_id, body.account, body.username), env);
   const pending = await fetchPendingHatchTrackerByDiscordUser(env, discordUserId);
   const existingAccounts = (await fetchHatchTrackersByDiscordUser(env, discordUserId))
     .filter(row => row.roblox_user_id);
@@ -419,7 +434,8 @@ async function handleOAuthCallback(request, env) {
       authorizedAt,
       expiresAt,
       expiresIn,
-      identityVerified: [tokenAccount.user_id, profileAccount.user_id].includes(targetUserId)
+      identityVerified: [tokenAccount.user_id, profileAccount.user_id].includes(targetUserId),
+      purpose: isHatchTrackerOAuth ? "hatch_tracker" : "inventory"
     });
     await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
       userId: targetUserId,
@@ -490,7 +506,8 @@ async function handleOAuthCallback(request, env) {
     authorizedAt,
     expiresAt,
     expiresIn,
-    identityVerified: account.user_id === targetUserId
+    identityVerified: account.user_id === targetUserId,
+    purpose: isHatchTrackerOAuth ? "hatch_tracker" : "inventory"
   });
   await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
     userId: targetUserId,
@@ -517,7 +534,7 @@ async function handleOAuthCallback(request, env) {
   }
   await markOAuthStateUsed(env, stateHash);
 
-  return oauthCompletion(pending, true, `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled. Hourly gains will appear after two scheduled scans.`, {
+  return oauthCompletion(pending, true, oauthConnectedReadyMessage(isHatchTrackerOAuth, expiresAt), {
     user_id: targetUserId,
     pulled: "1",
     forced: forcedRefresh ? "1" : "0",
@@ -684,7 +701,7 @@ async function handleHatchTrackerCommand(request, env) {
 
   const accessResults = await Promise.all(selectedRows.map(async row => ({
     row,
-    access: await oauthStatus(env, row.roblox_user_id)
+    access: await oauthStatus(env, row.roblox_user_id, "hatch_tracker")
   })));
 
   await Promise.all(accessResults.map(({ row }) => {
@@ -776,7 +793,7 @@ async function maybeUpsertHatchTrackerUserFromOAuth(env, pending, details) {
       ? hatchTrackerConfiguredTiers(existing)
       : hatchTrackerConfiguredTiers(pendingTracker);
   const now = new Date().toISOString();
-  await supabaseUpsert(env, HATCH_TRACKER_USERS_TABLE, [{
+  const row = {
     tracker_key: hatchTrackerKey(discordUserId, details.userId),
     discord_user_id: discordUserId,
     discord_username: firstString(metadata.discord_username, existing?.discord_username) || null,
@@ -790,9 +807,17 @@ async function maybeUpsertHatchTrackerUserFromOAuth(env, pending, details) {
       : existing?.disabled_at || pendingTracker?.disabled_at || null,
     updated_at: now,
     metadata: hatchTrackerMetadataWithTiers(existing?.metadata || pendingTracker?.metadata, tiers)
-  }], "roblox_user_id");
+  };
 
-  if (pendingTracker?.id) {
+  if (existing?.id || existing?.tracker_key || existing?.roblox_user_id) {
+    await updateHatchTrackerRow(env, existing, row);
+  } else if (pendingTracker?.id || pendingTracker?.tracker_key || pendingTracker?.discord_user_id) {
+    await updateHatchTrackerRow(env, pendingTracker, row);
+  } else {
+    await supabaseInsert(env, HATCH_TRACKER_USERS_TABLE, [row], "minimal");
+  }
+
+  if (existing && pendingTracker?.id && existing.id !== pendingTracker.id) {
     await supabaseDelete(env, HATCH_TRACKER_USERS_TABLE, { id: `eq.${pendingTracker.id}` }).catch(() => {});
   }
 }
@@ -802,7 +827,7 @@ async function hatchTrackerStatus(env, discordUserId) {
   const pending = rows.find(row => !row.roblox_user_id) || null;
   const accountRows = rows.filter(row => row.roblox_user_id);
   const accounts = await Promise.all(accountRows.map(async row => {
-    const access = await oauthStatus(env, row.roblox_user_id);
+    const access = await oauthStatus(env, row.roblox_user_id, "hatch_tracker");
     return {
       id: row.id || null,
       discord_user_id: discordUserId,
@@ -812,6 +837,10 @@ async function hatchTrackerStatus(env, discordUserId) {
       enabled: Boolean(row.enabled),
       enabled_tiers: hatchTrackerEnabledTiers(row),
       connected: Boolean(access.connected),
+      authorization_missing: Boolean(access.authorization_missing),
+      reauthorization_required: Boolean(access.reauthorization_required),
+      missing_scopes: access.missing_scopes || [],
+      authorization_message: access.message || null,
       authorized_at: row.authorized_at || access.authorized_at || null,
       authorization_expires_at: row.authorization_expires_at || access.expires_at || null,
       last_checked_at: row.last_checked_at || null,
@@ -946,18 +975,50 @@ function normalizeHatchAccountSelector(value) {
   return raw;
 }
 
-async function resolveHatchOAuthTargetAccount(value) {
-  const raw = String(value || "").trim();
+async function resolveHatchOAuthTargetAccount(value, env) {
+  const raw = normalizeRobloxLookupInput(value);
   if (!raw || normalizeHatchAccountSelector(raw) === "all") return null;
 
-  if (/^\d+$/.test(raw)) {
-    const username = await fetchRobloxUsernameById(raw).catch(() => "");
-    return {
-      user_id: raw,
-      username: username || raw
-    };
+  const forcedId = robloxIdLookupInput(raw);
+  if (forcedId) return resolveRobloxUserIdAccount(forcedId);
+
+  const exact = await resolveRobloxUsernameExact(raw).catch(error => {
+    console.warn("Roblox exact username lookup failed", error?.message || error);
+    return null;
+  });
+  if (exact?.user_id) return exact;
+
+  if (/^\d+$/.test(raw)) return resolveRobloxUserIdAccount(raw);
+
+  const local = await resolveKnownRobloxAccount(env, raw).catch(error => {
+    if (error?.status && error.status < 500) throw error;
+    console.warn("Local Roblox account lookup failed", error?.message || error);
+    return null;
+  });
+  if (local?.user_id) return local;
+
+  const searched = await searchRobloxAccounts(raw).catch(error => {
+    console.warn("Roblox username search failed", error?.message || error);
+    return [];
+  });
+  const picked = pickRobloxSearchAccount(raw, searched);
+  if (picked.account?.user_id) return picked.account;
+  if (picked.suggestions.length) {
+    throw httpError(400, `Roblox account "${raw}" matched multiple users. Try one of these exact usernames: ${picked.suggestions.join(", ")}.`);
   }
 
+  throw httpError(400, `Roblox account "${raw}" could not be resolved. Check the spelling and use their exact Roblox @username.`);
+}
+
+async function resolveRobloxUserIdAccount(userId) {
+  const username = await fetchRobloxUsernameById(userId).catch(() => "");
+  return {
+    user_id: String(userId),
+    username: username || String(userId)
+  };
+}
+
+async function resolveRobloxUsernameExact(raw) {
   const res = await fetch("https://users.roblox.com/v1/usernames/users", {
     method: "POST",
     headers: {
@@ -968,12 +1029,181 @@ async function resolveHatchOAuthTargetAccount(value) {
     body: JSON.stringify({ usernames: [raw], excludeBannedUsers: false })
   });
   const payload = await res.json().catch(() => ({}));
-  const row = Array.isArray(payload.data) ? payload.data[0] : null;
-  if (!res.ok || !row?.id) throw httpError(400, `Roblox account "${raw}" could not be resolved. Use the Roblox user id instead.`);
+  if (!res.ok) throw httpError(res.status || 502, `Roblox username lookup failed (${res.status}).`);
+  const rows = Array.isArray(payload.data) ? payload.data : [];
+  const row = rows.find(item => normalizeRobloxNameKey(item?.name) === normalizeRobloxNameKey(raw)) || rows[0];
+  if (!row?.id) return null;
   return {
     user_id: String(row.id),
     username: firstString(row.name, row.requestedUsername, raw)
   };
+}
+
+async function searchRobloxAccounts(raw) {
+  const url = new URL("https://users.roblox.com/v1/users/search");
+  url.searchParams.set("keyword", raw);
+  url.searchParams.set("limit", "10");
+  const res = await fetch(url.toString(), {
+    headers: {
+      accept: "application/json",
+      "user-agent": "c0ld-Luna-HTG-Worker"
+    }
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw httpError(res.status || 502, `Roblox username search failed (${res.status}).`);
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+function pickRobloxSearchAccount(raw, rows) {
+  const inputKey = normalizeRobloxNameKey(raw);
+  const normalized = (rows || [])
+    .map(row => ({
+      user_id: String(row?.id || "").trim(),
+      username: firstString(row?.name),
+      display_name: firstString(row?.displayName)
+    }))
+    .filter(row => /^\d+$/.test(row.user_id) && row.username);
+
+  const exactUsername = normalized.find(row => normalizeRobloxNameKey(row.username) === inputKey);
+  if (exactUsername) return { account: { user_id: exactUsername.user_id, username: exactUsername.username }, suggestions: [] };
+
+  const exactDisplay = uniqueAccounts(normalized.filter(row => normalizeRobloxNameKey(row.display_name) === inputKey));
+  if (exactDisplay.length === 1) return { account: { user_id: exactDisplay[0].user_id, username: exactDisplay[0].username }, suggestions: [] };
+
+  return {
+    account: null,
+    suggestions: uniqueAccounts(exactDisplay.length ? exactDisplay : normalized)
+      .slice(0, 5)
+      .map(row => `@${row.username}`)
+  };
+}
+
+async function resolveKnownRobloxAccount(env, raw) {
+  if (!supabaseUrl(env)) return null;
+  const specs = [
+    {
+      table: HATCH_TRACKER_USERS_TABLE,
+      select: "roblox_user_id,roblox_username,discord_username,updated_at",
+      fields: ["roblox_username", "discord_username"],
+      order: "updated_at.desc",
+      idKey: "roblox_user_id",
+      usernameKeys: ["roblox_username"]
+    },
+    {
+      table: SNAPSHOT_TABLE,
+      select: "roblox_user_id,roblox_username,captured_at",
+      fields: ["roblox_username"],
+      order: "captured_at.desc",
+      idKey: "roblox_user_id",
+      usernameKeys: ["roblox_username"]
+    },
+    {
+      table: "c0ld_global_ranks_current",
+      select: "user_id,username,display_name,updated_at",
+      fields: ["username", "display_name"],
+      order: "updated_at.desc",
+      idKey: "user_id",
+      usernameKeys: ["username", "display_name"]
+    },
+    {
+      table: "c0ld_global_rank_history",
+      select: "user_id,username,display_name,fetched_at",
+      fields: ["username", "display_name"],
+      order: "fetched_at.desc",
+      idKey: "user_id",
+      usernameKeys: ["username", "display_name"]
+    },
+    {
+      table: "ps99_league_current",
+      select: "user_id,display_name,updated_at",
+      fields: ["display_name"],
+      order: "updated_at.desc",
+      idKey: "user_id",
+      usernameKeys: ["display_name"]
+    }
+  ];
+
+  const candidates = [];
+  for (const spec of specs) {
+    const rows = await queryKnownRobloxAccountTable(env, spec, raw);
+    candidates.push(...rows.map(row => accountCandidateFromRow(row, spec)));
+  }
+
+  const inputKey = normalizeRobloxNameKey(raw);
+  const exact = uniqueAccountSuggestions(candidates)
+    .filter(row => /^\d+$/.test(row.user_id) && row.username && row.matchKeys.includes(inputKey));
+  if (exact.length === 1) return { user_id: exact[0].user_id, username: exact[0].username };
+  if (exact.length > 1) {
+    throw httpError(400, `Roblox account "${raw}" matched multiple known users. Try one of these exact usernames: ${exact.slice(0, 5).map(row => `@${row.username}`).join(", ")}.`);
+  }
+  return null;
+}
+
+async function queryKnownRobloxAccountTable(env, spec, raw) {
+  const safe = raw.replace(/[(),]/g, "").trim();
+  if (!safe) return [];
+  const params = {
+    select: spec.select,
+    limit: "10"
+  };
+  if (spec.order) params.order = spec.order;
+  params.or = `(${spec.fields.map(field => `${field}.ilike.${safe}`).join(",")})`;
+  try {
+    return await supabaseSelect(env, spec.table, params);
+  } catch (error) {
+    if (/does not exist|schema cache|PGRST/i.test(error?.message || "")) return [];
+    throw error;
+  }
+}
+
+function accountCandidateFromRow(row, spec) {
+  const username = firstString(...spec.usernameKeys.map(key => row?.[key]));
+  return {
+    user_id: String(row?.[spec.idKey] || "").trim(),
+    username,
+    matchKeys: spec.usernameKeys.map(key => normalizeRobloxNameKey(row?.[key])).filter(Boolean)
+  };
+}
+
+function uniqueAccounts(rows) {
+  const seen = new Set();
+  const output = [];
+  for (const row of rows || []) {
+    const id = String(row?.user_id || "").trim();
+    if (!/^\d+$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    output.push(row);
+  }
+  return output;
+}
+
+function uniqueAccountSuggestions(rows) {
+  const seen = new Set();
+  const output = [];
+  for (const row of uniqueAccounts(rows)) {
+    const usernameKey = normalizeRobloxNameKey(row?.username);
+    const key = usernameKey || String(row?.user_id || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(row);
+  }
+  return output;
+}
+
+function normalizeRobloxLookupInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .trim();
+}
+
+function robloxIdLookupInput(value) {
+  const match = String(value || "").trim().match(/^(?:id|user|userid|user_id):\s*(\d+)$/i);
+  return match ? match[1] : "";
+}
+
+function normalizeRobloxNameKey(value) {
+  return normalizeRobloxLookupInput(value).toLowerCase();
 }
 
 async function fetchRobloxUsernameById(userId) {
@@ -1058,7 +1288,7 @@ function hatchTierResponseLabel(selection) {
 
 async function handleInventoryRetry(request, env) {
   requireSupabase(env);
-  requireAllowedOrigin(request, env);
+  if (!hasAdminAuthorization(request, env)) requireAllowedOrigin(request, env);
 
   const url = new URL(request.url);
   const userId = String(url.searchParams.get("user_id") || "").trim();
@@ -1153,14 +1383,16 @@ async function handleOAuthSummary(env) {
   });
 }
 
-async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID) {
-  const configured = bigGamesOAuthConfigured(env);
-  if (!configured || !supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) {
-    return { configured, connected: false, expires_at: null };
+async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEFAULT_USER_ID, purpose = "inventory") {
+  const configured = bigGamesOAuthConfiguredForPurpose(env, purpose);
+  if (!supabaseUrl(env) || !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY)) {
+    return { configured, connected: false, expires_at: null, authorization_missing: true };
   }
   try {
     const grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at");
-    const connected = !!grant && new Date(grant.expires_at).getTime() > Date.now();
+    const missingScopes = grant ? missingOAuthScopes(env, purpose, grant.scope) : [];
+    const expired = !!grant && new Date(grant.expires_at).getTime() <= Date.now();
+    const connected = !!grant && !expired && !missingScopes.length;
     return {
       configured,
       connected,
@@ -1168,23 +1400,26 @@ async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEF
       expires_at: grant?.expires_at || null,
       last_used_at: grant?.last_used_at || null,
       scope: grant?.scope || null,
-      reauthorization_required: !!grant && !connected
+      missing_scopes: missingScopes,
+      authorization_missing: !grant,
+      reauthorization_required: !!grant && (expired || missingScopes.length > 0)
     };
   } catch (error) {
     return { configured, connected: false, expires_at: null, storage_ready: false, message: error?.message || String(error) };
   }
 }
 
-async function getUsableOAuthGrant(env, userId) {
-  if (!bigGamesOAuthConfigured(env) || !supabaseUrl(env)) return null;
+async function getUsableOAuthGrant(env, userId, purpose = "inventory") {
+  if (!supabaseUrl(env)) return null;
   let grant;
   try {
-    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at");
+    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at,metadata");
   } catch (error) {
     if (/does not exist|schema cache|PGRST205/i.test(error?.message || "")) return null;
     throw error;
   }
   if (!grant) return null;
+  if (!bigGamesOAuthConfiguredForPurpose(env, purpose) && !inventoryCredentialSecret(env, purpose)) return null;
   if (new Date(grant.expires_at).getTime() <= Date.now()) {
     throw httpError(401, `Big Games authorization expired for Roblox user ${userId}. Run the OAuth authorization flow again.`);
   }
@@ -1219,6 +1454,15 @@ function bigGamesOAuthConfigured(env) {
 
 function hatchBigGamesOAuthConfigured(env) {
   return bigGamesOAuthMissing(env, "hatch_tracker").length === 0;
+}
+
+function bigGamesOAuthConfiguredForPurpose(env, purpose = "inventory") {
+  return purpose === "hatch_tracker" ? hatchBigGamesOAuthConfigured(env) : bigGamesOAuthConfigured(env);
+}
+
+function missingOAuthScopes(env, purpose = "inventory", scopeText = "") {
+  const granted = oauthScopeSet(scopeText);
+  return bigGamesOAuthScopes(env, purpose).filter(scope => !granted.has(scope));
 }
 
 function requireBigGamesOAuth(env) {
@@ -1273,11 +1517,13 @@ function bigGamesOAuthScopeString(env, purpose = "inventory") {
 
 function bigGamesOAuthScopes(env, purpose = "inventory") {
   const configured = purpose === "hatch_tracker"
-    ? firstString(env.HATCH_BIG_GAMES_SCOPES, env.BIG_GAMES_SCOPES)
+    ? firstString(env.HATCH_BIG_GAMES_SCOPES)
     : firstString(env.BIG_GAMES_SCOPES);
   const scopes = configured
     ? configured.split(/[,\s]+/).map(scope => scope.trim()).filter(Boolean)
-    : [BIG_GAMES_INVENTORY_SCOPE];
+    : purpose === "hatch_tracker"
+      ? BIG_GAMES_HATCH_TRACKER_SCOPES
+      : [BIG_GAMES_INVENTORY_SCOPE];
   const unique = [...new Set(scopes)];
   if (!unique.includes(BIG_GAMES_INVENTORY_SCOPE)) unique.unshift(BIG_GAMES_INVENTORY_SCOPE);
   return unique;
@@ -1298,8 +1544,35 @@ function bigGamesOAuthEnvNames(purpose = "inventory") {
   };
 }
 
-function inventoryCredentialSecret(env) {
-  return String(env.INVENTORY_TOKEN_ENCRYPTION_SECRET || env.BIG_GAMES_TOKEN_ENCRYPTION_SECRET || env.BIG_GAMES_CLIENT_SECRET || env.HATCH_BIG_GAMES_CLIENT_SECRET || "").trim();
+function inventoryCredentialSecret(env, purpose = "inventory") {
+  return oauthCredentialSecrets(env, purpose)[0] || "";
+}
+
+function oauthCredentialSecrets(env, purpose = "inventory") {
+  const stable = firstString(env.INVENTORY_TOKEN_ENCRYPTION_SECRET, env.BIG_GAMES_TOKEN_ENCRYPTION_SECRET);
+  const inventorySecret = firstString(env.BIG_GAMES_CLIENT_SECRET);
+  const hatchSecret = firstString(env.HATCH_BIG_GAMES_CLIENT_SECRET);
+  const ordered = purpose === "hatch_tracker"
+    ? [stable, hatchSecret, inventorySecret]
+    : [stable, inventorySecret, hatchSecret];
+  return [...new Set(ordered.map(secret => String(secret || "").trim()).filter(Boolean))];
+}
+
+async function openOAuthAccessToken(env, grant, purpose = "inventory") {
+  const metadata = grant?.metadata && typeof grant.metadata === "object" ? grant.metadata : {};
+  const storedPurpose = metadata.oauth_app === "hatch_tracker" || metadata.purpose === "hatch_tracker"
+    ? "hatch_tracker"
+    : purpose;
+  const secrets = oauthCredentialSecrets(env, storedPurpose);
+  let lastError = null;
+  for (const secret of secrets) {
+    try {
+      return await openSecret(grant.access_token_ciphertext, secret, "big-games-access-token");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || httpError(500, "No OAuth credential encryption secret is configured.");
 }
 
 function bigGamesRedirectUri(env) {
@@ -1350,6 +1623,12 @@ function oauthSnapshotPendingMessage(isHatchTrackerOAuth) {
     : "Access is connected, but the first inventory snapshot could not be saved. Retry from the league page or wait for the next scheduled scan";
 }
 
+function oauthConnectedReadyMessage(isHatchTrackerOAuth, expiresAt) {
+  return isHatchTrackerOAuth
+    ? `HTG access is connected through ${formatDateTime(expiresAt)} and the baseline snapshot was saved. Luna will compare future snapshots and alert only on enabled Huge, Titanic, or Gargantuan gains that do not match trade, booth, or mail activity.`
+    : `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled. Hourly gains will appear after two scheduled scans.`;
+}
+
 function oauthCompletion(pending, success, message, params = {}) {
   if (pending?.return_url) {
     const target = new URL(pending.return_url);
@@ -1365,11 +1644,11 @@ function oauthCompletion(pending, success, message, params = {}) {
   return oauthHtml(success, message);
 }
 
-async function saveOAuthGrant(env, { userId, username, token, scopes, authorizedAt, expiresAt, expiresIn, identityVerified }) {
+async function saveOAuthGrant(env, { userId, username, token, scopes, authorizedAt, expiresAt, expiresIn, identityVerified, purpose = "inventory" }) {
   await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
     grant_key: oauthGrantKey(userId),
     roblox_user_id: Number(userId),
-    access_token_ciphertext: await sealSecret(token.access_token, inventoryCredentialSecret(env), "big-games-access-token"),
+    access_token_ciphertext: await sealSecret(token.access_token, inventoryCredentialSecret(env, purpose), "big-games-access-token"),
     token_type: token.token_type || "Bearer",
     scope: scopes.join(" "),
     authorized_at: authorizedAt.toISOString(),
@@ -1378,7 +1657,8 @@ async function saveOAuthGrant(env, { userId, username, token, scopes, authorized
     metadata: {
       expires_in: expiresIn,
       username: username || null,
-      identity_verified: !!identityVerified
+      identity_verified: !!identityVerified,
+      oauth_app: purpose
     },
     updated_at: new Date().toISOString()
   }], "grant_key");
@@ -1773,11 +2053,20 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
 
   const diff = await buildDiffFromSnapshots(env, start, end);
   const enabledTiers = new Set(hatchTrackerEnabledTiers(tracker));
-  const hatched = hatchAlertCandidates(diff.gained || [])
+  const candidates = hatchAlertCandidates(diff.gained || [])
     .filter(row => enabledTiers.has(row.tier));
+  const sourceFilter = await filterHatchSourceGains(env, userId, candidates, { start, end });
+  const hatched = sourceFilter.rows;
   if (!hatched.length) {
     await markHatchSnapshotChecked(env, tracker, latestSnapshot.id);
-    return { posted: false, reason: "No enabled Huge, Titanic, or Gargantuan gains were detected.", snapshot_id: latestSnapshot.id };
+    return {
+      posted: false,
+      reason: candidates.length && sourceFilter.suppressed.length
+        ? "All enabled Huge, Titanic, or Gargantuan gains matched trade, booth, or mail activity."
+        : "No enabled Huge, Titanic, or Gargantuan gains were detected.",
+      snapshot_id: latestSnapshot.id,
+      source_filter: compactHatchSourceFilterSummary(sourceFilter)
+    };
   }
 
   const featured = pickFeaturedHatch(hatched);
@@ -1822,7 +2111,8 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     tier: featured.tier,
     item: featured.display_name,
     delta: featured.delta,
-    snapshot_id: latestSnapshot.id
+    snapshot_id: latestSnapshot.id,
+    source_filter: compactHatchSourceFilterSummary(sourceFilter)
   };
 }
 
@@ -1895,6 +2185,256 @@ function compactHatchCandidate(row) {
     delta: row.delta,
     rap: row.rap || 0,
     image_url: row.image_url || null
+  };
+}
+
+async function filterHatchSourceGains(env, userId, rows, period) {
+  const candidates = Array.isArray(rows) ? rows : [];
+  const unchanged = {
+    rows: candidates,
+    suppressed: [],
+    available: false,
+    reason: null,
+    source_item_count: 0,
+    sources: []
+  };
+  if (!candidates.length) return { ...unchanged, available: true };
+  if (!envBool(env.HATCH_SOURCE_FILTER_ENABLED, true)) {
+    return { ...unchanged, reason: "HATCH_SOURCE_FILTER_ENABLED is false." };
+  }
+
+  let grant;
+  try {
+    grant = await getUsableOAuthGrant(env, userId, "hatch_tracker");
+  } catch (error) {
+    return { ...unchanged, reason: error?.message || String(error) };
+  }
+  if (!grant) return { ...unchanged, reason: "No usable Big Games OAuth grant." };
+
+  const scopes = oauthScopeSet(grant.scope);
+  const missing = HATCH_SOURCE_ENDPOINTS
+    .filter(endpoint => !scopes.has(endpoint.scope))
+    .map(endpoint => endpoint.scope);
+  if (missing.length) {
+    return { ...unchanged, reason: `Grant is missing source scopes: ${missing.join(", ")}` };
+  }
+
+  let accessToken;
+  try {
+    accessToken = await openOAuthAccessToken(env, grant, "hatch_tracker");
+  } catch (error) {
+    return { ...unchanged, reason: `Could not open Big Games access token: ${error?.message || error}` };
+  }
+
+  const fetched = await Promise.all(HATCH_SOURCE_ENDPOINTS.map(async endpoint => {
+    try {
+      const payload = await fetchAccountSourceWithAccessToken(env, accessToken, endpoint);
+      const items = hatchSourceItemsFromPayload(endpoint, payload, userId, period);
+      return { ok: true, endpoint, items };
+    } catch (error) {
+      return { ok: false, endpoint, error: error?.message || String(error), items: [] };
+    }
+  }));
+
+  const failed = fetched.filter(result => !result.ok);
+  const sources = fetched.map(result => ({
+    key: result.endpoint.key,
+    ok: result.ok,
+    item_count: result.items.length,
+    ...(result.error ? { error: result.error } : {})
+  }));
+  if (failed.length) {
+    return {
+      ...unchanged,
+      reason: `Source fetch failed for ${failed.map(result => result.endpoint.key).join(", ")}.`,
+      sources
+    };
+  }
+
+  const sourceItems = fetched.flatMap(result => result.items);
+  const filtered = suppressHatchSourceMatches(candidates, sourceItems);
+  return {
+    rows: filtered.rows,
+    suppressed: filtered.suppressed,
+    available: true,
+    reason: null,
+    source_item_count: sourceItems.length,
+    sources
+  };
+}
+
+async function fetchAccountSourceWithAccessToken(env, accessToken, endpoint) {
+  const url = new URL(env[endpoint.envUrl] || endpoint.defaultUrl);
+  const res = await fetch(url.toString(), {
+    headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
+    cf: { cacheTtl: 0 }
+  });
+  const text = await res.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw httpError(502, `Big Games Player API returned non-JSON for ${endpoint.key}: ${text.slice(0, 160)}`); }
+  if (res.status === 401) throw httpError(401, "Big Games authorization expired or was revoked. Run the OAuth authorization flow again.");
+  if (res.status === 403) throw httpError(403, `Big Games token does not include the ${endpoint.label} permission. Re-authorize the app.`);
+  if (!res.ok || payload.status === "error") throw httpError(502, `Big Games Player API ${endpoint.key} fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
+  attachResponseHeaders(payload, res.headers);
+  return payload;
+}
+
+function hatchSourceItemsFromPayload(endpoint, payload, userId, period) {
+  const entries = Array.isArray(payload?.data?.entries)
+    ? payload.data.entries
+    : Array.isArray(payload?.entries)
+      ? payload.entries
+      : [];
+  const output = [];
+  for (const entry of entries) {
+    if (!hatchSourceEntryInWindow(entry, period)) continue;
+    const items = hatchSourceReceivedItems(endpoint.key, entry, userId);
+    for (const item of items) {
+      const normalized = normalizeHatchSourceItem(item, endpoint, entry);
+      if (normalized) output.push(normalized);
+    }
+  }
+  return output;
+}
+
+function hatchSourceReceivedItems(sourceKey, entry, userId) {
+  if (!entry || typeof entry !== "object") return [];
+  if (sourceKey === "mail") {
+    if (!isIncomingHatchMail(entry, userId)) return [];
+    return entry.item ? [entry.item] : [];
+  }
+  return Array.isArray(entry.received) ? entry.received : [];
+}
+
+function isIncomingHatchMail(entry, userId) {
+  const normalizedUserId = String(userId || "").trim();
+  const receiverId = partyUserId(entry.receiver);
+  const senderId = partyUserId(entry.sender);
+  if (receiverId) return receiverId === normalizedUserId;
+  if (senderId) return senderId !== normalizedUserId;
+  return true;
+}
+
+function partyUserId(party) {
+  if (!party || typeof party !== "object") return "";
+  return String(party.uid || party.userId || party.user_id || party.robloxUserId || party.roblox_user_id || "").trim();
+}
+
+function hatchSourceEntryInWindow(entry, period) {
+  const timestamp = sourceEntryTimeMs(entry);
+  if (!timestamp) return false;
+  const start = new Date(period?.start?.captured_at || period?.start || 0).getTime();
+  const end = new Date(period?.end?.captured_at || period?.end || Date.now()).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return true;
+  const padding = HATCH_SOURCE_WINDOW_PADDING_MINUTES * 60000;
+  return timestamp >= start - padding && timestamp <= end + padding;
+}
+
+function sourceEntryTimeMs(entry) {
+  const raw = entry?.timestamp ?? entry?.time ?? entry?.createdAt ?? entry?.created_at ?? entry?.date;
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const number = Number(raw);
+  if (Number.isFinite(number)) return number > 100000000000 ? number : number * 1000;
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeHatchSourceItem(item, endpoint, entry) {
+  if (!item || typeof item !== "object") return null;
+  const itemClass = firstString(item.class, item.category, item.collection, "Pet");
+  const itemId = firstString(item.id, item.itemId, item.configName, item.name);
+  const displayName = firstString(item.displayName, item.name, itemId, item.stackKey, "Unknown item");
+  const variant = getVariant(item);
+  const count = Math.max(0, Math.floor(Number(itemCount(item)) || 0));
+  const raw = {
+    ...item,
+    class: itemClass,
+    category: firstString(item.category, item.collection, itemClass),
+    collection: firstString(item.collection, item.category, itemClass)
+  };
+  const row = {
+    item_key: getItemKey(item, itemClass, itemId, variant),
+    item_class: itemClass,
+    item_category: raw.category || raw.collection || null,
+    item_id: itemId,
+    display_name: displayName,
+    variant,
+    delta: count || 1,
+    rap: itemRap(item),
+    icon: firstString(item.icon, item.goldenIcon),
+    raw,
+    source: endpoint.key,
+    source_label: endpoint.label,
+    source_timestamp: entry?.timestamp || null
+  };
+  const tier = hatchTier(row);
+  return tier ? { ...row, tier, match_key: hatchSourceMatchKey(row) } : null;
+}
+
+function suppressHatchSourceMatches(rows, sourceItems) {
+  const pool = new Map();
+  for (const item of sourceItems || []) {
+    const key = hatchSourceMatchKey(item);
+    if (!key) continue;
+    const existing = pool.get(key) || { count: 0, sources: [] };
+    existing.count += Math.max(0, Number(item.delta || 0));
+    existing.sources.push({ source: item.source, timestamp: item.source_timestamp || null });
+    pool.set(key, existing);
+  }
+
+  const kept = [];
+  const suppressed = [];
+  for (const row of rows || []) {
+    const key = hatchSourceMatchKey(row);
+    const available = pool.get(key);
+    const delta = Math.max(0, Number(row.delta || 0));
+    if (!key || !available || available.count <= 0 || delta <= 0) {
+      kept.push(row);
+      continue;
+    }
+
+    const amount = Math.min(delta, available.count);
+    suppressed.push({ ...row, delta: amount, source_matches: available.sources.slice(0, 3) });
+    available.count -= amount;
+    if (delta > amount) kept.push({ ...row, delta: delta - amount, source_suppressed_delta: amount });
+  }
+  return { rows: kept, suppressed };
+}
+
+function hatchSourceMatchKey(row) {
+  const baseName = hatchSourceBaseName(firstString(row?.display_name, row?.item_id, row?.item_key));
+  if (!baseName) return "";
+  return [
+    baseName,
+    normalizeVariantForMatch(row?.variant || getVariant(row?.raw || {}))
+  ].join("|");
+}
+
+function hatchSourceBaseName(value) {
+  return normalizeHatchName(value)
+    .replace(/\b(shiny|rainbow|golden|regular|normal)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeVariantForMatch(value) {
+  const text = String(value || "Normal").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text || text === "regular") return "normal";
+  return text;
+}
+
+function oauthScopeSet(scope) {
+  return new Set(String(scope || "").split(/[,\s]+/).map(value => value.trim()).filter(Boolean));
+}
+
+function compactHatchSourceFilterSummary(filter) {
+  if (!filter) return null;
+  return {
+    available: !!filter.available,
+    reason: filter.reason || null,
+    source_item_count: filter.source_item_count || 0,
+    suppressed_count: (filter.suppressed || []).length,
+    sources: filter.sources || []
   };
 }
 
@@ -2265,7 +2805,7 @@ function pickPreviousSnapshots(snapshots) {
 }
 
 async function fetchAuthorizedInventory(env, grant, options = {}) {
-  const accessToken = await openSecret(grant.access_token_ciphertext, inventoryCredentialSecret(env), "big-games-access-token");
+  const accessToken = await openOAuthAccessToken(env, grant, "inventory");
   let payload;
   try {
     payload = await fetchInventoryWithAccessToken(env, accessToken, options);
@@ -2340,6 +2880,7 @@ async function fetchPublicInventory(usernameOrId) {
 }
 
 const INVENTORY_ITEM_PATHS = Object.freeze([
+  "data.items",
   "data.views.inventory.data.items",
   "data.views.inventory.items",
   "views.inventory.data.items",
@@ -2352,6 +2893,7 @@ const INVENTORY_ITEM_PATHS = Object.freeze([
   "inventory.items"
 ]);
 
+const TRUSTED_AUTH_INVENTORY_ITEM_PATHS = new Set(["data.items"]);
 const CATALOG_PATH_PATTERN = /(^|\.)(collection|collections|catalog|index|directory|config|database|exist|exists)(\.|$)/i;
 const CATALOG_ITEM_KEYS = Object.freeze(["collection", "collections", "exists", "goldenIcon", "rapApproximate", "existCount", "globalCount"]);
 
@@ -2367,10 +2909,11 @@ function selectOwnedInventoryItems(raw, env) {
       throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH does not point to an array: ${configuredPath}`);
     }
     const analysis = analyzeInventoryArray(configuredPath, configuredItems);
-    if (analysis.catalog_like) {
+    const trustedPath = isTrustedAuthenticatedOwnedInventoryPath(raw, configuredPath, analysis);
+    if (analysis.catalog_like && !trustedPath) {
       throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH points to catalog/collection data, not owned inventory: ${configuredPath}`);
     }
-    if (!analysis.owned_like) {
+    if (!analysis.owned_like && !trustedPath) {
       throw httpError(502, `BIG_GAMES_INVENTORY_ITEMS_PATH does not contain recognizable owned item stacks: ${configuredPath}`);
     }
     return { items: configuredItems, path: configuredPath, method: "configured", confidence: analysis.score };
@@ -2380,7 +2923,7 @@ function selectOwnedInventoryItems(raw, env) {
     const items = valueAtPath(raw, path);
     if (!Array.isArray(items)) continue;
     const analysis = analyzeInventoryArray(path, items);
-    if (analysis.owned_like && !analysis.catalog_like) {
+    if ((analysis.owned_like && !analysis.catalog_like) || isTrustedAuthenticatedOwnedInventoryPath(raw, path, analysis)) {
       return { items, path, method: "recognized_path", confidence: analysis.score };
     }
   }
@@ -2471,6 +3014,17 @@ function analyzeInventoryArray(path, items) {
     catalog_signal_count: catalogSignalCount,
     sample_size: sample.length
   };
+}
+
+function isTrustedAuthenticatedOwnedInventoryPath(raw, path, analysis) {
+  if (!TRUSTED_AUTH_INVENTORY_ITEM_PATHS.has(String(path || ""))) return false;
+  const data = raw?.data || {};
+  const hasAuthenticatedInventoryEnvelope = Boolean(raw?.refresh || data?.fetchedAt || data?.cached !== undefined);
+  if (!hasAuthenticatedInventoryEnvelope) return false;
+  const sampleSize = Math.max(1, Number(analysis?.sample_size || 0));
+  return Number(analysis?.item_like_count || 0) >= Math.ceil(sampleSize * 0.6)
+    && Number(analysis?.quantity_count || 0) >= Math.ceil(sampleSize * 0.5)
+    && Number(analysis?.stack_count || 0) >= Math.ceil(sampleSize * 0.5);
 }
 
 function summarizeInventoryCandidate(path, items, query, selection = null) {
@@ -2679,6 +3233,8 @@ function itemCount(item) {
 }
 function itemRap(item) { for (const v of [item.rap, item.RAP, item.value, item.Value, item.recentAveragePrice, item.rawData?.rap]) { const n = Number(v); if (Number.isFinite(n) && n > 0) return n; } return 0; }
 function getVariant(item) {
+  const explicit = String(item?.variant || item?.Variant || "").trim();
+  if (explicit) return explicit.replace(/^regular$/i, "Normal");
   let stack = {};
   try { stack = JSON.parse(String(item?.stackKey || item?.stack_key || "{}")); } catch {}
   const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};

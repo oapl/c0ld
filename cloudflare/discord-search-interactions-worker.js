@@ -57,8 +57,8 @@ const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
-const HTG_BUILD_ID = "htg-debug-2026-07-27e";
-const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/jSkBQzx.png", "", ""];
+const HTG_BUILD_ID = "htg-debug-2026-07-27i";
+const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 let chartDuckImagePromise = null;
 
 export default {
@@ -903,14 +903,25 @@ async function completeHatchInteraction(interaction, env, subcommand) {
 
     let payload;
     if (subcommand === "tracker") {
-      payload = await hatchApiRequest(env, "/api/hatch/oauth/start", {
-        method: "POST",
-        body: {
-          discord_user_id: discordUserId,
-          discord_username: discordUsername
-        }
-      });
-      await editOriginalInteraction(interaction, buildHatchSetupMessage(payload, { discordUserId, page: 0, env }));
+      const account = getCommandOption(interaction, "account");
+      payload = account
+        ? await hatchApiRequest(env, "/api/hatch/oauth/start", {
+          method: "POST",
+          body: {
+            discord_user_id: discordUserId,
+            discord_username: discordUsername,
+            account
+          }
+        })
+        : await hatchApiRequest(env, "/api/hatch/tracker/status", {
+          query: { discord_user_id: discordUserId }
+        });
+      await editOriginalInteraction(interaction, buildHatchSetupMessage(payload, {
+        discordUserId,
+        page: 0,
+        env,
+        account
+      }));
       return;
     }
 
@@ -1013,17 +1024,9 @@ async function completeHtgSetupPageInteraction(interaction, env, state) {
   let payload;
 
   try {
-    payload = page === 0
-      ? await hatchApiRequest(env, "/api/hatch/oauth/start", {
-        method: "POST",
-        body: {
-          discord_user_id: discordUserId,
-          discord_username: discordUsername
-        }
-      })
-      : await hatchApiRequest(env, "/api/hatch/tracker/status", {
-        query: { discord_user_id: discordUserId }
-      });
+    payload = await hatchApiRequest(env, "/api/hatch/tracker/status", {
+      query: { discord_user_id: discordUserId }
+    });
   } catch (err) {
     payload = {
       ok: false,
@@ -1048,18 +1051,15 @@ function buildHatchSetupMessage(payload, context = {}) {
   const imageUrl = htgSetupPageImageUrl(context.env, page);
   const thumbnailUrl = String(context.env?.HTG_SETUP_THUMBNAIL_URL || LUNA_REWARD_THUMBNAIL_URL || "").trim();
   const footerLines = [];
-  if (page === 0 && authUrl) {
-    footerLines.push("-# The private auth link expires in about 10 minutes. *(the button link)*");
-  } else if (page === 0 && setupError) {
+  if (page === 0 && setupError) {
     footerLines.push(`-# Setup issue: ${escapeDiscordMarkdown(setupError)}`);
+  } else if (page === 0 && !authUrl) {
+    footerLines.push("-# No auth button is shown until you provide `account:<roblox name>`.");
   }
 
   const titleText = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
-    content: [
-      "## HTG Hatch Alert Setup",
-      `**Step ${page + 1} of ${pages.length}: ${current.title}**`
-    ].join("\n")
+    content: `## Step ${page + 1}/${pages.length}`
   };
   const bodyText = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
@@ -1142,34 +1142,45 @@ function buildHatchSetupMessage(payload, context = {}) {
 }
 
 function htgSetupPages(payload, context = {}) {
+  const authUrl = String(payload?.authorize_url || "").trim();
+  const targetAccount = String(payload?.username || payload?.user_id || context.account || "").trim();
+  const targetLabel = targetAccount
+    ? escapeDiscordMarkdown(targetAccount)
+    : "the Roblox account you put in the command";
+  const connectInstructions = authUrl
+    ? `Click the Connect Big Games DB button to approve inventory access for ${targetLabel}.`
+    : "Run `/htg setup account:<roblox username>` to create an account-bound Connect Big Games DB button first.";
+
   return [
     {
-      title: "Connect to Big Games DB",
+      title: "Connect",
       body: [
-        "If you haven't already linked your ROBLOX account to the Big Games DB then you will need to for this feature to work: <https://db.biggames.io/>",
+        "If you haven't already linked your ROBLOX account to the Big Games DB then you will need to for this feature to work: https://db.biggames.io/",
         "",
-        "Then you'll need to allow this bot to see your inventory. For alt accounts, use `/htg enable tier:all account:<roblox name or id>` so Luna knows which approval belongs to which account.",
-        "-# It can only view your inventory to detect the huges, titanics, etc...",
-        "-# If Big Games shows multiple linked Roblox accounts, connect each alt with `/htg enable tier:all account:<roblox name or id>` instead of the generic setup button.",
+        connectInstructions,
+        "Make sure you approve the same linked Roblox account that you put in the command.",
         "",
-        "If comfortable, click **Approve Access**."
+        "Then, click `Approve access`"
       ].join("\n"),
-      afterImageBody: "This will **NOT** require you to make your inventory public, nor will it make the inventory public view."
+      afterImageBody: "Note: This will **NOT** make your inventory public."
     },
     {
-      title: "Approve Inventory Access",
+      title: "Enable",
       body: [
-        "On the Big Games page, approve the Pet Simulator 99 inventory permission for this tracker.",
-        "This uses OAuth. It does **not** ask for `.ROBLOSECURITY`, and it only connects the Discord account that ran this command."
-      ].join("\n")
-    },
-    {
-      title: "Enable The Alerts",
-      body: [
-        "After the browser says the inventory tracker connected, return here and choose what you want tracked.",
-        "Use `/htg accounts` to see every connected alt.",
-        "Use `/htg enable tier:all` to enable all connected alts, or add `account:<name or id>` for one account.",
-        "Use `/htg disable tier:<choice>` any time to turn off one tier or all tiers."
+        "That's it, basically! Just use the server commands to enable the alerts, because you can disable them later. :wink:"
+      ].join("\n"),
+      afterImageBody: [
+        "```",
+        "/htg enable [user]",
+        "/htg disable [user]",
+        "/htg accounts - lists all accounts associated with your Discord Account",
+        "```",
+        "",
+        "If you're a server owner or administrator you'll need to run this to assign the channel where it posts to:",
+        "",
+        "`/htg assign [channel]`",
+        "",
+        "Then watch the titanics roll in! :light_blue_heart:"
       ].join("\n")
     }
   ];
@@ -1231,7 +1242,7 @@ function htgSetupCustomId(ownerId, page) {
 function normalizedHtgSetupPage(value) {
   const page = Math.round(Number(value));
   if (!Number.isFinite(page) || page < 0) return 0;
-  return Math.min(2, page);
+  return Math.min(1, page);
 }
 
 function htgSetupPageImageUrl(env, page) {
@@ -1246,17 +1257,17 @@ function htgSetupImageUrls(env) {
     try {
       const parsed = JSON.parse(jsonText);
       if (Array.isArray(parsed)) {
-        return [0, 1, 2].map(index => String(parsed[index] || defaults[index] || "").trim());
+        return [0, 1].map(index => String(parsed[index] || defaults[index] || "").trim());
       }
       if (parsed && typeof parsed === "object") {
-        return [0, 1, 2].map(index => String(parsed[index + 1] || parsed[index] || defaults[index] || "").trim());
+        return [0, 1].map(index => String(parsed[index + 1] || parsed[index] || defaults[index] || "").trim());
       }
     } catch {}
   }
 
   const configured = parseCsv(env?.HTG_SETUP_STEP_IMAGE_URLS)
     .map(value => String(value || "").trim());
-  return [0, 1, 2].map(index => configured[index] || defaults[index] || "");
+  return [0, 1].map(index => configured[index] || defaults[index] || "");
 }
 
 function buildHatchTrackerMessage(payload, context = {}) {
@@ -1335,8 +1346,21 @@ function hatchTrackerAccountLine(account) {
     ? account.authorization_expires_at
       ? `auth expires ${discordTime(account.authorization_expires_at)}`
       : "auth active"
-    : "auth expired";
+    : account.reauthorization_required || authorizationIsExpired(account.authorization_expires_at)
+      ? Array.isArray(account.missing_scopes) && account.missing_scopes.length
+        ? "auth needs refresh"
+        : "auth expired"
+      : account.authorization_missing
+        ? "auth missing"
+        : account.authorization_message
+          ? "auth unavailable"
+          : "auth not connected";
   return `- **${name}${id}:** ${account.enabled ? "Enabled" : "Disabled"} | ${tiers} | ${auth}`;
+}
+
+function authorizationIsExpired(value) {
+  const time = new Date(value || 0).getTime();
+  return Number.isFinite(time) && time > 0 && time <= Date.now();
 }
 
 function hatchTierDisplayName(tier) {
@@ -7612,7 +7636,13 @@ function htgCommandPayload() {
   };
   const accountOption = {
     name: "account",
-    description: "Roblox username/user ID to change; omit or use all for every connected alt",
+    description: "Roblox username to change; use id:<number> only to force a Roblox user ID",
+    type: APPLICATION_COMMAND_OPTION_STRING,
+    required: false
+  };
+  const setupAccountOption = {
+    name: "account",
+    description: "Roblox username to connect; use id:<number> only to force a Roblox user ID",
     type: APPLICATION_COMMAND_OPTION_STRING,
     required: false
   };
@@ -7626,7 +7656,8 @@ function htgCommandPayload() {
       {
         name: "setup",
         description: "Show your private Big Games auth link and hatch alert instructions.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [setupAccountOption]
       },
       {
         name: "accounts",

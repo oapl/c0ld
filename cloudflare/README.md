@@ -1041,7 +1041,8 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
-| `HATCH_BIG_GAMES_SCOPES` | Optional space/comma-separated scopes requested by the HTG app. Defaults to inventory only: `player-data:pet-simulator-99:inventory:read`. Only add `profile`, `trades`, `booth`, or `mail` scopes after those exact scopes are registered on the Luna HTG Big Games developer app. |
+| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish hatches from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
+| `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
 
@@ -1056,6 +1057,12 @@ Required/optional secrets on `inventory-detector-worker`:
 | `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
 | `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
 
+The HTG detector source filter removes matching Huge, Titanic, and Gargantuan
+inventory gains when those same pets appear as received trade items, booth
+purchases, or incoming mail within the snapshot window. If the source endpoints
+cannot be read, Luna returns that in the `source_filter` result and leaves the
+candidate gains unfiltered.
+
 Set these on `c0ld-discord-search`:
 
 | Setting | Purpose |
@@ -1069,9 +1076,12 @@ Set these on `c0ld-discord-search`:
 
 The user flow is:
 
-- `/htg setup` creates a private paginated Components V2 setup message with a
-  Big Games DB connect button. Run it once for each linked Roblox account the
-  user wants Luna to track.
+- `/htg setup account:<roblox username>` creates a private paginated
+  Components V2 setup message with a Big Games DB connect button bound to that
+  account. Bare numeric values are treated as possible numeric usernames first;
+  use `account:id:<number>` only when intentionally targeting a Roblox user ID.
+  Accountless `/htg setup` only shows instructions because Big Games does not
+  return which linked Roblox account approved a generic OAuth link.
 - `/htg accounts` lists every Roblox account connected to the user's Discord
   account.
 - `/htg assign channel:<channel>` sets the only hatch-alert destination for the
@@ -1080,7 +1090,8 @@ The user flow is:
   fallback.
 - `/htg enable tier:<huge|titanic|gargantuan|all>` enables selected alerts for
   every connected Roblox account on that Discord user by default. Add
-  `account:<roblox username or user_id>` to target one alt.
+  `account:<roblox username>` to target one alt, or `account:id:<number>` to
+  force a Roblox user ID.
 - `/htg disable tier:<huge|titanic|gargantuan|all>` disables selected alerts
   with the same optional `account:` selector.
 
