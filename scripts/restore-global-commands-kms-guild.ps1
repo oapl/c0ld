@@ -1,14 +1,13 @@
 param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev",
-  [string]$GuildId = "1457088639006670979",
   [string]$KmsGuildId = "1529193730022838392",
-  [int]$MaxAttempts = 8,
-  [switch]$KeepGlobalCommands
+  [string[]]$CleanupGuildIds = @("1457088639006670979", "1529193730022838392"),
+  [int]$MaxAttempts = 8
 )
 
 $ErrorActionPreference = "Stop"
 
-# Paste the discord-search-interactions-worker REGISTER_ADMIN_TOKEN here.
+# Paste the discord-search-interactions-worker REGISTER_ADMIN_TOKEN here, or run the script and enter it when prompted.
 $Token = "PASTE_REGISTER_ADMIN_TOKEN_HERE"
 
 if ($Token -eq "PASTE_REGISTER_ADMIN_TOKEN_HERE" -or [string]::IsNullOrWhiteSpace($Token)) {
@@ -113,7 +112,7 @@ $commandsToDelete = @(
   "duplicatecheck"
 )
 
-$commandsToRegister = @(
+$globalCommandsToRegister = @(
   "/admin/register-search-command",
   "/admin/register-version-command",
   "/admin/register-rewards-command",
@@ -131,44 +130,39 @@ $commandsToRegister = @(
   "/admin/register-offline-command"
 )
 
-Write-Host "Resetting guild commands for $GuildId..." -ForegroundColor Cyan
-if (-not $KeepGlobalCommands) {
-  Write-Host "Deleting managed global commands first; otherwise Discord can show global + guild duplicates." -ForegroundColor Cyan
-
-  foreach ($name in $commandsToDelete) {
-    $query = New-QueryString @{ scope = "global"; name = $name }
-    Write-Host "Deleting global /$name if present..." -ForegroundColor Cyan
-    try {
-      Invoke-DiscordWorkerAdmin -Method POST -Path "/admin/delete-command$query" | ConvertTo-Json -Depth 8
-    } catch {
-      Write-Host "Global delete for /$name failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-    Start-Sleep -Milliseconds 1200
-  }
-} else {
-  Write-Host "Keeping global commands because -KeepGlobalCommands was supplied." -ForegroundColor Yellow
-}
-
-Write-Host "Deleting all known guild commands first, including /kms..." -ForegroundColor Cyan
-
+Write-Host "Deleting existing managed global commands, including stale duplicates and /kms..." -ForegroundColor Cyan
 foreach ($name in $commandsToDelete) {
-  $query = New-QueryString @{ scope = "guild"; guild_id = $GuildId; name = $name }
-  Write-Host "Deleting /$name if present..." -ForegroundColor Cyan
+  $query = New-QueryString @{ scope = "global"; name = $name }
+  Write-Host "Deleting global /$name if present..." -ForegroundColor Cyan
   try {
     Invoke-DiscordWorkerAdmin -Method POST -Path "/admin/delete-command$query" | ConvertTo-Json -Depth 8
   } catch {
-    Write-Host "Delete for /$name failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Global delete for /$name failed: $($_.Exception.Message)" -ForegroundColor Yellow
   }
-  Start-Sleep -Milliseconds 900
+  Start-Sleep -Milliseconds 1200
 }
 
-Write-Host "Re-registering guild commands, excluding /kms..." -ForegroundColor Cyan
+Write-Host "Removing guild-specific duplicates from cleanup guilds..." -ForegroundColor Cyan
+foreach ($guildId in $CleanupGuildIds) {
+  if ([string]::IsNullOrWhiteSpace($guildId)) { continue }
+  foreach ($name in $commandsToDelete) {
+    $query = New-QueryString @{ scope = "guild"; guild_id = $guildId; name = $name }
+    Write-Host "Deleting /$name from guild $guildId if present..." -ForegroundColor Cyan
+    try {
+      Invoke-DiscordWorkerAdmin -Method POST -Path "/admin/delete-command$query" | ConvertTo-Json -Depth 8
+    } catch {
+      Write-Host "Guild delete for /$name in $guildId failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    Start-Sleep -Milliseconds 900
+  }
+}
 
-foreach ($path in $commandsToRegister) {
-  $query = New-QueryString @{ guild_id = $GuildId }
-  Write-Host "Registering $path..." -ForegroundColor Cyan
+Write-Host "Registering normal commands globally. /kms is intentionally excluded here." -ForegroundColor Cyan
+foreach ($path in $globalCommandsToRegister) {
+  $query = New-QueryString @{ scope = "global" }
+  Write-Host "Registering global $path..." -ForegroundColor Cyan
   Invoke-DiscordWorkerAdmin -Method POST -Path "$path$query" | ConvertTo-Json -Depth 8
-  Start-Sleep -Milliseconds 1100
+  Start-Sleep -Milliseconds 1400
 }
 
 if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
@@ -178,13 +172,12 @@ if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
   Start-Sleep -Milliseconds 1100
 }
 
-Write-Host "Current guild commands:" -ForegroundColor Cyan
-$listQuery = New-QueryString @{ scope = "guild"; guild_id = $GuildId }
-Invoke-DiscordWorkerAdmin -Path "/admin/commands$listQuery" |
+Write-Host "Current global commands:" -ForegroundColor Cyan
+Invoke-DiscordWorkerAdmin -Path "/admin/commands?scope=global" |
   ConvertTo-Json -Depth 8
 
 if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
-  Write-Host "Current /kms guild commands in ${KmsGuildId}:" -ForegroundColor Cyan
+  Write-Host "Current /kms guild command in ${KmsGuildId}:" -ForegroundColor Cyan
   $kmsListQuery = New-QueryString @{ scope = "guild"; guild_id = $KmsGuildId }
   Invoke-DiscordWorkerAdmin -Path "/admin/commands$kmsListQuery" |
     Select-Object -ExpandProperty results |
@@ -192,10 +185,4 @@ if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
     ConvertTo-Json -Depth 8
 }
 
-if (-not $KeepGlobalCommands) {
-  Write-Host "Remaining global commands:" -ForegroundColor Cyan
-  Invoke-DiscordWorkerAdmin -Path "/admin/commands?scope=global" |
-    ConvertTo-Json -Depth 8
-}
-
-Write-Host "Note: global command removals can take a little while to disappear from Discord clients. Restart Discord with Ctrl+R if the picker still looks stale." -ForegroundColor Yellow
+Write-Host "Done. Global command changes can take a while to appear in Discord. Use Ctrl+R to refresh the client." -ForegroundColor Yellow

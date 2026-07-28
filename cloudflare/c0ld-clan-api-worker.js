@@ -6536,13 +6536,32 @@ async function handleOfflinePingConfig(request, env) {
   const body = await request.json().catch(() => ({}));
   const requestedGuildId = String(body.guild_id || guildId || "").trim();
   if (!/^\d{5,30}$/.test(requestedGuildId)) throw httpError(400, "Missing or invalid guild_id.");
+  const rawDestinationScope = body.destination_scope ?? body.channel_scope ?? body.scope;
+  const destinationScope = normalizeOfflinePingDestinationScope(rawDestinationScope);
+  if (rawDestinationScope !== undefined && !destinationScope) {
+    throw httpError(400, "Invalid offline destination scope. Use clan or users.");
+  }
 
   const patch = {
     guild_id: requestedGuildId,
     updated_at: new Date().toISOString()
   };
-  if (body.channel_id !== undefined) patch.channel_id = stringOrNull(body.channel_id);
-  if (body.channel_type !== undefined) patch.channel_type = toNumber(body.channel_type);
+  if (destinationScope && body.channel_id !== undefined) {
+    if (destinationScope === "clan") patch.clan_channel_id = stringOrNull(body.channel_id);
+    if (destinationScope === "users") patch.users_channel_id = stringOrNull(body.channel_id);
+  } else if (body.channel_id !== undefined) {
+    patch.channel_id = stringOrNull(body.channel_id);
+    patch.clan_channel_id = stringOrNull(body.channel_id);
+    patch.users_channel_id = stringOrNull(body.channel_id);
+  }
+  if (destinationScope && body.channel_type !== undefined) {
+    if (destinationScope === "clan") patch.clan_channel_type = toNumber(body.channel_type);
+    if (destinationScope === "users") patch.users_channel_type = toNumber(body.channel_type);
+  } else if (body.channel_type !== undefined) {
+    patch.channel_type = toNumber(body.channel_type);
+    patch.clan_channel_type = toNumber(body.channel_type);
+    patch.users_channel_type = toNumber(body.channel_type);
+  }
   if (body.minutes_threshold !== undefined || body.minutes !== undefined) {
     patch.minutes_threshold = clamp(Number(body.minutes_threshold ?? body.minutes), 1, 1440);
   }
@@ -6881,7 +6900,7 @@ async function handleOfflinePingCheck(env, source, options = {}) {
   if (requestedGuildId) configParams.guild_id = `eq.${requestedGuildId}`;
 
   const configs = (await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, configParams))
-    .filter(config => /^\d{5,30}$/.test(String(config.channel_id || "")));
+    .filter(config => hasOfflinePingDestination(config));
   const results = [];
 
   for (const config of configs) {
@@ -6896,7 +6915,7 @@ async function handleOfflinePingCheck(env, source, options = {}) {
       return {
         ok: false,
         guild_id: config.guild_id,
-        channel_id: config.channel_id,
+        channel_id: config.channel_id || config.clan_channel_id || config.users_channel_id || null,
         message
       };
     }));
@@ -6923,6 +6942,7 @@ async function handleOfflinePingTestPost(request, env) {
   const postRateMinutes = clamp(Number(body.post_rate_minutes || body.post_rate || offlineDefaultPostRateMinutes(env)), 1, 1440);
   const clanName = String(body.clan_name || body.clan || "c0ld").trim() || "c0ld";
   const username = String(body.username || "Cinnamowopal").trim() || "Cinnamowopal";
+  const destinationScope = normalizeOfflinePingDestinationScope(body.destination_scope || body.channel_scope || body.scope);
   const sampleAlerts = [
     {
       scope: "user",
@@ -6950,7 +6970,10 @@ async function handleOfflinePingTestPost(request, env) {
       }
     }
   ];
-  const messageBody = offlinePingAlertMessageBody(sampleAlerts, checkedAt, {
+  const previewAlerts = destinationScope
+    ? sampleAlerts.filter(alert => destinationScope === "users" ? alert.scope === "user" : alert.scope === "clan")
+    : sampleAlerts;
+  const messageBody = offlinePingAlertMessageBody(previewAlerts, checkedAt, {
     thresholdMinutes,
     postRateMinutes,
     mentionDirectUsers: parseBooleanish(body.mention_users) === true
@@ -6972,11 +6995,11 @@ async function handleOfflinePingTestPost(request, env) {
   const guildId = String(body.guild_id || "").trim();
   if (!channelId && guildId) {
     const configs = await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, {
-      select: "guild_id,channel_id",
+      select: "guild_id,channel_id,clan_channel_id,users_channel_id",
       guild_id: `eq.${guildId}`,
       limit: "1"
     }).catch(() => []);
-    channelId = String(configs[0]?.channel_id || "").trim();
+    channelId = offlinePingDestinationChannelId(configs[0] || {}, destinationScope || "clan");
   }
   if (!/^\d{5,30}$/.test(channelId)) {
     throw httpError(400, "Provide webhook_url, channel_id, or a guild_id with /offline assign already configured.");
@@ -7130,21 +7153,37 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
     }
   }
 
-  let postResult = null;
+  const postResults = [];
+  const skippedAlerts = [];
   if (dueAlerts.length) {
-    postResult = await postOfflinePingAlerts(env, config, dueAlerts, checkedAt, {
-      thresholdMinutes,
-      postRateMinutes
-    });
-    const messageId = stringOrNull(postResult?.message_id);
-    for (const alert of dueAlerts) {
-      stateUpdates.push({
-        ...alert.stateRow,
-        last_alert_at: checkedAt,
-        last_alert_message_id: messageId
+    for (const group of splitOfflinePingAlertsByDestination(config, dueAlerts)) {
+      if (!group.channel_id) {
+        skippedAlerts.push(...group.alerts);
+        continue;
+      }
+
+      const postResult = await postOfflinePingAlerts(env, config, group.alerts, checkedAt, {
+        thresholdMinutes,
+        postRateMinutes,
+        destinationScope: group.scope
       });
+      postResults.push(postResult);
+      const messageId = stringOrNull(postResult?.message_id);
+      for (const alert of group.alerts) {
+        stateUpdates.push({
+          ...alert.stateRow,
+          last_alert_at: checkedAt,
+          last_alert_message_id: messageId
+        });
+      }
     }
+    skippedAlerts.forEach(alert => stateUpdates.push(alert.stateRow));
   }
+
+  const posted = postResults.filter(result => result?.posted).length;
+  const missingDestinationMessage = skippedAlerts.length
+    ? `${skippedAlerts.length} offline alert${skippedAlerts.length === 1 ? "" : "s"} skipped because that alert type has no assigned channel.`
+    : null;
 
   if (stateUpdates.length) {
     await supabaseUpsertChunked(
@@ -7159,23 +7198,26 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
   await supabaseUpsert(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, [{
     guild_id: guildId,
     last_checked_at: checkedAt,
-    last_posted_at: dueAlerts.length ? checkedAt : config.last_posted_at || null,
-    last_error: null,
+    last_posted_at: posted ? checkedAt : config.last_posted_at || null,
+    last_error: missingDestinationMessage,
     updated_at: checkedAt
   }], "guild_id");
 
   return {
     ok: true,
     guild_id: guildId,
-    channel_id: config.channel_id,
+    channel_id: config.channel_id || null,
+    clan_channel_id: offlinePingDestinationChannelId(config, "clan") || null,
+    users_channel_id: offlinePingDestinationChannelId(config, "users") || null,
     threshold_minutes: thresholdMinutes,
     post_rate_minutes: postRateMinutes,
     clan_watches: clanWatches.length,
     user_watches: userWatches.length,
     checked_users: uniqueValues(checkedRows.map(row => row.user_key)).length,
     offline_candidates: dueAlerts.length,
-    alerts_posted: postResult?.posted ? 1 : 0,
-    message_id: postResult?.message_id || null
+    alerts_posted: posted,
+    alerts_skipped_no_channel: skippedAlerts.length,
+    message_ids: postResults.map(result => result?.message_id).filter(Boolean)
   };
 }
 
@@ -7345,11 +7387,12 @@ function computeOfflineMemberStatuses(currentRows, historyRows) {
 }
 
 async function postOfflinePingAlerts(env, config, alerts, checkedAt, options = {}) {
-  const channelId = String(config.channel_id || "").trim();
+  const destinationScope = normalizeOfflinePingDestinationScope(options.destinationScope) || "clan";
+  const channelId = offlinePingDestinationChannelId(config, destinationScope);
   const body = offlinePingAlertMessageBody(alerts, checkedAt, {
     thresholdMinutes: options.thresholdMinutes || config.minutes_threshold || offlineDefaultMinutes(env),
     postRateMinutes: options.postRateMinutes || config.post_rate_minutes || offlineDefaultPostRateMinutes(env),
-    mentionDirectUsers: true
+    mentionDirectUsers: destinationScope === "users"
   });
   const result = await discordBotChannelMessageRequest(env, {
     method: "POST",
@@ -7364,6 +7407,46 @@ async function postOfflinePingAlerts(env, config, alerts, checkedAt, options = {
     message_id: stringOrNull(result.body?.id),
     channel_id: stringOrNull(result.body?.channel_id) || channelId
   };
+}
+
+function splitOfflinePingAlertsByDestination(config, alerts) {
+  const groupsByScope = new Map([
+    ["users", []],
+    ["clan", []]
+  ]);
+
+  for (const alert of alerts) {
+    const scope = alert?.scope === "user" ? "users" : "clan";
+    groupsByScope.get(scope).push(alert);
+  }
+
+  return [...groupsByScope.entries()]
+    .filter(([, rows]) => rows.length)
+    .map(([scope, rows]) => ({
+      scope,
+      channel_id: offlinePingDestinationChannelId(config, scope),
+      alerts: rows
+    }));
+}
+
+function normalizeOfflinePingDestinationScope(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (["clan", "clans", "clan-wide", "clan_wide"].includes(text)) return "clan";
+  if (["user", "users", "direct", "direct-users", "direct_users"].includes(text)) return "users";
+  return "";
+}
+
+function offlinePingDestinationChannelId(config, scope) {
+  const normalizedScope = normalizeOfflinePingDestinationScope(scope) || "clan";
+  const scopedChannel = normalizedScope === "users"
+    ? config?.users_channel_id
+    : config?.clan_channel_id;
+  return String(scopedChannel || config?.channel_id || "").trim();
+}
+
+function hasOfflinePingDestination(config) {
+  return /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "clan"))
+    || /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "users"));
 }
 
 function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
@@ -7405,7 +7488,6 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
   });
   return {
     ...payload,
-    content: options.mentionDirectUsers === true ? mentionIds.map(id => `<@${id}>`).join(" ") : "",
     allowed_mentions: {
       parse: [],
       users: options.mentionDirectUsers === true ? mentionIds : []
@@ -7529,6 +7611,10 @@ function normalizeOfflinePingConfigOutput(row) {
     guild_id: String(row.guild_id || ""),
     channel_id: row.channel_id || null,
     channel_type: toNumber(row.channel_type),
+    clan_channel_id: row.clan_channel_id || row.channel_id || null,
+    clan_channel_type: toNumber(row.clan_channel_type ?? row.channel_type),
+    users_channel_id: row.users_channel_id || row.channel_id || null,
+    users_channel_type: toNumber(row.users_channel_type ?? row.channel_type),
     minutes_threshold: toNumber(row.minutes_threshold) || DEFAULT_OFFLINE_ALERT_MINUTES,
     post_rate_minutes: toNumber(row.post_rate_minutes) || DEFAULT_OFFLINE_POST_RATE_MINUTES,
     enabled: row.enabled !== false,

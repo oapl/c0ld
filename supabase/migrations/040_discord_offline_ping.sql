@@ -8,6 +8,10 @@ create table if not exists public.discord_offline_ping_guilds (
   guild_id text primary key,
   channel_id text,
   channel_type integer,
+  clan_channel_id text,
+  clan_channel_type integer,
+  users_channel_id text,
+  users_channel_type integer,
   minutes_threshold integer not null default 30
     check (minutes_threshold between 1 and 1440),
   post_rate_minutes integer not null default 30

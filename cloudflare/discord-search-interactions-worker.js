@@ -8,6 +8,7 @@ const INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE = 5;
 const INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE = 6;
 const APPLICATION_COMMAND_CHAT_INPUT = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
+const APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP = 2;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const APPLICATION_COMMAND_OPTION_INTEGER = 4;
 const APPLICATION_COMMAND_OPTION_USER = 6;
@@ -596,9 +597,11 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (commandName === "offline") {
-    const subcommand = getSubcommandName(interaction);
-    if (!["assign", "minutes", "clan", "user", "users", "remove-user", "remove-users", "post-rate", "check"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign`, `/offline minutes`, `/offline clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, or `/offline check`.", true));
+    const offlinePath = getOfflineSubcommandPath(interaction);
+    const subcommand = offlinePath.group || offlinePath.subcommand;
+    const validAssignTarget = offlinePath.group !== "assign" || ["clan", "users"].includes(offlinePath.subcommand);
+    if (!validAssignTarget || !["assign", "minutes", "clan", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign users`, `/offline minutes`, `/offline clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -745,7 +748,7 @@ async function buildSearchResponse(query, env) {
       betterThanLine(row),
       "",
       `Last Update: ${discordTime(row.fetched_at)}`,
-      "Updates every 30 minutes"
+      "Updates every 20 minutes"
     ].filter(line => line !== null).join("\n")
   };
 
@@ -2166,14 +2169,33 @@ async function completeHourlyClanInteraction(interaction, env) {
 
 async function completeOfflinePingInteraction(interaction, env) {
   try {
-    const subcommand = getSubcommandName(interaction);
+    const offlinePath = getOfflineSubcommandPath(interaction);
+    const subcommand = offlinePath.group || offlinePath.subcommand;
+    const assignTarget = offlinePath.group === "assign" ? offlinePath.subcommand : "";
     const guildId = String(interaction.guild_id || "").trim();
     const sourceChannelId = interactionSourceChannelId(interaction);
     const actorId = interactionUserId(interaction);
 
     if (!guildId) throw httpError(400, "Offline pings can only be configured inside a Discord server.");
 
+    if (subcommand === "list") {
+      const query = new URLSearchParams({ guild_id: guildId });
+      const payload = await hourlyClanApiRequest(env, `/api/offline/status?${query}`, {
+        method: "GET"
+      });
+      await editOriginalInteraction(interaction, {
+        content: formatOfflinePingListResponse(payload, guildId),
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
     if (subcommand === "assign") {
+      if (!["clan", "users"].includes(assignTarget)) {
+        throw httpError(400, "Use `/offline assign clan channel:<channel>` or `/offline assign users channel:<channel>`.");
+      }
       const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
       const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
       if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel.type))) {
@@ -2186,13 +2208,15 @@ async function completeOfflinePingInteraction(interaction, env) {
           guild_id: guildId,
           channel_id: requestedChannelId,
           channel_type: Number(channel.type),
+          destination_scope: assignTarget,
           assigned_by: actorId,
           updated_by: actorId,
           enabled: true
         }
       });
+      const label = assignTarget === "users" ? "Direct user offline pings" : "Clan offline pings";
       await editOriginalInteraction(interaction, {
-        content: `Offline pings are assigned to <#${requestedChannelId}>. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`,
+        content: `${label} are assigned to <#${requestedChannelId}>. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2253,7 +2277,7 @@ async function completeOfflinePingInteraction(interaction, env) {
         }
       });
       await editOriginalInteraction(interaction, {
-        content: `Offline pings will watch every tracked member in **${escapeDiscordMarkdown(clan)}**.`,
+        content: `Offline pings will watch every tracked member in **${escapeDiscordMarkdown(clan)}**. Use \`/offline list\` to confirm the clan alert channel is assigned.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2283,7 +2307,7 @@ async function completeOfflinePingInteraction(interaction, env) {
       });
       const warningText = payload.warnings?.length ? `\n-# ${payload.warnings.join(" ")}` : "";
       await editOriginalInteraction(interaction, {
-        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** → <@${discordUserId}>.${warningText}`,
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** → <@${discordUserId}>. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2318,7 +2342,7 @@ async function completeOfflinePingInteraction(interaction, env) {
       const warnings = [...(resolvedBulk.warnings || []), ...(payload.warnings || [])];
       const warningText = warnings.length ? `\n-# ${warnings.slice(0, 5).join(" ")}` : "";
       await editOriginalInteraction(interaction, {
-        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"}.${warningText}`,
+        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"}. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2379,11 +2403,9 @@ async function completeOfflinePingInteraction(interaction, env) {
 
     if (subcommand === "check") {
       const query = new URLSearchParams({ guild_id: guildId, force: "1" });
-      const payload = await hourlyClanApiRequest(env, `/api/offline/check?${query}`, {
-        method: "POST"
-      });
+      const payload = await offlinePingCheckApiRequest(env, `/api/offline/check?${query}`);
       await editOriginalInteraction(interaction, {
-        content: `Offline check completed. Guilds checked: **${payload.guilds_checked || 0}** · candidates: **${payload.offline_candidates || 0}** · posts: **${payload.alerts_posted || 0}**.`,
+        content: formatOfflinePingCheckResponse(payload),
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2471,6 +2493,135 @@ function offlineDiscordUserLabel(interaction, userId) {
   return user?.global_name || user?.username || String(userId || "");
 }
 
+function formatOfflinePingListResponse(payload, guildId) {
+  const guild = (payload?.guilds || [])
+    .find(row => String(row?.config?.guild_id || "") === String(guildId || ""))
+    || null;
+
+  if (!guild) {
+    return [
+      "## Offline Ping Setup",
+      "No offline ping config is saved for this server yet.",
+      "",
+      "Start with `/offline assign clan channel:#channel` and `/offline assign users channel:#channel`."
+    ].join("\n");
+  }
+
+  const config = guild.config || {};
+  const clans = (guild.clans || []).filter(row => row?.enabled !== false);
+  const users = (guild.users || []).filter(row => row?.enabled !== false);
+  const clanChannel = formatOfflinePingChannel(config.clan_channel_id || config.channel_id);
+  const usersChannel = formatOfflinePingChannel(config.users_channel_id || config.channel_id);
+  const warnings = [];
+
+  if (clans.length && !validDiscordSnowflake(config.clan_channel_id || config.channel_id)) {
+    warnings.push("Clan watches exist, but `/offline assign clan` has not been set.");
+  }
+  if (users.length && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
+    warnings.push("Direct user watches exist, but `/offline assign users` has not been set.");
+  }
+
+  const lines = [
+    "## Offline Ping Setup",
+    `**Clan alert channel:** ${clanChannel}`,
+    `**Direct user alert channel:** ${usersChannel}`,
+    `**Threshold:** ${Math.max(1, Math.round(Number(config.minutes_threshold) || 30))}m with no point gain`,
+    `**Re-alert rate:** ${Math.max(1, Math.round(Number(config.post_rate_minutes) || 30))}m`,
+    `**Enabled:** ${config.enabled === false ? "No" : "Yes"}`,
+    `**Scheduled checks:** ${payload?.runtime?.ingest_offline_alerts ? "Enabled" : "Disabled"}`,
+    `**Last checked:** ${config.last_checked_at ? discordTime(config.last_checked_at) : "Never"}`,
+    warnings.length ? `-# ${warnings.join(" ")}` : "",
+    "",
+    `### Watched Clans (${clans.length})`,
+    ...formatOfflinePingClanRows(clans),
+    "",
+    `### Direct User Watches (${users.length})`,
+    ...formatOfflinePingUserRows(users)
+  ].filter(line => line !== "");
+
+  const content = lines.join("\n");
+  return content.length <= 1950
+    ? content
+    : `${content.slice(0, 1900)}\n-# Output truncated. Use the API status endpoint for the full list.`;
+}
+
+function formatOfflinePingCheckResponse(payload) {
+  const results = payload?.results || [];
+  const lines = [
+    "## Offline Check Completed",
+    `**Guilds checked:** ${Math.max(0, Math.round(Number(payload?.guilds_checked) || 0))}`,
+    `**Offline candidates:** ${Math.max(0, Math.round(Number(payload?.offline_candidates) || 0))}`,
+    `**Posts sent:** ${Math.max(0, Math.round(Number(payload?.alerts_posted) || 0))}`,
+    `**Scheduled checks:** ${payload?.runtime?.ingest_offline_alerts ? "Enabled" : "Disabled"}`,
+    ""
+  ];
+
+  if (!results.length) {
+    lines.push("No eligible offline ping config was found for this server.");
+    lines.push("-# Make sure `/offline assign clan` or `/offline assign users` is set.");
+    return lines.join("\n");
+  }
+
+  for (const result of results.slice(0, 5)) {
+    const ok = result.ok === false ? "Failed" : "OK";
+    const channels = [
+      result.clan_channel_id ? `clan <#${result.clan_channel_id}>` : "",
+      result.users_channel_id ? `users <#${result.users_channel_id}>` : "",
+      !result.clan_channel_id && !result.users_channel_id && result.channel_id ? `fallback <#${result.channel_id}>` : ""
+    ].filter(Boolean).join(" · ") || "no channel";
+    lines.push([
+      `### ${ok} · ${channels}`,
+      `**Watched clans:** ${Math.max(0, Math.round(Number(result.clan_watches) || 0))}`,
+      `**Direct users:** ${Math.max(0, Math.round(Number(result.user_watches) || 0))}`,
+      `**Checked users:** ${Math.max(0, Math.round(Number(result.checked_users) || 0))}`,
+      `**Skipped no channel:** ${Math.max(0, Math.round(Number(result.alerts_skipped_no_channel) || 0))}`,
+      result.message ? `**Error:** ${escapeDiscordMarkdown(truncateText(result.message, 260))}` : ""
+    ].filter(Boolean).join("\n"));
+  }
+
+  const content = lines.join("\n");
+  return content.length <= 1950
+    ? content
+    : `${content.slice(0, 1900)}\n-# Output truncated.`;
+}
+
+function formatOfflinePingClanRows(clans) {
+  if (!clans.length) return ["None yet. Use `/offline clan name:c0ld`."];
+  const rows = clans
+    .slice(0, 20)
+    .map(row => `- **${escapeDiscordMarkdown(row.clan_name || row.clan_key || "Unknown")}**`);
+  if (clans.length > rows.length) rows.push(`-# ...and ${clans.length - rows.length} more.`);
+  return rows;
+}
+
+function formatOfflinePingUserRows(users) {
+  if (!users.length) return ["None yet. Use `/offline user username:<roblox> discord:<discord user>`."];
+  const rows = users
+    .slice(0, 25)
+    .map(row => {
+      const name = escapeDiscordMarkdown(row.roblox_username || row.roblox_username_key || "Unknown");
+      const discordUserId = validDiscordSnowflake(row.discord_user_id)
+        ? String(row.discord_user_id).trim()
+        : "";
+      const discord = discordUserId
+        ? `<@${discordUserId}>`
+        : escapeDiscordMarkdown(row.discord_label || "no Discord mention");
+      const clan = row.clan_name ? ` · ${escapeDiscordMarkdown(row.clan_name)}` : "";
+      return `- **${name}** → ${discord}${clan}`;
+    });
+  if (users.length > rows.length) rows.push(`-# ...and ${users.length - rows.length} more.`);
+  return rows;
+}
+
+function formatOfflinePingChannel(channelId) {
+  const id = String(channelId || "").trim();
+  return validDiscordSnowflake(id) ? `<#${id}>` : "Not assigned";
+}
+
+function validDiscordSnowflake(value) {
+  return /^\d{5,30}$/.test(String(value || "").trim());
+}
+
 function parseOfflineBulkUserEntries(value) {
   const text = String(value || "").trim();
   if (!text) return [];
@@ -2537,7 +2688,9 @@ async function resolveOfflineBulkDiscordUsers(entries, interaction, env) {
 
   for (const entry of entries || []) {
     const next = { ...entry };
-    const directId = parseDiscordUserId(next.discord_user_id);
+    const directId = validDiscordSnowflake(next.discord_user_id)
+      ? String(next.discord_user_id).trim()
+      : "";
     if (directId) {
       next.discord_user_id = directId;
       next.discord_label = next.discord_label || offlineDiscordUserLabel(interaction, directId);
@@ -2915,13 +3068,47 @@ async function hourlyClanApiRequest(env, path, options = {}) {
 
   const response = await fetchClanApi(env, url, init);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
+  if (!response.ok || (payload.ok === false && options.allowPayloadError !== true)) {
     throw httpError(
       response.status || 502,
       payload.message || `Clan API request failed (${response.status}).`
     );
   }
   return payload;
+}
+
+async function offlinePingCheckApiRequest(env, path) {
+  const token = String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim();
+  if (!token) {
+    throw httpError(500, "Missing CLAN_API_ADMIN_TOKEN on the Luna Discord Worker.");
+  }
+
+  const apiBase = String(
+    env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev"
+  ).replace(/\/$/, "");
+  const url = clanApiUrl(env, path, apiBase);
+  const response = await fetchClanApi(env, url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "Luna-Offline-Ping-Check"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw httpError(
+      response.status || 502,
+      payload.message || `Clan API request failed (${response.status}).`
+    );
+  }
+
+  return {
+    ...payload,
+    http_status: response.status
+  };
 }
 
 async function enrichHourlyClanCurrent(env, current, requestedClan) {
@@ -8928,15 +9115,36 @@ function offlineCommandPayload() {
     options: [
       {
         name: "assign",
-        description: "Assign the channel where offline pings are posted.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        description: "Assign separate channels for clan or direct user offline pings.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
         options: [
           {
-            name: "channel",
-            description: "Text channel or thread; defaults to the current channel",
-            type: APPLICATION_COMMAND_OPTION_CHANNEL,
-            required: false,
-            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+            name: "clan",
+            description: "Assign where clan-wide offline pings are posted.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "channel",
+                description: "Text channel or thread; defaults to the current channel",
+                type: APPLICATION_COMMAND_OPTION_CHANNEL,
+                required: false,
+                channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+              }
+            ]
+          },
+          {
+            name: "users",
+            description: "Assign where direct user offline pings are posted.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "channel",
+                description: "Text channel or thread; defaults to the current channel",
+                type: APPLICATION_COMMAND_OPTION_CHANNEL,
+                required: false,
+                channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+              }
+            ]
           }
         ]
       },
@@ -9070,6 +9278,11 @@ function offlineCommandPayload() {
       {
         name: "check",
         description: "Run the offline ping check now for this server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "list",
+        description: "Show configured offline ping channels, clans, and direct user watches.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       }
     ]
@@ -9248,6 +9461,23 @@ function getSubcommandName(interaction) {
   const option = (interaction.data?.options || [])
     .find(item => Number(item?.type) === APPLICATION_COMMAND_OPTION_SUB_COMMAND);
   return String(option?.name || "").trim().toLowerCase();
+}
+
+function getOfflineSubcommandPath(interaction) {
+  const topOption = (interaction.data?.options || [])[0] || null;
+  if (Number(topOption?.type) === APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP) {
+    const nested = (topOption.options || [])
+      .find(item => Number(item?.type) === APPLICATION_COMMAND_OPTION_SUB_COMMAND);
+    return {
+      group: String(topOption.name || "").trim().toLowerCase(),
+      subcommand: String(nested?.name || "").trim().toLowerCase()
+    };
+  }
+
+  return {
+    group: "",
+    subcommand: getSubcommandName(interaction)
+  };
 }
 
 function messageResponse(content, forceEphemeral = false) {
