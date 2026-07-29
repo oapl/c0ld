@@ -5234,6 +5234,7 @@ async function handleHistory(request, env) {
   const url = new URL(request.url);
   const clan = url.searchParams.get("clan") || clanName(env);
   const allBattles = ["1", "true", "yes"].includes(String(url.searchParams.get("all_battles") || "").toLowerCase());
+  const includeArchive = !["0", "false", "no", "off"].includes(String(url.searchParams.get("include_archive") || "true").toLowerCase());
   const battle = allBattles ? null : (url.searchParams.get("battle") || battleKey(env));
   const userId = url.searchParams.get("user_id");
   const hours = historyHours(url, env, 24);
@@ -5260,19 +5261,49 @@ async function handleHistory(request, env) {
     params.battle_key = `eq.${battle}`;
   }
 
-  const rows = await supabaseSelectPaged(env, SNAPSHOT_TABLE, params, limit, 1000);
+  let rows;
+  let archiveRows = [];
+  if (includeArchive) {
+    const baseParams = { ...params, offset: "0", limit: String(limit + offset) };
+    const [liveRows, archived] = await Promise.all([
+      supabaseSelectPaged(env, SNAPSHOT_TABLE, baseParams, limit + offset, 1000),
+      supabaseSelectPaged(env, SNAPSHOT_ARCHIVE_TABLE, baseParams, limit + offset, 1000).catch(err => {
+        const message = String(err?.message || "");
+        if (message.includes(SNAPSHOT_ARCHIVE_TABLE) || message.includes("404") || message.includes("42P01")) return [];
+        throw err;
+      })
+    ]);
+    archiveRows = archived;
+    rows = [...liveRows, ...archiveRows]
+      .sort((a, b) => compareHistorySnapshotRows(a, b, orderDir))
+      .slice(offset, offset + limit);
+  } else {
+    rows = await supabaseSelectPaged(env, SNAPSHOT_TABLE, params, limit, 1000);
+  }
 
   return cacheJson({
     generated_at: new Date().toISOString(),
     clan_name: clan,
     battle,
     all_battles: allBattles,
+    include_archive: includeArchive,
+    archive_row_count: archiveRows.length,
     hours,
     limit,
     offset,
     has_more: rows.length === limit,
     rows
   }, env);
+}
+
+function compareHistorySnapshotRows(a, b, orderDir = "desc") {
+  const aMs = Date.parse(a?.fetched_at || "") || 0;
+  const bMs = Date.parse(b?.fetched_at || "") || 0;
+  if (aMs !== bMs) return orderDir === "asc" ? aMs - bMs : bMs - aMs;
+  const aRank = toNumber(a?.rank) ?? Number.MAX_SAFE_INTEGER;
+  const bRank = toNumber(b?.rank) ?? Number.MAX_SAFE_INTEGER;
+  if (aRank !== bRank) return aRank - bRank;
+  return (toNumber(a?.user_id) ?? 0) - (toNumber(b?.user_id) ?? 0);
 }
 
 async function handleBattles(request, env) {
