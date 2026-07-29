@@ -5572,7 +5572,10 @@ async function loadHistoryCommandData(query, env) {
       rank: finiteHistoryNumber(latest.rank),
       points: finiteHistoryNumber(latest.total_points ?? latest.points),
       battle_end_iso: battle.battle_end_iso || null,
-      is_active: battle.is_active === true
+      is_active: battle.is_active === true,
+      first_snapshot: battle.first_snapshot || battle.first_row_at || battle.first_seen_at || null,
+      last_snapshot: battle.last_snapshot || battle.last_row_at || battle.latest_snapshot_at || battle.last_seen_at || latest.fetched_at || null,
+      update_number: finiteHistoryNumber(battle.update_number)
     };
     })).filter(Boolean);
 
@@ -5608,7 +5611,7 @@ async function loadHistoryCommandData(query, env) {
     avatar_url: avatarUrl || null,
     current_clan: globalPayload?.row?.source_clan || globalPayload?.row?.clan_name || null,
     clan_join_time: globalPayload?.row?.join_time || null,
-    clan: [...clanMap.values()],
+    clan: sortClanHistoryRecords([...clanMap.values()]),
     league: leagueRows,
     league_unavailable: leagueHistory === null && leagueRows.length === 0
   };
@@ -5620,7 +5623,10 @@ function summarizeTrackedClanHistory(rows, battleRows) {
     {
       name: row.display_name || row.battle_display_name || row.battle || row.battle_key,
       battle_end_iso: row.battle_end_iso || null,
-      is_active: row.is_active === true
+      is_active: row.is_active === true,
+      first_snapshot: row.first_snapshot || row.first_row_at || row.first_seen_at || null,
+      last_snapshot: row.last_snapshot || row.last_row_at || row.latest_snapshot_at || row.last_seen_at || null,
+      update_number: finiteHistoryNumber(row.update_number)
     }
   ]));
   const latestByBattle = new Map();
@@ -5649,7 +5655,10 @@ function summarizeTrackedClanHistory(rows, battleRows) {
       rank: finiteHistoryNumber(row.rank),
       points: finiteHistoryNumber(row.total_points ?? row.points),
       battle_end_iso: battle.battle_end_iso || null,
-      is_active: battle.is_active === true
+      is_active: battle.is_active === true,
+      first_snapshot: battle.first_snapshot || battle.first_row_at || battle.first_seen_at || null,
+      last_snapshot: battle.last_snapshot || battle.last_row_at || battle.latest_snapshot_at || battle.last_seen_at || row.fetched_at || null,
+      update_number: finiteHistoryNumber(battle.update_number)
     }] : [];
   });
 }
@@ -5765,10 +5774,15 @@ function staticClanHistoryRows(profile, defaultClan = null) {
       return {
         key: historyRecordKey(row.battle || row.battle_key || name),
         name: historyRecordName(name),
+        battle_key: row.battle_key || row.battle || null,
+        battle_display_name: row.display_name || row.battle_display_name || null,
         source: "site",
         clan_name: row.clan_name || latest.clan_name || defaultClan,
         rank: finiteHistoryNumber(row.ending_rank ?? row.end_rank ?? row.last_rank ?? latest.rank),
-        points: finiteHistoryNumber(row.ending_points ?? latest.points ?? latest.total_points)
+        points: finiteHistoryNumber(row.ending_points ?? latest.points ?? latest.total_points),
+        first_snapshot: row.first_snapshot || row.battle_first_snapshot || row.first_seen_at || row.first_seen || series[0]?.fetched_at || series[0]?.t || null,
+        last_snapshot: row.last_snapshot || row.battle_last_snapshot || row.last_seen_at || row.last_seen || latest.fetched_at || latest.t || null,
+        update_number: finiteHistoryNumber(row.update_number)
       };
     })
     .filter(row => row.key && (row.rank !== null || row.points !== null));
@@ -5790,7 +5804,10 @@ function externalClanHistoryRows(rows, source) {
       total_ranked: totalClanMembers,
       global_rank: globalRank,
       total_global_players: totalGlobalPlayers,
-      points: finiteHistoryNumber(row.final_points)
+      points: finiteHistoryNumber(row.final_points),
+      first_snapshot: row.first_snapshot || row.first_seen_at || row.period_start_at || null,
+      last_snapshot: row.last_snapshot || row.last_seen_at || row.period_end_at || row.fetched_at || row.updated_at || null,
+      update_number: finiteHistoryNumber(row.update_number)
     };
   }).filter(row => row.key && (row.rank !== null || row.global_rank !== null || row.points !== null));
 }
@@ -5911,6 +5928,126 @@ function historyRecordName(value) {
     .replace(/(\D)(20\d{2})$/i, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const CLAN_BATTLE_HISTORY_TIMELINE = [
+  { keys: ["GummyBattle2026", "Gummy Battle 2026"], first: "2026-07-28T17:20:58.000Z", last: null, update: null },
+  { keys: ["LunarBattle2026", "Lunar Battle 2026"], first: "2026-07-14T19:00:00.000Z", last: null, update: null },
+  { keys: ["SoccerBattle2026", "Soccer Battle 2026"], first: "2026-06-29T17:55:53.296Z", last: "2026-07-04T14:55:36.921Z", update: null },
+  { keys: ["Backrooms2026", "Backrooms 2026"], first: "2026-06-16T22:39:23.659Z", last: "2026-06-19T18:21:55.086Z", update: null },
+  { keys: ["AngelBattle2026", "Angel Battle 2026"], first: "2026-05-11T14:23:36.089Z", last: "2026-05-15T11:05:55.407Z", update: 78 },
+  { keys: ["StarryBattle", "Starry Battle"], first: "2026-04-29T12:00:00.524Z", last: "2026-05-02T12:00:00.524Z", update: 76 },
+  { keys: ["Spring2026", "Abstract Battle"], first: "2026-04-21T12:14:36.000Z", last: "2026-04-25T13:09:36.000Z", update: 75 },
+  { keys: ["Clover Clan Battle", "Clover Battle"], first: "2026-03-14T12:00:00.524Z", last: "2026-03-28T12:00:00.524Z", update: 73 },
+  { keys: ["Silver Clan Battle", "Silver Battle"], first: "2025-12-20T12:00:00.524Z", last: "2025-12-26T12:00:00.524Z", update: 72 },
+  { keys: ["Forged Battle"], first: "2025-01-29T12:00:00.524Z", last: "2025-12-06T12:00:00.524Z", update: 71 },
+  { keys: ["Sun Angelus Battle"], first: "2025-07-25T12:00:00.524Z", last: "2025-07-18T12:00:00.524Z", update: 68 },
+  { keys: ["Scuba Dog Battle"], first: "2025-06-28T12:00:00.524Z", last: "2025-07-04T12:00:00.524Z", update: 66 },
+  { keys: ["Nightmare Cyclops Battle"], first: "2025-06-14T12:00:00.524Z", last: "2025-06-21T12:00:00.524Z", update: 64 },
+  { keys: ["Junkyard Hound Battle"], first: "2025-05-31T12:00:00.524Z", last: "2025-06-07T12:00:00.524Z", update: 62 },
+  { keys: ["Balloon Corgi Battle"], first: "2025-05-17T12:00:00.524Z", last: "2025-05-24T12:00:00.524Z", update: 60 },
+  { keys: ["Poison Turtle Battle"], first: "2025-05-03T12:00:00.524Z", last: "2025-05-09T12:00:00.524Z", update: 58 },
+  { keys: ["Pixel Chick Battle"], first: "2025-04-19T12:00:00.524Z", last: "2025-04-25T12:00:00.524Z", update: 56 },
+  { keys: ["Athena Battle"], first: "2025-03-29T12:00:00.524Z", last: "2025-04-04T12:00:00.524Z", update: 53 },
+  { keys: ["Tie Dye Battle"], first: "2025-03-21T12:00:00.524Z", last: "2025-03-21T12:00:00.524Z", update: 51 },
+  { keys: ["Egyptian Battle"], first: "2025-03-08T12:00:00.524Z", last: "2025-03-14T12:00:00.524Z", update: 50 },
+  { keys: ["Evil Battle"], first: "2025-02-22T12:00:00.524Z", last: "2025-02-28T12:00:00.524Z", update: 46 },
+  { keys: ["Holographic Battle"], first: "2025-02-08T12:00:00.524Z", last: "2025-02-14T12:00:00.524Z", update: 46 },
+  { keys: ["Mushroom Battle"], first: "2025-01-25T12:00:00.524Z", last: "2025-01-31T12:00:00.524Z", update: 44 },
+  { keys: ["Wyvern Battle"], first: "2025-01-11T12:00:00.524Z", last: "2025-01-24T12:00:00.524Z", update: 42 },
+  { keys: ["Blurred Battle"], first: "2024-12-28T12:00:00.524Z", last: "2025-01-03T12:00:00.524Z", update: 40 },
+  { keys: ["Diamond Clan Battle", "Diamond Battle"], first: "2024-12-21T12:00:00.524Z", last: "2024-12-27T12:00:00.524Z", update: 39 },
+  { keys: ["Gingerbread Clan Battle", "Gingerbread Battle"], first: "2024-12-14T12:00:00.524Z", last: "2024-12-20T12:00:00.524Z", update: 38 },
+  { keys: ["Bee Clan Battle", "Bee Battle"], first: "2024-12-07T12:00:00.524Z", last: "2024-12-13T12:00:00.524Z", update: 37 },
+  { keys: ["Blimp Dragon Clan Battle", "Blimp Dragon Battle"], first: "2024-11-09T12:00:00.524Z", last: "2024-11-23T12:00:00.524Z", update: 33 },
+  { keys: ["Ghost Clan Battle", "Ghost Battle"], first: "2024-10-19T12:00:00.524Z", last: "2024-11-01T12:00:00.524Z", update: 30 },
+  { keys: ["Reversed Clan Battle", "Reversed Battle"], first: "2024-09-21T12:00:00.524Z", last: "2024-10-04T12:00:00.524Z", update: 29 },
+  { keys: ["Rave Crab Clan Battle", "Rave Crab Battle"], first: "2024-08-31T12:00:00.524Z", last: "2024-09-13T12:00:00.524Z", update: 27 },
+  { keys: ["Ice Cream Clan Battle", "Ice Cream Battle"], first: "2024-08-10T12:00:00.524Z", last: "2024-08-23T12:00:00.524Z", update: 24 },
+  { keys: ["Clown Clan Battle", "Clown Battle"], first: "2024-07-20T12:00:00.524Z", last: "2024-08-02T12:00:00.524Z", update: 21 },
+  { keys: ["Safety Battle"], first: "2024-07-20T12:00:00.524Z", last: "2024-08-02T12:00:00.524Z", update: 17 },
+  { keys: ["Wicked Clan Battle", "Wicked Battle"], first: "2024-06-08T12:00:00.524Z", last: "2024-06-21T12:00:00.524Z", update: 15 },
+  { keys: ["Fragmented Clan Battle", "Fragmented Battle"], first: "2024-06-08T12:00:00.524Z", last: "2024-06-21T12:00:00.524Z", update: 12 },
+  { keys: ["Bubble Clan Battle", "Bubble Battle"], first: "2024-04-06T12:00:00.524Z", last: "2024-04-19T12:00:00.524Z", update: 9 },
+  { keys: ["Pixel Clan Battle", "Pixel Battle"], first: "2024-04-06T12:00:00.524Z", last: "2024-04-19T12:00:00.524Z", update: 8 },
+  { keys: ["Quest Clan Battle", "Quest Battle"], first: "2024-03-16T12:00:00.524Z", last: "2024-03-29T12:00:00.524Z", update: 7 },
+  { keys: ["Raid Clan Battle", "Raid Battle"], first: "2024-02-24T12:00:00.524Z", last: "2024-03-15T12:00:00.524Z", update: 6 },
+  { keys: ["Achievements Battle"], first: "2024-02-10T12:00:00.524Z", last: "2024-02-21T12:00:00.524Z", update: 5 },
+  { keys: ["Pet Collecting Battle"], first: "2024-01-20T12:00:00.524Z", last: "2024-02-09T12:00:00.524Z", update: 5 },
+  { keys: ["New Years Clan Battle", "New Years Battle"], first: "2023-12-30T12:00:00.524Z", last: "2024-01-19T12:00:00.524Z", update: 4 },
+  { keys: ["Festive Clan Battle", "Festive Battle"], first: "2023-12-16T12:00:00.524Z", last: "2023-12-29T12:00:00.524Z", update: 2 }
+];
+
+const CLAN_BATTLE_HISTORY_TIME_BY_KEY = buildClanBattleHistoryTimeMap();
+
+function buildClanBattleHistoryTimeMap() {
+  const map = new Map();
+  for (const row of CLAN_BATTLE_HISTORY_TIMELINE) {
+    const sortTime = Math.max(historyDateMs(row.first), historyDateMs(row.last));
+    const sortUpdate = finiteHistoryNumber(row.update) ?? 0;
+    for (const key of row.keys || []) {
+      for (const alias of [key, historyRecordName(key)]) {
+        const normalized = historyRecordKey(alias);
+        if (!normalized) continue;
+        map.set(normalized, { sortTime, sortUpdate });
+      }
+    }
+  }
+  return map;
+}
+
+function sortClanHistoryRecords(rows) {
+  return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const timeDelta = historyBattleSortTime(b) - historyBattleSortTime(a);
+    if (timeDelta !== 0) return timeDelta;
+    const updateDelta = historyBattleSortUpdate(b) - historyBattleSortUpdate(a);
+    if (updateDelta !== 0) return updateDelta;
+    return String(a.name || a.battle_display_name || a.battle_key || "").localeCompare(String(b.name || b.battle_display_name || b.battle_key || ""));
+  });
+}
+
+function historyBattleSortTime(row) {
+  const timeline = historyTimelineForRow(row);
+  if (timeline?.sortTime) return timeline.sortTime;
+  return Math.max(
+    historyDateMs(row?.last_snapshot),
+    historyDateMs(row?.latest_snapshot_at),
+    historyDateMs(row?.latest_fetched_at),
+    historyDateMs(row?.last_seen_at),
+    historyDateMs(row?.battle_end_iso),
+    historyDateMs(row?.fetched_at),
+    historyDateMs(row?.updated_at),
+    historyDateMs(row?.created_at),
+    historyDateMs(row?.first_snapshot),
+    historyDateMs(row?.first_seen_at),
+    historyDateMs(row?.battle_start_iso)
+  );
+}
+
+function historyBattleSortUpdate(row) {
+  const timeline = historyTimelineForRow(row);
+  return finiteHistoryNumber(row?.update_number) ?? finiteHistoryNumber(timeline?.sortUpdate) ?? 0;
+}
+
+function historyTimelineForRow(row) {
+  for (const value of [
+    row?.key,
+    row?.battle_key,
+    row?.battle,
+    row?.battle_display_name,
+    row?.display_name,
+    row?.event_name,
+    row?.name
+  ]) {
+    const key = historyRecordKey(value);
+    if (key && CLAN_BATTLE_HISTORY_TIME_BY_KEY.has(key)) return CLAN_BATTLE_HISTORY_TIME_BY_KEY.get(key);
+  }
+  return null;
+}
+
+function historyDateMs(value) {
+  const ms = Date.parse(String(value || ""));
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function isLegacyHistoryBattle(row, staticOnly) {
