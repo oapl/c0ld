@@ -50,9 +50,10 @@ const DEFAULT_HATCH_BACKFILL_MIN_ITEM_GROWTH = 25;
 const DEFAULT_HATCH_BACKFILL_ITEM_GROWTH_RATIO = 0.05;
 const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
 const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
+const DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS = 48;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-2026-07-29a";
+const INVENTORY_BUILD_ID = "inventory-htg-2026-07-29b";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -561,6 +562,25 @@ async function handleOAuthCallback(request, env) {
       snapshot_state: "missing"
     });
   }
+  if (isHatchTrackerOAuth && ingest.snapshot?.id) {
+    const tracker = await fetchHatchTrackerByRobloxUser(env, targetUserId, { includeDisabled: true }).catch(() => null);
+    if (tracker) {
+      await markHatchSnapshotCheckedWithBaseline(env, tracker, ingest.snapshot, {
+        next_armed: false,
+        stable_comparisons: 0,
+        reason: "HTG baseline reset after Big Games authorization.",
+        risk: {
+          reasons: ["authorization_baseline"],
+          start_item_count: 0,
+          end_item_count: Number(ingest.snapshot.item_count || 0),
+          item_growth: 0,
+          item_growth_ratio: 0,
+          candidate_gain_count: 0,
+          total_gain_count: 0
+        }
+      }).catch(error => console.warn("HTG authorization baseline reset failed", error?.message || error));
+    }
+  }
   await markOAuthStateUsed(env, stateHash);
 
   return oauthCompletion(pending, true, oauthConnectedReadyMessage(isHatchTrackerOAuth, expiresAt), {
@@ -736,15 +756,37 @@ async function handleHatchTrackerCommand(request, env) {
     access: await oauthStatus(env, row.roblox_user_id, "hatch_tracker")
   })));
 
-  await Promise.all(accessResults.map(({ row }) => {
+  await Promise.all(accessResults.map(async ({ row }) => {
     const nextTiers = mergeHatchTierSelection(hatchTrackerEnabledTiers(row), selectedTier);
+    const latestSnapshot = row.roblox_user_id
+      ? await getLatestSnapshot(env, row.roblox_user_id).catch(() => null)
+      : null;
+    const metadataWithTiers = hatchTrackerMetadataWithTiers(row.metadata, nextTiers, { addAlertGuildId: guildId });
     return updateHatchTrackerRow(env, row, {
       discord_username: discordUsername || row.discord_username || null,
       enabled: true,
       last_enabled_at: now,
       disabled_at: null,
       updated_at: now,
-      metadata: hatchTrackerMetadataWithTiers(row.metadata, nextTiers, { addAlertGuildId: guildId })
+      last_checked_snapshot_id: latestSnapshot?.id || row.last_checked_snapshot_id || null,
+      last_checked_at: latestSnapshot?.id ? now : row.last_checked_at || null,
+      metadata: hatchTrackerMetadataWithBaseline(metadataWithTiers, {
+        armed: false,
+        snapshot_id: firstString(latestSnapshot?.id),
+        captured_at: firstString(latestSnapshot?.captured_at),
+        item_count: Number(latestSnapshot?.item_count || 0),
+        stable_comparisons: 0,
+        reset_reason: "HTG baseline reset after alerts were enabled.",
+        risk_reasons: latestSnapshot?.id ? ["enabled_baseline"] : ["enabled_waiting_for_snapshot"],
+        risk: {
+          start_item_count: 0,
+          end_item_count: Number(latestSnapshot?.item_count || 0),
+          item_growth: 0,
+          item_growth_ratio: 0,
+          candidate_gain_count: 0,
+          total_gain_count: 0
+        }
+      })
     });
   }));
 
@@ -2265,7 +2307,19 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
       }
     };
   }
-  const sourceFilter = await filterHatchSourceGains(env, userId, candidates, { start, end });
+  const historyFilter = await filterHatchHistoricalInventoryEchoes(env, userId, candidates, { start, end });
+  if (!historyFilter.rows.length) {
+    await markHatchSnapshotChecked(env, tracker, latestSnapshot.id);
+    return {
+      posted: false,
+      reason: candidates.length && historyFilter.suppressed.length
+        ? "All enabled Huge, Titanic, or Gargantuan gains were already present in recent inventory history."
+        : "No enabled Huge, Titanic, or Gargantuan gains were detected.",
+      snapshot_id: latestSnapshot.id,
+      history_filter: compactHatchHistoryFilterSummary(historyFilter)
+    };
+  }
+  const sourceFilter = await filterHatchSourceGains(env, userId, historyFilter.rows, { start, end });
   const hatched = sourceFilter.rows;
   if (!hatched.length) {
     await markHatchSnapshotChecked(env, tracker, latestSnapshot.id);
@@ -2275,6 +2329,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
         ? "All enabled Huge, Titanic, or Gargantuan gains matched trade, booth, or mail activity."
         : "No enabled Huge, Titanic, or Gargantuan gains were detected.",
       snapshot_id: latestSnapshot.id,
+      history_filter: compactHatchHistoryFilterSummary(historyFilter),
       source_filter: compactHatchSourceFilterSummary(sourceFilter)
     };
   }
@@ -2322,6 +2377,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     item: featured.display_name,
     delta: featured.delta,
     snapshot_id: latestSnapshot.id,
+    history_filter: compactHatchHistoryFilterSummary(historyFilter),
     source_filter: compactHatchSourceFilterSummary(sourceFilter)
   };
 }
@@ -2478,6 +2534,123 @@ function compactHatchCandidate(row) {
   };
 }
 
+async function filterHatchHistoricalInventoryEchoes(env, userId, rows, context = {}) {
+  const candidates = Array.isArray(rows) ? rows : [];
+  const lookbackHours = hatchHistoricalEchoLookbackHours(env);
+  const unchanged = {
+    rows: candidates,
+    suppressed: [],
+    adjusted: [],
+    available: false,
+    lookback_hours: lookbackHours,
+    historical_snapshot_count: 0
+  };
+  if (!candidates.length || !envBool(env.HATCH_SUPPRESS_HISTORICAL_ECHOES, true)) return unchanged;
+
+  const endTime = new Date(context?.end?.captured_at || 0).getTime();
+  if (!Number.isFinite(endTime) || endTime <= 0) return unchanged;
+  const cutoffMs = endTime - lookbackHours * 3600000;
+  const snapshotLimit = Math.max(50, Math.min(300, Math.ceil(lookbackHours * 4)));
+  const snapshots = sortAsc(await getUserSnapshots(env, userId, snapshotLimit))
+    .filter(snapshot => {
+      const time = new Date(snapshot?.captured_at || 0).getTime();
+      return Number.isFinite(time)
+        && time >= cutoffMs
+        && time < endTime
+        && String(snapshot?.id || "") !== String(context?.end?.id || "");
+    });
+  if (!snapshots.length) return unchanged;
+
+  const maxPriorCountByKey = new Map();
+  let checkedSnapshots = 0;
+  for (const snapshot of snapshots) {
+    const items = await getSnapshotItems(env, snapshot.id).catch(error => {
+      console.warn("HTG historical echo snapshot read failed", snapshot.id, error?.message || error);
+      return [];
+    });
+    if (!items.length) continue;
+    checkedSnapshots += 1;
+    for (const [key, count] of hatchMatchCounts(items).entries()) {
+      maxPriorCountByKey.set(key, Math.max(Number(maxPriorCountByKey.get(key) || 0), count));
+    }
+  }
+  if (!checkedSnapshots || !maxPriorCountByKey.size) return unchanged;
+
+  const kept = [];
+  const suppressed = [];
+  const adjusted = [];
+  for (const row of candidates) {
+    const key = hatchSourceMatchKey(row);
+    const delta = Math.max(0, Number(row.delta || 0));
+    const endCount = Math.max(0, Number(row.after || 0));
+    const historicalMax = Math.max(0, Number(maxPriorCountByKey.get(key) || 0));
+    if (!key || delta <= 0 || historicalMax <= 0) {
+      kept.push(row);
+      continue;
+    }
+
+    const novelDelta = Math.max(0, endCount - historicalMax);
+    if (novelDelta <= 0) {
+      suppressed.push({ ...row, historical_max_count: historicalMax, historical_echo_suppressed_delta: delta });
+      continue;
+    }
+
+    if (novelDelta < delta) {
+      const adjustedRow = {
+        ...row,
+        before: Math.max(Number(row.before || 0), historicalMax),
+        delta: novelDelta,
+        historical_max_count: historicalMax,
+        historical_echo_suppressed_delta: delta - novelDelta
+      };
+      kept.push(adjustedRow);
+      adjusted.push(adjustedRow);
+      continue;
+    }
+
+    kept.push(row);
+  }
+
+  return {
+    rows: kept,
+    suppressed,
+    adjusted,
+    available: true,
+    lookback_hours: lookbackHours,
+    historical_snapshot_count: checkedSnapshots
+  };
+}
+
+function hatchMatchCounts(rows) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    const tier = hatchTier(row);
+    if (!tier) continue;
+    const key = hatchSourceMatchKey(row);
+    if (!key) continue;
+    counts.set(key, Number(counts.get(key) || 0) + Math.max(0, Number(row.count ?? row.after ?? row.delta ?? 0)));
+  }
+  return counts;
+}
+
+function compactHatchHistoryFilterSummary(filter) {
+  return {
+    available: filter?.available === true,
+    lookback_hours: Number(filter?.lookback_hours || 0),
+    historical_snapshot_count: Number(filter?.historical_snapshot_count || 0),
+    suppressed_count: Array.isArray(filter?.suppressed) ? filter.suppressed.length : 0,
+    adjusted_count: Array.isArray(filter?.adjusted) ? filter.adjusted.length : 0,
+    suppressed: (filter?.suppressed || []).slice(0, 8).map(row => ({
+      tier: row.tier,
+      display_name: row.display_name,
+      variant: row.variant,
+      delta: row.delta,
+      historical_max_count: row.historical_max_count,
+      suppressed_delta: row.historical_echo_suppressed_delta
+    }))
+  };
+}
+
 function hatchBaselineDecision(env, tracker, start, end, diff, candidates) {
   if (!envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true)) {
     return { skip: false, state: hatchTrackerBaselineState(tracker), risk: null };
@@ -2585,6 +2758,10 @@ function hatchBackfillHtgGainCount(env) {
 
 function hatchBackfillTotalGainCount(env) {
   return Math.max(1, Math.floor(clampNumber(env.HATCH_BACKFILL_TOTAL_GAIN_COUNT, DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT, 1, 100000)));
+}
+
+function hatchHistoricalEchoLookbackHours(env) {
+  return Math.max(1, Math.floor(clampNumber(env.HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS, DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS, 1, 168)));
 }
 
 async function filterHatchSourceGains(env, userId, rows, period) {

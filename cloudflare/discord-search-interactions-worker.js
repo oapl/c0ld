@@ -32,7 +32,7 @@ const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
 const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
 const HISTORY_VIEW_LABELS = {
-  clan: "Clan History",
+  clan: "Clan Battle History",
   league: "League History",
   leaderboard: "Leaderboard History"
 };
@@ -59,6 +59,7 @@ const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
+const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HTG_BUILD_ID = "htg-debug-2026-07-27i";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
@@ -243,8 +244,14 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    const scheduledTime = event?.scheduledTime || Date.now();
+    if (!shouldRunHourlyScheduledPosts(env, scheduledTime)) {
+      return;
+    }
+
     ctx.waitUntil(runHourlyClanAssignments(env, {
-      scheduledTime: event?.scheduledTime || Date.now()
+      scheduledTime,
+      alignToHour: true
     }).catch(err => {
       console.error("Hourly clan delivery failed", err);
     }));
@@ -2419,19 +2426,32 @@ async function completeOfflinePingInteraction(interaction, env) {
     }
 
     if (subcommand === "users") {
-      const entriesText = String(getCommandOption(interaction, "entries") || "").trim();
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
-      const resolvedBulk = await resolveOfflineBulkDiscordUsers(
-        parseOfflineBulkUserEntries(entriesText),
-        interaction,
-        env
-      );
-      const users = resolvedBulk.users.map(entry => ({
-        ...entry,
-        clan_name: entry.clan_name || clan || null
-      }));
+      if (!clan) {
+        throw httpError(400, "Use `/offline users clan:<clan> user1:<roblox name> discord1:<Discord user>`.");
+      }
+      const users = [];
+      const pairErrors = [];
+      for (let index = 1; index <= 12; index += 1) {
+        const username = String(getCommandOption(interaction, `user${index}`) || "").trim();
+        const discordUserId = String(getCommandOption(interaction, `discord${index}`) || "").trim();
+        if (!username && !discordUserId) continue;
+        if (!username || !discordUserId) {
+          pairErrors.push(`user${index}/discord${index}`);
+          continue;
+        }
+        users.push({
+          username,
+          discord_user_id: discordUserId,
+          discord_label: offlineDiscordUserLabel(interaction, discordUserId),
+          clan_name: clan || null
+        });
+      }
+      if (pairErrors.length) {
+        throw httpError(400, `Each numbered offline mapping needs both boxes filled: ${pairErrors.join(", ")}.`);
+      }
       if (!users.length) {
-        throw httpError(400, "Paste pairs like `username: Cinnamowopal discord: @oaple username: BEARDED_DRAGONGUY discord: @BEARDED_DRAGONGUY`.");
+        throw httpError(400, "Add at least one Roblox username and Discord user pair, starting with user1 and discord1.");
       }
       const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
         method: "POST",
@@ -2442,10 +2462,10 @@ async function completeOfflinePingInteraction(interaction, env) {
           updated_by: actorId
         }
       });
-      const warnings = [...(resolvedBulk.warnings || []), ...(payload.warnings || [])];
+      const warnings = [...(payload.warnings || [])];
       const warningText = warnings.length ? `\n-# ${warnings.slice(0, 5).join(" ")}` : "";
       await editOriginalInteraction(interaction, {
-        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"}. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
+        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2727,29 +2747,6 @@ function validDiscordSnowflake(value) {
   return /^\d{5,30}$/.test(String(value || "").trim());
 }
 
-function parseOfflineBulkUserEntries(value) {
-  const text = String(value || "").trim();
-  if (!text) return [];
-
-  const entries = [];
-  const pattern = /username\s*:\s*([^\s]+)\s+discord\s*:\s*(<@!?\d{5,30}>|\d{5,30}|[^\s]+)/gi;
-  let match;
-  while ((match = pattern.exec(text))) {
-    const username = String(match[1] || "").trim();
-    const discordValue = String(match[2] || "").trim();
-    const mentionMatch = discordValue.match(/^<@!?(\d{5,30})>$/);
-    const discordUserId = mentionMatch ? mentionMatch[1] : (/^\d{5,30}$/.test(discordValue) ? discordValue : "");
-    if (!username) continue;
-    entries.push({
-      username,
-      discord_user_id: discordUserId || null,
-      discord_label: discordUserId ? null : discordValue
-    });
-  }
-
-  return entries;
-}
-
 function parseOfflineBulkRemoveUserEntries(value) {
   const text = String(value || "").trim();
   if (!text) return [];
@@ -2784,46 +2781,6 @@ function dedupeOfflineRemoveEntries(entries) {
     output.push({ username });
   }
   return output;
-}
-
-async function resolveOfflineBulkDiscordUsers(entries, interaction, env) {
-  const guildId = String(interaction?.guild_id || "").trim();
-  const users = [];
-  const warnings = [];
-
-  for (const entry of entries || []) {
-    const next = { ...entry };
-    const directId = validDiscordSnowflake(next.discord_user_id)
-      ? String(next.discord_user_id).trim()
-      : "";
-    if (directId) {
-      next.discord_user_id = directId;
-      next.discord_label = next.discord_label || offlineDiscordUserLabel(interaction, directId);
-      users.push(next);
-      continue;
-    }
-
-    const label = String(next.discord_label || "").replace(/^@+/, "").trim();
-    if (!label || !guildId) {
-      users.push(next);
-      continue;
-    }
-
-    const member = await searchDiscordGuildMemberByName(env, guildId, label).catch(err => {
-      warnings.push(`Could not resolve Discord member ${label}: ${err?.message || err}. Use a mention or numeric ID if needed.`);
-      return null;
-    });
-    const userId = member?.user?.id ? String(member.user.id) : "";
-    if (userId) {
-      next.discord_user_id = userId;
-      next.discord_label = member.nick || member.user.global_name || member.user.username || label;
-    } else {
-      warnings.push(`Discord member ${label} was saved as a label only; use a mention or numeric ID to guarantee a ping.`);
-    }
-    users.push(next);
-  }
-
-  return { users, warnings };
 }
 
 async function searchDiscordGuildMemberByName(env, guildId, value) {
@@ -2885,13 +2842,15 @@ function interactionSourceChannelId(interaction) {
 
 async function runHourlyClanAssignments(env, options = {}) {
   const force = options.force === true;
+  const alignToHour = options.alignToHour === true;
+  const postMinute = hourlyScheduledPostMinute(env);
   const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
     query: { enabled: "true", limit: 1000 }
   });
   const assignments = Array.isArray(response.assignments) ? response.assignments : [];
   const now = Number(options.scheduledTime || Date.now());
   const eligible = assignments.filter(assignment => (
-    force || hourlyAssignmentDue(assignment, now)
+    force || hourlyAssignmentDue(assignment, now, { alignToHour, postMinute })
   ));
   const reportPromises = new Map();
   const results = [];
@@ -2899,15 +2858,35 @@ async function runHourlyClanAssignments(env, options = {}) {
   for (const assignment of eligible) {
     const targetType = hourlyAssignmentTargetType(assignment);
     const targetName = hourlyAssignmentTargetName(assignment);
-    const reportKey = `${targetType}:${normalizeSearchKey(targetName)}`;
-    if (!reportPromises.has(reportKey)) {
-      reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment));
-    }
+    let claimAcquired = force;
 
     try {
+      if (!force) {
+        const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
+        if (!claim.claimed) {
+          results.push({
+            ok: true,
+            skipped: true,
+            reason: claim.reason || "already_claimed",
+            target_type: targetType,
+            target_name: targetName,
+            clan_name: targetType === "clan" ? targetName : null,
+            username: targetType === "user" ? targetName : null,
+            channel_id: assignment.channel_id,
+            assignment_key: String(assignment.assignment_key || "")
+          });
+          continue;
+        }
+        claimAcquired = true;
+      }
+
+      const reportKey = `${targetType}:${normalizeSearchKey(targetName)}`;
+      if (!reportPromises.has(reportKey)) {
+        reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment));
+      }
       const report = await reportPromises.get(reportKey);
       const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
-      await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
+      await updateHourlyClanAssignmentDelivery(env, assignment, {
         last_posted_at: new Date(now).toISOString(),
         last_message_id: posted.id || null,
         last_snapshot_at: hourlyReportSnapshotAt(report),
@@ -2924,9 +2903,11 @@ async function runHourlyClanAssignments(env, options = {}) {
       });
     } catch (err) {
       const message = String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000);
-      await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
-        last_error: message
-      }).catch(() => null);
+      if (claimAcquired) {
+        await updateHourlyClanAssignmentDelivery(env, assignment, {
+          last_error: message
+        }).catch(() => null);
+      }
       results.push({
         ok: false,
         target_type: targetType,
@@ -2942,6 +2923,8 @@ async function runHourlyClanAssignments(env, options = {}) {
   return {
     ok: results.every(result => result.ok),
     scheduled_at: new Date(now).toISOString(),
+    schedule_aligned: alignToHour,
+    post_minute: alignToHour ? postMinute : null,
     configured: assignments.length,
     due: eligible.length,
     results
@@ -2955,10 +2938,10 @@ async function runOneHourlyClanAssignment(url, env, options = {}) {
   }
 
   const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
-    query: { channel_id: channelId, limit: 1 }
+    query: { channel_id: channelId, limit: 100 }
   });
-  const assignment = Array.isArray(response.assignments) ? response.assignments[0] : null;
-  if (!assignment) {
+  const assignments = Array.isArray(response.assignments) ? response.assignments : [];
+  if (!assignments.length) {
     return {
       ok: false,
       channel_id: channelId,
@@ -2966,12 +2949,17 @@ async function runOneHourlyClanAssignment(url, env, options = {}) {
     };
   }
 
-  const result = await deliverHourlyClanAssignment(env, assignment, options);
+  const results = [];
+  for (const assignment of assignments) {
+    results.push(await deliverHourlyClanAssignment(env, assignment, options));
+  }
+
   return {
-    ok: result.ok,
+    ok: results.every(result => result.ok),
     channel_id: channelId,
-    assignment,
-    result
+    assignment_count: assignments.length,
+    assignments,
+    results
   };
 }
 
@@ -2987,10 +2975,44 @@ async function removeHourlyClanAssignment(url, env) {
   });
 }
 
-function hourlyAssignmentDue(assignment, now = Date.now()) {
+function hourlyAssignmentDue(assignment, now = Date.now(), options = {}) {
   const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
   if (!Number.isFinite(lastPosted) || lastPosted <= 0) return true;
+  if (options.alignToHour) {
+    return lastPosted < hourlyScheduledBucketMs(now, options.postMinute ?? DEFAULT_HOURLY_CLAN_POST_MINUTE);
+  }
+
   return now - lastPosted >= HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000;
+}
+
+function hourlyScheduledPostMinute(env) {
+  const value = Number(env.HOURLY_CLAN_POST_MINUTE ?? DEFAULT_HOURLY_CLAN_POST_MINUTE);
+  if (!Number.isFinite(value)) return DEFAULT_HOURLY_CLAN_POST_MINUTE;
+  return Math.max(0, Math.min(59, Math.round(value)));
+}
+
+function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now()) {
+  const date = new Date(scheduledTime || Date.now());
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getUTCMinutes() === hourlyScheduledPostMinute(env);
+}
+
+function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MINUTE) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return 0;
+  date.setUTCMinutes(Number(postMinute) || 0, 0, 0);
+  return date.getTime();
+}
+
+function hourlyNextScheduledHourMs(lastPostedMs, now, env) {
+  const postMinute = hourlyScheduledPostMinute(env);
+  const currentBucket = hourlyScheduledBucketMs(now, postMinute);
+  if (!Number.isFinite(lastPostedMs) || lastPostedMs <= 0) return currentBucket;
+  if (lastPostedMs < currentBucket) return Math.max(now, currentBucket);
+
+  let next = currentBucket + 60 * 60 * 1000;
+  while (next <= lastPostedMs) next += 60 * 60 * 1000;
+  return next;
 }
 
 async function hourlyClanAssignmentStatus(env) {
@@ -3003,19 +3025,25 @@ async function hourlyClanAssignmentStatus(env) {
     ok: true,
     checked_at: new Date(now).toISOString(),
     configured: assignments.length,
-    due: assignments.filter(assignment => hourlyAssignmentDue(assignment, now)).length,
+    due: assignments.filter(assignment => hourlyAssignmentDue(assignment, now, {
+      alignToHour: true,
+      postMinute: hourlyScheduledPostMinute(env)
+    })).length,
     min_post_interval_minutes: HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES,
+    scheduled_post_minute: hourlyScheduledPostMinute(env),
+    scheduled_window_open: shouldRunHourlyScheduledPosts(env, now),
     bot_token_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
     clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
     clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
-    cron_expected: "*/15 * * * *",
+    cron_expected: "*/15 * * * * with top-of-hour posting gate",
     assignments: assignments.map(assignment => {
       const lastPostedMs = new Date(assignment?.last_posted_at || 0).getTime();
       const hasLastPosted = Number.isFinite(lastPostedMs) && lastPostedMs > 0;
       const nextDueMs = hasLastPosted
-        ? lastPostedMs + HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000
+        ? hourlyNextScheduledHourMs(lastPostedMs, now, env)
         : now;
       return {
+        assignment_key: String(assignment.assignment_key || ""),
         guild_id: String(assignment.guild_id || ""),
         channel_id: String(assignment.channel_id || ""),
         channel_type: assignment.channel_type ?? null,
@@ -3025,7 +3053,10 @@ async function hourlyClanAssignmentStatus(env) {
         clan_name: hourlyAssignmentTargetType(assignment) === "clan" ? hourlyAssignmentTargetName(assignment) : null,
         username: hourlyAssignmentTargetType(assignment) === "user" ? hourlyAssignmentTargetName(assignment) : null,
         enabled: assignment.enabled !== false,
-        due: hourlyAssignmentDue(assignment, now),
+        due: hourlyAssignmentDue(assignment, now, {
+          alignToHour: true,
+          postMinute: hourlyScheduledPostMinute(env)
+        }),
         last_posted_at: assignment.last_posted_at || null,
         next_due_at: new Date(Math.max(now, nextDueMs)).toISOString(),
         last_snapshot_at: assignment.last_snapshot_at || null,
@@ -3047,24 +3078,37 @@ function discordChannelTypeName(value) {
 }
 
 async function deliverHourlyClanAssignment(env, assignment, options = {}) {
-  if (!options.force && !hourlyAssignmentDue(assignment)) {
+  const force = options.force === true;
+  const now = Date.now();
+  if (!force && !hourlyAssignmentDue(assignment, now)) {
     return { ok: true, skipped: true, reason: "not_due" };
   }
 
+  let claimAcquired = force;
   try {
+    if (!force) {
+      const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
+      if (!claim.claimed) {
+        return { ok: true, skipped: true, reason: claim.reason || "already_claimed" };
+      }
+      claimAcquired = true;
+    }
+
     const report = await buildHourlyAssignmentReport(env, assignment);
     const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
-    await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
-      last_posted_at: new Date().toISOString(),
+    await updateHourlyClanAssignmentDelivery(env, assignment, {
+      last_posted_at: new Date(now).toISOString(),
       last_message_id: posted.id || null,
       last_snapshot_at: hourlyReportSnapshotAt(report),
       last_error: null
     });
     return { ok: true, message_id: posted.id || null };
   } catch (err) {
-    await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
-      last_error: String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000)
-    }).catch(() => null);
+    if (claimAcquired) {
+      await updateHourlyClanAssignmentDelivery(env, assignment, {
+        last_error: String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000)
+      }).catch(() => null);
+    }
     throw err;
   }
 }
@@ -3204,14 +3248,55 @@ async function postHourlyClanReport(env, channelId, report, assignment = {}) {
   return responsePayload;
 }
 
-async function updateHourlyClanAssignmentDelivery(env, channelId, patch) {
+async function updateHourlyClanAssignmentDelivery(env, assignment, patch) {
+  const channelId = typeof assignment === "object"
+    ? String(assignment?.channel_id || "").trim()
+    : String(assignment || "").trim();
+  const assignmentKey = typeof assignment === "object"
+    ? String(assignment?.assignment_key || "").trim()
+    : "";
+
   return hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
     method: "PATCH",
     body: {
       channel_id: channelId,
+      ...(assignmentKey ? { assignment_key: assignmentKey } : {}),
       ...patch
     }
   });
+}
+
+async function claimHourlyClanAssignmentDelivery(env, assignment, now = Date.now()) {
+  const assignmentKey = String(assignment?.assignment_key || "").trim();
+  if (!assignmentKey) {
+    throw httpError(500, "Hourly assignment is missing assignment_key; run the hourly assignment migration before enabling duplicate-post protection.");
+  }
+
+  const token = hourlyDeliveryClaimToken(assignment);
+  const claimAt = new Date(now).toISOString();
+  const response = await updateHourlyClanAssignmentDelivery(env, assignment, {
+    last_posted_at: claimAt,
+    last_error: `posting:${token}`,
+    claim_due_before: claimAt,
+    claim_token: token
+  });
+
+  return {
+    claimed: response?.claim_acquired === true,
+    reason: response?.claim_acquired === false ? "already_claimed" : null,
+    token,
+    response
+  };
+}
+
+function hourlyDeliveryClaimToken(assignment) {
+  const prefix = String(assignment?.assignment_key || assignment?.channel_id || "hourly")
+    .replace(/[^a-z0-9:_-]/gi, "")
+    .slice(0, 80);
+  const random = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}:${random}`.slice(0, 180);
 }
 
 function hourlyAlertUserId(assignment) {
@@ -6525,87 +6610,132 @@ async function renderHistoryCardPng(history, view) {
   ]);
   const selectedView = HISTORY_VIEWS.includes(view) ? view : "clan";
   const rows = Array.isArray(history[selectedView]) ? history[selectedView] : [];
-  if (selectedView === "clan") return renderClanBattleLedgerPng(history, rows, fonts, avatar);
-  const width = 760;
-  const margin = 22;
-  const gap = 14;
-  const contentWidth = width - margin * 2;
-  const columns = selectedView === "clan" || rows.length > 12 ? 2 : 1;
-  const columnWidth = columns === 2 ? Math.floor((contentWidth - gap) / 2) : contentWidth;
-  const rowHeight = 64;
-  const headerHeight = 144;
-  const sectionHeaderHeight = 48;
-  const sectionGap = 18;
-  const footerHeight = 58;
-  const gridRows = Math.max(1, Math.ceil(rows.length / columns));
-  const height = Math.max(410, headerHeight + sectionHeaderHeight + gridRows * rowHeight + sectionGap + footerHeight);
-  const canvas = new HistoryPixelCanvas(width, height, [11, 16, 23, 255], 2);
-  const color = {
-    panel: [22, 29, 39, 255],
-    panelAlt: [17, 24, 33, 255],
-    header: [25, 33, 44, 255],
-    line: [48, 60, 75, 255],
-    white: [239, 245, 252, 255],
-    muted: [176, 188, 204, 255],
-    red: [255, 100, 105, 255],
-    blue: [88, 166, 255, 255],
-    gold: [242, 204, 96, 255],
-    green: [104, 218, 159, 255],
-    greenDark: [27, 66, 49, 255],
-    goldDark: [67, 57, 28, 255],
-    blueDark: [29, 53, 78, 255]
-  };
-  const accent = selectedView === "league" ? color.gold : selectedView === "leaderboard" ? color.blue : color.red;
+  const width = 1200;
+  const margin = 32;
+  const headerHeight = 176;
+  const rowHeight = 42;
+  const visibleRows = rows.length ? rows : [null];
+  const rowAreaHeight = Math.max(382, visibleRows.length * rowHeight + 34);
+  const height = Math.max(660, headerHeight + rowAreaHeight + 84);
+  const color = searchChartBoardColors();
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
+  const accent = historyModernAccent(selectedView, color);
+  const fontsWithRows = { ...fonts, rowBold: fonts.hourlyBold || fonts.bold };
+  const name = historyCardText(history.username || `user_${history.user_id}`, 42);
+  const title = HISTORY_VIEW_LABELS[selectedView];
 
-  canvas.fillRect(0, 0, width, 6, accent);
-  canvas.fillRect(0, 6, 220, 2, color.gold);
-  canvas.fillRect(220, 6, 290, 2, color.red);
-  canvas.fillRect(510, 6, width - 510, 2, color.blue);
-  canvas.fillRect(margin, 26, contentWidth, 96, color.header);
-  canvas.fillRect(margin, 26, 6, 96, accent);
-  canvas.fillRect(43, 45, 58, 58, accent);
-  if (avatar) canvas.drawImageCover(avatar, 47, 49, 50, 50, true);
-  else canvas.drawFontText(fonts.bold, "C", 62, 55, 27, [12, 17, 24, 255], 30);
-  canvas.drawFontText(fonts.bold, "PS99 Player History", 119, 35, 17, accent, 360);
-  canvas.drawFontText(fonts.bold, `${historyCardText(history.username, 25)}'s ${HISTORY_VIEW_LABELS[selectedView]}`, 119, 59, 25, color.white, 390);
-  canvas.drawFontText(fonts.regular, `${rows.length} recorded result${rows.length === 1 ? "" : "s"}`, 120, 96, 13, color.muted, 200);
-  const highlight = historyViewHighlight(rows, selectedView);
-  canvas.fillRect(520, 43, 194, 63, color.panelAlt);
-  canvas.drawFontText(fonts.bold, highlight.label, 536, 50, 12, color.muted, 160);
-  canvas.drawFontText(fonts.bold, highlight.value, 536, 70, selectedView === "league" ? 13 : 18, highlight.tone === "gold" ? color.gold : highlight.tone === "blue" ? color.blue : color.green, 165);
+  canvas.fillRect(margin, 24, width - margin * 2, height - 48, color.panel);
+  hourlyDrawMysticSmoke(canvas, width, height, color);
+  hourlyDrawPanelFrame(canvas, margin, 24, width - margin * 2, height - 48, color.line);
+  searchChartDrawRainbowBar(canvas, margin + 16, 40, width - margin * 2 - 32, 5, color);
+  hourlyDrawHeaderOrnaments(canvas, width / 2, 105, color);
+  searchChartDrawAvatarBadge(canvas, fontsWithRows, name, avatar, width / 2 - 42, 62, 84, color);
+  historyModernDrawHeader(canvas, fontsWithRows, name, title, width / 2, 94, color);
 
-  let cursorY = headerHeight;
-  drawHistorySectionHeader(canvas, fonts, HISTORY_VIEW_LABELS[selectedView], rows.length, margin, cursorY, contentWidth, accent, color);
-  cursorY += sectionHeaderHeight;
-  const visible = rows.length ? rows : [null];
-  visible.forEach((row, index) => {
-    const column = index % columns;
-    const gridRow = Math.floor(index / columns);
-    const x = margin + column * (columnWidth + gap);
-    const y = cursorY + gridRow * rowHeight;
-    canvas.fillRect(x, y, columnWidth, rowHeight, gridRow % 2 ? color.panel : color.panelAlt);
-    if (row) drawCombinedHistoryRow(canvas, fonts, row, selectedView, x, y, columnWidth, color, accent);
-    else canvas.drawFontText(
-      fonts.regular,
-      selectedView === "league" && history.league_unavailable
-        ? "League data temporarily unavailable."
-        : `No ${HISTORY_VIEW_LABELS[selectedView].toLowerCase()} recorded.`,
-      x + 18,
-      y + 18,
-      15,
-      color.muted,
-      columnWidth - 36
-    );
-    canvas.fillRect(x + 16, y + rowHeight - 1, columnWidth - 32, 1, color.line);
+  const rightPanel = { x: margin + 22, y: headerHeight, w: width - margin * 2 - 44, h: rowAreaHeight };
+  hourlyDrawPanel(canvas, rightPanel.x, rightPanel.y, rightPanel.w, rightPanel.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, rightPanel.x, rightPanel.y, rightPanel.w, rightPanel.h, 1, color);
+  hourlyDrawColumnHeader(canvas, fontsWithRows, rightPanel.x, rightPanel.y, rightPanel.w, 50, [title, `${fullNumber(rows.length)} record${rows.length === 1 ? "" : "s"}`], 1, color);
+
+  const listTop = rightPanel.y + 66;
+  visibleRows.forEach((row, index) => {
+    const y = listTop + index * rowHeight;
+    if (row) {
+      historyModernDrawRecordRow(canvas, fontsWithRows, row, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight - 5, index, color, accent);
+    } else {
+      historyModernDrawEmptyRow(canvas, fontsWithRows, history, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight + 20, color);
+    }
   });
-  if (columns === 2) {
-    const separatorX = margin + columnWidth + Math.floor(gap / 2);
-    canvas.fillRect(separatorX, cursorY + 8, 1, gridRows * rowHeight - 16, color.line);
-  }
 
-  canvas.fillRect(margin, height - footerHeight + 8, contentWidth, 1, color.line);
-  canvas.drawFontText(fonts.regular, "Bot by Cinnamowopal", 41, height - 35, 13, color.muted, 470);
+  hourlyDrawMistDivider(canvas, margin + 24, height - 58, width - margin * 2 - 48, color);
+  canvas.drawFontText(fonts.regular, "Luna Pet Sim 99 Bot | Player History", margin + 34, height - 40, 13, color.muted, 520);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function historyModernAccent(view, color) {
+  if (view === "league") return color.yellow;
+  if (view === "leaderboard") return color.cyan;
+  return color.red;
+}
+
+function historyModernDrawHeader(canvas, fonts, playerName, title, centerX, y, color) {
+  const nameSize = 33;
+  const titleSize = 28;
+  const fittedName = canvas.fitFontText(fonts.bold, playerName, nameSize, 410);
+  const fittedTitle = canvas.fitFontText(fonts.bold, title, titleSize, 320);
+  const nameWidth = canvas.measureFontText(fonts.bold, fittedName, nameSize);
+  const titleWidth = canvas.measureFontText(fonts.bold, fittedTitle, titleSize);
+  const nameX = centerX - 78 - nameWidth;
+  const titleX = centerX + 78;
+  hourlyDrawOutlinedText(canvas, fonts.bold, fittedName, nameX, y, nameSize, color.green, [7, 18, 31, 235], nameWidth + 8);
+  hourlyDrawOutlinedText(canvas, fonts.bold, fittedTitle, titleX, y + 3, titleSize, color.yellow, [48, 32, 9, 235], titleWidth + 8);
+}
+
+function historyModernMetricRows(history, rows, view, highlight, color) {
+  const globalBest = bestGlobalPerformanceRows(rows);
+  const leagueBest = view === "league"
+    ? rows.reduce((best, row) => {
+        const rankValue = positiveInteger(row.player_rank);
+        return rankValue && (!best || rankValue < best) ? rankValue : best;
+      }, null)
+    : null;
+  const currentClan = historyCardText(String(history.current_clan || "-").toUpperCase(), 16);
+  const maxPoints = Math.max(1, ...rows.map(row => finiteHistoryNumber(row?.points) || 0));
+  return [
+    { label: "Player ID", value: historyCardText(history.user_id || "-", 18), tone: color.muted },
+    { label: "View", value: HISTORY_VIEW_LABELS[view], tone: historyModernAccent(view, color) },
+    { label: "Records", value: fullNumber(rows.length), tone: rows.length ? color.green : color.zeroText },
+    { label: view === "league" ? "Best Player Rank" : "Best Global Rank", value: view === "league" ? (leagueBest ? rank(leagueBest) : "-") : (globalBest ? rank(globalBest.rank) : "-"), tone: color.yellow },
+    { label: "Best Finish", value: globalBest ? historyTopLabel(globalBest.percent) : historyCardText(highlight.value, 20), tone: highlight.tone === "gold" ? color.yellow : color.green },
+    { label: "Current Clan", value: currentClan || "-", tone: color.green },
+    { label: "Highest Points", value: rows.length ? shortNumber(maxPoints) : "-", tone: color.red, barFraction: rows.length ? 1 : null }
+  ];
+}
+
+function historyModernDrawRecordRow(canvas, fonts, row, view, x, y, width, height, index, color, accent) {
+  const record = historyModernRecordParts(row, view);
+  hourlyDrawPlayerRowShell(canvas, x, y, width, height, index, true, color);
+  canvas.fillRect(x + 12, y + 8, 5, height - 16, accent);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(record.title, 44), x + 28, y + 7, 16, color.white, width * 0.34);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, record.tag, x + Math.floor(width * 0.39), y + 7, 14, record.tagTone, width * 0.17);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, record.rank, x + Math.floor(width * 0.58), y + 7, 14, color.yellow, width * 0.18);
+  hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, record.points, x + width - 18, y + 7, 14, color.red, width * 0.18);
+}
+
+function historyModernDrawEmptyRow(canvas, fonts, history, view, x, y, width, height, color) {
+  hourlyDrawPlayerRowShell(canvas, x, y, width, height, 0, false, color);
+  const message = view === "league" && history.league_unavailable
+    ? "League history is temporarily unavailable. Try this section again shortly."
+    : `No ${HISTORY_VIEW_LABELS[view].toLowerCase()} has been recorded for this player.`;
+  hourlyDrawCenteredText(canvas, fonts.rowBold || fonts.bold, message, x + width / 2, y + 18, 15, color.muted, width - 44, false);
+}
+
+function historyModernRecordParts(row, view) {
+  if (view === "league") {
+    return {
+      title: row.league_name || row.name || "Unknown League",
+      tag: `Player ${historyCardRank(row.player_rank)}`,
+      tagTone: [247, 211, 83, 255],
+      rank: `League ${historyCardRank(row.league_rank)}`,
+      points: `${historyCardPoints(row.points)} pts`
+    };
+  }
+  if (view === "clan") {
+    return {
+      title: row.name || "Unknown Battle",
+      tag: historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 10),
+      tagTone: [76, 211, 132, 255],
+      rank: `Global ${historyCardRank(row.global_rank, row.total_global_players)}`,
+      points: `${historyCardPoints(row.points)} pts`
+    };
+  }
+  return {
+    title: row.name || "Unknown Event",
+    tag: "Global",
+    tagTone: [52, 225, 239, 255],
+    rank: historyCardRank(row.global_rank, row.total_global_players),
+    points: `${historyCardPoints(row.points)} pts`
+  };
 }
 
 async function renderClanBattleLedgerPng(history, rows, fonts, avatar) {
@@ -9327,6 +9457,30 @@ function htgCommandPayload() {
   };
 }
 
+function offlineUsersBulkOptions() {
+  const options = [];
+  for (let index = 1; index <= 12; index += 1) {
+    const required = index === 1;
+    options.push(
+      {
+        name: `user${index}`,
+        description: `Roblox username #${index}`,
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required,
+        min_length: 1,
+        max_length: 100
+      },
+      {
+        name: `discord${index}`,
+        description: `Discord user to ping for Roblox user #${index}`,
+        type: APPLICATION_COMMAND_OPTION_USER,
+        required
+      }
+    );
+  }
+  return options;
+}
+
 function offlineCommandPayload() {
   return {
     name: "offline",
@@ -9462,25 +9616,18 @@ function offlineCommandPayload() {
       },
       {
         name: "users",
-        description: "Bulk-add pasted username/Discord pairs.",
+        description: "Add up to 12 Roblox users to direct offline pings.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
-            name: "entries",
-            description: "Pairs like: username: Cinnamowopal discord: @oaple username: Foo discord: @Foo",
+            name: "clan",
+            description: "Clan these users belong to, for example c0ld or WMSY",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: true,
             min_length: 1,
-            max_length: 4000
-          },
-          {
-            name: "clan",
-            description: "Optional clan hint applied to every pasted user",
-            type: APPLICATION_COMMAND_OPTION_STRING,
-            required: false,
-            min_length: 1,
             max_length: 100
-          }
+          },
+          ...offlineUsersBulkOptions()
         ]
       },
       {

@@ -39,7 +39,7 @@ const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
 const DISCORD_OFFLINE_PING_CLANS_TABLE = "discord_offline_ping_clans";
 const DISCORD_OFFLINE_PING_USERS_TABLE = "discord_offline_ping_users";
 const DISCORD_OFFLINE_PING_ALERT_STATE_TABLE = "discord_offline_ping_alert_state";
-const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
+const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -781,9 +781,11 @@ async function handleDiscordHourlyClanAssignments(request, env) {
     };
     const guildId = String(url.searchParams.get("guild_id") || "").trim();
     const channelId = String(url.searchParams.get("channel_id") || "").trim();
+    const assignmentKey = String(url.searchParams.get("assignment_key") || "").trim();
     const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
     if (guildId) params.guild_id = `eq.${guildId}`;
     if (channelId) params.channel_id = `eq.${channelId}`;
+    if (assignmentKey) params.assignment_key = `eq.${assignmentKey}`;
     if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
     if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
 
@@ -800,21 +802,27 @@ async function handleDiscordHourlyClanAssignments(request, env) {
   }
 
   if (request.method === "DELETE") {
+    const assignmentKey = String(body.assignment_key || "").trim();
+    const filters = assignmentKey
+      ? { assignment_key: `eq.${assignmentKey}` }
+      : { channel_id: `eq.${channelId}` };
     const assignments = await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
       select: DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS,
-      channel_id: `eq.${channelId}`,
-      limit: "1"
+      ...filters,
+      order: "created_at.asc",
+      limit: "100"
     });
 
-    await supabaseDelete(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
-      channel_id: `eq.${channelId}`
-    });
+    await supabaseDelete(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, filters);
 
     return noStoreJson({
       ok: true,
       channel_id: channelId,
-      removed: Boolean(assignments[0]),
-      assignment: assignments[0] || null
+      assignment_key: assignmentKey || null,
+      removed: assignments.length > 0,
+      removed_count: assignments.length,
+      assignment: assignments[0] || null,
+      assignments
     });
   }
 
@@ -829,7 +837,13 @@ async function handleDiscordHourlyClanAssignments(request, env) {
     }
 
     const now = new Date().toISOString();
+    const assignmentKey = discordHourlyAssignmentKey(channelId, clanNameValue);
+    if (!assignmentKey) {
+      throw httpError(400, "A valid hourly assignment target is required.");
+    }
+
     await supabaseUpsert(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, [{
+      assignment_key: assignmentKey,
       channel_id: channelId,
       guild_id: guildId,
       channel_type: toNumber(body.channel_type),
@@ -837,11 +851,11 @@ async function handleDiscordHourlyClanAssignments(request, env) {
       assigned_by: stringOrNull(body.assigned_by),
       enabled: body.enabled !== false,
       updated_at: now
-    }], "channel_id");
+    }], "assignment_key");
 
     const assignments = await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
       select: DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS,
-      channel_id: `eq.${channelId}`,
+      assignment_key: `eq.${assignmentKey}`,
       limit: "1"
     });
 
@@ -854,6 +868,28 @@ async function handleDiscordHourlyClanAssignments(request, env) {
   const patch = {
     updated_at: new Date().toISOString()
   };
+  const assignmentKey = String(body.assignment_key || "").trim();
+  const filters = assignmentKey
+    ? { assignment_key: `eq.${assignmentKey}` }
+    : { channel_id: `eq.${channelId}` };
+  const selectFilters = assignmentKey
+    ? { assignment_key: `eq.${assignmentKey}` }
+    : { channel_id: `eq.${channelId}` };
+  const claimDueBefore = String(body.claim_due_before || "").trim();
+  const claimToken = String(body.claim_token || "").trim();
+  if (claimDueBefore) {
+    if (!assignmentKey) {
+      throw httpError(400, "An assignment_key is required to claim an hourly assignment.");
+    }
+    const claimDueBeforeMs = Date.parse(claimDueBefore);
+    if (!Number.isFinite(claimDueBeforeMs)) {
+      throw httpError(400, "claim_due_before must be a valid ISO timestamp.");
+    }
+    filters.or = `(last_posted_at.is.null,last_posted_at.lt.${new Date(claimDueBeforeMs).toISOString()})`;
+  }
+  if (claimToken && claimToken.length > 200) {
+    throw httpError(400, "claim_token is too long.");
+  }
   for (const key of [
     "enabled",
     "alert_user_id",
@@ -879,21 +915,28 @@ async function handleDiscordHourlyClanAssignments(request, env) {
     patch.alert_updated_at = patch.alert_updated_at || patch.updated_at;
   }
 
-  await supabasePatch(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
-    channel_id: `eq.${channelId}`
-  }, patch);
+  await supabasePatch(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, filters, patch);
 
   const assignments = await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
     select: DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS,
-    channel_id: `eq.${channelId}`,
-    limit: "1"
+    ...selectFilters,
+    order: "created_at.asc",
+    limit: assignmentKey ? "1" : "100"
   });
+  const claimMarker = claimToken ? `posting:${claimToken}` : "";
+  const claimAcquired = claimMarker
+    ? assignments.some(assignment => String(assignment.last_error || "") === claimMarker)
+    : null;
 
   return noStoreJson({
     ok: true,
     channel_id: channelId,
-    updated: Boolean(assignments[0]),
-    assignment: assignments[0] || null
+    assignment_key: assignmentKey || null,
+    updated: claimMarker ? claimAcquired : assignments.length > 0,
+    updated_count: assignments.length,
+    ...(claimMarker ? { claim_acquired: claimAcquired } : {}),
+    assignment: assignments[0] || null,
+    assignments
   });
 }
 
@@ -7152,7 +7195,6 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
   const bundleCache = new Map();
   const stateUpdates = [];
   const dueAlerts = [];
-  const directUserKeys = new Set();
   const checkedRows = [];
 
   const getBundle = async clanNameValue => {
@@ -7174,9 +7216,8 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
       subject_key: subjectKey,
       tracked_user_key: trackedKey
     });
-    directUserKeys.add(status?.user_key || normalizeText(watch.roblox_username));
     if (!status) {
-      stateUpdates.push(offlineStateRow({
+      stateUpdates.push(offlineStateWithDeliveryState(offlineStateRow({
         guildId,
         scope: "user",
         subjectKey,
@@ -7186,7 +7227,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
         alertActive: false,
         checkedAt,
         lastError: "No current clan row found for this Roblox user."
-      }));
+      }), stateByKey.get(stateKey)));
       continue;
     }
 
@@ -7202,7 +7243,8 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
       alertActive: offline,
       checkedAt
     });
-    if (offline && offlineAlertDue(stateByKey.get(stateKey), postRateMinutes, checkedAt)) {
+    const existingState = stateByKey.get(stateKey);
+    if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
       dueAlerts.push({
         scope: "user",
         watch,
@@ -7211,7 +7253,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
         stateRow: update
       });
     } else {
-      stateUpdates.push(update);
+      stateUpdates.push(offlineStateWithDeliveryState(update, existingState));
     }
   }
 
@@ -7222,7 +7264,6 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
 
     for (const status of bundle.statuses) {
       const trackedKey = status.user_key;
-      const isDirectWatch = directUserKeys.has(status.user_key);
       const stateKey = offlineStateMapKey({
         guild_id: guildId,
         scope: "clan",
@@ -7242,7 +7283,8 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
         checkedAt
       });
 
-      if (offline && !isDirectWatch && offlineAlertDue(stateByKey.get(stateKey), postRateMinutes, checkedAt)) {
+      const existingState = stateByKey.get(stateKey);
+      if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
         dueAlerts.push({
           scope: "clan",
           watch,
@@ -7251,13 +7293,14 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
           stateRow: update
         });
       } else {
-        stateUpdates.push(update);
+        stateUpdates.push(offlineStateWithDeliveryState(update, existingState));
       }
     }
   }
 
   const postResults = [];
   const skippedAlerts = [];
+  const cooldownAlerts = [];
   if (dueAlerts.length) {
     for (const group of splitOfflinePingAlertsByDestination(config, dueAlerts)) {
       if (!group.channel_id) {
@@ -7265,23 +7308,80 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
         continue;
       }
 
-      const postResult = await postOfflinePingAlerts(env, config, group.alerts, checkedAt, {
-        thresholdMinutes,
-        postRateMinutes,
-        destinationScope: group.scope,
-        channelId: group.channel_id
-      });
-      postResults.push(postResult);
-      const messageId = stringOrNull(postResult?.message_id);
-      for (const alert of group.alerts) {
-        stateUpdates.push({
-          ...alert.stateRow,
-          last_alert_at: checkedAt,
-          last_alert_message_id: messageId
+      const channelStateKey = offlineDestinationStateMapKey(guildId, group.channel_id);
+      const channelState = stateByKey.get(channelStateKey);
+      if (!offlinePostRateDue(channelState, postRateMinutes, checkedAt)) {
+        cooldownAlerts.push(...group.alerts);
+        group.alerts.forEach(alert => stateUpdates.push(
+          offlineStateWithDeliveryState(alert.stateRow, stateByKey.get(alert.stateKey))
+        ));
+        stateUpdates.push(offlineDestinationStateRow({
+          guildId,
+          channelId: group.channel_id,
+          checkedAt,
+          lastAlertAt: channelState?.last_alert_at || null,
+          lastMessageId: channelState?.last_alert_message_id || null,
+          lastError: "Offline alert channel post-rate cooldown is active."
+        }));
+        continue;
+      }
+
+      try {
+        const postResult = await postOfflinePingAlerts(env, config, group.alerts, checkedAt, {
+          thresholdMinutes,
+          postRateMinutes,
+          destinationScope: group.scope,
+          channelId: group.channel_id
         });
+        postResults.push(postResult);
+        const messageId = stringOrNull(postResult?.message_id);
+        for (const alert of group.alerts) {
+          stateUpdates.push({
+            ...alert.stateRow,
+            last_alert_at: checkedAt,
+            last_alert_message_id: messageId,
+            last_error: null
+          });
+        }
+        stateUpdates.push(offlineDestinationStateRow({
+          guildId,
+          channelId: group.channel_id,
+          checkedAt,
+          lastAlertAt: checkedAt,
+          lastMessageId: messageId,
+          lastError: null
+        }));
+      } catch (err) {
+        const message = String(err?.message || err || "Discord offline ping post failed.").slice(0, 1000);
+        postResults.push({
+          posted: false,
+          channel_id: group.channel_id,
+          error: message
+        });
+        for (const alert of group.alerts) {
+          stateUpdates.push({
+            ...alert.stateRow,
+            last_alert_at: checkedAt,
+            last_alert_message_id: null,
+            last_error: message
+          });
+        }
+        stateUpdates.push(offlineDestinationStateRow({
+          guildId,
+          channelId: group.channel_id,
+          checkedAt,
+          lastAlertAt: checkedAt,
+          lastMessageId: null,
+          lastError: message
+        }));
       }
     }
-    skippedAlerts.forEach(alert => stateUpdates.push(alert.stateRow));
+    skippedAlerts.forEach(alert => stateUpdates.push({
+      ...alert.stateRow,
+      last_alert_at: checkedAt,
+      last_alert_message_id: null,
+      last_error: "No assigned offline alert channel for this alert type."
+    }));
   }
 
   const posted = postResults.filter(result => result?.posted).length;
@@ -7321,6 +7421,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
     offline_candidates: dueAlerts.length,
     alerts_posted: posted,
     alerts_skipped_no_channel: skippedAlerts.length,
+    alerts_skipped_channel_cooldown: cooldownAlerts.length,
     message_ids: postResults.map(result => result?.message_id).filter(Boolean)
   };
 }
@@ -7652,6 +7753,22 @@ function offlineStateRow({
   };
 }
 
+function offlineStateWithDeliveryState(row, existingState) {
+  if (row?.alert_active === true) {
+    return {
+      ...row,
+      last_alert_at: row.last_alert_at || existingState?.last_alert_at || null,
+      last_alert_message_id: row.last_alert_message_id || existingState?.last_alert_message_id || null
+    };
+  }
+
+  return {
+    ...row,
+    last_alert_at: null,
+    last_alert_message_id: null
+  };
+}
+
 function normalizeOfflineMemberRow(row, source) {
   const userId = toNumber(row.user_id);
   const username = String(row.username || (userId ? `user_${userId}` : "")).trim();
@@ -7698,10 +7815,59 @@ function findOfflineStatusInBundle(bundle, userId, usernameKey) {
 
 function offlineAlertDue(state, postRateMinutes, checkedAt) {
   if (!state?.alert_active) return true;
-  const lastAlertMs = isoToMs(state.last_alert_at);
+  return offlinePostRateDue(state, postRateMinutes, checkedAt);
+}
+
+function offlinePostRateDue(state, postRateMinutes, checkedAt) {
+  const lastAlertMs = isoToMs(state?.last_alert_at);
   const checkedMs = isoToMs(checkedAt) || Date.now();
   if (!lastAlertMs) return true;
   return checkedMs - lastAlertMs >= clamp(Number(postRateMinutes || DEFAULT_OFFLINE_POST_RATE_MINUTES), 1, 1440) * 60 * 1000;
+}
+
+function offlineDestinationStateMapKey(guildId, channelId) {
+  return offlineStateMapKey({
+    guild_id: guildId,
+    scope: "clan",
+    subject_key: offlineDestinationSubjectKey(channelId),
+    tracked_user_key: "__channel__"
+  });
+}
+
+function offlineDestinationSubjectKey(channelId) {
+  return `channel:${String(channelId || "").trim()}`;
+}
+
+function offlineDestinationStateRow({
+  guildId,
+  channelId,
+  checkedAt,
+  lastAlertAt = null,
+  lastMessageId = null,
+  lastError = null
+}) {
+  return {
+    guild_id: guildId,
+    scope: "clan",
+    subject_key: offlineDestinationSubjectKey(channelId),
+    tracked_user_key: "__channel__",
+    clan_name: null,
+    clan_key: null,
+    user_id: null,
+    username: null,
+    discord_user_id: null,
+    last_points: null,
+    last_snapshot_at: null,
+    last_gain_at: null,
+    offline_since: null,
+    offline_minutes: null,
+    alert_active: false,
+    last_alert_at: lastAlertAt,
+    last_alert_message_id: lastMessageId,
+    last_error: lastError,
+    updated_at: checkedAt,
+    created_at: checkedAt
+  };
 }
 
 function offlineStateMapKey(row) {
@@ -19211,6 +19377,20 @@ function normalizeText(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+}
+
+function discordHourlyAssignmentKey(channelId, storedTarget) {
+  const channel = String(channelId || "").trim();
+  const raw = String(storedTarget || "").trim();
+  if (!channel || !raw) return "";
+
+  const lower = raw.toLowerCase();
+  const isUser = lower.startsWith("user:");
+  const target = isUser ? raw.slice("user:".length).trim() : raw;
+  const key = normalizeText(target);
+  if (!key) return "";
+
+  return `${channel}:${isUser ? "user" : "clan"}:${key}`;
 }
 
 function battleKey(env) {
