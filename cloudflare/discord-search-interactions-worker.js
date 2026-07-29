@@ -30,13 +30,14 @@ const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
-const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
+const HISTORY_VIEWS = ["clan", "league"];
 const HISTORY_VIEW_LABELS = {
   clan: "Clan Battle History",
-  league: "League History",
-  leaderboard: "Leaderboard History"
+  league: "League History"
 };
 const DEFAULT_HISTORY_PAGE_SIZE = 10;
+const HISTORY_RENDER_CACHE_TTL_SECONDS = 20 * 60;
+const HISTORY_RENDER_MEMORY_CACHE_MAX = 80;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 10, 100, 250, 500, 1000, 10000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
 const DEFAULT_LEAGUE_REWARD_CUTOFF_RANKS = [1, 3, 15, 50, 100, 250, 2000];
@@ -66,6 +67,7 @@ const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "h
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
 const SELF_TIMEOUT_DAYS = 7;
 let chartDuckImagePromise = null;
+const historyRenderMemoryCache = new Map();
 
 export default {
   async fetch(request, env, ctx) {
@@ -5351,7 +5353,8 @@ function handleHistoryComponent(interaction, env, ctx) {
     targetId: state.targetId,
     ownerId: state.ownerId,
     view: state.view,
-    page: state.page
+    page: state.page,
+    cacheId: state.cacheId
   }));
 
   return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
@@ -5359,13 +5362,24 @@ function handleHistoryComponent(interaction, env, ctx) {
 
 async function completeHistoryInteraction(interaction, env, state) {
   try {
+    const imageEnabled = historyImageResponses(env);
+    if (imageEnabled && state.cacheId) {
+      const cached = await buildCachedHistoryMessage(state, env);
+      if (cached) {
+        await editOriginalInteraction(interaction, cached);
+        return;
+      }
+    }
+
     const history = await loadHistoryCommandData(state.query, env);
     await editOriginalInteraction(interaction, await renderHistoryMessage(history, {
       ownerId: state.ownerId,
       view: state.view,
       page: state.page,
       pageSize: historyPageSize(env),
-      imageEnabled: historyImageResponses(env)
+      imageEnabled,
+      cacheId: state.cacheId,
+      env
     }));
   } catch (err) {
     await editOriginalInteraction(interaction, {
@@ -5440,20 +5454,21 @@ function interactionUsername(interaction) {
   ).trim() || "user";
 }
 
-function historyCustomId(ownerId, targetId, view, page, action = "open") {
-  return ["history", ownerId, targetId, view, Math.max(0, Math.trunc(Number(page) || 0)), action].join("|");
+function historyCustomId(ownerId, targetId, view, page, action = "open", cacheId = "") {
+  return ["history", ownerId, targetId, view, Math.max(0, Math.trunc(Number(page) || 0)), action, historyCacheIdPart(cacheId)].filter((part, index) => index < 6 || part).join("|");
 }
 
 function parseHistoryCustomId(value) {
   const parts = String(value || "").split("|");
-  if (![5, 6].includes(parts.length) || parts[0] !== "history") return null;
+  if (![5, 6, 7].includes(parts.length) || parts[0] !== "history") return null;
   const ownerId = String(parts[1] || "");
   const targetId = String(parts[2] || "");
   const view = String(parts[3] || "").toLowerCase();
   const page = Math.max(0, Math.trunc(Number(parts[4]) || 0));
   const action = String(parts[5] || "open");
+  const cacheId = historyCacheIdPart(parts[6] || "");
   if (!/^\d+$/.test(ownerId) || !/^\d+$/.test(targetId) || !HISTORY_VIEWS.includes(view) || !/^[a-z_]+$/.test(action)) return null;
-  return { ownerId, targetId, view, page };
+  return { ownerId, targetId, view, page, cacheId };
 }
 
 async function loadHistoryCommandData(query, env) {
@@ -5553,10 +5568,6 @@ async function loadHistoryCommandData(query, env) {
     normalizeLeagueHistoryRows(leagueHistory?.rows),
     normalizeLeagueHistoryRows(staticProfile?.league_summaries)
   );
-  const combinedLeaderboardRows = mergeHistorySummaryRows(
-    leaderboardRows,
-    normalizeLeaderboardHistoryRows(staticProfile?.leaderboard_summaries)
-  );
   const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
     || absoluteProfileAssetUrl(staticProfile?.avatar_url, env);
 
@@ -5568,8 +5579,7 @@ async function loadHistoryCommandData(query, env) {
     clan_join_time: globalPayload?.row?.join_time || null,
     clan: [...clanMap.values()],
     league: leagueRows,
-    league_unavailable: leagueHistory === null && leagueRows.length === 0,
-    leaderboard: combinedLeaderboardRows
+    league_unavailable: leagueHistory === null && leagueRows.length === 0
   };
 }
 
@@ -5799,7 +5809,7 @@ function normalizeLeagueHistoryRows(rows) {
       player_rank: finiteHistoryNumber(row.player_league_rank ?? row.member_rank ?? row.final_rank ?? row.best_rank),
       points: finiteHistoryNumber(row.final_points ?? row.points ?? row.highest_points)
     };
-  }).filter(row => row.key && (row.league_rank !== null || row.player_rank !== null || row.points !== null));
+  }).filter(row => row.key && !isSyntheticLeagueHistoryRow(row) && (row.league_rank !== null || row.player_rank !== null || row.points !== null));
 }
 
 function normalizeLeaderboardHistoryRows(rows) {
@@ -6455,7 +6465,7 @@ async function renderHistoryMessage(history, options) {
       : `No ${HISTORY_VIEW_LABELS[view].toLowerCase()} has been recorded for this player.`;
   const fallbackEmbed = {
     title: `${truncateHistoryText(history.username, 80)} — ${HISTORY_VIEW_LABELS[view]}`,
-    color: view === "league" ? 0xf2cc60 : view === "leaderboard" ? 0x58a6ff : 0xff6b6b,
+    color: view === "league" ? 0xf2cc60 : 0xff6b6b,
     description: truncateHistoryText(description, 4000)
   };
   if (history.avatar_url) fallbackEmbed.thumbnail = { url: history.avatar_url };
@@ -6464,23 +6474,32 @@ async function renderHistoryMessage(history, options) {
     targetId: String(history.user_id),
     view,
     page: 0,
-    totalPages: 1
+    totalPages: 1,
+    cacheId: options.cacheId
   });
 
   if (options.imageEnabled !== false) {
     try {
       const filename = `c0ld-history-${history.user_id}-${view}.png`;
-      const bytes = await renderHistoryCardPng(history, view);
-      return {
-        content: null,
-        embeds: [{
-          color: 0xff6469,
-          image: { url: `attachment://${filename}` }
-        }],
-        components,
-        allowed_mentions: { parse: [] },
-        _file: { filename, contentType: "image/png", bytes }
-      };
+      const cacheId = options.cacheId || historyCreateCacheId(history.user_id);
+      const prepared = await prepareHistoryRenderCache(history, {
+        env: options.env,
+        ownerId: options.ownerId,
+        cacheId
+      });
+      const bytes = prepared.get(view) || await renderHistoryCardPng(history, view);
+      return historyImageMessage({
+        filename,
+        bytes,
+        components: historyComponents({
+          ownerId: options.ownerId,
+          targetId: String(history.user_id),
+          view,
+          page: 0,
+          totalPages: 1,
+          cacheId
+        })
+      });
     } catch (err) {
       console.warn("history image rendering failed", err?.message || String(err));
     }
@@ -6493,6 +6512,220 @@ async function renderHistoryMessage(history, options) {
     components,
     allowed_mentions: { parse: [] }
   };
+}
+
+async function buildCachedHistoryMessage(state, env) {
+  const view = HISTORY_VIEWS.includes(state.view) ? state.view : "clan";
+  const cacheId = historyCacheIdPart(state.cacheId);
+  if (!cacheId) return null;
+
+  const [meta, bytes] = await Promise.all([
+    historyGetCachedJson(env, "meta", cacheId),
+    historyGetCachedBytes(env, "image", cacheId, view)
+  ]);
+  if (!meta || !bytes?.byteLength) return null;
+
+  const ownerId = String(meta.owner_id || state.ownerId || "");
+  const targetId = String(meta.user_id || state.targetId || "");
+  if (ownerId && ownerId !== state.ownerId) return null;
+  if (!targetId) return null;
+
+  return historyImageMessage({
+    filename: `c0ld-history-${targetId}-${view}.png`,
+    bytes,
+    components: historyComponents({
+      ownerId: state.ownerId,
+      targetId,
+      view,
+      page: state.page || 0,
+      totalPages: 1,
+      cacheId
+    })
+  });
+}
+
+function historyImageMessage({ filename, bytes, components }) {
+  return {
+    content: null,
+    embeds: [{
+      color: 0xff6469,
+      image: { url: `attachment://${filename}` }
+    }],
+    components,
+    allowed_mentions: { parse: [] },
+    _file: { filename, contentType: "image/png", bytes }
+  };
+}
+
+async function prepareHistoryRenderCache(history, options = {}) {
+  const cacheId = historyCacheIdPart(options.cacheId) || historyCreateCacheId(history.user_id);
+  const env = options.env || {};
+  const ownerId = String(options.ownerId || "");
+  const rendered = new Map();
+  const meta = {
+    cache_id: cacheId,
+    owner_id: ownerId,
+    user_id: String(history.user_id || ""),
+    username: history.username || null,
+    avatar_url: history.avatar_url || null,
+    created_at: new Date().toISOString()
+  };
+
+  await historyPutCachedJson(env, "meta", cacheId, meta);
+
+  await Promise.all(HISTORY_VIEWS.map(async candidate => {
+    const existing = await historyGetCachedBytes(env, "image", cacheId, candidate);
+    if (existing?.byteLength) {
+      rendered.set(candidate, existing);
+      return;
+    }
+
+    const bytes = await renderHistoryCardPng(history, candidate);
+    rendered.set(candidate, bytes);
+    await historyPutCachedBytes(env, "image", cacheId, candidate, bytes, "image/png");
+  }));
+
+  return rendered;
+}
+
+function historyCreateCacheId(userId) {
+  let randomPart = Math.random().toString(36).slice(2, 10);
+  try {
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    randomPart = [...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    // Math.random fallback is fine for a short-lived render cache key.
+  }
+  return historyCacheIdPart(`${userId || "player"}-${Date.now().toString(36)}-${randomPart}`);
+}
+
+function historyCacheIdPart(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 48);
+}
+
+function historyRenderCacheTtlSeconds(env) {
+  const value = Math.round(Number(env?.HISTORY_RENDER_CACHE_TTL_SECONDS || HISTORY_RENDER_CACHE_TTL_SECONDS));
+  return Number.isFinite(value) ? Math.min(3600, Math.max(60, value)) : HISTORY_RENDER_CACHE_TTL_SECONDS;
+}
+
+function historyRenderCacheKey(kind, cacheId, view = "meta") {
+  return ["history-render", kind, historyCacheIdPart(cacheId), String(view || "meta").toLowerCase()].join(":");
+}
+
+function historyRenderCacheRequest(kind, cacheId, view = "meta") {
+  return new Request(`https://c0ld-history-cache.local/${encodeURIComponent(kind)}/${encodeURIComponent(historyCacheIdPart(cacheId))}/${encodeURIComponent(String(view || "meta").toLowerCase())}`, {
+    method: "GET"
+  });
+}
+
+function historySetMemoryCache(key, value, env) {
+  const ttlMs = historyRenderCacheTtlSeconds(env) * 1000;
+  historyRenderMemoryCache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs
+  });
+  historySweepMemoryCache();
+}
+
+function historyGetMemoryCache(key) {
+  const entry = historyRenderMemoryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    historyRenderMemoryCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function historySweepMemoryCache() {
+  const now = Date.now();
+  for (const [key, entry] of historyRenderMemoryCache) {
+    if (now > entry.expiresAt) historyRenderMemoryCache.delete(key);
+  }
+  while (historyRenderMemoryCache.size > HISTORY_RENDER_MEMORY_CACHE_MAX) {
+    const oldestKey = historyRenderMemoryCache.keys().next().value;
+    if (!oldestKey) break;
+    historyRenderMemoryCache.delete(oldestKey);
+  }
+}
+
+async function historyPutCachedBytes(env, kind, cacheId, view, bytes, contentType = "application/octet-stream") {
+  const key = historyRenderCacheKey(kind, cacheId, view);
+  const storedBytes = bytes instanceof Uint8Array ? new Uint8Array(bytes) : new Uint8Array(bytes || []);
+  historySetMemoryCache(key, storedBytes, env);
+
+  if (typeof caches === "undefined" || !caches.default) return;
+  try {
+    await caches.default.put(
+      historyRenderCacheRequest(kind, cacheId, view),
+      new Response(storedBytes, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": `public, max-age=${historyRenderCacheTtlSeconds(env)}`
+        }
+      })
+    );
+  } catch {
+    // Memory cache still keeps button swaps fast on the current worker isolate.
+  }
+}
+
+async function historyGetCachedBytes(env, kind, cacheId, view) {
+  const key = historyRenderCacheKey(kind, cacheId, view);
+  const memory = historyGetMemoryCache(key);
+  if (memory instanceof Uint8Array && memory.byteLength) return new Uint8Array(memory);
+
+  if (typeof caches === "undefined" || !caches.default) return null;
+  try {
+    const response = await caches.default.match(historyRenderCacheRequest(kind, cacheId, view));
+    if (!response?.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength) historySetMemoryCache(key, bytes, env);
+    return bytes.byteLength ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function historyPutCachedJson(env, kind, cacheId, value) {
+  const key = historyRenderCacheKey(kind, cacheId);
+  const storedValue = JSON.parse(JSON.stringify(value || {}));
+  historySetMemoryCache(key, storedValue, env);
+
+  if (typeof caches === "undefined" || !caches.default) return;
+  try {
+    await caches.default.put(
+      historyRenderCacheRequest(kind, cacheId),
+      new Response(JSON.stringify(storedValue), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": `public, max-age=${historyRenderCacheTtlSeconds(env)}`
+        }
+      })
+    );
+  } catch {
+    // Cache API misses only mean the next click may fall back to a full render.
+  }
+}
+
+async function historyGetCachedJson(env, kind, cacheId) {
+  const key = historyRenderCacheKey(kind, cacheId);
+  const memory = historyGetMemoryCache(key);
+  if (memory && typeof memory === "object" && !(memory instanceof Uint8Array)) {
+    return JSON.parse(JSON.stringify(memory));
+  }
+
+  if (typeof caches === "undefined" || !caches.default) return null;
+  try {
+    const response = await caches.default.match(historyRenderCacheRequest(kind, cacheId));
+    if (!response?.ok) return null;
+    const value = await response.json().catch(() => null);
+    if (value) historySetMemoryCache(key, value, env);
+    return value;
+  } catch {
+    return null;
+  }
 }
 
 function formatHistoryLine(row, view, number) {
@@ -6519,15 +6752,15 @@ function historyPoints(value) {
   return finiteHistoryNumber(value) === null ? "—" : shortNumber(value);
 }
 
-function historyComponents({ ownerId, targetId, view, page, totalPages }) {
+function historyComponents({ ownerId, targetId, view, page, totalPages, cacheId = "" }) {
   const rows = [];
   if (totalPages > 1) {
     rows.push({
       type: COMPONENT_TYPE_ACTION_ROW,
       components: [
-        historyButton("Previous", historyCustomId(ownerId, targetId, view, page - 1, "previous"), BUTTON_STYLE_SECONDARY, page <= 0),
-        historyButton(`Page ${page + 1}/${totalPages}`, historyCustomId(ownerId, targetId, view, page, "indicator"), BUTTON_STYLE_SECONDARY, true),
-        historyButton("Next", historyCustomId(ownerId, targetId, view, page + 1, "next"), BUTTON_STYLE_SECONDARY, page >= totalPages - 1)
+        historyButton("Previous", historyCustomId(ownerId, targetId, view, page - 1, "previous", cacheId), BUTTON_STYLE_SECONDARY, page <= 0),
+        historyButton(`Page ${page + 1}/${totalPages}`, historyCustomId(ownerId, targetId, view, page, "indicator", cacheId), BUTTON_STYLE_SECONDARY, true),
+        historyButton("Next", historyCustomId(ownerId, targetId, view, page + 1, "next", cacheId), BUTTON_STYLE_SECONDARY, page >= totalPages - 1)
       ]
     });
   }
@@ -6536,7 +6769,7 @@ function historyComponents({ ownerId, targetId, view, page, totalPages }) {
     type: COMPONENT_TYPE_ACTION_ROW,
     components: HISTORY_VIEWS.map(candidate => historyButton(
       HISTORY_VIEW_LABELS[candidate],
-      historyCustomId(ownerId, targetId, candidate, 0, `view_${candidate}`),
+      historyCustomId(ownerId, targetId, candidate, 0, `view_${candidate}`, cacheId),
       candidate === view ? BUTTON_STYLE_PRIMARY : BUTTON_STYLE_SECONDARY,
       false
     ))
@@ -6613,16 +6846,19 @@ async function renderHistoryCardPng(history, view) {
   const width = 1200;
   const margin = 32;
   const headerHeight = 176;
-  const rowHeight = 42;
+  const summaryHeight = 104;
+  const panelGap = 14;
+  const rowHeight = 56;
   const visibleRows = rows.length ? rows : [null];
-  const rowAreaHeight = Math.max(382, visibleRows.length * rowHeight + 34);
-  const height = Math.max(660, headerHeight + rowAreaHeight + 84);
+  const rowAreaHeight = Math.max(382, 66 + visibleRows.length * rowHeight + 18);
+  const height = Math.max(780, headerHeight + summaryHeight + panelGap + rowAreaHeight + 64);
   const color = searchChartBoardColors();
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const accent = historyModernAccent(selectedView, color);
   const fontsWithRows = { ...fonts, rowBold: fonts.hourlyBold || fonts.bold };
   const name = historyCardText(history.username || `user_${history.user_id}`, 42);
   const title = HISTORY_VIEW_LABELS[selectedView];
+  const highlight = historyViewHighlight(rows, selectedView);
 
   canvas.fillRect(margin, 24, width - margin * 2, height - 48, color.panel);
   hourlyDrawMysticSmoke(canvas, width, height, color);
@@ -6632,7 +6868,10 @@ async function renderHistoryCardPng(history, view) {
   searchChartDrawAvatarBadge(canvas, fontsWithRows, name, avatar, width / 2 - 42, 62, 84, color);
   historyModernDrawHeader(canvas, fontsWithRows, name, title, width / 2, 94, color);
 
-  const rightPanel = { x: margin + 22, y: headerHeight, w: width - margin * 2 - 44, h: rowAreaHeight };
+  const summaryPanel = { x: margin + 22, y: headerHeight, w: width - margin * 2 - 44, h: summaryHeight };
+  const rightPanel = { x: summaryPanel.x, y: summaryPanel.y + summaryPanel.h + panelGap, w: summaryPanel.w, h: rowAreaHeight };
+  historyModernDrawSummaryStrip(canvas, fontsWithRows, historyModernMetricRows(history, rows, selectedView, highlight, color), summaryPanel, color);
+
   hourlyDrawPanel(canvas, rightPanel.x, rightPanel.y, rightPanel.w, rightPanel.h, color.panelDeep, color.line);
   hourlyDrawColumnAura(canvas, rightPanel.x, rightPanel.y, rightPanel.w, rightPanel.h, 1, color);
   hourlyDrawColumnHeader(canvas, fontsWithRows, rightPanel.x, rightPanel.y, rightPanel.w, 50, [title, `${fullNumber(rows.length)} record${rows.length === 1 ? "" : "s"}`], 1, color);
@@ -6641,21 +6880,60 @@ async function renderHistoryCardPng(history, view) {
   visibleRows.forEach((row, index) => {
     const y = listTop + index * rowHeight;
     if (row) {
-      historyModernDrawRecordRow(canvas, fontsWithRows, row, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight - 5, index, color, accent);
+      const rowAccent = selectedView === "clan" ? historyClanAccent(row.clan_name, color) : accent;
+      historyModernDrawRecordRow(canvas, fontsWithRows, row, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight - 5, index, color, rowAccent);
     } else {
       historyModernDrawEmptyRow(canvas, fontsWithRows, history, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight + 20, color);
     }
   });
 
   hourlyDrawMistDivider(canvas, margin + 24, height - 58, width - margin * 2 - 48, color);
-  canvas.drawFontText(fonts.regular, "Luna Pet Sim 99 Bot | Player History", margin + 34, height - 40, 13, color.muted, 520);
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
 function historyModernAccent(view, color) {
   if (view === "league") return color.yellow;
-  if (view === "leaderboard") return color.cyan;
   return color.red;
+}
+
+function historyClanAccent(clanName, color) {
+  const normalized = String(clanName || "").trim().toUpperCase();
+  if (normalized === "COLD" || normalized === "C0LD") return color.green;
+  if (normalized === "NONG") return [88, 166, 255, 255];
+  if (normalized === "NXNG") return [255, 154, 74, 255];
+  const palette = [
+    color.red,
+    color.yellow,
+    color.cyan,
+    color.violet,
+    color.pink,
+    color.orange,
+    [88, 166, 255, 255],
+    [104, 218, 159, 255],
+    [255, 126, 174, 255]
+  ];
+  const key = normalized || "UNKNOWN";
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
+function isSyntheticLeagueHistoryRow(row) {
+  const values = [
+    row?.key,
+    row?.name,
+    row?.league_name
+  ].map(value => String(value || "").trim().toLowerCase());
+  return values.some(value => {
+    const compact = value.replace(/[^a-z0-9]+/g, "");
+    const underscored = value.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    return compact.startsWith("globalleagueplayer")
+      || compact.startsWith("globalleagueplayers")
+      || underscored.startsWith("global_league_player")
+      || underscored.startsWith("global_league_players");
+  });
 }
 
 function historyModernDrawHeader(canvas, fonts, playerName, title, centerX, y, color) {
@@ -6675,31 +6953,77 @@ function historyModernMetricRows(history, rows, view, highlight, color) {
   const globalBest = bestGlobalPerformanceRows(rows);
   const leagueBest = view === "league"
     ? rows.reduce((best, row) => {
-        const rankValue = positiveInteger(row.player_rank);
+        const rankValue = positiveInteger(row.league_rank);
         return rankValue && (!best || rankValue < best) ? rankValue : best;
       }, null)
     : null;
+  if (view === "league") {
+    return [
+      { label: "Player ID", value: historyCardText(history.user_id || "-", 18), tone: color.muted },
+      { label: "Records", value: fullNumber(rows.length), tone: rows.length ? color.green : color.zeroText },
+      { label: "Best League Rank", value: leagueBest ? rank(leagueBest) : "-", tone: color.yellow }
+    ];
+  }
   const currentClan = historyCardText(String(history.current_clan || "-").toUpperCase(), 16);
-  const maxPoints = Math.max(1, ...rows.map(row => finiteHistoryNumber(row?.points) || 0));
   return [
     { label: "Player ID", value: historyCardText(history.user_id || "-", 18), tone: color.muted },
     { label: "View", value: HISTORY_VIEW_LABELS[view], tone: historyModernAccent(view, color) },
     { label: "Records", value: fullNumber(rows.length), tone: rows.length ? color.green : color.zeroText },
-    { label: view === "league" ? "Best Player Rank" : "Best Global Rank", value: view === "league" ? (leagueBest ? rank(leagueBest) : "-") : (globalBest ? rank(globalBest.rank) : "-"), tone: color.yellow },
-    { label: "Best Finish", value: globalBest ? historyTopLabel(globalBest.percent) : historyCardText(highlight.value, 20), tone: highlight.tone === "gold" ? color.yellow : color.green },
-    { label: "Current Clan", value: currentClan || "-", tone: color.green },
-    { label: "Highest Points", value: rows.length ? shortNumber(maxPoints) : "-", tone: color.red, barFraction: rows.length ? 1 : null }
+    { label: "Best Global Rank", value: globalBest ? rank(globalBest.rank) : "-", tone: color.yellow },
+    {
+      label: "Top Performance",
+      value: globalBest ? historyTopLabel(globalBest.percent) : historyCardText(highlight.value, 20),
+      tone: highlight.tone === "gold" ? color.yellow : color.green
+    },
+    { label: "Current Clan", value: currentClan || "-", tone: color.green }
   ];
+}
+
+function historyModernDrawSummaryStrip(canvas, fonts, metrics, panel, color) {
+  hourlyDrawPanel(canvas, panel.x, panel.y, panel.w, panel.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, panel.x, panel.y, panel.w, panel.h, 2, color);
+
+  const visibleMetrics = (metrics || [])
+    .filter(metric => !["View"].includes(metric.label))
+    .slice(0, 6);
+  const gap = 8;
+  const inset = 12;
+  const cellWidth = Math.floor((panel.w - inset * 2 - gap * (visibleMetrics.length - 1)) / Math.max(1, visibleMetrics.length));
+  const cellY = panel.y + 18;
+  const cellHeight = panel.h - 36;
+  visibleMetrics.forEach((metric, index) => {
+    const x = panel.x + inset + index * (cellWidth + gap);
+    hourlyDrawPlayerRowShell(canvas, x, cellY, cellWidth, cellHeight, index, metric.barFraction !== null && metric.barFraction !== undefined, color);
+    historyDrawCleanCenteredText(canvas, fonts.rowBold || fonts.bold, metric.label, x + cellWidth / 2, cellY + 10, 12, color.muted, cellWidth - 24);
+    historyDrawCleanCenteredText(canvas, fonts.rowBold || fonts.bold, metric.value, x + cellWidth / 2, cellY + 31, 18, metric.tone, cellWidth - 24);
+    if (metric.barFraction !== null && metric.barFraction !== undefined) {
+      historyDrawBetterThanBar(canvas, x + 12, cellY + cellHeight - 14, cellWidth - 24, 6, metric.barFraction, color);
+    }
+  });
 }
 
 function historyModernDrawRecordRow(canvas, fonts, row, view, x, y, width, height, index, color, accent) {
   const record = historyModernRecordParts(row, view);
+  const tagTone = view === "clan" ? accent : record.tagTone;
   hourlyDrawPlayerRowShell(canvas, x, y, width, height, index, true, color);
   canvas.fillRect(x + 12, y + 8, 5, height - 16, accent);
-  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(record.title, 44), x + 28, y + 7, 16, color.white, width * 0.34);
-  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, record.tag, x + Math.floor(width * 0.39), y + 7, 14, record.tagTone, width * 0.17);
-  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, record.rank, x + Math.floor(width * 0.58), y + 7, 14, color.yellow, width * 0.18);
-  hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, record.points, x + width - 18, y + 7, 14, color.red, width * 0.18);
+  const titleX = x + 28;
+  const pointsX = x + Math.floor(width * 0.29);
+  const rankX = x + Math.floor(width * 0.46);
+  const barX = x + Math.floor(width * 0.63);
+  const pctX = x + width - 18;
+  const barW = Math.max(80, pctX - barX - 72);
+  const betterThan = historyBetterThanPercent(row);
+  const betterFraction = betterThan === null ? null : betterThan / 100;
+
+  historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(record.title, 38), titleX, y + 6, 16, color.white, Math.max(150, pointsX - titleX - 18));
+  historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, record.tag, titleX, y + 28, 12, tagTone, Math.max(150, pointsX - titleX - 18));
+  historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, record.points, pointsX, y + 15, 15, color.red, Math.max(110, rankX - pointsX - 18));
+  historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, record.rank, rankX, y + 15, 15, color.yellow, Math.max(120, barX - rankX - 18));
+  if (betterFraction !== null) {
+    historyDrawBetterThanBar(canvas, barX, y + 22, barW, 8, betterFraction, color);
+    historyDrawCleanRightText(canvas, fonts.rowBold || fonts.bold, `${historyPercentLabel(betterThan)}%`, pctX, y + 18, 13, color.green, 66);
+  }
 }
 
 function historyModernDrawEmptyRow(canvas, fonts, history, view, x, y, width, height, color) {
@@ -6717,7 +7041,7 @@ function historyModernRecordParts(row, view) {
       tag: `Player ${historyCardRank(row.player_rank)}`,
       tagTone: [247, 211, 83, 255],
       rank: `League ${historyCardRank(row.league_rank)}`,
-      points: `${historyCardPoints(row.points)} pts`
+      points: historyCardPointLabel(row.points)
     };
   }
   if (view === "clan") {
@@ -6725,8 +7049,8 @@ function historyModernRecordParts(row, view) {
       title: row.name || "Unknown Battle",
       tag: historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 10),
       tagTone: [76, 211, 132, 255],
-      rank: `Global ${historyCardRank(row.global_rank, row.total_global_players)}`,
-      points: `${historyCardPoints(row.points)} pts`
+      rank: historyCardRank(row.global_rank, row.total_global_players),
+      points: historyCardPointLabel(row.points)
     };
   }
   return {
@@ -6734,7 +7058,7 @@ function historyModernRecordParts(row, view) {
     tag: "Global",
     tagTone: [52, 225, 239, 255],
     rank: historyCardRank(row.global_rank, row.total_global_players),
-    points: `${historyCardPoints(row.points)} pts`
+    points: historyCardPointLabel(row.points)
   };
 }
 
@@ -6980,6 +7304,68 @@ function historyRowPercent(row) {
   return rank && total ? rank / total * 100 : null;
 }
 
+function historyDrawCleanFittedText(canvas, font, value, x, y, size, rgba, maxWidth = Infinity) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
+  canvas.drawFontText(font, fitted, Math.round(x), Math.round(y), size, rgba, maxWidth);
+}
+
+function historyDrawCleanRightText(canvas, font, value, rightX, y, size, rgba, maxWidth = Infinity) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
+  const width = canvas.measureFontText(font, fitted, size);
+  canvas.drawFontText(font, fitted, Math.round(rightX - width), Math.round(y), size, rgba, width + 4);
+}
+
+function historyDrawCleanCenteredText(canvas, font, value, centerX, y, size, rgba, maxWidth = Infinity) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 10000), size, maxWidth);
+  const width = canvas.measureFontText(font, fitted, size);
+  canvas.drawFontText(font, fitted, Math.round(centerX - width / 2), Math.round(y), size, rgba, width + 4);
+}
+
+function historyBetterThanPercent(row) {
+  const rank = positiveInteger(row?.global_rank);
+  const total = positiveInteger(row?.total_global_players);
+  if (!rank || !total) return null;
+  return Math.max(0, Math.min(100, (total - rank) / total * 100));
+}
+
+function historyBetterThanPercentFromTopPercent(topPercent) {
+  if (!Number.isFinite(topPercent)) return null;
+  return Math.max(0, Math.min(100, 100 - topPercent));
+}
+
+function historyPercentLabel(value) {
+  if (!Number.isFinite(value)) return "N/A";
+  return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+}
+
+function historyDrawBetterThanBar(canvas, x, y, width, height, fraction, color) {
+  const barX = Math.round(x);
+  const barY = Math.round(y);
+  const barW = Math.max(1, Math.round(width));
+  const barH = Math.max(1, Math.round(height));
+  const pct = Math.max(0, Math.min(1, Number(fraction) || 0));
+  hourlyFillRoundedRect(canvas, barX, barY, barW, barH, Math.min(4, Math.floor(barH / 2)), color.bar || color.track || [48, 55, 72, 255]);
+  const fillW = Math.max(0, Math.min(barW, Math.round(barW * pct)));
+  for (let dx = 0; dx < fillW; dx += 1) {
+    const t = fillW <= 1 ? 1 : dx / (fillW - 1);
+    const blend = t < 0.58 ? t / 0.58 : (t - 0.58) / 0.42;
+    const start = t < 0.58 ? color.violet : color.cyan;
+    const end = t < 0.58 ? color.cyan : color.green;
+    const rgba = historyMixColor(start, end, blend);
+    canvas.fillRect(barX + dx, barY, 1, barH, rgba);
+  }
+}
+
+function historyMixColor(start, end, amount) {
+  const t = Math.max(0, Math.min(1, Number(amount) || 0));
+  return [
+    Math.round((start?.[0] ?? 0) + ((end?.[0] ?? 0) - (start?.[0] ?? 0)) * t),
+    Math.round((start?.[1] ?? 0) + ((end?.[1] ?? 0) - (start?.[1] ?? 0)) * t),
+    Math.round((start?.[2] ?? 0) + ((end?.[2] ?? 0) - (start?.[2] ?? 0)) * t),
+    Math.round((start?.[3] ?? 255) + ((end?.[3] ?? 255) - (start?.[3] ?? 255)) * t)
+  ];
+}
+
 function historyPerformanceTone(percent, color) {
   if (!Number.isFinite(percent)) return color.quiet || color.muted;
   if (percent <= 1) return color.gold;
@@ -7015,17 +7401,17 @@ function drawCombinedHistoryRow(canvas, fonts, row, view, x, y, width, color, ac
   }
   let details;
   if (view === "league") {
-    details = `${row.league_name || "Unknown"}  |  League ${historyCardRank(row.league_rank)}  |  Player ${historyCardRank(row.player_rank)}  |  ${historyCardPoints(row.points)} pts`;
+    details = `${row.league_name || "Unknown"}  |  League ${historyCardRank(row.league_rank)}  |  Player ${historyCardRank(row.player_rank)}  |  ${historyCardPointLabel(row.points)}`;
   } else if (view === "clan") {
     const clanName = historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 8);
     canvas.fillRect(x + 17, y + 35, 3, 17, accent);
     canvas.drawFontText(fonts.bold, clanName, x + 29, y + 33, 12, color.white, 54);
     canvas.fillRect(x + 91, y + 35, 1, 17, color.line);
-    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPoints(row.points)} pts`;
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPointLabel(row.points)}`;
     canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 103, y + 33, 13, color.muted, width - 116);
     return;
   } else {
-    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPoints(row.points)} pts`;
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPointLabel(row.points)}`;
   }
   canvas.fillRect(x + 17, y + 42, 5, 5, accent);
   canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 30, y + 33, 13, color.muted, width - 43);
@@ -7079,7 +7465,7 @@ function bestGlobalPerformanceRows(rows) {
 }
 
 function bestHistoryGlobalPerformance(history) {
-  const rows = [...(history.clan || []), ...(history.leaderboard || [])];
+  const rows = [...(history.clan || [])];
   return rows.reduce((best, row) => {
     const rank = positiveInteger(row.global_rank);
     const total = positiveInteger(row.total_global_players);
@@ -7095,6 +7481,10 @@ function historyCardRank(value, total) {
 }
 
 function historyCardPoints(value) {
+  return finiteHistoryNumber(value) === null ? "N/A" : historyPoints(value);
+}
+
+function historyCardPointLabel(value) {
   return finiteHistoryNumber(value) === null ? "N/A" : historyPoints(value);
 }
 
