@@ -1068,6 +1068,12 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish hatches from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
 | `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new hatches are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
+| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. |
+| `HATCH_BASELINE_STABLE_COMPARISONS` | Optional. Defaults to `1`; number of clean snapshot comparisons required after setup or a baseline reset before HTG alerts can post. |
+| `HATCH_BACKFILL_MIN_ITEM_GROWTH` | Optional. Defaults to `25`; minimum snapshot stack-count jump considered a possible inventory backfill when HTG gains are present. |
+| `HATCH_BACKFILL_ITEM_GROWTH_RATIO` | Optional. Defaults to `0.05`; required stack-count growth ratio for the backfill guard. |
+| `HATCH_BACKFILL_HTG_GAIN_COUNT` | Optional. Defaults to `2`; HTG gained count that can trigger the bulk-gain backfill guard. |
+| `HATCH_BACKFILL_TOTAL_GAIN_COUNT` | Optional. Defaults to `20`; total gained stack count that can trigger the bulk-inventory backfill guard. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
 
@@ -1155,13 +1161,14 @@ back to the previous Supabase username/display name before showing a raw user
 ID. `/debug` includes `usernameLookupMisses` and `previousUsernameFallbacks`
 inside `board.summary`.
 
-## Luna global `/hourly` clan boards
+## Luna global `/hourly` picture posts
 
-The Luna Discord interactions Worker supports the hourly image-board idea for
-any PS99 clan:
+The Luna Discord interactions Worker supports hourly image posts for either
+a PS99 clan board or a single user's `/search` picture:
 
 ```text
-/hourly assign clan:WMSY channel:#hourly-gains
+/hourly clan clan:WMSY channel:#hourly-gains
+/hourly user username:Cinnamowopal channel:#hourly-gains
 ```
 
 `channel` is optional and defaults to the channel or thread where the command
@@ -1193,15 +1200,15 @@ Worker needs an hourly cron trigger:
 ```
 
 Assignments are stored per Discord channel/thread ID. Assigning the same
-destination again replaces its clan without affecting assignments in other
-servers. Luna posts a first board immediately, then one board per hour. Each
-assigned clan is collected independently.
+destination again replaces its hourly target without affecting assignments in
+other servers. Luna posts a first image immediately, then one image per hour.
+Each assigned clan or user is collected independently.
 
 Use `GET /admin/hourly/status` with the Luna Discord Worker's admin token to
 verify stored assignments, due state, the last Discord error, and whether the
-required bot/API tokens are present. If `/hourly assign` works but no hourly
-post follows, make sure the worker receiving Discord interactions is the same
-deployed worker that has the `0 * * * *` cron trigger.
+required bot/API tokens are present. If `/hourly clan` or `/hourly user` works
+but no hourly post follows, make sure the worker receiving Discord interactions
+is the same deployed worker that has the `0 * * * *` cron trigger.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for
@@ -1285,7 +1292,7 @@ supabase/migrations/008_c0ld_servers.sql
 ### Discord private-server tracker
 
 The same Worker also supports guild-local Roblox private-server tracking for
-the `/server` and `/tracking` commands. Run:
+the `/server`, `/add`, and `/remove` commands. Run:
 
 ```text
 supabase/migrations/033_private_server_tracker.sql
@@ -1341,7 +1348,7 @@ Set these on `c0ld-discord-search`:
 
 Any guild member can use `/server add`, `/server list`, and `/server who`.
 Discord members with Administrator, Manage Server, or a configured tracker-admin
-role can use `/server remove`, `/tracking enable`, and `/tracking disable`.
+role can use `/server assign`, `/server tracker`, and `/server remove`.
 `/server list` and `/server who` are available to guild members.
 
 After deploying both Workers, register the new commands with the existing
@@ -1357,8 +1364,8 @@ PowerShell helper:
 
 The tracker commands are:
 
-- `/tracking enable [channel]`
-- `/tracking disable`
+- `/server assign channel:<channel>`
+- `/server tracker`
 - `/server add link:<private-server-link> [place_id]`
 - `/server remove server:<S1>`
 - `/server list`

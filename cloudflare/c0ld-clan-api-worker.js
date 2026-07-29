@@ -101,6 +101,9 @@ const DEFAULT_OFFLINE_ALERT_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_OFFLINE_LOOKBACK_BUFFER_MINUTES = 30;
 const DEFAULT_MEMBER_SNAPSHOT_MIN_INTERVAL_MINUTES = 5;
 const DEFAULT_CLANS_SNAPSHOT_MIN_INTERVAL_MINUTES = 5;
+const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_MINUTES = 15;
+const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES = 0;
+const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCAN_LIMIT = 50;
 const DEFAULT_BATTLE_FINAL_PULL_GRACE_MINUTES = 0;
 const TOP_CLAN_REBIRTH_POINTS = 120;
 const DEFAULT_PS99_UNIVERSE_ID = 3317771874;
@@ -201,6 +204,7 @@ export default {
           snapshot_write_guards: battleSnapshotRuntimeConfig(env),
           global_rank_config: globalRankRuntimeConfig(env),
           clan_activity_config: clanActivityRuntimeConfig(env),
+          hourly_assignment_clan_config: hourlyAssignmentClanRuntimeConfig(env),
           offline_ping_config: offlinePingRuntimeConfig(env),
           ps99_version_config: ps99VersionRuntimeConfig(env),
           roblox_release_config: robloxReleaseRuntimeConfig(env),
@@ -252,7 +256,7 @@ export default {
         requireAdmin(request, env);
         response = await handleOfflinePingConfig(request, env);
       } else if (
-        ["GET", "POST", "PATCH"].includes(request.method)
+        ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
         && url.pathname === "/api/offline/clans"
       ) {
         requireAdmin(request, env);
@@ -524,10 +528,22 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
   const jobs = [];
 
   if (runBattleDataJobs) {
-    jobs.push(...clanNames(env).map(clan => ({
+    const configuredClans = clanNames(env);
+    jobs.push(...configuredClans.map(clan => ({
       label: `members:${clan}`,
       run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
     })));
+
+    if (force || (hourlyAssignmentClanIngestEnabled(env) && shouldRunHourlyAssignmentClanSchedule(env, scheduledAt))) {
+      const assignedHourlyClans = await fetchHourlyAssignmentClanNames(env, configuredClans).catch(err => {
+        console.warn("scheduled hourly assignment clan lookup failed", err?.message || String(err));
+        return [];
+      });
+      jobs.push(...assignedHourlyClans.map(clan => ({
+        label: `hourly-members:${clan}`,
+        run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
+      })));
+    }
 
     if (String(env.INGEST_CLANS_LEADERBOARD || "true").toLowerCase() !== "false") {
       jobs.push({
@@ -726,6 +742,31 @@ async function responseJson(response) {
   } catch {
     return null;
   }
+}
+
+async function fetchHourlyAssignmentClanNames(env, configuredClans = []) {
+  const configured = new Set((configuredClans || []).map(clan => normalizeText(clan)).filter(Boolean));
+  const rows = await supabaseSelect(env, DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE, {
+    select: "clan_name,enabled,updated_at",
+    enabled: "eq.true",
+    order: "updated_at.desc",
+    limit: String(hourlyAssignmentClanScanLimit(env))
+  });
+  const seen = new Set(configured);
+  const clans = [];
+
+  for (const row of rows) {
+    const raw = String(row?.clan_name || "").trim();
+    if (!raw || raw.toLowerCase().startsWith("user:")) continue;
+
+    const key = normalizeText(raw);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    clans.push(raw);
+  }
+
+  return clans;
 }
 
 async function handleDiscordHourlyClanAssignments(request, env) {
@@ -6573,7 +6614,12 @@ async function handleOfflinePingConfig(request, env) {
   if (body.updated_by !== undefined) patch.updated_by = stringOrNull(body.updated_by);
   if (request.method === "POST") patch.created_at = patch.updated_at;
 
+  const alertStateResetRequested = patch.minutes_threshold !== undefined || patch.enabled === false;
+
   await supabaseUpsert(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, [patch], "guild_id");
+  if (alertStateResetRequested) {
+    await resetOfflinePingAlertStateForGuild(env, requestedGuildId);
+  }
   const rows = await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, {
     select: "*",
     guild_id: `eq.${requestedGuildId}`,
@@ -6582,7 +6628,8 @@ async function handleOfflinePingConfig(request, env) {
 
   return noStoreJson({
     ok: true,
-    config: normalizeOfflinePingConfigOutput(rows[0] || patch)
+    config: normalizeOfflinePingConfigOutput(rows[0] || patch),
+    alert_state_reset: alertStateResetRequested
   });
 }
 
@@ -6610,6 +6657,33 @@ async function handleOfflinePingClans(request, env) {
   const body = await request.json().catch(() => ({}));
   const requestedGuildId = String(body.guild_id || guildId || "").trim();
   if (!/^\d{5,30}$/.test(requestedGuildId)) throw httpError(400, "Missing or invalid guild_id.");
+
+  if (request.method === "DELETE") {
+    const clanName = String(body.clan_name || body.name || body.clan || "").trim();
+    const clanKey = normalizeText(clanName);
+    if (!clanKey) throw httpError(400, "Add a clan name to remove.");
+
+    const existing = await supabaseSelect(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
+      select: "*",
+      guild_id: `eq.${requestedGuildId}`,
+      clan_key: `eq.${clanKey}`,
+      limit: "1"
+    });
+
+    await supabaseDelete(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
+      guild_id: `eq.${requestedGuildId}`,
+      clan_key: `eq.${clanKey}`
+    });
+    await deleteOfflinePingClanAlertState(env, requestedGuildId, clanKey);
+
+    return noStoreJson({
+      ok: true,
+      guild_id: requestedGuildId,
+      clan_name: clanName,
+      removed: Boolean(existing[0]),
+      clan: existing[0] ? normalizeOfflinePingClanOutput(existing[0]) : null
+    });
+  }
 
   const clanNamesValue = Array.isArray(body.clans)
     ? body.clans
@@ -6707,7 +6781,9 @@ async function handleOfflinePingUsers(request, env) {
       username: body.username || body.roblox_username,
       discord_user_id: body.discord_user_id,
       discord_label: body.discord_label,
-      clan_name: body.clan_name || body.clan
+      clan_name: body.clan_name || body.clan,
+      channel_id: body.channel_id || body.channel,
+      channel_type: body.channel_type
     }];
   const now = new Date().toISOString();
   const rows = [];
@@ -6726,12 +6802,17 @@ async function handleOfflinePingUsers(request, env) {
     const robloxKey = normalizeText(robloxUsername || usernameInput);
     const discordUserId = parseDiscordUserId(entry?.discord_user_id || entry?.discord || entry?.mention);
     const clanNameValue = stringOrNull(entry?.clan_name || entry?.clan);
+    const channelId = stringOrNull(entry?.channel_id || entry?.channel || body.channel_id || body.channel);
+    const channelType = toNumber(entry?.channel_type ?? body.channel_type);
 
     if (!identity.user_id) {
       warnings.push(`Roblox user ${usernameInput} was saved by name only; Luna could not resolve the numeric ID yet.`);
     }
     if (!discordUserId && (entry?.discord_user_id || entry?.discord || entry?.mention)) {
       warnings.push(`Discord user ${entry.discord_user_id || entry.discord || entry.mention} for ${usernameInput} was not a numeric ID or mention.`);
+    }
+    if (channelId && !/^\d{5,30}$/.test(channelId)) {
+      throw httpError(400, `Discord channel for ${usernameInput} is not a valid channel ID.`);
     }
 
     rows.push({
@@ -6743,6 +6824,8 @@ async function handleOfflinePingUsers(request, env) {
       roblox_username_key: robloxKey || normalizeText(usernameInput),
       discord_user_id: discordUserId || null,
       discord_label: stringOrNull(entry?.discord_label || entry?.discord || entry?.mention),
+      channel_id: channelId || null,
+      channel_type: channelId ? channelType : null,
       enabled: entry?.enabled === undefined ? true : parseBooleanish(entry.enabled) !== false,
       created_by: stringOrNull(body.created_by || entry?.created_by),
       created_at: now,
@@ -6834,6 +6917,27 @@ async function deleteOfflinePingUserAlertState(env, guildId, row) {
   }
 }
 
+async function deleteOfflinePingClanAlertState(env, guildId, clanKey) {
+  const guildIdText = String(guildId || "").trim();
+  const key = normalizeText(clanKey);
+  if (!/^\d{5,30}$/.test(guildIdText) || !key) return;
+
+  await supabaseDelete(env, DISCORD_OFFLINE_PING_ALERT_STATE_TABLE, {
+    guild_id: `eq.${guildIdText}`,
+    scope: "eq.clan",
+    subject_key: `eq.${key}`
+  });
+}
+
+async function resetOfflinePingAlertStateForGuild(env, guildId) {
+  const guildIdText = String(guildId || "").trim();
+  if (!/^\d{5,30}$/.test(guildIdText)) return;
+
+  await supabaseDelete(env, DISCORD_OFFLINE_PING_ALERT_STATE_TABLE, {
+    guild_id: `eq.${guildIdText}`
+  });
+}
+
 async function handleOfflinePingStatus(request, env) {
   requireSupabase(env);
 
@@ -6899,8 +7003,7 @@ async function handleOfflinePingCheck(env, source, options = {}) {
   };
   if (requestedGuildId) configParams.guild_id = `eq.${requestedGuildId}`;
 
-  const configs = (await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, configParams))
-    .filter(config => hasOfflinePingDestination(config));
+  const configs = await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, configParams);
   const results = [];
 
   for (const config of configs) {
@@ -7165,7 +7268,8 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
       const postResult = await postOfflinePingAlerts(env, config, group.alerts, checkedAt, {
         thresholdMinutes,
         postRateMinutes,
-        destinationScope: group.scope
+        destinationScope: group.scope,
+        channelId: group.channel_id
       });
       postResults.push(postResult);
       const messageId = stringOrNull(postResult?.message_id);
@@ -7388,7 +7492,7 @@ function computeOfflineMemberStatuses(currentRows, historyRows) {
 
 async function postOfflinePingAlerts(env, config, alerts, checkedAt, options = {}) {
   const destinationScope = normalizeOfflinePingDestinationScope(options.destinationScope) || "clan";
-  const channelId = offlinePingDestinationChannelId(config, destinationScope);
+  const channelId = String(options.channelId || offlinePingDestinationChannelId(config, destinationScope)).trim();
   const body = offlinePingAlertMessageBody(alerts, checkedAt, {
     thresholdMinutes: options.thresholdMinutes || config.minutes_threshold || offlineDefaultMinutes(env),
     postRateMinutes: options.postRateMinutes || config.post_rate_minutes || offlineDefaultPostRateMinutes(env),
@@ -7410,23 +7514,25 @@ async function postOfflinePingAlerts(env, config, alerts, checkedAt, options = {
 }
 
 function splitOfflinePingAlertsByDestination(config, alerts) {
-  const groupsByScope = new Map([
-    ["users", []],
-    ["clan", []]
-  ]);
+  const groupsByKey = new Map();
 
   for (const alert of alerts) {
     const scope = alert?.scope === "user" ? "users" : "clan";
-    groupsByScope.get(scope).push(alert);
+    const channelId = scope === "users"
+      ? offlineUserWatchChannelId(alert?.watch) || offlinePingDestinationChannelId(config, "users")
+      : offlinePingDestinationChannelId(config, "clan");
+    const key = `${scope}|${channelId || ""}`;
+    if (!groupsByKey.has(key)) {
+      groupsByKey.set(key, {
+        scope,
+        channel_id: channelId || "",
+        alerts: []
+      });
+    }
+    groupsByKey.get(key).alerts.push(alert);
   }
 
-  return [...groupsByScope.entries()]
-    .filter(([, rows]) => rows.length)
-    .map(([scope, rows]) => ({
-      scope,
-      channel_id: offlinePingDestinationChannelId(config, scope),
-      alerts: rows
-    }));
+  return [...groupsByKey.values()].filter(group => group.alerts.length);
 }
 
 function normalizeOfflinePingDestinationScope(value) {
@@ -7442,6 +7548,11 @@ function offlinePingDestinationChannelId(config, scope) {
     ? config?.users_channel_id
     : config?.clan_channel_id;
   return String(scopedChannel || config?.channel_id || "").trim();
+}
+
+function offlineUserWatchChannelId(watch) {
+  const channelId = String(watch?.channel_id || "").trim();
+  return /^\d{5,30}$/.test(channelId) ? channelId : "";
 }
 
 function hasOfflinePingDestination(config) {
@@ -7470,7 +7581,7 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
     for (const [clanKey, rows] of byClan.entries()) {
       const clanNameValue = rows[0]?.status?.clan_name || rows[0]?.watch?.clan_name || clanKey;
       lines.push(`### ${escapeDiscordMarkdown(clanNameValue)}`);
-      rows.slice(0, 12).forEach(alert => lines.push(offlineAlertLine(alert, false)));
+      rows.slice(0, 12).forEach(alert => lines.push(offlineAlertLine(alert, false, { includeClan: false })));
       if (rows.length > 12) lines.push(`-# ...and ${rows.length - 12} more in ${escapeDiscordMarkdown(clanNameValue)}.`);
     }
     sections.push(["## Clan Watches", ...lines].join("\n").slice(0, 4000));
@@ -7495,14 +7606,14 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
   };
 }
 
-function offlineAlertLine(alert, includeMention) {
+function offlineAlertLine(alert, includeMention, options = {}) {
   const status = alert.status || {};
   const watch = alert.watch || {};
   const mentionId = parseDiscordUserId(watch.discord_user_id);
   const mention = includeMention && mentionId ? `<@${mentionId}> ` : "";
   const name = escapeDiscordMarkdown(status.username || watch.roblox_username || "Unknown");
   const clan = escapeDiscordMarkdown(status.clan_name || watch.clan_name || "");
-  const clanPart = clan ? ` · ${clan}` : "";
+  const clanPart = options.includeClan === false || !clan ? "" : ` · ${clan}`;
   const points = Math.max(0, Math.round(toNumber(status.points) || 0)).toLocaleString("en-US");
   const oneHour = Math.max(0, Math.round(toNumber(status.gain_1h) || 0)).toLocaleString("en-US");
   return `- ${mention}**${name}**${clanPart} · ${formatOfflineMinutes(status.offline_minutes)} no gain · ${points} pts · +${oneHour}/1h`;
@@ -7650,6 +7761,8 @@ function normalizeOfflinePingUserOutput(row) {
     roblox_username_key: row.roblox_username_key || normalizeText(row.roblox_username),
     discord_user_id: parseDiscordUserId(row.discord_user_id),
     discord_label: row.discord_label || null,
+    channel_id: row.channel_id || null,
+    channel_type: toNumber(row.channel_type),
     enabled: row.enabled !== false,
     created_by: row.created_by || null,
     created_at: row.created_at || null,
@@ -16041,13 +16154,14 @@ async function addGainFields(env, rows, latest) {
 
   const windows = [
     { key: "gain_5m", minutes: 5, tolerance: 4 },
-    { key: "gain_1h", minutes: 60, tolerance: 10 },
+    { key: "gain_1h", minutes: 60, tolerance: 35 },
     { key: "gain_6h", minutes: 6 * 60, tolerance: 20 },
     { key: "gain_12h", minutes: 12 * 60, tolerance: 25 },
     { key: "gain_24h", minutes: 24 * 60, tolerance: 45 }
   ];
 
   const maps = {};
+  let fallbackHourly = null;
 
   for (const window of windows) {
     const targetMs = latestMs - window.minutes * 60 * 1000;
@@ -16057,16 +16171,41 @@ async function addGainFields(env, rows, latest) {
     );
   }
 
+  if (!maps.gain_1h?.size) {
+    const fallbackRows = await fetchFallbackHourlySnapshotRows(env, latest, latestMs);
+    const fallbackMs = new Date(fallbackRows[0]?.fetched_at || 0).getTime();
+    const elapsedHours = Number.isFinite(fallbackMs) && fallbackMs > 0
+      ? (latestMs - fallbackMs) / (60 * 60 * 1000)
+      : 0;
+    if (elapsedHours > 0) {
+      fallbackHourly = {
+        elapsedHours,
+        points: new Map(fallbackRows.map(row => [String(row.user_id), toNumber(row.total_points) || 0]))
+      };
+    }
+  }
+
   return rows.map(row => {
     const key = String(row.user_id);
     const out = { ...row };
+    const currentPoints = toNumber(row.total_points) || 0;
 
     for (const window of windows) {
       const oldPoints = maps[window.key].get(key);
-      out[window.key] =
-        oldPoints === undefined
-          ? null
-          : (toNumber(row.total_points) || 0) - oldPoints;
+      if (oldPoints !== undefined) {
+        out[window.key] = Math.max(0, currentPoints - oldPoints);
+        continue;
+      }
+
+      if (window.key === "gain_1h" && fallbackHourly?.points?.has(key)) {
+        out[window.key] = Math.max(
+          0,
+          Math.round((currentPoints - fallbackHourly.points.get(key)) / fallbackHourly.elapsedHours)
+        );
+        continue;
+      }
+
+      out[window.key] = null;
     }
 
     return out;
@@ -16313,6 +16452,36 @@ async function fetchNearestSnapshotRows(env, latest, targetMs, toleranceMin) {
     if (!best || diff < best.diff) {
       best = { snapshotId, group, diff };
     }
+  }
+
+  return best ? best.group : [];
+}
+
+async function fetchFallbackHourlySnapshotRows(env, latest, latestMs) {
+  const minAgeMs = 45 * 60 * 1000;
+  const maxAgeMs = 4 * 60 * 60 * 1000;
+  const afterIso = new Date(latestMs - maxAgeMs).toISOString();
+  const beforeIso = new Date(latestMs - minAgeMs).toISOString();
+  const candidates = await supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: "snapshot_id,fetched_at,user_id,total_points",
+    clan_name: `eq.${latest.clan_name}`,
+    battle_key: `eq.${latest.battle_key}`,
+    fetched_at: [`gte.${afterIso}`, `lte.${beforeIso}`],
+    order: "fetched_at.desc",
+    limit: "5000"
+  });
+
+  const groups = new Map();
+  for (const row of candidates) {
+    if (!groups.has(row.snapshot_id)) groups.set(row.snapshot_id, []);
+    groups.get(row.snapshot_id).push(row);
+  }
+
+  let best = null;
+  for (const [snapshotId, group] of groups.entries()) {
+    const ms = new Date(group[0]?.fetched_at || 0).getTime();
+    if (!Number.isFinite(ms) || ms <= 0 || ms >= latestMs) continue;
+    if (!best || ms > best.ms) best = { snapshotId, group, ms };
   }
 
   return best ? best.group : [];
@@ -18426,6 +18595,52 @@ function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
   return minutesUntilOffset < 5;
+}
+
+function hourlyAssignmentClanIngestEnabled(env) {
+  return String(env.INGEST_HOURLY_ASSIGNMENT_CLANS || "true").toLowerCase() !== "false";
+}
+
+function hourlyAssignmentClanScheduleMinutes(env) {
+  return clamp(
+    Number(env.HOURLY_ASSIGNMENT_CLAN_SCHEDULE_MINUTES || DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_MINUTES),
+    5,
+    1440
+  );
+}
+
+function hourlyAssignmentClanScheduleOffsetMinutes(env) {
+  const interval = hourlyAssignmentClanScheduleMinutes(env);
+  const offsetValue = env.HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES === undefined || env.HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES === ""
+    ? DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES
+    : env.HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES;
+
+  return normalizedScheduleOffset(offsetValue, interval);
+}
+
+function shouldRunHourlyAssignmentClanSchedule(env, scheduledAt = null) {
+  return shouldRunMinuteSchedule(
+    hourlyAssignmentClanScheduleMinutes(env),
+    hourlyAssignmentClanScheduleOffsetMinutes(env),
+    scheduledAt
+  );
+}
+
+function hourlyAssignmentClanScanLimit(env) {
+  return clamp(
+    Number(env.HOURLY_ASSIGNMENT_CLAN_SCAN_LIMIT || DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCAN_LIMIT),
+    1,
+    500
+  );
+}
+
+function hourlyAssignmentClanRuntimeConfig(env) {
+  return {
+    enabled: hourlyAssignmentClanIngestEnabled(env),
+    schedule_minutes: hourlyAssignmentClanScheduleMinutes(env),
+    schedule_offset_minutes: hourlyAssignmentClanScheduleOffsetMinutes(env),
+    scan_limit: hourlyAssignmentClanScanLimit(env)
+  };
 }
 
 function clanActivityRuntimeConfig(env) {

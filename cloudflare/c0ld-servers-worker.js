@@ -122,7 +122,6 @@ async function handleTrackerServerAdd(request, env) {
   requireSupabase(env);
   const body = await readJsonOptional(request);
   const guildId = trackerGuildId(body.guild_id);
-  const channelId = trackerChannelId(body.channel_id, false);
   const serverLink = firstString(body.server_link, body.link);
   const requestedPlaceId = trackerPlaceId(body.place_id, DEFAULT_TRACKER_PLACE_ID);
   const actorId = firstString(body.actor_id, body.user_id);
@@ -148,7 +147,6 @@ async function handleTrackerServerAdd(request, env) {
   const placeId = trackerPlaceId(resolvedInvite?.placeId, requestedPlaceId);
   const guild = await ensureTrackerGuild(env, {
     guild_id: guildId,
-    channel_id: channelId,
     default_place_id: placeId,
     created_by_discord_id: actorId
   });
@@ -399,14 +397,25 @@ async function handleTrackerToggle(request, env) {
   const guildId = trackerGuildId(body.guild_id);
   const channelId = trackerChannelId(body.channel_id, true);
   const enabled = Boolean(body.enabled);
+  const assignChannel = Boolean(body.assign_channel);
+  const existing = await fetchTrackerGuild(env, guildId);
+  if (enabled && !channelId && !firstString(existing?.channel_id)) {
+    throw httpError(400, "Assign a tracker channel first with `/server assign channel:<channel>`.");
+  }
   const guild = await ensureTrackerGuild(env, {
     guild_id: guildId,
     channel_id: channelId,
+    assign_channel: assignChannel,
     tracking_enabled: enabled,
     refresh_minutes: 1,
     default_place_id: trackerPlaceId(body.place_id, DEFAULT_TRACKER_PLACE_ID),
     created_by_discord_id: firstString(body.actor_id, body.user_id)
   });
+  const previousChannelId = firstString(existing?.channel_id);
+  const previousMessageId = firstString(existing?.message_id);
+  if (assignChannel && previousChannelId && previousMessageId && channelId && previousChannelId !== channelId) {
+    await deleteDiscordBotMessageBestEffort(firstString(env.DISCORD_BOT_TOKEN), previousChannelId, previousMessageId);
+  }
 
   let result;
   if (enabled) {
@@ -884,9 +893,20 @@ function normalizeRobloxServerPlayers(value) {
 async function ensureTrackerGuild(env, values) {
   const existing = await fetchTrackerGuild(env, values.guild_id);
   const now = new Date().toISOString();
+  const assignedChannel = firstString(values.channel_id);
+  const existingChannel = firstString(existing?.channel_id);
+  const channelId = values.assign_channel
+    ? firstString(assignedChannel, existingChannel) || null
+    : firstString(existingChannel, assignedChannel) || null;
+  const movedChannel = Boolean(
+    values.assign_channel &&
+    assignedChannel &&
+    existingChannel &&
+    assignedChannel !== existingChannel
+  );
   const row = {
     guild_id: values.guild_id,
-    channel_id: firstString(values.channel_id, existing?.channel_id) || null,
+    channel_id: channelId,
     tracking_enabled: values.tracking_enabled === undefined
       ? Boolean(existing?.tracking_enabled)
       : Boolean(values.tracking_enabled),
@@ -896,6 +916,7 @@ async function ensureTrackerGuild(env, values) {
     admin_role_id: firstString(values.admin_role_id, existing?.admin_role_id) || null,
     updated_at: now
   };
+  if (movedChannel) row.message_id = null;
   const rows = await supabaseUpsert(env, TRACKER_GUILDS_TABLE, [row], "guild_id");
   return rows?.[0] || { ...existing, ...row };
 }
@@ -1399,6 +1420,7 @@ function trackerDiscordSeparator() {
 }
 
 async function deleteDiscordBotMessageBestEffort(token, channelId, messageId) {
+  if (!token || !channelId || !messageId) return;
   try {
     await fetch(
       `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,

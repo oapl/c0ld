@@ -59,6 +59,7 @@ const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
+const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HTG_BUILD_ID = "htg-debug-2026-07-27i";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
@@ -572,9 +573,9 @@ async function handleInteraction(request, env, ctx) {
 
   if (commandName === "hourly") {
     const subcommand = getSubcommandName(interaction);
-    if (!["assign", "remove", "alert"].includes(subcommand)) {
+    if (!["clan", "user", "remove", "alert"].includes(subcommand)) {
       return interactionJson(messageResponse(
-        "Use `/hourly assign clan:<clan name> channel:<text channel or thread>`, `/hourly alert user:<user> channel:<channel>`, or `/hourly remove channel:<channel>`.",
+        "Use `/hourly clan clan:<clan name> channel:<channel>`, `/hourly user username:<roblox username> channel:<channel>`, `/hourly alert user:<user> channel:<channel>`, or `/hourly remove channel:<channel>`.",
         true
       ));
     }
@@ -584,7 +585,7 @@ async function handleInteraction(request, env, ctx) {
     });
     if (!permitted) {
       return interactionJson(messageResponse(
-        "You need the configured Luna administrator role to manage hourly clan boards.",
+        "You need the configured Luna administrator role to manage hourly picture posts.",
         true
       ));
     }
@@ -600,8 +601,8 @@ async function handleInteraction(request, env, ctx) {
     const offlinePath = getOfflineSubcommandPath(interaction);
     const subcommand = offlinePath.group || offlinePath.subcommand;
     const validAssignTarget = offlinePath.group !== "assign" || ["clan", "users"].includes(offlinePath.subcommand);
-    if (!validAssignTarget || !["assign", "minutes", "clan", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign users`, `/offline minutes`, `/offline clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
+    if (!validAssignTarget || !["assign", "enable", "disable", "minutes", "clan", "remove-clan", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign users`, `/offline enable`, `/offline disable`, `/offline minutes`, `/offline clan`, `/offline remove-clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -1450,7 +1451,6 @@ async function completeServerTrackerInteraction(interaction, env, commandName, s
         method: "POST",
         body: {
           guild_id: guildId,
-          channel_id: channelId,
           actor_id: actorId,
           actor_username: interactionUsername(interaction),
           server_link: serverLink,
@@ -1469,8 +1469,9 @@ async function completeServerTrackerInteraction(interaction, env, commandName, s
           server: `#${serverId}`
         }
       });
-    } else if (commandName === "server" && subcommand === "tracker") {
-      const configuredChannel = getCommandOption(interaction, "channel") || channelId;
+    } else if (commandName === "server" && subcommand === "assign") {
+      const configuredChannel = getCommandOption(interaction, "channel");
+      if (!configuredChannel) throw httpError(400, "Use `/server assign channel:<channel>`.");
 
       payload = await serverTrackerApiRequest(env, "/api/tracker/tracking", {
         method: "POST",
@@ -1478,7 +1479,21 @@ async function completeServerTrackerInteraction(interaction, env, commandName, s
           guild_id: guildId,
           channel_id: configuredChannel,
           actor_id: actorId,
-          enabled: true
+          enabled: true,
+          assign_channel: true
+        }
+      });
+    } else if (commandName === "server" && subcommand === "tracker") {
+      const configuredChannel = getCommandOption(interaction, "channel") || "";
+
+      payload = await serverTrackerApiRequest(env, "/api/tracker/tracking", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          channel_id: configuredChannel,
+          actor_id: actorId,
+          enabled: true,
+          assign_channel: Boolean(configuredChannel)
         }
       });
     } else if (commandName === "luna" && subcommand === "admin") {
@@ -1540,9 +1555,26 @@ function buildServerTrackerCommandMessage(commandName, subcommand, payload) {
     };
   }
 
-  if (commandName === "server" && subcommand === "tracker") {
+  if (commandName === "server" && subcommand === "assign") {
+    const guild = payload.guild || payload.state?.guild || {};
+    const channelId = String(guild.channel_id || "").trim();
     return {
-      content: "The persistent private-server tracker was created or updated in the selected channel. It refreshes every five minutes.",
+      content: channelId
+        ? `The private-server tracker is assigned to <#${channelId}> and will only refresh there.`
+        : "The private-server tracker channel was assigned.",
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
+  }
+
+  if (commandName === "server" && subcommand === "tracker") {
+    const guild = payload.guild || payload.state?.guild || {};
+    const channelId = String(guild.channel_id || "").trim();
+    return {
+      content: channelId
+        ? `The persistent private-server tracker was refreshed in <#${channelId}>. Use \`/server assign\` to move it.`
+        : "No private-server tracker channel is assigned yet. Use `/server assign channel:<channel>`.",
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
@@ -1580,12 +1612,14 @@ async function completeHatchInteraction(interaction, env, subcommand) {
     let payload;
     if (subcommand === "tracker") {
       const account = getCommandOption(interaction, "account");
+      const guildId = String(interaction.guild_id || "").trim();
       payload = account
         ? await hatchApiRequest(env, "/api/hatch/oauth/start", {
           method: "POST",
           body: {
             discord_user_id: discordUserId,
             discord_username: discordUsername,
+            guild_id: guildId || null,
             account
           }
         })
@@ -1652,7 +1686,8 @@ async function completeHatchInteraction(interaction, env, subcommand) {
         tier: getCommandOption(interaction, "tier") || "all",
         account: getCommandOption(interaction, "account") || "all",
         discord_user_id: discordUserId,
-        discord_username: discordUsername
+        discord_username: discordUsername,
+        guild_id: String(interaction.guild_id || "").trim() || null
       }
     });
     await editOriginalInteraction(interaction, buildHatchTrackerMessage(payload, {
@@ -2054,9 +2089,10 @@ async function completeHourlyClanInteraction(interaction, env) {
     const sourceChannelId = interactionSourceChannelId(interaction);
     const actorId = interactionUserId(interaction);
     const clan = String(getCommandOption(interaction, "clan") || "").trim();
+    const username = String(getCommandOption(interaction, "username") || getCommandOption(interaction, "user_name") || "").trim();
     const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
 
-    if (!guildId) throw httpError(400, "Hourly clan boards can only be assigned inside a Discord server.");
+    if (!guildId) throw httpError(400, "Hourly posts can only be assigned inside a Discord server.");
 
     if (subcommand === "remove") {
       const assignmentPayload = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
@@ -2071,8 +2107,8 @@ async function completeHourlyClanInteraction(interaction, env) {
 
       await editOriginalInteraction(interaction, {
         content: assignmentPayload.removed
-          ? `Hourly clan reporting was removed from ${destination}. Luna will stop posting hourly boards there.`
-          : `No hourly clan reporting assignment was found for ${destination}.`,
+          ? `Hourly reporting was removed from ${destination}. Luna will stop posting hourly pictures there.`
+          : `No hourly reporting assignment was found for ${destination}.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2103,8 +2139,8 @@ async function completeHourlyClanInteraction(interaction, env) {
 
       await editOriginalInteraction(interaction, {
         content: assignmentPayload.assignment
-          ? `Hourly clan alerts for ${destination} will mention <@${alertUserId}> when Luna posts the board.`
-          : `No hourly clan reporting assignment was found for ${destination}. Assign one first with \`/hourly assign\`.`,
+          ? `Hourly alerts for ${destination} will mention <@${alertUserId}> when Luna posts the picture.`
+          : `No hourly reporting assignment was found for ${destination}. Assign one first with \`/hourly clan\` or \`/hourly user\`.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2112,8 +2148,12 @@ async function completeHourlyClanInteraction(interaction, env) {
       return;
     }
 
-    if (!clan) {
-      throw httpError(400, "Use `/hourly assign clan:<clan name> channel:<text channel or thread>`.");
+    const targetType = subcommand === "user" ? "user" : "clan";
+    const targetName = targetType === "user" ? username : clan;
+    if (!targetName) {
+      throw httpError(400, targetType === "user"
+        ? "Use `/hourly user username:<roblox username> channel:<text channel or thread>`."
+        : "Use `/hourly clan clan:<clan name> channel:<text channel or thread>`.");
     }
 
     const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
@@ -2127,7 +2167,7 @@ async function completeHourlyClanInteraction(interaction, env) {
         guild_id: guildId,
         channel_id: requestedChannelId,
         channel_type: Number(channel.type),
-        clan_name: clan,
+        clan_name: hourlyStoredAssignmentTarget(targetType, targetName),
         assigned_by: actorId,
         enabled: true
       }
@@ -2136,7 +2176,7 @@ async function completeHourlyClanInteraction(interaction, env) {
       guild_id: guildId,
       channel_id: requestedChannelId,
       channel_type: Number(channel.type),
-      clan_name: clan,
+      clan_name: hourlyStoredAssignmentTarget(targetType, targetName),
       assigned_by: actorId,
       enabled: true
     };
@@ -2149,17 +2189,18 @@ async function completeHourlyClanInteraction(interaction, env) {
     }
 
     const destination = `<#${requestedChannelId}>`;
+    const targetLabel = targetType === "user" ? "user" : "clan";
     await editOriginalInteraction(interaction, {
       content: preview.ok
-        ? `Hourly **${escapeDiscordMarkdown(clan)}** reporting is assigned to ${destination}. The first board was posted and Luna will refresh it hourly.`
-        : `Hourly **${escapeDiscordMarkdown(clan)}** reporting is assigned to ${destination}, but the first board could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
+        ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}. The first image was posted and Luna will refresh it hourly.`
+        : `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but the first image could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
     });
   } catch (err) {
     await editOriginalInteraction(interaction, {
-      content: `Hourly clan assignment failed: ${err?.message || String(err)}`,
+      content: `Hourly assignment failed: ${err?.message || String(err)}`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
@@ -2177,6 +2218,30 @@ async function completeOfflinePingInteraction(interaction, env) {
     const actorId = interactionUserId(interaction);
 
     if (!guildId) throw httpError(400, "Offline pings can only be configured inside a Discord server.");
+
+    if (subcommand === "enable" || subcommand === "disable") {
+      const enabled = subcommand === "enable";
+      const payload = await hourlyClanApiRequest(env, "/api/offline/config", {
+        method: "PATCH",
+        body: {
+          guild_id: guildId,
+          enabled,
+          updated_by: actorId
+        }
+      });
+      const resetNote = payload.alert_state_reset
+        ? " Active alert state was cleared."
+        : "";
+      await editOriginalInteraction(interaction, {
+        content: enabled
+          ? `Offline alerts are enabled for this server. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`
+          : `Offline alerts are disabled for this server.${resetNote}`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
 
     if (subcommand === "list") {
       const query = new URLSearchParams({ guild_id: guildId });
@@ -2235,8 +2300,11 @@ async function completeOfflinePingInteraction(interaction, env) {
           updated_by: actorId
         }
       });
+      const resetNote = payload.alert_state_reset
+        ? " Active no-gain timers were reset so only this threshold is in effect."
+        : "";
       await editOriginalInteraction(interaction, {
-        content: `Offline threshold is now **${payload.config?.minutes_threshold || Math.trunc(minutes)} minutes** with no point gain.`,
+        content: `Offline threshold is now **${payload.config?.minutes_threshold || Math.trunc(minutes)} minutes** with no point gain.${resetNote}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2285,12 +2353,42 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
+    if (subcommand === "remove-clan") {
+      const clan = String(getCommandOption(interaction, "name") || "").trim();
+      if (!clan) throw httpError(400, "Use `/offline remove-clan name:<clan>`.");
+      const payload = await hourlyClanApiRequest(env, "/api/offline/clans", {
+        method: "DELETE",
+        body: {
+          guild_id: guildId,
+          clan_name: clan,
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: payload.removed
+          ? `Offline pings stopped watching **${escapeDiscordMarkdown(clan)}**.`
+          : `No offline clan watch was found for **${escapeDiscordMarkdown(clan)}**.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
     if (subcommand === "user") {
       const username = String(getCommandOption(interaction, "username") || "").trim();
       const discordUserId = String(getCommandOption(interaction, "discord") || "").trim();
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
+      const requestedChannelId = String(getCommandOption(interaction, "channel") || "").trim();
       if (!username || !discordUserId) {
         throw httpError(400, "Use `/offline user username:<roblox name> discord:<Discord user>`.");
+      }
+      let directChannel = null;
+      if (requestedChannelId) {
+        directChannel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
+        if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(directChannel.type))) {
+          throw httpError(400, "Select a text channel, announcement channel, or existing Discord thread.");
+        }
       }
       const label = offlineDiscordUserLabel(interaction, discordUserId);
       const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
@@ -2301,13 +2399,18 @@ async function completeOfflinePingInteraction(interaction, env) {
           discord_user_id: discordUserId,
           discord_label: label,
           clan_name: clan || null,
+          channel_id: requestedChannelId || null,
+          channel_type: directChannel ? Number(directChannel.type) : null,
           created_by: actorId,
           updated_by: actorId
         }
       });
       const warningText = payload.warnings?.length ? `\n-# ${payload.warnings.join(" ")}` : "";
+      const channelText = requestedChannelId
+        ? ` Alerts for this user will post in <#${requestedChannelId}>.`
+        : "";
       await editOriginalInteraction(interaction, {
-        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** → <@${discordUserId}>. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> <@${discordUserId}>.${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2517,7 +2620,8 @@ function formatOfflinePingListResponse(payload, guildId) {
   if (clans.length && !validDiscordSnowflake(config.clan_channel_id || config.channel_id)) {
     warnings.push("Clan watches exist, but `/offline assign clan` has not been set.");
   }
-  if (users.length && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
+  const usersMissingDestination = users.some(row => !validDiscordSnowflake(row.channel_id));
+  if (users.length && usersMissingDestination && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
     warnings.push("Direct user watches exist, but `/offline assign users` has not been set.");
   }
 
@@ -2607,7 +2711,8 @@ function formatOfflinePingUserRows(users) {
         ? `<@${discordUserId}>`
         : escapeDiscordMarkdown(row.discord_label || "no Discord mention");
       const clan = row.clan_name ? ` · ${escapeDiscordMarkdown(row.clan_name)}` : "";
-      return `- **${name}** → ${discord}${clan}`;
+      const channel = validDiscordSnowflake(row.channel_id) ? ` · <#${row.channel_id}>` : "";
+      return `- **${name}** -> ${discord}${clan}${channel}`;
     });
   if (users.length > rows.length) rows.push(`-# ...and ${users.length - rows.length} more.`);
   return rows;
@@ -2775,7 +2880,7 @@ async function resolveHourlyClanChannel(interaction, env, channelId) {
 }
 
 function interactionSourceChannelId(interaction) {
-  return String(interaction?.channel?.id || interaction?.channel_id || "").trim();
+  return String(interaction?.channel_id || interaction?.channel?.id || "").trim();
 }
 
 async function runHourlyClanAssignments(env, options = {}) {
@@ -2792,23 +2897,28 @@ async function runHourlyClanAssignments(env, options = {}) {
   const results = [];
 
   for (const assignment of eligible) {
-    const clanKey = normalizeSearchKey(assignment.clan_name);
-    if (!reportPromises.has(clanKey)) {
-      reportPromises.set(clanKey, buildHourlyClanReport(env, assignment.clan_name));
+    const targetType = hourlyAssignmentTargetType(assignment);
+    const targetName = hourlyAssignmentTargetName(assignment);
+    const reportKey = `${targetType}:${normalizeSearchKey(targetName)}`;
+    if (!reportPromises.has(reportKey)) {
+      reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment));
     }
 
     try {
-      const report = await reportPromises.get(clanKey);
+      const report = await reportPromises.get(reportKey);
       const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
       await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
         last_posted_at: new Date(now).toISOString(),
         last_message_id: posted.id || null,
-        last_snapshot_at: report.current.snapshot_at || null,
+        last_snapshot_at: hourlyReportSnapshotAt(report),
         last_error: null
       });
       results.push({
         ok: true,
-        clan_name: assignment.clan_name,
+        target_type: targetType,
+        target_name: targetName,
+        clan_name: targetType === "clan" ? targetName : null,
+        username: targetType === "user" ? targetName : null,
         channel_id: assignment.channel_id,
         message_id: posted.id || null
       });
@@ -2819,7 +2929,10 @@ async function runHourlyClanAssignments(env, options = {}) {
       }).catch(() => null);
       results.push({
         ok: false,
-        clan_name: assignment.clan_name,
+        target_type: targetType,
+        target_name: targetName,
+        clan_name: targetType === "clan" ? targetName : null,
+        username: targetType === "user" ? targetName : null,
         channel_id: assignment.channel_id,
         error: message
       });
@@ -2895,7 +3008,7 @@ async function hourlyClanAssignmentStatus(env) {
     bot_token_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
     clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
     clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
-    cron_expected: "0 * * * *",
+    cron_expected: "*/15 * * * *",
     assignments: assignments.map(assignment => {
       const lastPostedMs = new Date(assignment?.last_posted_at || 0).getTime();
       const hasLastPosted = Number.isFinite(lastPostedMs) && lastPostedMs > 0;
@@ -2907,7 +3020,10 @@ async function hourlyClanAssignmentStatus(env) {
         channel_id: String(assignment.channel_id || ""),
         channel_type: assignment.channel_type ?? null,
         channel_type_name: discordChannelTypeName(assignment.channel_type),
-        clan_name: String(assignment.clan_name || ""),
+        target_type: hourlyAssignmentTargetType(assignment),
+        target_name: hourlyAssignmentTargetName(assignment),
+        clan_name: hourlyAssignmentTargetType(assignment) === "clan" ? hourlyAssignmentTargetName(assignment) : null,
+        username: hourlyAssignmentTargetType(assignment) === "user" ? hourlyAssignmentTargetName(assignment) : null,
         enabled: assignment.enabled !== false,
         due: hourlyAssignmentDue(assignment, now),
         last_posted_at: assignment.last_posted_at || null,
@@ -2936,12 +3052,12 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
   }
 
   try {
-    const report = await buildHourlyClanReport(env, assignment.clan_name);
+    const report = await buildHourlyAssignmentReport(env, assignment);
     const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
     await updateHourlyClanAssignmentDelivery(env, assignment.channel_id, {
       last_posted_at: new Date().toISOString(),
       last_message_id: posted.id || null,
-      last_snapshot_at: report.current.snapshot_at || null,
+      last_snapshot_at: hourlyReportSnapshotAt(report),
       last_error: null
     });
     return { ok: true, message_id: posted.id || null };
@@ -2951,6 +3067,35 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
     }).catch(() => null);
     throw err;
   }
+}
+
+function hourlyAssignmentTargetType(assignment) {
+  const raw = String(assignment?.clan_name || "").trim();
+  return raw.toLowerCase().startsWith(HOURLY_USER_ASSIGNMENT_PREFIX) ? "user" : "clan";
+}
+
+function hourlyAssignmentTargetName(assignment) {
+  const raw = String(assignment?.clan_name || "").trim();
+  if (raw.toLowerCase().startsWith(HOURLY_USER_ASSIGNMENT_PREFIX)) {
+    return raw.slice(HOURLY_USER_ASSIGNMENT_PREFIX.length).trim();
+  }
+  return raw;
+}
+
+function hourlyStoredAssignmentTarget(targetType, targetName) {
+  const clean = String(targetName || "").trim();
+  return targetType === "user" ? `${HOURLY_USER_ASSIGNMENT_PREFIX}${clean}` : clean;
+}
+
+function hourlyReportSnapshotAt(report) {
+  return report?.snapshot_at || report?.current?.snapshot_at || null;
+}
+
+async function buildHourlyAssignmentReport(env, assignment) {
+  const targetType = hourlyAssignmentTargetType(assignment);
+  const targetName = hourlyAssignmentTargetName(assignment);
+  if (targetType === "user") return buildHourlyUserReport(env, targetName);
+  return buildHourlyClanReport(env, targetName);
 }
 
 async function buildHourlyClanReport(env, clanNameValue) {
@@ -2977,11 +3122,49 @@ async function buildHourlyClanReport(env, clanNameValue) {
     throw httpError(409, `No current battle rows were returned for clan ${clan}.`);
   }
   await enrichHourlyClanCurrent(env, current, clan).catch(() => null);
+  if (!hourlyClanReportHasReliableGains(current)) {
+    throw httpError(
+      409,
+      `Hourly baseline is warming up for ${clan}. Luna stored the current snapshot, but will not post an hourly board until a comparison snapshot is available.`
+    );
+  }
 
   return {
     current,
+    snapshot_at: current.snapshot_at || null,
     filename: `luna-hourly-${hourlyFilenamePart(clan)}-${Date.now()}.png`,
     bytes: await renderHourlyClanBoardPng(current)
+  };
+}
+
+function hourlyClanReportHasReliableGains(current) {
+  return Array.isArray(current?.rows)
+    && current.rows.some(row => hourlyOptionalNumber(
+      hourlyFirstDefined(row.gain_1h, row.hourly_gain, row.hourly_points, row.one_hour_gain)
+    ) !== null);
+}
+
+async function buildHourlyUserReport(env, usernameValue) {
+  const query = String(usernameValue || "").trim();
+  if (!query) throw httpError(400, "The hourly user assignment has no Roblox username.");
+
+  const { payload, status, ok } = await fetchGlobalSearchPayload(query, env);
+  if (!ok || payload.ok === false || !payload.row) {
+    throw httpError(404, payload.message || `No global-rank result found for ${query}. ${status ? `(API ${status})` : ""}`.trim());
+  }
+
+  const row = payload.row;
+  const avatarUrl = await searchAvatarUrl(row, env);
+  const chart = await buildSearchChartAttachment(payload, row, env, avatarUrl);
+  if (!chart?.bytes?.byteLength) {
+    throw httpError(502, `No hourly user picture could be rendered for ${query}.`);
+  }
+
+  const username = displayName(row) || query;
+  return {
+    snapshot_at: row.fetched_at || row.updated_at || payload?.run?.finished_at || payload?.generated_at || null,
+    filename: `luna-hourly-user-${hourlyFilenamePart(username)}-${Date.now()}.png`,
+    bytes: chart.bytes
   };
 }
 
@@ -3470,21 +3653,24 @@ async function renderHourlyClanBoardPng(current) {
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const clan = String(current.clan_name || "Clan").trim() || "Clan";
   const preparedRows = [...(current.rows || [])]
-    .map(row => ({
-      ...row,
-      gainAvailable: hourlyOptionalNumber(row.gain_1h) !== null,
-      gain: Math.max(0, hourlyOptionalNumber(row.gain_1h) || 0),
-      total: Math.max(0, Number(row.total_points) || 0),
-      downtime: hourlyDowntimeMinutes(row)
-    }));
+    .map(row => {
+      const gainValue = hourlyOptionalNumber(
+        hourlyFirstDefined(row.gain_1h, row.hourly_gain, row.hourly_points, row.one_hour_gain)
+      );
+      return {
+        ...row,
+        gainAvailable: gainValue !== null,
+        gain: Math.max(0, gainValue || 0),
+        total: Math.max(0, Number(row.total_points) || 0),
+        downtime: hourlyDowntimeMinutes(row)
+      };
+    });
   const hourlyGainReady = preparedRows.some(row => row.gainAvailable);
   const activeRows = hourlyGainReady
     ? preparedRows
       .filter(row => row.gain > 0)
       .sort((a, b) => b.gain - a.gain || b.total - a.total || String(a.username).localeCompare(String(b.username)))
-    : preparedRows
-      .filter(row => row.total > 0)
-      .sort((a, b) => b.total - a.total || String(a.username).localeCompare(String(b.username)));
+    : [];
   const inactiveRows = hourlyGainReady
     ? preparedRows
       .filter(row => row.gain <= 0)
@@ -3499,15 +3685,19 @@ async function renderHourlyClanBoardPng(current) {
         inactiveCount: list.length
       }))
     : preparedRows
-      .filter(row => row.total <= 0)
-      .sort((a, b) => String(a.username).localeCompare(String(b.username)));
+      .sort((a, b) => b.total - a.total || String(a.username).localeCompare(String(b.username)))
+      .map((row, index, list) => ({
+        ...row,
+        inactiveIndex: index,
+        inactiveCount: list.length
+      }));
   const rows = [...activeRows, ...inactiveRows]
     .slice(0, 75);
-  const hourlyPoints = hourlyGainReady ? rows.reduce((sum, row) => sum + row.gain, 0) : null;
-  const active = hourlyGainReady ? rows.filter(row => row.gain > 0).length : null;
-  const zero = hourlyGainReady ? rows.length - active : null;
-  const maximum = Math.max(1, ...rows.map(row => hourlyRowMetric(row, hourlyGainReady)).filter(value => value > 0));
-  const gainScale = hourlyGainScale(rows, hourlyGainReady);
+  const hourlyPoints = rows.reduce((sum, row) => sum + Math.max(0, Number(row.gain) || 0), 0);
+  const active = rows.filter(row => row.gain > 0).length;
+  const zero = rows.length - active;
+  const maximum = Math.max(1, ...rows.map(row => Math.max(0, Number(row.gain) || 0)).filter(value => value > 0));
+  const gainScale = hourlyGainScale(rows, true);
 
   canvas.fillRect(32, 30, width - 64, height - 60, color.panel);
   hourlyDrawMysticSmoke(canvas, width, height, color);
@@ -3523,11 +3713,9 @@ async function renderHourlyClanBoardPng(current) {
   const battleName = historyCardText(current.display_name || current.battle || "Current Clan Battle", 52);
   const updated = hourlyBoardCompactTimestamp(current.snapshot_at || current.generated_at);
   const columnHeaderLabels = [
-    [`Points: ${Number.isFinite(clanPoints) ? shortNumber(clanPoints) : "-"}`, `Hourly: ${hourlyGainReady ? shortNumber(hourlyPoints) : "-"}`],
+    [`Points: ${Number.isFinite(clanPoints) ? shortNumber(clanPoints) : "-"}`, `Hourly: ${shortNumber(hourlyPoints)}`],
     [battleName, updated],
-    hourlyGainReady
-      ? [`Active: ${fullNumber(active)}`, `Inactive: ${fullNumber(zero)}`]
-      : [`Players: ${fullNumber(rows.length)}`, `Inactive: ${fullNumber(inactiveRows.length)}`]
+    [`Active: ${fullNumber(active)}`, `Inactive: ${fullNumber(zero)}`]
   ];
 
   const columnTop = 206;
@@ -3550,15 +3738,13 @@ async function renderHourlyClanBoardPng(current) {
       hourlyDrawPlayerRowShell(canvas, x + 10, y, columnWidth - 20, rowHeight - 2, absoluteIndex, row?.gain > 0, color);
       if (!row) continue;
 
-      const isActive = hourlyGainReady ? row.gain > 0 : row.total > 0;
-      const metric = hourlyRowMetric(row, hourlyGainReady);
+      const isActive = row.gain > 0;
+      const metric = Math.max(0, Number(row.gain) || 0);
       const tone = isActive ? hourlyGainColor(metric, gainScale, color) : color.zero;
-      const nameTone = hourlyGainReady
-        ? (isActive ? color.white : color.red)
-        : (isActive ? color.white : color.zeroText);
+      const nameTone = isActive ? color.white : color.red;
       const rankText = String(absoluteIndex + 1).padStart(2, "0");
       const name = historyCardText(row.username || `User ${row.user_id || ""}`, 22);
-      const firstInactive = hourlyGainReady && !isActive && (absoluteIndex === 0 || rows[absoluteIndex - 1]?.gain > 0);
+      const firstInactive = !isActive && active > 0 && (absoluteIndex === 0 || rows[absoluteIndex - 1]?.gain > 0);
       if (firstInactive) hourlyDrawMistDivider(canvas, x + 54, Math.max(columnTop + 32, y - 3), columnWidth - 108, color);
       const rowFont = fonts.rowBold || fonts.bold;
       const rowFontSize = 16;
@@ -8895,13 +9081,26 @@ function serverCommandPayload() {
     dm_permission: false,
     options: [
       {
-        name: "tracker",
-        description: "Create or move the persistent private-server tracker post.",
+        name: "assign",
+        description: "Assign the persistent private-server tracker post channel.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
             name: "channel",
-            description: "Tracker channel; defaults to this channel",
+            description: "Text channel where the tracker should post",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: true
+          }
+        ]
+      },
+      {
+        name: "tracker",
+        description: "Refresh the persistent private-server tracker post.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "channel",
+            description: "Legacy move target; prefer /server assign",
             type: APPLICATION_COMMAND_OPTION_CHANNEL,
             required: false
           }
@@ -8970,12 +9169,12 @@ function hourlyCommandPayload() {
   return {
     name: "hourly",
     type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "Assign Luna's hourly clan performance board.",
+    description: "Assign Luna's hourly picture posts.",
     dm_permission: false,
     options: [
       {
-        name: "assign",
-        description: "Assign a clan's hourly board to a text channel or thread.",
+        name: "clan",
+        description: "Post a clan's hourly board picture in a text channel or thread.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
@@ -8996,8 +9195,30 @@ function hourlyCommandPayload() {
         ]
       },
       {
+        name: "user",
+        description: "Post a user's hourly search chart picture in a text channel or thread.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Roblox username or user ID to monitor",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          },
+          {
+            name: "channel",
+            description: "Text channel or thread; defaults to the current destination",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          }
+        ]
+      },
+      {
         name: "remove",
-        description: "Remove the hourly board assignment from a text channel or thread.",
+        description: "Remove the hourly picture assignment from a text channel or thread.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
@@ -9011,12 +9232,12 @@ function hourlyCommandPayload() {
       },
       {
         name: "alert",
-        description: "Mention one user when a channel's hourly board posts.",
+        description: "Mention one user when a channel's hourly picture posts.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
             name: "user",
-            description: "User to mention on each hourly board post",
+            description: "User to mention on each hourly picture post",
             type: APPLICATION_COMMAND_OPTION_USER,
             required: true
           },
@@ -9149,6 +9370,16 @@ function offlineCommandPayload() {
         ]
       },
       {
+        name: "enable",
+        description: "Turn offline alerts back on for this server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "disable",
+        description: "Turn offline alerts off for this server without deleting watches.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
         name: "minutes",
         description: "Set how many minutes with no point gain should trigger an alert.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
@@ -9171,6 +9402,21 @@ function offlineCommandPayload() {
           {
             name: "name",
             description: "PS99 clan name, for example c0ld or WMSY",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "remove-clan",
+        description: "Remove one clan from clan-wide offline alerts.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "PS99 clan name to remove",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: true,
             min_length: 1,
@@ -9204,6 +9450,13 @@ function offlineCommandPayload() {
             required: false,
             min_length: 1,
             max_length: 100
+          },
+          {
+            name: "channel",
+            description: "Optional private channel or ticket for this user's alerts",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
           }
         ]
       },

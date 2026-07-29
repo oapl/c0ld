@@ -34,7 +34,9 @@ const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
 const HATCH_ALERT_COLOR = 0xff9b96;
-const HATCH_ALERT_FOOTER_TEXT = "Oapl's 3rd-Eye | Hatch Tracker";
+const LUNA_WEBHOOK_USERNAME = "Luna";
+const LUNA_AVATAR_URL = "https://i.imgur.com/rVVo99A.png";
+const HATCH_ALERT_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const DEFAULT_LEAGUE_API_BASE = "https://yamo-league-api-worker.opal-dde.workers.dev";
 const DEFAULT_TIME_ZONE = "America/Denver";
 const DEFAULT_USER_ID = "109818";
@@ -43,9 +45,14 @@ const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_MIN_FETCH_INTERVAL_MINUTES = 55;
 const DEFAULT_PET_CATALOG_CACHE_SECONDS = 3600;
 const HATCH_SOURCE_WINDOW_PADDING_MINUTES = 10;
+const DEFAULT_HATCH_BASELINE_STABLE_COMPARISONS = 1;
+const DEFAULT_HATCH_BACKFILL_MIN_ITEM_GROWTH = 25;
+const DEFAULT_HATCH_BACKFILL_ITEM_GROWTH_RATIO = 0.05;
+const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
+const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-2026-07-28a";
+const INVENTORY_BUILD_ID = "inventory-htg-2026-07-29a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -121,6 +128,12 @@ export default {
           hatch_tracker: {
             big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
+            baseline_protection_enabled: envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true),
+            baseline_stable_comparisons: hatchBaselineStableComparisons(env),
+            backfill_min_item_growth: hatchBackfillMinItemGrowth(env),
+            backfill_item_growth_ratio: hatchBackfillItemGrowthRatio(env),
+            backfill_htg_gain_count: hatchBackfillHtgGainCount(env),
+            backfill_total_gain_count: hatchBackfillTotalGainCount(env),
             channel_configured: Boolean(assignedHatchChannelCount || hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
             assigned_channel_count: assignedHatchChannelCount,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
@@ -277,6 +290,7 @@ async function handleHatchOAuthStart(request, env) {
   const body = await readJsonOptional(request);
   const discordUserId = requiredDiscordSnowflake(body.discord_user_id, "discord_user_id");
   const discordUsername = firstString(body.discord_username);
+  const guildId = optionalDiscordSnowflake(body.guild_id, "guild_id");
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
   const state = randomBase64Url(32);
@@ -303,7 +317,8 @@ async function handleHatchOAuthStart(request, env) {
     discordUserId,
     discordUsername,
     enabled: enableAfterAuth || pending?.enabled === true || inheritEnabled,
-    tiers: pendingTiers
+    tiers: pendingTiers,
+    alertGuildId: guildId
   });
 
   await supabaseUpsert(env, OAUTH_STATES_TABLE, [{
@@ -322,6 +337,8 @@ async function handleHatchOAuthStart(request, env) {
       oauth_client_id: oauthApp.clientId,
       discord_user_id: discordUserId,
       discord_username: discordUsername || null,
+      guild_id: guildId || null,
+      alert_guild_ids: guildId ? [guildId] : [],
       target_roblox_user_id: targetAccount?.user_id || null,
       target_roblox_username: targetAccount?.username || null,
       enable_after_auth: enableAfterAuth,
@@ -625,6 +642,7 @@ async function handleHatchTrackerCommand(request, env) {
   const body = await readJsonOptional(request);
   const discordUserId = requiredDiscordSnowflake(body.discord_user_id, "discord_user_id");
   const discordUsername = firstString(body.discord_username);
+  const guildId = optionalDiscordSnowflake(body.guild_id, "guild_id");
   const action = String(body.action || "").trim().toLowerCase();
   const selectedTier = normalizeHatchTierSelection(body.tier || "all");
   const accountSelector = normalizeHatchAccountSelector(firstString(body.account, body.roblox_user_id, body.username));
@@ -670,6 +688,7 @@ async function handleHatchTrackerCommand(request, env) {
     const auth = await createHatchOAuthStartForDiscord(env, {
       discord_user_id: discordUserId,
       discord_username: discordUsername,
+      guild_id: guildId || null,
       tier: selectedTier,
       account: accountSelector === "all" ? null : accountSelector,
       enable_after_auth: true
@@ -694,6 +713,7 @@ async function handleHatchTrackerCommand(request, env) {
     const auth = await createHatchOAuthStartForDiscord(env, {
       discord_user_id: discordUserId,
       discord_username: discordUsername,
+      guild_id: guildId || null,
       tier: selectedTier,
       account: accountSelector,
       enable_after_auth: true
@@ -724,7 +744,7 @@ async function handleHatchTrackerCommand(request, env) {
       last_enabled_at: now,
       disabled_at: null,
       updated_at: now,
-      metadata: hatchTrackerMetadataWithTiers(row.metadata, nextTiers)
+      metadata: hatchTrackerMetadataWithTiers(row.metadata, nextTiers, { addAlertGuildId: guildId })
     });
   }));
 
@@ -734,6 +754,7 @@ async function handleHatchTrackerCommand(request, env) {
     const auth = await createHatchOAuthStartForDiscord(env, {
       discord_user_id: discordUserId,
       discord_username: discordUsername,
+      guild_id: guildId || null,
       tier: selectedTier,
       account: firstExpired?.roblox_user_id || firstExpired?.roblox_username || null,
       enable_after_auth: true
@@ -815,7 +836,7 @@ async function handleHatchDiagnostics(request, env) {
       const start = snapshots[i - 1];
       const end = snapshots[i];
       const diff = buildDiff(snapshotItems.get(start.id), snapshotItems.get(end.id));
-      const hatchCandidates = hatchAlertCandidates(diff.gained || []);
+      const hatchCandidates = await hatchAlertCandidates(env, diff.gained || []);
       const queryCandidates = hatchCandidates.filter(item => hatchDiagnosticItemMatches(item, itemQuery));
       recentDiffs.push({
         period_start: start.captured_at,
@@ -898,6 +919,11 @@ async function maybeUpsertHatchTrackerUserFromOAuth(env, pending, details) {
     : hatchTrackerConfiguredTiers(existing).length
       ? hatchTrackerConfiguredTiers(existing)
       : hatchTrackerConfiguredTiers(pendingTracker);
+  const alertGuildIds = [
+    ...hatchTrackerAlertGuildIds(existing),
+    ...hatchTrackerAlertGuildIds(pendingTracker),
+    ...hatchTrackerAlertGuildIds(metadata)
+  ];
   const now = new Date().toISOString();
   const row = {
     tracker_key: hatchTrackerKey(discordUserId, details.userId),
@@ -912,7 +938,7 @@ async function maybeUpsertHatchTrackerUserFromOAuth(env, pending, details) {
       ? null
       : existing?.disabled_at || pendingTracker?.disabled_at || null,
     updated_at: now,
-    metadata: hatchTrackerMetadataWithTiers(existing?.metadata || pendingTracker?.metadata, tiers)
+    metadata: hatchTrackerMetadataWithTiers(existing?.metadata || pendingTracker?.metadata || metadata, tiers, { alertGuildIds })
   };
 
   if (existing?.id || existing?.tracker_key || existing?.roblox_user_id) {
@@ -942,6 +968,7 @@ async function hatchTrackerStatus(env, discordUserId) {
       roblox_username: row.roblox_username || null,
       enabled: Boolean(row.enabled),
       enabled_tiers: hatchTrackerEnabledTiers(row),
+      alert_guild_ids: hatchTrackerAlertGuildIds(row),
       connected: Boolean(access.connected),
       authorization_missing: Boolean(access.authorization_missing),
       reauthorization_required: Boolean(access.reauthorization_required),
@@ -961,6 +988,10 @@ async function hatchTrackerStatus(env, discordUserId) {
   for (const account of accounts) {
     for (const tier of account.enabled_tiers || []) enabledTierSet.add(tier);
   }
+  const alertGuildSet = new Set();
+  for (const account of accounts) {
+    for (const guildId of account.alert_guild_ids || []) alertGuildSet.add(guildId);
+  }
 
   return {
     discord_user_id: discordUserId,
@@ -969,6 +1000,7 @@ async function hatchTrackerStatus(env, discordUserId) {
     roblox_username: primary?.roblox_username || null,
     enabled: accounts.some(account => account.enabled),
     enabled_tiers: [...enabledTierSet],
+    alert_guild_ids: [...alertGuildSet],
     connected: accounts.some(account => account.connected),
     authorized_at: primary?.authorized_at || null,
     authorization_expires_at: primary?.authorization_expires_at || null,
@@ -1011,7 +1043,7 @@ async function fetchHatchTrackerByRobloxUser(env, userId, options = {}) {
   return rows[0] || null;
 }
 
-async function savePendingHatchTracker(env, { existing, discordUserId, discordUsername, enabled, tiers }) {
+async function savePendingHatchTracker(env, { existing, discordUserId, discordUsername, enabled, tiers, alertGuildId }) {
   const now = new Date().toISOString();
   const row = {
     tracker_key: existing?.tracker_key || hatchTrackerKey(discordUserId, null),
@@ -1023,7 +1055,7 @@ async function savePendingHatchTracker(env, { existing, discordUserId, discordUs
     last_enabled_at: enabled === true ? now : existing?.last_enabled_at || null,
     disabled_at: enabled === true ? null : existing?.disabled_at || null,
     updated_at: now,
-    metadata: hatchTrackerMetadataWithTiers(existing?.metadata, tiers)
+    metadata: hatchTrackerMetadataWithTiers(existing?.metadata, tiers, { addAlertGuildId: alertGuildId })
   };
 
   if (existing?.id) {
@@ -1381,11 +1413,68 @@ function removeHatchTierSelection(currentTiers, selection) {
   return current.filter(tier => tier !== selection);
 }
 
-function hatchTrackerMetadataWithTiers(metadata, tiers) {
-  return {
-    ...((metadata && typeof metadata === "object" && !Array.isArray(metadata)) ? metadata : {}),
+function hatchTrackerMetadataWithTiers(metadata, tiers, options = {}) {
+  const base = plainObject(metadata);
+  const alertGuildIds = [
+    ...hatchTrackerAlertGuildIds(base),
+    ...(Array.isArray(options.alertGuildIds) ? options.alertGuildIds : []),
+    firstString(options.addAlertGuildId)
+  ]
+    .map(value => String(value || "").trim())
+    .filter(value => /^\d{10,24}$/.test(value));
+
+  const next = {
+    ...base,
     enabled_tiers: [...new Set(tiers || [])].filter(tier => HATCH_TRACKER_TIERS.includes(tier))
   };
+  const uniqueGuildIds = [...new Set(alertGuildIds)];
+  if (uniqueGuildIds.length) next.alert_guild_ids = uniqueGuildIds;
+  return next;
+}
+
+function hatchTrackerMetadataWithBaseline(metadata, baselinePatch) {
+  const base = plainObject(metadata);
+  const current = plainObject(base.hatch_baseline);
+  const nextBaseline = {
+    ...current,
+    ...(baselinePatch || {}),
+    updated_at: new Date().toISOString()
+  };
+  return { ...base, hatch_baseline: nextBaseline };
+}
+
+function hatchTrackerBaselineState(tracker) {
+  const metadata = plainObject(tracker?.metadata);
+  const baseline = plainObject(metadata.hatch_baseline);
+  return {
+    armed: baseline.armed === true,
+    snapshot_id: firstString(baseline.snapshot_id),
+    captured_at: firstString(baseline.captured_at),
+    item_count: Number(baseline.item_count || 0),
+    stable_comparisons: Math.max(0, Math.floor(Number(baseline.stable_comparisons || 0))),
+    reset_reason: firstString(baseline.reset_reason),
+    risk_reasons: Array.isArray(baseline.risk_reasons) ? baseline.risk_reasons : []
+  };
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function hatchTrackerAlertGuildIds(value) {
+  const metadata = value?.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
+    ? value.metadata
+    : value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  const candidates = [
+    ...(Array.isArray(metadata.alert_guild_ids) ? metadata.alert_guild_ids : []),
+    ...(Array.isArray(metadata.guild_ids) ? metadata.guild_ids : []),
+    metadata.guild_id
+  ];
+  return [...new Set(candidates
+    .map(item => String(item || "").trim())
+    .filter(item => /^\d{10,24}$/.test(item)))];
 }
 
 function hatchTierResponseLabel(selection) {
@@ -2159,8 +2248,23 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
 
   const diff = await buildDiffFromSnapshots(env, start, end);
   const enabledTiers = new Set(hatchTrackerEnabledTiers(tracker));
-  const candidates = hatchAlertCandidates(diff.gained || [])
+  const candidates = (await hatchAlertCandidates(env, diff.gained || []))
     .filter(row => enabledTiers.has(row.tier));
+  const baselineDecision = hatchBaselineDecision(env, tracker, start, end, diff, candidates);
+  if (baselineDecision.skip) {
+    await markHatchSnapshotCheckedWithBaseline(env, tracker, end, baselineDecision);
+    return {
+      posted: false,
+      reason: baselineDecision.reason,
+      snapshot_id: end.id,
+      baseline: {
+        armed: baselineDecision.next_armed === true,
+        stable_comparisons: baselineDecision.stable_comparisons,
+        required_stable_comparisons: hatchBaselineStableComparisons(env),
+        risk_reasons: baselineDecision.risk?.reasons || []
+      }
+    };
+  }
   const sourceFilter = await filterHatchSourceGains(env, userId, candidates, { start, end });
   const hatched = sourceFilter.rows;
   if (!hatched.length) {
@@ -2177,7 +2281,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
 
   const featured = pickFeaturedHatch(hatched);
   const payload = buildHatchAlertDiscordPayload(tracker, user, featured, hatched, { start, end });
-  const discordResponse = await sendHatchAlert(env, payload);
+  const discordResponse = await sendHatchAlert(env, payload, tracker);
   const now = new Date().toISOString();
 
   await supabaseInsert(env, HATCH_ALERTS_TABLE, [{
@@ -2222,7 +2326,8 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
   };
 }
 
-function hatchAlertCandidates(rows) {
+async function hatchAlertCandidates(env, rows) {
+  const catalog = await getPetPowerCatalog(env).catch(() => ({ images: new Map() }));
   return (rows || [])
     .map(row => {
       const tier = hatchTier(row);
@@ -2230,7 +2335,7 @@ function hatchAlertCandidates(rows) {
         ...row,
         tier,
         tier_priority: HATCH_TIER_PRIORITY[tier] || 0,
-        image_url: inventoryImageUrl(row.icon)
+        image_url: hatchCandidateImageUrl(row, catalog.images)
       } : null;
     })
     .filter(Boolean)
@@ -2240,6 +2345,85 @@ function hatchAlertCandidates(rows) {
       Number(b.delta || 0) - Number(a.delta || 0) ||
       String(a.display_name || "").localeCompare(String(b.display_name || ""))
     );
+}
+
+function hatchCandidateImageUrl(row, catalogImages) {
+  const raw = plainObject(row?.raw);
+  const rawData = plainObject(raw.rawData);
+  const configData = plainObject(raw.configData);
+  const directValues = [
+    row?.image_url,
+    row?.imageUrl,
+    row?.thumbnail_url,
+    row?.thumbnailUrl,
+    row?.thumbnail,
+    row?.icon,
+    raw.image_url,
+    raw.imageUrl,
+    raw.thumbnail_url,
+    raw.thumbnailUrl,
+    raw.thumbnail,
+    raw.goldenThumbnail,
+    raw.icon,
+    raw.Icon,
+    raw.goldenIcon,
+    rawData.image_url,
+    rawData.imageUrl,
+    rawData.thumbnail_url,
+    rawData.thumbnailUrl,
+    rawData.thumbnail,
+    rawData.goldenThumbnail,
+    rawData.icon,
+    rawData.Icon,
+    configData.thumbnail,
+    configData.goldenThumbnail
+  ];
+  for (const value of directValues) {
+    const url = hatchRenderableDirectImageUrl(value);
+    if (url) return url;
+  }
+
+  const catalogUrl = hatchCatalogImageUrl(row, catalogImages);
+  return catalogUrl || HATCH_ALERT_THUMBNAIL_URL;
+}
+
+function hatchRenderableDirectImageUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return inventoryImageUrl(text);
+  if (/^rbxassetid:\/\/\d+$/i.test(text) || /^\d{5,20}$/.test(text) || /[?&]id=\d{5,20}/i.test(text)) {
+    return inventoryImageUrl(text);
+  }
+  return "";
+}
+
+function hatchCatalogImageUrl(row, catalogImages) {
+  if (!(catalogImages instanceof Map) || !catalogImages.size) return "";
+  const raw = plainObject(row?.raw);
+  const rawData = plainObject(raw.rawData);
+  const names = [
+    row?.item_id,
+    row?.display_name,
+    raw.id,
+    raw.itemId,
+    raw.configName,
+    raw.name,
+    raw.displayName,
+    rawData.id,
+    rawData.configName,
+    rawData.name
+  ];
+  for (const name of names) {
+    const record = catalogImages.get(normalizePetName(name));
+    if (!record) continue;
+    const variant = normalizeVariantName(row?.variant || getVariant(raw));
+    const rawImage = variant.includes("Golden")
+      ? firstString(record.golden_thumbnail, record.thumbnail)
+      : firstString(record.thumbnail, record.golden_thumbnail);
+    const url = inventoryImageUrl(rawImage);
+    if (url) return url;
+  }
+  return "";
 }
 
 function hatchTier(row) {
@@ -2292,6 +2476,115 @@ function compactHatchCandidate(row) {
     rap: row.rap || 0,
     image_url: row.image_url || null
   };
+}
+
+function hatchBaselineDecision(env, tracker, start, end, diff, candidates) {
+  if (!envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true)) {
+    return { skip: false, state: hatchTrackerBaselineState(tracker), risk: null };
+  }
+
+  const state = hatchTrackerBaselineState(tracker);
+  const risk = hatchSnapshotBackfillRisk(env, state, start, end, diff, candidates);
+  const target = hatchBaselineStableComparisons(env);
+  const hasBaseline = !!state.snapshot_id;
+
+  if (!state.armed) {
+    const stableComparisons = hasBaseline && !risk.risky
+      ? Math.min(target, state.stable_comparisons + 1)
+      : 0;
+    const nextArmed = stableComparisons >= target;
+    return {
+      skip: true,
+      next_armed: nextArmed,
+      stable_comparisons: stableComparisons,
+      reason: nextArmed
+        ? "HTG baseline is armed; the next snapshot can alert."
+        : risk.risky
+          ? "HTG baseline reset because the inventory looked like a late Big Games backfill."
+          : "HTG baseline is warming before alerts are allowed.",
+      state,
+      risk
+    };
+  }
+
+  if (risk.risky) {
+    return {
+      skip: true,
+      next_armed: false,
+      stable_comparisons: 0,
+      reason: "HTG alert suppressed because the inventory looked like a late Big Games backfill.",
+      state,
+      risk
+    };
+  }
+
+  return { skip: false, next_armed: true, stable_comparisons: state.stable_comparisons || target, state, risk };
+}
+
+function hatchSnapshotBackfillRisk(env, state, start, end, diff, candidates) {
+  const startCount = Math.max(0, Number(start?.item_count || 0));
+  const endCount = Math.max(0, Number(end?.item_count || 0));
+  const itemGrowth = Math.max(0, endCount - startCount);
+  const itemGrowthRatio = startCount > 0 ? itemGrowth / startCount : itemGrowth > 0 ? 1 : 0;
+  const candidateGainCount = sumPositiveDelta(candidates);
+  const totalGainCount = sumPositiveDelta(diff?.gained || []);
+  const reasons = [];
+
+  if (
+    candidateGainCount > 0 &&
+    itemGrowth >= hatchBackfillMinItemGrowth(env) &&
+    itemGrowthRatio >= hatchBackfillItemGrowthRatio(env)
+  ) {
+    reasons.push("inventory_item_count_jump");
+  }
+  if (
+    candidateGainCount >= hatchBackfillHtgGainCount(env) &&
+    (!state.armed || itemGrowth >= Math.min(hatchBackfillMinItemGrowth(env), candidateGainCount))
+  ) {
+    reasons.push("bulk_htg_gain");
+  }
+  if (
+    candidateGainCount > 0 &&
+    totalGainCount >= hatchBackfillTotalGainCount(env) &&
+    (!state.armed || itemGrowth >= hatchBackfillMinItemGrowth(env))
+  ) {
+    reasons.push("bulk_inventory_gain");
+  }
+
+  return {
+    risky: reasons.length > 0,
+    reasons,
+    start_item_count: startCount,
+    end_item_count: endCount,
+    item_growth: itemGrowth,
+    item_growth_ratio: itemGrowthRatio,
+    candidate_gain_count: candidateGainCount,
+    total_gain_count: totalGainCount
+  };
+}
+
+function sumPositiveDelta(rows) {
+  return (rows || []).reduce((total, row) => total + Math.max(0, Number(row?.delta || 0)), 0);
+}
+
+function hatchBaselineStableComparisons(env) {
+  return Math.max(1, Math.floor(clampNumber(env.HATCH_BASELINE_STABLE_COMPARISONS, DEFAULT_HATCH_BASELINE_STABLE_COMPARISONS, 1, 12)));
+}
+
+function hatchBackfillMinItemGrowth(env) {
+  return Math.max(0, Math.floor(clampNumber(env.HATCH_BACKFILL_MIN_ITEM_GROWTH, DEFAULT_HATCH_BACKFILL_MIN_ITEM_GROWTH, 0, 100000)));
+}
+
+function hatchBackfillItemGrowthRatio(env) {
+  return clampNumber(env.HATCH_BACKFILL_ITEM_GROWTH_RATIO, DEFAULT_HATCH_BACKFILL_ITEM_GROWTH_RATIO, 0, 1);
+}
+
+function hatchBackfillHtgGainCount(env) {
+  return Math.max(1, Math.floor(clampNumber(env.HATCH_BACKFILL_HTG_GAIN_COUNT, DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT, 1, 1000)));
+}
+
+function hatchBackfillTotalGainCount(env) {
+  return Math.max(1, Math.floor(clampNumber(env.HATCH_BACKFILL_TOTAL_GAIN_COUNT, DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT, 1, 100000)));
 }
 
 async function filterHatchSourceGains(env, userId, rows, period) {
@@ -2545,6 +2838,74 @@ function compactHatchSourceFilterSummary(filter) {
 }
 
 function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapshots) {
+  {
+    const alertDiscordUserId = String(tracker.discord_user_id || "").trim();
+    const alertUsername = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
+    const alertDisplayItem = hatchDisplayItemName(featured);
+    const alertTier = hatchTierLabel(featured.tier);
+    const alertTheme = hatchAlertTheme(featured.tier);
+    const alertImageUrl = featured.image_url || HATCH_ALERT_THUMBNAIL_URL;
+    const alertRap = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
+    const alertQuantity = Number(featured.delta) > 1 ? ` x${shortInventoryNumber(featured.delta)}` : "";
+    const alertTimestamp = snapshots?.end?.captured_at || new Date().toISOString();
+    const alertUnix = Math.floor(new Date(alertTimestamp).getTime() / 1000);
+    const alertPlayer = alertDiscordUserId
+      ? `**Player:** <@${alertDiscordUserId}> (${escapeDiscordMarkdown(alertUsername)})`
+      : `**Player:** ${escapeDiscordMarkdown(alertUsername)}`;
+    const alertExtra = hatched.length > 1
+      ? `-# Also detected: ${hatched.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${escapeDiscordMarkdown(hatchDisplayItemName(row))} x${shortInventoryNumber(row.delta)}`).join(", ")}`
+      : "";
+    const alertLines = [
+      `### ${escapeDiscordMarkdown(alertUsername)} found something magical`,
+      alertPlayer,
+      `**Item:** ${alertTheme.icon} **${alertTier}:** ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}`,
+      `**RAP:** ${alertRap}`,
+      hatchAlertSnapshotLine(snapshots),
+      alertExtra
+    ].filter(Boolean);
+
+    return {
+      username: LUNA_WEBHOOK_USERNAME,
+      avatar_url: LUNA_AVATAR_URL,
+      allowed_mentions: alertDiscordUserId ? { users: [alertDiscordUserId] } : { parse: [] },
+      flags: DISCORD_COMPONENTS_V2_FLAG,
+      components: [
+        {
+          type: 17,
+          accent_color: alertTheme.accent,
+          components: [
+            {
+              type: 9,
+              components: [
+                {
+                  type: 10,
+                  content: [
+                    `## ${alertTheme.icon} ${alertTheme.title}`,
+                    `-# detected <t:${alertUnix}:R>`
+                  ].join("\n")
+                }
+              ],
+              accessory: {
+                type: 11,
+                media: { url: alertImageUrl },
+                description: `${alertTier} ${alertDisplayItem}`
+              }
+            },
+            { type: 14, divider: true, spacing: 1 },
+            { type: 10, content: alertLines.join("\n") },
+            { type: 14, divider: true, spacing: 1 },
+            { type: 10, content: "-# Luna filters trade, booth, and mail matches before posting HTG alerts." },
+            { type: 14, divider: true, spacing: 1 },
+            { type: 10, content: `${lunaHatchCreditLine()} | <t:${alertUnix}:R>` }
+          ]
+        }
+      ]
+    };
+  }
+
+}
+
+/*
   const discordUserId = String(tracker.discord_user_id || "").trim();
   const username = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
   const displayItem = hatchDisplayItemName(featured);
@@ -2569,7 +2930,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
   const alertText = hatchAlertTemplate(featured.tier, templateContext);
 
   return {
-    username: "Oapl's 3rd-Eye",
+    username: LUNA_WEBHOOK_USERNAME,
     allowed_mentions: discordUserId ? { users: [discordUserId] } : { parse: [] },
     flags: DISCORD_COMPONENTS_V2_FLAG,
     components: [
@@ -2577,7 +2938,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
         type: 17,
         accent_color: HATCH_ALERT_COLOR,
         components: [
-          { type: 10, content: `## HATCHING ALERTS ${discordUserId ? `||<@${discordUserId}>||` : ""}` },
+          { type: 10, content: `## HTG Alerts ${discordUserId ? `||<@${discordUserId}>||` : ""}` },
           { type: 14, divider: true, spacing: 1 },
           imageUrl
             ? {
@@ -2591,11 +2952,39 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
               }
             : { type: 10, content: alertText },
           { type: 14, divider: true, spacing: 1 },
-          { type: 10, content: `-# **${HATCH_ALERT_FOOTER_TEXT}** · <t:${unix}:R>` }
+          { type: 10, content: `${lunaHatchCreditLine()} | <t:${unix}:R>` }
         ]
       }
     ]
   };
+}
+*/
+
+function hatchAlertTheme(tier) {
+  const normalized = String(tier || "").toLowerCase();
+  if (normalized === "gargantuan") {
+    return { title: "Gargantuan Alert", icon: ":gem:", accent: 0xffd44d };
+  }
+  if (normalized === "titanic") {
+    return { title: "Titanic Alert", icon: ":milky_way:", accent: 0xff5db8 };
+  }
+  return { title: "Huge Alert", icon: ":sparkles:", accent: 0x34e1ef };
+}
+
+function hatchAlertSnapshotLine(snapshots) {
+  const startMs = new Date(snapshots?.start?.captured_at || 0).getTime();
+  const endMs = new Date(snapshots?.end?.captured_at || 0).getTime();
+  const hasStart = Number.isFinite(startMs) && startMs > 0;
+  const hasEnd = Number.isFinite(endMs) && endMs > 0;
+  if (hasStart && hasEnd) {
+    return `**Window:** <t:${Math.floor(startMs / 1000)}:t> - <t:${Math.floor(endMs / 1000)}:t>`;
+  }
+  if (hasEnd) return `**Detected:** <t:${Math.floor(endMs / 1000)}:F>`;
+  return "";
+}
+
+function lunaHatchCreditLine() {
+  return "-# :woman_genie: Luna, A Pet Sim 99 Bot :rainbow_flag: \u2219 by [Cinnamowopal](https://x.com/oapl_the_opal)";
 }
 
 function hatchAlertTemplate(tier, context) {
@@ -2642,15 +3031,29 @@ function gargantuanHatchAlertTemplate(context) {
   ].filter(Boolean).join("\n");
 }
 
-async function sendHatchAlert(env, payload) {
+async function sendHatchAlert(env, payload, tracker = null) {
   const assignedConfigs = await fetchEnabledHatchGuildConfigs(env).catch(() => []);
   const botToken = String(env.DISCORD_BOT_TOKEN || "").trim();
   if (assignedConfigs.length) {
     if (!botToken) {
       throw httpError(500, "HTG hatch-alert channels are assigned, but DISCORD_BOT_TOKEN is not set on the inventory Worker.");
     }
+    const alertGuildIds = hatchTrackerAlertGuildIds(tracker);
+    const targetConfigs = alertGuildIds.length
+      ? assignedConfigs.filter(config => alertGuildIds.includes(String(config.guild_id || "").trim()))
+      : assignedConfigs.length === 1
+        ? assignedConfigs
+        : [];
+    if (!targetConfigs.length) {
+      throw httpError(
+        409,
+        alertGuildIds.length
+          ? "HTG hatch alerts are enabled for this account, but none of its enabled servers have an assigned HTG channel."
+          : "HTG hatch alerts need a server binding. Run /htg enable in the server that should receive this account's alerts."
+      );
+    }
     const destinations = [];
-    for (const config of assignedConfigs) {
+    for (const config of targetConfigs) {
       const channelId = String(config.channel_id || "").trim();
       if (!channelId) continue;
       const posted = await sendHatchAlertBotMessage(channelId, botToken, payload);
@@ -2677,7 +3080,7 @@ async function sendHatchAlert(env, payload) {
 }
 
 async function sendHatchAlertBotMessage(channelId, botToken, payload) {
-  const { username, ...botPayload } = payload;
+  const { username, avatar_url, ...botPayload } = payload;
   const res = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: {
@@ -2700,6 +3103,34 @@ async function markHatchSnapshotChecked(env, tracker, snapshotId) {
   });
 }
 
+async function markHatchSnapshotCheckedWithBaseline(env, tracker, snapshot, decision) {
+  const now = new Date().toISOString();
+  const risk = decision?.risk || {};
+  const metadata = hatchTrackerMetadataWithBaseline(tracker?.metadata, {
+    armed: decision?.next_armed === true,
+    snapshot_id: firstString(snapshot?.id),
+    captured_at: firstString(snapshot?.captured_at),
+    item_count: Number(snapshot?.item_count || 0),
+    stable_comparisons: Math.max(0, Math.floor(Number(decision?.stable_comparisons || 0))),
+    reset_reason: firstString(decision?.reason),
+    risk_reasons: Array.isArray(risk.reasons) ? risk.reasons : [],
+    risk: {
+      start_item_count: Number(risk.start_item_count || 0),
+      end_item_count: Number(risk.end_item_count || 0),
+      item_growth: Number(risk.item_growth || 0),
+      item_growth_ratio: Number(risk.item_growth_ratio || 0),
+      candidate_gain_count: Number(risk.candidate_gain_count || 0),
+      total_gain_count: Number(risk.total_gain_count || 0)
+    }
+  });
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
+    metadata,
+    last_checked_snapshot_id: firstString(snapshot?.id),
+    last_checked_at: now,
+    updated_at: now
+  });
+}
+
 function hatchDisplayItemName(row) {
   const raw = String(firstString(row.display_name, row.item_id, row.item_key, "pet")).trim();
   return raw.replace(/^(Huge|Titanic|Gargantuan|Garg)\s+/i, "").trim() || raw;
@@ -2716,6 +3147,13 @@ function inventoryImageUrl(value) {
   const text = String(value || "").trim();
   if (!text) return "";
   if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+  const assetId = (
+    text.match(/^rbxassetid:\/\/(\d+)$/i) ||
+    text.match(/[?&]id=(\d{5,20})/i) ||
+    text.match(/\/(\d{5,20})(?:\D|$)/)
+  )?.[1];
+  if (assetId) return `https://ps99.biggamesapi.io/image/${encodeURIComponent(assetId)}`;
+  if (/^\d{5,20}$/.test(text)) return `https://ps99.biggamesapi.io/image/${encodeURIComponent(text)}`;
   return `https://ps99.biggamesapi.io/image/${encodeURIComponent(text)}`;
 }
 
@@ -3532,13 +3970,16 @@ async function getPetPowerCatalog(env) {
       const payload = text ? JSON.parse(text) : {};
       const rows = Array.isArray(payload) ? payload : Array.isArray(payload.data) ? payload.data : [];
       const powers = new Map();
+      const images = new Map();
       for (const row of rows) {
         const name = normalizePetName(row?.configName || row?.configData?.name || row?.name);
         if (!name) continue;
         const power = extractCatalogPower(row);
         if (power) powers.set(name, power);
+        const image = extractCatalogImage(row);
+        if (image) images.set(name, image);
       }
-      return { powers, source: "BIG Games Pets catalog", warning: null };
+      return { powers, images, source: "BIG Games Pets catalog", warning: null };
     })();
   }
   try {
@@ -3548,6 +3989,7 @@ async function getPetPowerCatalog(env) {
   } catch (error) {
     petCatalogCache = {
       powers: new Map(),
+      images: new Map(),
       source: "unavailable",
       warning: error?.message || String(error)
     };
@@ -3562,8 +4004,9 @@ function mergePetPowerCatalog(catalog, overrides) {
   const powers = builtInEventPetPowers();
   for (const [name, value] of catalog?.powers || []) powers.set(name, value);
   for (const [name, value] of overrides) powers.set(name, { ...value, source: "override" });
+  const images = new Map(catalog?.images || []);
   const sources = [catalog?.source && catalog.source !== "unavailable" ? catalog.source : null, "PS99 decompile", overrides.size ? "override" : null].filter(Boolean);
-  return { powers, source: sources.join(" + "), warning: catalog?.warning || null };
+  return { powers, images, source: sources.join(" + "), warning: catalog?.warning || null };
 }
 
 function builtInEventPetPowers() {
@@ -3616,6 +4059,15 @@ function extractCatalogPower(row) {
     if (value > 0) variants[label] = value;
   }
   return base > 0 || Object.keys(variants).length ? { base: base || null, variants, source: "catalog" } : null;
+}
+
+function extractCatalogImage(row) {
+  const data = plainObject(row?.configData);
+  const thumbnail = firstString(data.thumbnail, data.icon, row?.thumbnail, row?.icon);
+  const goldenThumbnail = firstString(data.goldenThumbnail, data.goldenIcon, row?.goldenThumbnail, row?.goldenIcon);
+  return thumbnail || goldenThumbnail
+    ? { thumbnail, golden_thumbnail: goldenThumbnail }
+    : null;
 }
 
 function normalizePowerRecord(value, source) {
@@ -3770,6 +4222,7 @@ function fmtNumber(n) { return Number(n || 0).toLocaleString("en-US"); }
 function formatDiscordTime(iso) { return new Date(iso).toLocaleString("en-US", { timeZone: DEFAULT_TIME_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
 function firstString(...values) { for (const value of values) { const text = String(value ?? "").trim(); if (text) return text; } return ""; }
 function requiredDiscordSnowflake(value, label) { const text = firstString(value); if (!/^\d{10,24}$/.test(text)) throw httpError(400, `A valid ${label || "Discord ID"} is required.`); return text; }
+function optionalDiscordSnowflake(value, label) { const text = firstString(value); if (!text) return ""; if (!/^\d{10,24}$/.test(text)) throw httpError(400, `A valid ${label || "Discord ID"} is required.`); return text; }
 function shortInventoryNumber(value) { const number = Number(value); if (!Number.isFinite(number)) return "-"; const abs = Math.abs(number); if (abs >= 1e12) return `${(number / 1e12).toFixed(2).replace(/\.?0+$/, "")}T`; if (abs >= 1e9) return `${(number / 1e9).toFixed(2).replace(/\.?0+$/, "")}B`; if (abs >= 1e6) return `${(number / 1e6).toFixed(2).replace(/\.?0+$/, "")}M`; if (abs >= 1e3) return `${(number / 1e3).toFixed(2).replace(/\.?0+$/, "")}K`; return Math.round(number).toLocaleString("en-US"); }
 function escapeDiscordMarkdown(value) { return String(value || "").replace(/([\\`*_~|])/g, "\\$1"); }
 async function readJsonOptional(request) { const text = await request.text().catch(() => ""); if (!String(text || "").trim()) return {}; try { const parsed = JSON.parse(text); return parsed && typeof parsed === "object" ? parsed : {}; } catch { throw httpError(400, "Request body must be valid JSON."); } }
