@@ -5847,7 +5847,8 @@ function externalClanHistoryRows(rows, source) {
       total_global_players: totalGlobalPlayers,
       points: finiteHistoryNumber(row.final_points),
       first_snapshot: row.first_snapshot || row.first_seen_at || row.period_start_at || null,
-      last_snapshot: row.last_snapshot || row.last_seen_at || row.period_end_at || row.fetched_at || row.updated_at || null,
+      // External-history timestamps describe the import, not when the battle ran.
+      last_snapshot: row.last_snapshot || row.last_seen_at || row.period_end_at || null,
       update_number: finiteHistoryNumber(row.update_number)
     };
   }).filter(row => row.key && (row.rank !== null || row.global_rank !== null || row.points !== null));
@@ -5923,17 +5924,21 @@ function mergeHistorySummaryRows(primaryRows, secondaryRows) {
 }
 
 function mergeClanHistoryRecord(map, row) {
-  if (!row?.key) return;
-  const existing = map.get(row.key);
+  const key = canonicalClanHistoryKey(row?.key || row?.battle_key || row?.name);
+  if (!key) return;
+  const normalizedRow = row.key === key ? row : { ...row, key };
+  const existing = map.get(key);
   if (!existing) {
-    map.set(row.key, row);
+    map.set(key, normalizedRow);
     return;
   }
 
-  const rowWins = historySourcePriority(row.source) > historySourcePriority(existing.source);
-  const primary = rowWins ? row : existing;
-  const secondary = rowWins ? existing : row;
-  map.set(row.key, fillHistoryRecord(primary, secondary));
+  const rowWins = historySourcePriority(normalizedRow.source) > historySourcePriority(existing.source);
+  const primary = rowWins ? normalizedRow : existing;
+  const secondary = rowWins ? existing : normalizedRow;
+  // Native history stays authoritative. A lower-priority import can only fill
+  // a field that is missing from the native record; it cannot replace it.
+  map.set(key, fillHistoryRecord(primary, secondary));
 }
 
 function fillHistoryRecord(primary, secondary) {
@@ -5972,26 +5977,26 @@ function historyRecordName(value) {
 }
 
 const CLAN_BATTLE_HISTORY_TIMELINE = [
-  { keys: ["GummyBattle2026", "Gummy Battle 2026"], first: "2026-07-28T17:20:58.000Z", last: null, update: null },
-  { keys: ["LunarBattle2026", "Lunar Battle 2026"], first: "2026-07-14T19:00:00.000Z", last: null, update: null },
-  { keys: ["SoccerBattle2026", "Soccer Battle 2026"], first: "2026-06-29T17:55:53.296Z", last: "2026-07-04T14:55:36.921Z", update: null },
-  { keys: ["Backrooms2026", "Backrooms 2026"], first: "2026-06-16T22:39:23.659Z", last: "2026-06-19T18:21:55.086Z", update: null },
-  { keys: ["AngelBattle2026", "Angel Battle 2026"], first: "2026-05-11T14:23:36.089Z", last: "2026-05-15T11:05:55.407Z", update: 78 },
-  { keys: ["StarryBattle", "Starry Battle"], first: "2026-04-29T12:00:00.524Z", last: "2026-05-02T12:00:00.524Z", update: 76 },
-  { keys: ["Spring2026", "Abstract Battle"], first: "2026-04-21T12:14:36.000Z", last: "2026-04-25T13:09:36.000Z", update: 75 },
-  { keys: ["Clover Clan Battle", "Clover Battle"], first: "2026-03-14T12:00:00.524Z", last: "2026-03-28T12:00:00.524Z", update: 73 },
-  { keys: ["Silver Clan Battle", "Silver Battle"], first: "2025-12-20T12:00:00.524Z", last: "2025-12-26T12:00:00.524Z", update: 72 },
-  { keys: ["Forged Battle"], first: "2025-01-29T12:00:00.524Z", last: "2025-12-06T12:00:00.524Z", update: 71 },
-  { keys: ["Sun Angelus Battle"], first: "2025-07-25T12:00:00.524Z", last: "2025-07-18T12:00:00.524Z", update: 68 },
-  { keys: ["Scuba Dog Battle"], first: "2025-06-28T12:00:00.524Z", last: "2025-07-04T12:00:00.524Z", update: 66 },
-  { keys: ["Nightmare Cyclops Battle"], first: "2025-06-14T12:00:00.524Z", last: "2025-06-21T12:00:00.524Z", update: 64 },
-  { keys: ["Junkyard Hound Battle"], first: "2025-05-31T12:00:00.524Z", last: "2025-06-07T12:00:00.524Z", update: 62 },
-  { keys: ["Balloon Corgi Battle"], first: "2025-05-17T12:00:00.524Z", last: "2025-05-24T12:00:00.524Z", update: 60 },
+  { keys: ["GummyBattle2026", "Gummy Battle 2026"], first: "2026-07-18T00:00:00.000Z", last: "2026-07-31T23:59:59.000Z", update: null },
+  { keys: ["LunarBattle2026", "Lunar Battle 2026"], first: "2026-07-04T00:00:00.000Z", last: "2026-07-17T23:59:59.000Z", update: null },
+  { keys: ["SoccerBattle2026", "Soccer Battle 2026"], first: "2026-06-20T00:00:00.000Z", last: "2026-07-03T23:59:59.000Z", update: null },
+  { keys: ["Backrooms2026", "Backrooms 2026"], first: "2026-06-06T00:00:00.000Z", last: "2026-06-19T23:59:59.000Z", update: null },
+  { keys: ["AngelBattle2026", "Angel Battle 2026"], first: "2026-05-09T00:00:00.000Z", last: "2026-05-15T23:59:59.000Z", update: 78 },
+  { keys: ["StarryBattle", "Starry Battle", "Starry"], first: "2026-04-25T00:00:00.000Z", last: "2026-05-02T23:59:59.000Z", update: 76 },
+  { keys: ["Spring2026", "Spring 2026", "Abstract Battle"], first: "2026-04-18T00:00:00.000Z", last: "2026-04-24T23:59:59.000Z", update: 75 },
+  { keys: ["Lucky Chest Battle", "Lucky Chest", "Clover Clan Battle", "Clover Battle"], first: "2026-03-14T00:00:00.000Z", last: "2026-03-28T23:59:59.000Z", update: 73 },
+  { keys: ["Gingerbread Battle 2025", "GingerbreadBattle2025", "Christmas2025", "Christmas 2025", "Silver Clan Battle", "Silver Battle"], first: "2025-12-20T00:00:00.000Z", last: "2025-12-26T23:59:59.000Z", update: 72 },
+  { keys: ["Thanksgiving 2025 Battle", "Thanksgiving 2025", "Thanksgiving2025Battle", "Turkey2025", "Turkey 2025", "Forged Battle"], first: "2025-11-29T00:00:00.000Z", last: "2025-12-05T23:59:59.000Z", update: 71 },
+  { keys: ["Block Party", "Sun Angelus Battle"], first: "2025-07-12T00:00:00.000Z", last: "2025-07-18T23:59:59.000Z", update: 68 },
+  { keys: ["Strength", "Scuba Dog Battle"], first: "2025-06-28T00:00:00.000Z", last: "2025-07-04T23:59:59.000Z", update: 66 },
+  { keys: ["Tower Defense", "Nightmare Cyclops Battle"], first: "2025-06-14T00:00:00.000Z", last: "2025-06-20T23:59:59.000Z", update: 64 },
+  { keys: ["Basketball Battle", "Basketball", "BasketballBattle", "Junkyard Hound Battle"], first: "2025-05-31T00:00:00.000Z", last: "2025-06-06T23:59:59.000Z", update: 62 },
+  { keys: ["Balloon Corgi Battle", "Balloon Corgi"], first: "2025-05-17T00:00:00.000Z", last: "2025-05-23T23:59:59.000Z", update: 60 },
   { keys: ["Poison Turtle Battle"], first: "2025-05-03T12:00:00.524Z", last: "2025-05-09T12:00:00.524Z", update: 58 },
   { keys: ["Pixel Chick Battle"], first: "2025-04-19T12:00:00.524Z", last: "2025-04-25T12:00:00.524Z", update: 56 },
   { keys: ["Athena Battle"], first: "2025-03-29T12:00:00.524Z", last: "2025-04-04T12:00:00.524Z", update: 53 },
-  { keys: ["Tie Dye Battle"], first: "2025-03-21T12:00:00.524Z", last: "2025-03-21T12:00:00.524Z", update: 51 },
-  { keys: ["Egyptian Battle"], first: "2025-03-08T12:00:00.524Z", last: "2025-03-14T12:00:00.524Z", update: 50 },
+  { keys: ["Tie Dye Battle", "Tie Dye"], first: "2025-03-15T00:00:00.000Z", last: "2025-03-21T23:59:59.000Z", update: 51 },
+  { keys: ["Lucky Battle", "Lucky", "LuckyBattle", "Egyptian Battle"], first: "2025-03-08T00:00:00.000Z", last: "2025-03-14T23:59:59.000Z", update: 50 },
   { keys: ["Evil Battle"], first: "2025-02-22T12:00:00.524Z", last: "2025-02-28T12:00:00.524Z", update: 46 },
   { keys: ["Holographic Battle"], first: "2025-02-08T12:00:00.524Z", last: "2025-02-14T12:00:00.524Z", update: 46 },
   { keys: ["Mushroom Battle"], first: "2025-01-25T12:00:00.524Z", last: "2025-01-31T12:00:00.524Z", update: 44 },
@@ -6020,6 +6025,7 @@ const CLAN_BATTLE_HISTORY_TIMELINE = [
 ];
 
 const CLAN_BATTLE_HISTORY_TIME_BY_KEY = buildClanBattleHistoryTimeMap();
+const CLAN_BATTLE_HISTORY_CANONICAL_KEY_BY_ALIAS = buildClanBattleHistoryAliasMap();
 
 function buildClanBattleHistoryTimeMap() {
   const map = new Map();
@@ -6035,6 +6041,26 @@ function buildClanBattleHistoryTimeMap() {
     }
   }
   return map;
+}
+
+function buildClanBattleHistoryAliasMap() {
+  const map = new Map();
+  for (const row of CLAN_BATTLE_HISTORY_TIMELINE) {
+    const canonicalKey = historyRecordKey(row.keys?.[0]);
+    if (!canonicalKey) continue;
+    for (const key of row.keys || []) {
+      for (const alias of [key, historyRecordName(key)]) {
+        const normalized = historyRecordKey(alias);
+        if (normalized) map.set(normalized, canonicalKey);
+      }
+    }
+  }
+  return map;
+}
+
+function canonicalClanHistoryKey(value) {
+  const key = historyRecordKey(value);
+  return CLAN_BATTLE_HISTORY_CANONICAL_KEY_BY_ALIAS.get(key) || key;
 }
 
 function sortClanHistoryRecords(rows) {

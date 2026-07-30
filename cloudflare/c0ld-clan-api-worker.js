@@ -12,6 +12,7 @@ const GLOBAL_RANK_CURRENT_TABLE = "c0ld_global_ranks_current";
 const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
 const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const EXTERNAL_PLAYER_HISTORY_TABLE = "c0ld_external_player_history";
+const CW_BOT_HISTORY_TABLE = "c0ld_cwbot_history_imports";
 const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
@@ -48,6 +49,7 @@ const DEFAULT_CLAN_NAME = "c0ld";
 const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_HISTORY_MAX_HOURS = 100000;
 const DEFAULT_PUBLIC_CACHE_SECONDS = 30;
+const DEFAULT_DERIVED_SNAPSHOT_CACHE_SECONDS = 3600;
 const ARCHIVE_PRUNE_BATCH_SIZE = 500;
 const ARCHIVE_PRUNE_MAX_BATCHES = 10;
 const ROBLOX_BATCH_SIZE = 100;
@@ -85,6 +87,7 @@ const DEFAULT_GLOBAL_RANK_SHARD_COUNT = 1;
 const DEFAULT_GLOBAL_RANK_SHARD_CONCURRENCY = 1;
 const DEFAULT_GLOBAL_RANK_RETRY_ATTEMPTS = 6;
 const DEFAULT_GLOBAL_RANK_RETRY_BASE_MS = 15000;
+const DEFAULT_GLOBAL_RANK_RETENTION_DELETE_RUNS_PER_PASS = 3;
 const LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT = 1000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
@@ -278,6 +281,12 @@ export default {
         response = await handleExternalHistory(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/import") {
         response = await handleCwBotHistoryImport(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/guild-channels") {
+        response = await handleCwBotHistoryGuildChannels(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/archived-threads") {
+        response = await handleCwBotHistoryArchivedThreads(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/external-history/cwbot/channel-scan") {
+        response = await handleCwBotHistoryChannelScan(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/external-history/bigbot/import") {
         response = await handleBigBotHistoryImport(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/activity/summary") {
@@ -1081,13 +1090,17 @@ async function handleIngest(env, source, requestedClan, force = false, options =
   }));
 
   if (rows.length) {
+    const previousGainState = await fetchCurrentMemberGainState(env, clan);
+    const currentRows = rows.map(row => ({
+      ...row,
+      ...nextMemberGainState(row, previousGainState.get(String(row.user_id)), fetchedAt),
+      updated_at: fetchedAt
+    }));
+
     await supabaseInsert(env, SNAPSHOT_TABLE, rows);
     await replaceCurrentRows(env, CURRENT_TABLE, {
       clan_name: `eq.${clan}`
-    }, rows.map(row => ({
-      ...row,
-      updated_at: fetchedAt
-    })));
+    }, currentRows);
   }
 
   await upsertBattleRun(env, {
@@ -3338,6 +3351,9 @@ function globalCandidateRawUsername(row) {
   const userId = toNumber(row?.user_id);
   const raw = parseGlobalCandidateRaw(row.raw_candidate);
   const rawName = String(firstDefined(
+    raw.username,
+    raw.user_name,
+    raw.name,
     raw.member?.Username,
     raw.member?.username,
     raw.member?.Name,
@@ -3356,6 +3372,8 @@ function globalCandidateRawUsername(row) {
 function globalCandidateDisplayName(row) {
   const raw = parseGlobalCandidateRaw(row.raw_candidate);
   return String(firstDefined(
+    raw.display_name,
+    raw.displayName,
     raw.member?.DisplayName,
     raw.member?.displayName,
     raw.member?.Display,
@@ -3770,16 +3788,12 @@ async function handleExternalHistory(request, env) {
     requireAdmin(request, env);
   }
 
-  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+  const rows = await selectExternalHistoryRows(env, source, {
     select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,clan_rank,total_clan_members,global_rank,total_global_players,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
-    source: `eq.${source}`,
     user_id: `eq.${userId}`,
     status: status === "all" ? undefined : `eq.${status || "approved"}`,
     order: "final_snapshot_at.desc.nullslast,created_at.desc",
     limit: String(limit)
-  }).catch(err => {
-    if (String(err?.message || "").includes("c0ld_external_player_history")) return [];
-    throw err;
   });
 
   return cacheJson({
@@ -3787,8 +3801,9 @@ async function handleExternalHistory(request, env) {
     generated_at: new Date().toISOString(),
     user_id: userId,
     source,
+    storage_table: source === "cw_bot" ? CW_BOT_HISTORY_TABLE : EXTERNAL_PLAYER_HISTORY_TABLE,
     status,
-    rows: rows.map(normalizeExternalHistoryOutput)
+    rows: sortExternalHistoryRows(rows).slice(0, limit).map(normalizeExternalHistoryOutput)
   }, env, 30);
 }
 
@@ -3876,11 +3891,12 @@ async function handleCwBotHistoryImport(request, env) {
   }
 
   const body = await readJsonRequest(request);
-  const userId = toNumber(body.user_id || body.roblox_user_id);
+  let userId = toNumber(body.user_id || body.roblox_user_id);
   const username = stringOrNull(body.username || body.display_name || body.query);
   const messageUrl = String(body.message_url || body.discord_message_url || "").trim();
+  const preferEarliestMessage = body.prefer_earliest_message === true
+    || String(body.prefer_earliest_message || "").toLowerCase() === "true";
 
-  if (!userId) throw httpError(400, "Missing user_id.");
   if (!messageUrl) throw httpError(400, "Missing message_url.");
 
   const messageRef = parseDiscordMessageLink(messageUrl);
@@ -3923,6 +3939,24 @@ async function handleCwBotHistoryImport(request, env) {
       image_url: imageUrl || null,
       raw_text_preview: messageText.slice(0, 1000)
     }, 422);
+  }
+
+  const parsedUserId = toNumber(parsed.player_id);
+  if (userId && parsedUserId && userId !== parsedUserId) {
+    throw httpError(409, `CW_Bot image belongs to Roblox user ID ${parsedUserId}, not ${userId}.`);
+  }
+
+  userId = userId || parsedUserId;
+  if (!userId) {
+    const identityQuery = parsed.player_name || username;
+    const identity = identityQuery
+      ? await resolveGlobalSearchIdentity(identityQuery, env).catch(() => null)
+      : null;
+    userId = toNumber(identity?.user_id);
+  }
+
+  if (!userId) {
+    throw httpError(422, "CW_Bot history was recognized, but its Roblox user ID could not be resolved.");
   }
 
   const preventOverwrite = historyImportFlag(env, "CW_BOT_IMPORT_PREVENT_OVERWRITE", null, "true");
@@ -4014,7 +4048,9 @@ async function handleCwBotHistoryImport(request, env) {
     if (preventOverwrite) {
       const existingRow = existingRowsByKey.get(battleKeyValue);
       if (existingRow) {
-        const patch = externalHistoryBackfillPatch(existingRow, row);
+        const patch = externalHistoryBackfillPatch(existingRow, row, {
+          preferEarliestMessage
+        });
         if (patch) {
           backfills.push({ existing: existingRow, patch });
         } else {
@@ -4030,13 +4066,12 @@ async function handleCwBotHistoryImport(request, env) {
   }
 
   if (rows.length) {
-    await supabaseUpsertChunked(env, EXTERNAL_PLAYER_HISTORY_TABLE, rows, "source,user_id,battle_key", 100);
+    await supabaseUpsertChunked(env, CW_BOT_HISTORY_TABLE, rows, "user_id,battle_key", 100);
   }
 
   const backfilledRows = [];
   for (const item of backfills) {
-    await supabasePatch(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
-      source: `eq.${item.existing.source || "cw_bot"}`,
+    await supabasePatch(env, CW_BOT_HISTORY_TABLE, {
       user_id: `eq.${userId}`,
       battle_key: `eq.${item.existing.battle_key}`
     }, item.patch);
@@ -4047,8 +4082,10 @@ async function handleCwBotHistoryImport(request, env) {
     ok: true,
     user_id: userId,
     source: "cw_bot",
+    storage_table: CW_BOT_HISTORY_TABLE,
     discord_message_url: canonicalDiscordMessageUrl(messageRef),
     prevent_overwrite: preventOverwrite,
+    prefer_earliest_message: preferEarliestMessage,
     parsed_count: parsed.rows.length,
     status: importStatus,
     imported_count: rows.length,
@@ -4056,6 +4093,305 @@ async function handleCwBotHistoryImport(request, env) {
     skipped_count: skipped.length,
     rows: rows.concat(backfilledRows).map(normalizeExternalHistoryOutput),
     skipped
+  });
+}
+
+async function handleCwBotHistoryChannelScan(request, env) {
+  if (String(env.CW_BOT_IMPORT_ENABLED || "false").toLowerCase() !== "true") {
+    throw httpError(403, "CW_Bot imports are not enabled. Set CW_BOT_IMPORT_ENABLED=true on the Worker.");
+  }
+
+  requireAdmin(request, env);
+  const body = await readJsonRequest(request);
+  const channelId = String(body.channel_id || "").trim();
+  const beforeMessageId = String(body.before_message_id || "").trim();
+  const requestedAuthorId = String(body.author_id || env.CW_BOT_USER_ID || DEFAULT_CW_BOT_USER_ID).trim();
+  const expectedAuthorId = String(env.CW_BOT_USER_ID || DEFAULT_CW_BOT_USER_ID).trim();
+  const limit = clamp(Math.trunc(toNumber(body.limit) || 100), 1, 100);
+  const commandWindowSeconds = clamp(Math.trunc(toNumber(body.command_window_seconds) || 180), 30, 900);
+
+  if (!channelId) throw httpError(400, "Missing channel_id.");
+  if (!/^\d+$/.test(channelId)) throw httpError(400, "channel_id must be a Discord snowflake.");
+  if (beforeMessageId && !/^\d+$/.test(beforeMessageId)) {
+    throw httpError(400, "before_message_id must be a Discord snowflake.");
+  }
+  if (requestedAuthorId !== expectedAuthorId) {
+    throw httpError(400, `author_id must match configured CW_Bot ID ${expectedAuthorId}.`);
+  }
+
+  const channel = await fetchDiscordChannel(env, channelId);
+  const guildId = String(channel?.guild_id || body.guild_id || "").trim();
+  if (!guildId) throw httpError(400, "The supplied channel is not a Discord server channel.");
+
+  validateCwBotImportTarget({
+    guildId,
+    channelId,
+    messageId: beforeMessageId || "0"
+  }, env);
+
+  const messages = await fetchDiscordChannelMessages(env, channelId, {
+    beforeMessageId,
+    limit
+  });
+  const orderedMessages = messages.slice().sort((left, right) =>
+    compareDiscordSnowflakes(right?.id, left?.id)
+  );
+  const pending = normalizeCwBotPendingMessages(body.pending_bot_messages, {
+    guildId,
+    channelId,
+    authorId: expectedAuthorId
+  });
+  const waiting = pending.slice();
+  const candidatesById = new Map();
+  const ignored = [];
+  const stats = {
+    messages_scanned: orderedMessages.length,
+    cw_bot_messages: 0,
+    cw_bot_images: 0,
+    direct_history_signals: 0,
+    command_pairs: 0,
+    cw_bot_non_history: 0
+  };
+
+  for (const message of orderedMessages) {
+    const authorId = String(message?.author?.id || "");
+
+    if (authorId === expectedAuthorId) {
+      stats.cw_bot_messages += 1;
+      const text = discordMessageText(message);
+      const imageUrl = firstDiscordMessageImageUrl(message);
+      const directHistory = isDirectCwBotHistoryMessage(text);
+
+      if (imageUrl) stats.cw_bot_images += 1;
+
+      if (directHistory) {
+        stats.direct_history_signals += 1;
+        candidatesById.set(String(message.id), cwBotHistoryScanCandidate(message, {
+          guildId,
+          channelId,
+          imageUrl,
+          reason: "history_marker"
+        }));
+        continue;
+      }
+
+      if (imageUrl) {
+        waiting.push(cwBotPendingMessage(message, {
+          guildId,
+          channelId,
+          imageUrl
+        }));
+      } else {
+        stats.cw_bot_non_history += 1;
+        ignored.push(cwBotIgnoredScanMessage(message, {
+          guildId,
+          channelId,
+          reason: "no_history_marker_or_image"
+        }));
+      }
+      continue;
+    }
+
+    const command = parseCwBotHistoryCommand(message?.content);
+    if (!command) continue;
+
+    const matchIndex = nearestPendingCwBotMessageIndex(waiting, message?.timestamp, commandWindowSeconds);
+    if (matchIndex < 0) continue;
+
+    const matched = waiting.splice(matchIndex, 1)[0];
+    stats.command_pairs += 1;
+    candidatesById.set(String(matched.message_id), {
+      ...matched,
+      command_query: command.query,
+      command_message_id: String(message.id || ""),
+      command_timestamp: safeIso(message.timestamp),
+      reason: "paired_history_command",
+      message_url: canonicalDiscordMessageUrl({
+        guildId: matched.guild_id,
+        channelId: matched.channel_id,
+        messageId: matched.message_id
+      })
+    });
+  }
+
+  const oldestTimestamp = orderedMessages.length
+    ? safeIso(orderedMessages[orderedMessages.length - 1]?.timestamp)
+    : null;
+  const unresolved = waiting.filter(item => {
+    if (!oldestTimestamp) return true;
+    const ageSeconds = (Date.parse(item.timestamp) - Date.parse(oldestTimestamp)) / 1000;
+    return Number.isFinite(ageSeconds) && ageSeconds <= commandWindowSeconds;
+  }).slice(-25);
+  const unresolvedIds = new Set(unresolved.map(item => String(item.message_id)));
+  const expired = waiting.filter(item => !unresolvedIds.has(String(item.message_id)));
+  stats.cw_bot_non_history += expired.length;
+  ignored.push(...expired.map(item => ({
+    ...item,
+    reason: "unpaired_image",
+    message_url: canonicalDiscordMessageUrl({
+      guildId: item.guild_id,
+      channelId: item.channel_id,
+      messageId: item.message_id
+    })
+  })));
+
+  const nextBeforeMessageId = orderedMessages.length
+    ? String(orderedMessages[orderedMessages.length - 1]?.id || "")
+    : beforeMessageId || null;
+  const candidates = [...candidatesById.values()].sort((left, right) =>
+    compareDiscordSnowflakes(left.message_id, right.message_id)
+  );
+
+  return json({
+    ok: true,
+    guild_id: guildId,
+    channel_id: channelId,
+    author_id: expectedAuthorId,
+    before_message_id: beforeMessageId || null,
+    next_before_message_id: nextBeforeMessageId || null,
+    page_limit: limit,
+    done: orderedMessages.length < limit,
+    command_window_seconds: commandWindowSeconds,
+    stats,
+    candidate_count: candidates.length,
+    candidates,
+    ignored_count: ignored.length,
+    ignored,
+    pending_bot_messages: unresolved
+  }, 200, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function handleCwBotHistoryGuildChannels(request, env) {
+  if (String(env.CW_BOT_IMPORT_ENABLED || "false").toLowerCase() !== "true") {
+    throw httpError(403, "CW_Bot imports are not enabled. Set CW_BOT_IMPORT_ENABLED=true on the Worker.");
+  }
+
+  requireAdmin(request, env);
+  const body = await readJsonRequest(request);
+  const guildId = String(body.guild_id || "").trim();
+
+  if (!guildId) throw httpError(400, "Missing guild_id.");
+  if (!/^\d+$/.test(guildId)) throw httpError(400, "guild_id must be a Discord snowflake.");
+  validateCwBotImportGuild(guildId, env);
+
+  const [guildChannels, activeThreadPayload] = await Promise.all([
+    fetchDiscordGuildChannels(env, guildId),
+    fetchDiscordActiveGuildThreads(env, guildId).catch(() => ({ threads: [] }))
+  ]);
+  const channelAllowlist = csvSet(env.CW_BOT_IMPORT_CHANNEL_IDS);
+  const messageChannelTypes = new Set([0, 5, 10, 11, 12]);
+  const archiveParentTypes = new Set([0, 5, 15, 16]);
+  const channelsById = new Map();
+  const archiveParentChannels = [];
+
+  for (const channel of Array.isArray(guildChannels) ? guildChannels : []) {
+    const channelId = String(channel?.id || "").trim();
+    const channelType = toNumber(channel?.type);
+    if (!channelId || !archiveParentTypes.has(channelType)) continue;
+    if (channelAllowlist.size && !channelAllowlist.has(channelId)) continue;
+    archiveParentChannels.push({
+      channel_id: channelId,
+      channel_name: String(channel?.name || channelId),
+      channel_type: channelType,
+      position: toNumber(channel?.position) || 0
+    });
+  }
+
+  for (const channel of [
+    ...(Array.isArray(guildChannels) ? guildChannels : []),
+    ...(Array.isArray(activeThreadPayload?.threads) ? activeThreadPayload.threads : [])
+  ]) {
+    const channelId = String(channel?.id || "").trim();
+    const channelType = toNumber(channel?.type);
+    if (!channelId || !messageChannelTypes.has(channelType)) continue;
+    if (channelAllowlist.size && !channelAllowlist.has(channelId)) continue;
+
+    channelsById.set(channelId, {
+      channel_id: channelId,
+      channel_name: String(channel?.name || channelId),
+      channel_type: channelType,
+      parent_id: stringOrNull(channel?.parent_id),
+      position: toNumber(channel?.position) || 0,
+      is_thread: [10, 11, 12].includes(channelType)
+    });
+  }
+
+  const channels = [...channelsById.values()].sort((left, right) =>
+    Number(left.is_thread) - Number(right.is_thread)
+    || left.position - right.position
+    || left.channel_name.localeCompare(right.channel_name)
+    || compareDiscordSnowflakes(left.channel_id, right.channel_id)
+  );
+
+  return json({
+    ok: true,
+    guild_id: guildId,
+    channel_allowlist_active: channelAllowlist.size > 0,
+    channel_count: channels.length,
+    channels,
+    archive_parent_channels: archiveParentChannels
+  }, 200, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function handleCwBotHistoryArchivedThreads(request, env) {
+  if (String(env.CW_BOT_IMPORT_ENABLED || "false").toLowerCase() !== "true") {
+    throw httpError(403, "CW-Bot imports are not enabled. Set CW_BOT_IMPORT_ENABLED=true on the Worker.");
+  }
+
+  requireAdmin(request, env);
+  const body = await readJsonRequest(request);
+  const guildId = String(body.guild_id || "").trim();
+  const parentChannelId = String(body.parent_channel_id || "").trim();
+  const before = String(body.before || "").trim();
+
+  if (!/^\d+$/.test(guildId)) throw httpError(400, "guild_id must be a Discord snowflake.");
+  if (!/^\d+$/.test(parentChannelId)) {
+    throw httpError(400, "parent_channel_id must be a Discord snowflake.");
+  }
+  validateCwBotImportGuild(guildId, env);
+
+  const channelAllowlist = csvSet(env.CW_BOT_IMPORT_CHANNEL_IDS);
+  if (channelAllowlist.size && !channelAllowlist.has(parentChannelId)) {
+    throw httpError(403, "That Discord channel is not allowed for CW-Bot imports.");
+  }
+
+  const parent = await fetchDiscordChannel(env, parentChannelId);
+  if (String(parent?.guild_id || "") !== guildId) {
+    throw httpError(400, "The supplied parent channel does not belong to that Discord server.");
+  }
+
+  const payload = await fetchDiscordPublicArchivedThreads(env, parentChannelId, {
+    before,
+    limit: 100
+  });
+  const channels = (Array.isArray(payload?.threads) ? payload.threads : []).map(channel => ({
+    channel_id: String(channel?.id || ""),
+    channel_name: String(channel?.name || channel?.id || "archived-thread"),
+    channel_type: toNumber(channel?.type),
+    parent_id: String(channel?.parent_id || parentChannelId),
+    position: 0,
+    is_thread: true,
+    is_archived: true,
+    archive_timestamp: safeIso(channel?.thread_metadata?.archive_timestamp) || null
+  })).filter(channel => /^\d+$/.test(channel.channel_id));
+  const nextBefore = channels.length
+    ? channels[channels.length - 1].archive_timestamp
+    : null;
+
+  return json({
+    ok: true,
+    guild_id: guildId,
+    parent_channel_id: parentChannelId,
+    has_more: Boolean(payload?.has_more && nextBefore),
+    next_before: nextBefore,
+    channel_count: channels.length,
+    channels
+  }, 200, {
+    "Cache-Control": "no-store"
   });
 }
 
@@ -4288,20 +4624,10 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
     };
   }
 
-  const points = toNumber(candidate.points) || 0;
   const userId = toNumber(candidate.user_id);
-  const [higherCount, tiedBeforeCount, memberHigherCount, memberTiedBeforeCount, avatarMap] = await Promise.all([
-    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
-      run_key: `eq.${run.run_key}`,
-      points: `gt.${points}`
-    }),
-    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
-      run_key: `eq.${run.run_key}`,
-      points: `eq.${points}`,
-      user_id: `lt.${userId}`
-    }),
-    countHigherSourceClanMembers(env, run.run_key, candidate),
-    countTiedBeforeSourceClanMembers(env, run.run_key, candidate),
+  const [globalRank, memberRank, avatarMap] = await Promise.all([
+    resolveGlobalCandidateRank(env, run.run_key, candidate),
+    resolveGlobalCandidateMemberRank(env, run.run_key, candidate),
     resolveRobloxAvatarHeadshots([userId], env).catch(() => new Map())
   ]);
   const total = toNumber(run.total_global_players) ||
@@ -4314,8 +4640,8 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
 
   const row = normalizeGlobalCandidateSearchOutput(candidate, {
     run,
-    globalRank: higherCount + tiedBeforeCount + 1,
-    memberRank: memberHigherCount + memberTiedBeforeCount + 1,
+    globalRank,
+    memberRank,
     totalGlobalPlayers: total,
     username,
     displayName: lookup.display_name,
@@ -4442,21 +4768,12 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
       const userIdValue = toNumber(row.user_id);
       if (!row.run_key || points === null || !userIdValue) return row;
 
-      const [higherCount, tiedBeforeCount] = await Promise.all([
-        supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
-          run_key: `eq.${row.run_key}`,
-          points: `gt.${points}`
-        }),
-        supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
-          run_key: `eq.${row.run_key}`,
-          points: `eq.${points}`,
-          user_id: `lt.${userIdValue}`
-        })
-      ]);
-
       return {
         ...row,
-        global_rank: higherCount + tiedBeforeCount + 1
+        global_rank: await resolveGlobalCandidateRank(env, row.run_key, {
+          user_id: userIdValue,
+          points
+        })
       };
     })));
   }
@@ -4490,6 +4807,62 @@ async function countTiedBeforeSourceClanMembers(env, runKey, row) {
     points: `eq.${points}`,
     user_id: `lt.${userId}`
   });
+}
+
+async function resolveGlobalCandidateRank(env, runKey, row) {
+  const points = toNumber(row?.points);
+  const userId = toNumber(row?.user_id);
+  if (!runKey || points === null || !userId) return null;
+
+  const cacheMeta = {
+    clan_name: "global-rank",
+    battle_key: String(runKey),
+    snapshot_id: `${runKey}:${userId}:${points}`
+  };
+  const cached = await readDerivedSnapshotCache(env, "global-candidate-rank-v1", cacheMeta);
+  const cachedRank = toNumber(cached?.rank);
+  if (cachedRank !== null) return cachedRank;
+
+  const [higherCount, tiedBeforeCount] = await Promise.all([
+    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      run_key: `eq.${runKey}`,
+      points: `gt.${points}`
+    }),
+    supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+      run_key: `eq.${runKey}`,
+      points: `eq.${points}`,
+      user_id: `lt.${userId}`
+    })
+  ]);
+  const rank = higherCount + tiedBeforeCount + 1;
+
+  await writeDerivedSnapshotCache(env, "global-candidate-rank-v1", cacheMeta, { rank });
+  return rank;
+}
+
+async function resolveGlobalCandidateMemberRank(env, runKey, row) {
+  const points = toNumber(row?.points);
+  const userId = toNumber(row?.user_id);
+  const sourceClan = String(row?.source_clan || "").trim();
+  if (!runKey || points === null || !userId || !sourceClan) return null;
+
+  const cacheMeta = {
+    clan_name: sourceClan,
+    battle_key: String(runKey),
+    snapshot_id: `${runKey}:${sourceClan}:${userId}:${points}`
+  };
+  const cached = await readDerivedSnapshotCache(env, "global-candidate-member-rank-v1", cacheMeta);
+  const cachedRank = toNumber(cached?.rank);
+  if (cachedRank !== null) return cachedRank;
+
+  const [higherCount, tiedBeforeCount] = await Promise.all([
+    countHigherSourceClanMembers(env, runKey, row),
+    countTiedBeforeSourceClanMembers(env, runKey, row)
+  ]);
+  const rank = higherCount + tiedBeforeCount + 1;
+
+  await writeDerivedSnapshotCache(env, "global-candidate-member-rank-v1", cacheMeta, { rank });
+  return rank;
 }
 
 async function handleGlobalRankIngest(env, source, requestedClan, force = false, options = {}) {
@@ -5670,6 +6043,8 @@ async function handleClansBattles(request, env) {
 
   const url = new URL(request.url);
   const limit = clamp(Number(url.searchParams.get("limit") || 100), 1, 500);
+  const includeLegacyScan = isTruthyParam(url, "include_legacy");
+  const includeCounts = isTruthyParam(url, "include_counts");
   const scanLimit = clamp(
     Number(url.searchParams.get("scan_limit") || env.CLAN_BATTLES_SCAN_LIMIT || 20000),
     1000,
@@ -5697,27 +6072,42 @@ async function handleClansBattles(request, env) {
       first_snapshot: row.first_seen_at || null,
       last_snapshot: row.latest_snapshot_at || row.last_seen_at || null,
       latest_snapshot_id: row.latest_snapshot_id || null,
-      snapshot_count: 0,
+      snapshot_count: null,
+      row_count: null,
+      has_rows: Boolean(row.latest_snapshot_id),
       is_active: row.is_active,
-      source: "api"
+      source: "battle_runs"
     });
   }
 
-  const rows = await fetchClansBattleListRows(env, scanLimit);
-
-  for (const row of rows) {
-    addClansBattleSummary(byBattle, row);
+  // Battle-run metadata is maintained during ingest. Raw history scans are
+  // reserved for legacy recovery or an empty metadata table.
+  if (includeLegacyScan || byBattle.size === 0) {
+    const rows = await fetchClansBattleListRows(env, scanLimit);
+    for (const row of rows) {
+      addClansBattleSummary(byBattle, row);
+    }
   }
 
   const summaries = [...byBattle.values()].sort((a, b) =>
     new Date(b.last_snapshot || 0) - new Date(a.last_snapshot || 0)
   );
-  const rowsWithCoverage = await addBattleRowCounts(env, summaries, CLANS_SNAPSHOT_TABLE, row => ({
-    battle_key: `eq.${row.battle}`
-  }));
+  const rowsWithCoverage = includeCounts
+    ? await addBattleRowCounts(env, summaries, CLANS_SNAPSHOT_TABLE, row => ({
+      battle_key: `eq.${row.battle}`
+    }))
+    : await addBattleRowPresence(env, summaries, CLANS_SNAPSHOT_TABLE, row => (
+      row.latest_snapshot_id
+        ? { snapshot_id: `eq.${row.latest_snapshot_id}` }
+        : { battle_key: `eq.${row.battle}` }
+    ));
 
   return cacheJson({
     generated_at: new Date().toISOString(),
+    metadata_source: includeLegacyScan || battleRuns.length === 0
+      ? "battle_runs_and_legacy_scan"
+      : "battle_runs",
+    exact_counts_included: includeCounts,
     rows: rowsWithCoverage.slice(0, limit)
   }, env);
 }
@@ -14638,6 +15028,21 @@ async function addBattleRowCounts(env, rows, tableName, filtersForRow) {
   return output;
 }
 
+async function addBattleRowPresence(env, rows, tableName, filtersForRow) {
+  return Promise.all(rows.map(async row => {
+    const matches = await supabaseSelect(env, tableName, {
+      select: "id",
+      ...filtersForRow(row),
+      limit: "1"
+    }).catch(() => []);
+
+    return {
+      ...row,
+      has_rows: matches.length > 0
+    };
+  }));
+}
+
 async function fetchClansBattleListRows(env, scanLimit) {
   const pageSize = 1000;
   const rows = [];
@@ -15042,11 +15447,26 @@ async function collectGlobalRankCandidatesForClan(env, {
         member_rank: row.member_rank,
         member_points: points,
         join_time: memberJoinIso(row),
+        username: stringOrNull(firstDefined(
+          row.raw_member?.Username,
+          row.raw_member?.username,
+          row.raw_member?.Name,
+          row.raw_member?.name,
+          row.raw_contribution?.Username,
+          row.raw_contribution?.username,
+          row.raw_contribution?.Name,
+          row.raw_contribution?.name
+        )),
+        display_name: stringOrNull(firstDefined(
+          row.raw_member?.DisplayName,
+          row.raw_member?.displayName,
+          row.raw_member?.Display,
+          row.raw_member?.display,
+          row.raw_contribution?.DisplayName,
+          row.raw_contribution?.displayName
+        )),
         source_clan_leaderboard_rank: toNumber(clanRow.rank),
-        source_clan_leaderboard_points: toNumber(clanRow.points) || 0,
-        clan: clanRow.raw_clan || {},
-        member: row.raw_member || {},
-        contribution: row.raw_contribution || {}
+        source_clan_leaderboard_points: toNumber(clanRow.points) || 0
       },
       updated_at: new Date().toISOString()
     });
@@ -15671,14 +16091,20 @@ async function cleanupGlobalRankRetention(env, {
     groups.get(key).push(row);
   }
 
-  const deleteKeys = new Set();
+  const deleteRows = new Map();
   for (const [battleKeyValue, group] of groups.entries()) {
     const sorted = group
       .slice()
       .sort((a, b) => globalRankRunSortTime(b) - globalRankRunSortTime(a));
     const isCurrentBattle = currentBattleKey && battleKeyValue === String(currentBattleKey);
     const isEndedGroup = !isCurrentBattle || currentBattleEnded;
-    const keepFinal = isEndedGroup ? (sorted.find(row => String(row.status || "").toLowerCase() === "ok") || sorted[0] || null) : null;
+    const keepFinal = isEndedGroup
+      ? (
+        sorted.find(row => ["ok", "completed"].includes(String(row.status || "").toLowerCase())) ||
+        sorted[0] ||
+        null
+      )
+      : null;
 
     for (const row of sorted) {
       const runKey = String(row.run_key || "").trim();
@@ -15688,14 +16114,21 @@ async function cleanupGlobalRankRetention(env, {
 
       const runMs = globalRankRunSortTime(row);
       if (isEndedGroup || (runMs && runMs < cutoffMs)) {
-        deleteKeys.add(runKey);
+        deleteRows.set(runKey, { run_key: runKey, run_ms: runMs });
       }
     }
   }
 
-  const deletedRuns = await deleteGlobalRankRunData(env, [...deleteKeys]);
+  const eligibleRows = [...deleteRows.values()]
+    .sort((a, b) => a.run_ms - b.run_ms);
+  const selectedKeys = eligibleRows
+    .slice(0, globalRankRetentionDeleteRunsPerPass(env))
+    .map(row => row.run_key);
+  const deletedRuns = await deleteGlobalRankRunData(env, selectedKeys);
   return {
     deleted_runs: deletedRuns,
+    eligible_runs: eligibleRows.length,
+    remaining_runs: Math.max(0, eligibleRows.length - deletedRuns),
     retention_hours: retentionHours,
     mode: currentBattleEnded ? "final-snapshot" : "rolling"
   };
@@ -16348,6 +16781,9 @@ async function resolveRobloxAvatarHeadshots(userIds, env) {
 async function addGainFields(env, rows, latest) {
   if (!rows.length) return [];
 
+  const cached = await readDerivedSnapshotCache(env, "member-gains-v2", latest);
+  if (Array.isArray(cached?.rows)) return cached.rows;
+
   const latestMs = new Date(latest.fetched_at).getTime();
   if (!Number.isFinite(latestMs)) {
     return rows.map(row => addNullGains(row));
@@ -16386,7 +16822,7 @@ async function addGainFields(env, rows, latest) {
     }
   }
 
-  return rows.map(row => {
+  const output = rows.map(row => {
     const key = String(row.user_id);
     const out = { ...row };
     const currentPoints = toNumber(row.total_points) || 0;
@@ -16411,10 +16847,20 @@ async function addGainFields(env, rows, latest) {
 
     return out;
   });
+
+  await writeDerivedSnapshotCache(env, "member-gains-v2", latest, { rows: output });
+  return output;
 }
 
 async function addDowntimeFields(env, rows, latest) {
   if (!rows.length) return [];
+
+  if (rows.every(hasIncrementalDowntimeState)) {
+    return rows.map(row => addIncrementalDowntime(row, latest));
+  }
+
+  const cached = await readDerivedSnapshotCache(env, "member-downtime-v2", latest);
+  if (Array.isArray(cached?.rows)) return cached.rows;
 
   const latestMs = new Date(latest.fetched_at).getTime();
   if (!Number.isFinite(latestMs)) {
@@ -16477,7 +16923,7 @@ async function addDowntimeFields(env, rows, latest) {
     stateByUser.set(userId, state);
   }
 
-  return rows.map(row => {
+  const output = rows.map(row => {
     const userId = toNumber(row.user_id);
     const state = stateByUser.get(userId);
     const lastGainAt = state?.last_gain_at || null;
@@ -16493,10 +16939,16 @@ async function addDowntimeFields(env, rows, latest) {
       downtime_minutes: downtimeMinutes
     };
   });
+
+  await writeDerivedSnapshotCache(env, "member-downtime-v2", latest, { rows: output });
+  return output;
 }
 
 async function addClanGainFields(env, rows, latest) {
   if (!rows.length) return [];
+
+  const cached = await readDerivedSnapshotCache(env, "clan-gains-v2", latest);
+  if (Array.isArray(cached?.rows)) return cached.rows;
 
   const latestMs = new Date(latest.fetched_at).getTime();
   if (!Number.isFinite(latestMs)) {
@@ -16520,7 +16972,7 @@ async function addClanGainFields(env, rows, latest) {
     );
   }
 
-  return rows.map(row => {
+  const output = rows.map(row => {
     const key = normalizeText(row.clan_name);
     const out = { ...row };
 
@@ -16534,6 +16986,9 @@ async function addClanGainFields(env, rows, latest) {
 
     return out;
   });
+
+  await writeDerivedSnapshotCache(env, "clan-gains-v2", latest, { rows: output });
+  return output;
 }
 
 function addClanProjectionFields(rows, latest) {
@@ -16735,11 +17190,69 @@ async function fetchLatestSnapshotMeta(env, clan, battle) {
 
 async function fetchCurrentRows(env, clan) {
   return supabaseSelect(env, CURRENT_TABLE, {
-    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points,raw_member",
+    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points,last_gain_at,downtime_tracking_started_at,raw_member",
     clan_name: `eq.${clan}`,
     order: "rank.asc",
     limit: "1000"
   });
+}
+
+async function fetchCurrentMemberGainState(env, clan) {
+  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+    select: "fetched_at,battle_key,user_id,total_points,last_gain_at,downtime_tracking_started_at",
+    clan_name: `eq.${clan}`,
+    limit: "1000"
+  });
+
+  return new Map(rows.map(row => [String(row.user_id), row]));
+}
+
+function nextMemberGainState(row, previous, fetchedAt) {
+  const sameBattle = Boolean(
+    previous &&
+    normalizeText(previous.battle_key) === normalizeText(row.battle_key)
+  );
+
+  if (!sameBattle) {
+    return {
+      last_gain_at: null,
+      downtime_tracking_started_at: fetchedAt
+    };
+  }
+
+  const currentPoints = toNumber(row.total_points) || 0;
+  const previousPoints = toNumber(previous.total_points) || 0;
+  const trackingStartedAt =
+    previous.downtime_tracking_started_at ||
+    previous.fetched_at ||
+    fetchedAt;
+
+  return {
+    last_gain_at:
+      currentPoints > previousPoints
+        ? fetchedAt
+        : previous.last_gain_at || null,
+    downtime_tracking_started_at: trackingStartedAt
+  };
+}
+
+function hasIncrementalDowntimeState(row) {
+  return Boolean(row?.last_gain_at || row?.downtime_tracking_started_at);
+}
+
+function addIncrementalDowntime(row, latest) {
+  const latestMs = new Date(latest?.fetched_at || row?.fetched_at || "").getTime();
+  const anchor = row.last_gain_at || row.downtime_tracking_started_at;
+  const anchorMs = new Date(anchor || "").getTime();
+
+  return {
+    ...row,
+    last_gain_at: row.last_gain_at || null,
+    downtime_minutes:
+      Number.isFinite(latestMs) && Number.isFinite(anchorMs)
+        ? Math.max(0, Math.floor((latestMs - anchorMs) / 60000))
+        : null
+  };
 }
 
 function latestMetaFromRows(rows) {
@@ -16917,15 +17430,18 @@ function historyImportFlag(env, name, fallbackName, defaultValue = "false") {
 }
 
 function validateCwBotImportTarget(ref, env) {
-  const guildIds = csvSet(env.CW_BOT_IMPORT_GUILD_IDS);
+  validateCwBotImportGuild(ref.guildId, env);
   const channelIds = csvSet(env.CW_BOT_IMPORT_CHANNEL_IDS);
-
-  if (guildIds.size && !guildIds.has(String(ref.guildId))) {
-    throw httpError(403, "That Discord server is not allowed for CW_Bot imports.");
-  }
 
   if (channelIds.size && !channelIds.has(String(ref.channelId))) {
     throw httpError(403, "That Discord channel is not allowed for CW_Bot imports.");
+  }
+}
+
+function validateCwBotImportGuild(guildId, env) {
+  const guildIds = csvSet(env.CW_BOT_IMPORT_GUILD_IDS);
+  if (guildIds.size && !guildIds.has(String(guildId))) {
+    throw httpError(403, "That Discord server is not allowed for CW_Bot imports.");
   }
 }
 
@@ -16942,25 +17458,212 @@ function validateBigBotImportTarget(ref, env) {
   }
 }
 
-async function fetchDiscordMessage(env, channelId, messageId) {
+function compareDiscordSnowflakes(left, right) {
+  const leftText = String(left || "0");
+  const rightText = String(right || "0");
+
+  try {
+    const leftValue = BigInt(leftText);
+    const rightValue = BigInt(rightText);
+    return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+  } catch {
+    return leftText.localeCompare(rightText);
+  }
+}
+
+function parseCwBotHistoryCommand(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^!history(?:\s+([A-Za-z0-9_]{1,40}|\d+))?\s*$/i);
+  if (!match) return null;
+
+  return {
+    query: String(match[1] || "").trim() || null
+  };
+}
+
+function isDirectCwBotHistoryMessage(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/\bplayer\s+history\b|\bhistory\s+for\s+[A-Za-z0-9_]+|\b\d+\s+battles?\b/i.test(value)) {
+    return true;
+  }
+  return parseCwBotHistoryText(value).rows.length > 0;
+}
+
+function cwBotPendingMessage(message, context = {}) {
+  return {
+    guild_id: String(context.guildId || ""),
+    channel_id: String(context.channelId || ""),
+    message_id: String(message?.id || ""),
+    timestamp: safeIso(message?.timestamp) || null,
+    image_url: String(context.imageUrl || firstDiscordMessageImageUrl(message) || "") || null
+  };
+}
+
+function cwBotHistoryScanCandidate(message, context = {}) {
+  const pending = cwBotPendingMessage(message, context);
+  return {
+    ...pending,
+    command_query: null,
+    command_message_id: null,
+    command_timestamp: null,
+    reason: String(context.reason || "history_marker"),
+    message_url: canonicalDiscordMessageUrl({
+      guildId: pending.guild_id,
+      channelId: pending.channel_id,
+      messageId: pending.message_id
+    })
+  };
+}
+
+function cwBotIgnoredScanMessage(message, context = {}) {
+  const guildId = String(context.guildId || "");
+  const channelId = String(context.channelId || "");
+  const messageId = String(message?.id || "");
+
+  return {
+    guild_id: guildId,
+    channel_id: channelId,
+    message_id: messageId,
+    timestamp: safeIso(message?.timestamp) || null,
+    reason: String(context.reason || "not_history"),
+    message_url: canonicalDiscordMessageUrl({
+      guildId,
+      channelId,
+      messageId
+    })
+  };
+}
+
+function normalizeCwBotPendingMessages(values, context = {}) {
+  if (!Array.isArray(values)) return [];
+
+  return values.slice(-25).map(value => ({
+    guild_id: String(value?.guild_id || context.guildId || ""),
+    channel_id: String(value?.channel_id || context.channelId || ""),
+    message_id: String(value?.message_id || ""),
+    timestamp: safeIso(value?.timestamp) || null,
+    image_url: String(value?.image_url || "") || null
+  })).filter(value =>
+    /^\d+$/.test(value.message_id)
+    && value.guild_id === String(context.guildId || "")
+    && value.channel_id === String(context.channelId || "")
+    && value.timestamp
+  );
+}
+
+function nearestPendingCwBotMessageIndex(waiting, commandTimestamp, windowSeconds) {
+  const commandMs = Date.parse(commandTimestamp || "");
+  if (!Number.isFinite(commandMs)) return -1;
+
+  let bestIndex = -1;
+  let bestDifference = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < waiting.length; index += 1) {
+    const responseMs = Date.parse(waiting[index]?.timestamp || "");
+    const difference = (responseMs - commandMs) / 1000;
+    if (!Number.isFinite(difference) || difference < 0 || difference > windowSeconds) continue;
+
+    if (difference < bestDifference) {
+      bestDifference = difference;
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
+}
+
+async function fetchDiscordBotJson(env, path, label) {
   if (!env.DISCORD_BOT_TOKEN) {
     throw httpError(500, "Missing required Worker secret: DISCORD_BOT_TOKEN");
   }
 
-  const res = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
-    headers: {
-      Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
-      Accept: "application/json"
-    }
-  });
+  let lastStatus = 0;
+  let lastText = "";
 
-  const text = await res.text();
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const res = await fetch(`${DISCORD_API_BASE}${path}`, {
+      headers: {
+        Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+        Accept: "application/json"
+      }
+    });
+    const text = await res.text();
+    lastStatus = res.status;
+    lastText = text;
 
-  if (!res.ok) {
-    throw httpError(res.status === 403 ? 403 : 502, `Discord message fetch failed (${res.status}): ${text.slice(0, 500)}`);
+    if (res.ok) return text ? JSON.parse(text) : {};
+
+    if (res.status !== 429 || attempt === 4) break;
+
+    let retryAfterMs = 1000;
+    try {
+      const payload = JSON.parse(text);
+      retryAfterMs = Math.ceil(Number(payload?.retry_after || 1) * 1000);
+    } catch {}
+    await sleep(clamp(retryAfterMs, 250, 15000));
   }
 
-  return text ? JSON.parse(text) : {};
+  const status = [401, 403, 404, 429].includes(lastStatus) ? lastStatus : 502;
+  throw httpError(status, `${label} failed (${lastStatus}): ${lastText.slice(0, 500)}`);
+}
+
+async function fetchDiscordChannel(env, channelId) {
+  return fetchDiscordBotJson(
+    env,
+    `/channels/${encodeURIComponent(channelId)}`,
+    "Discord channel fetch"
+  );
+}
+
+async function fetchDiscordGuildChannels(env, guildId) {
+  const payload = await fetchDiscordBotJson(
+    env,
+    `/guilds/${encodeURIComponent(guildId)}/channels`,
+    "Discord guild channel fetch"
+  );
+  return Array.isArray(payload) ? payload : [];
+}
+
+async function fetchDiscordActiveGuildThreads(env, guildId) {
+  return fetchDiscordBotJson(
+    env,
+    `/guilds/${encodeURIComponent(guildId)}/threads/active`,
+    "Discord active thread fetch"
+  );
+}
+
+async function fetchDiscordPublicArchivedThreads(env, channelId, options = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(clamp(Math.trunc(toNumber(options.limit) || 100), 1, 100)));
+  if (options.before) params.set("before", String(options.before));
+
+  return fetchDiscordBotJson(
+    env,
+    `/channels/${encodeURIComponent(channelId)}/threads/archived/public?${params.toString()}`,
+    "Discord archived thread fetch"
+  );
+}
+
+async function fetchDiscordChannelMessages(env, channelId, options = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(clamp(Math.trunc(toNumber(options.limit) || 100), 1, 100)));
+  if (options.beforeMessageId) params.set("before", String(options.beforeMessageId));
+
+  const payload = await fetchDiscordBotJson(
+    env,
+    `/channels/${encodeURIComponent(channelId)}/messages?${params.toString()}`,
+    "Discord channel history fetch"
+  );
+  return Array.isArray(payload) ? payload : [];
+}
+
+async function fetchDiscordMessage(env, channelId, messageId) {
+  return fetchDiscordBotJson(
+    env,
+    `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+    "Discord message fetch"
+  );
 }
 
 function discordMessageText(message) {
@@ -17342,6 +18045,80 @@ async function trackedHistoryBattleKeySet(env, userId) {
   return keys;
 }
 
+async function selectExternalHistoryRows(env, source, params = {}) {
+  const normalizedSource = String(source || "").trim().toLowerCase();
+  const query = {
+    ...params,
+    source: normalizedSource ? `eq.${normalizedSource}` : params.source
+  };
+
+  if (normalizedSource !== "cw_bot") {
+    return selectExternalHistoryTableRows(env, EXTERNAL_PLAYER_HISTORY_TABLE, query).catch(err => {
+      if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
+      throw err;
+    });
+  }
+
+  const [dedicatedRows, legacyRows] = await Promise.all([
+    selectExternalHistoryTableRows(env, CW_BOT_HISTORY_TABLE, query).catch(err => {
+      if (String(err?.message || "").includes(CW_BOT_HISTORY_TABLE)) return [];
+      throw err;
+    }),
+    // Keep a read-only legacy fallback during deployment so a row written by
+    // the previous Worker between the SQL migration and Worker deployment is
+    // not stranded. New CW-Bot writes always use CW_BOT_HISTORY_TABLE.
+    selectExternalHistoryTableRows(env, EXTERNAL_PLAYER_HISTORY_TABLE, query).catch(err => {
+      if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
+      throw err;
+    })
+  ]);
+
+  return mergeExternalHistoryStorageRows(dedicatedRows, legacyRows);
+}
+
+function selectExternalHistoryTableRows(env, table, params) {
+  const limit = clamp(Number(params?.limit || 1000), 1, 5000);
+  return limit > 1000
+    ? supabaseSelectPaged(env, table, params, limit, 1000)
+    : supabaseSelect(env, table, params);
+}
+
+function mergeExternalHistoryStorageRows(preferredRows, fallbackRows) {
+  const rowsByKey = new Map();
+
+  for (const row of fallbackRows || []) {
+    rowsByKey.set(externalHistoryStorageKey(row), row);
+  }
+
+  for (const row of preferredRows || []) {
+    const key = externalHistoryStorageKey(row);
+    const fallback = rowsByKey.get(key);
+    rowsByKey.set(key, fallback ? mergeExternalHistoryStoredRow(row, fallback) : row);
+  }
+
+  return [...rowsByKey.values()];
+}
+
+function externalHistoryStorageKey(row) {
+  return [
+    String(row?.source || "cw_bot").toLowerCase(),
+    String(toNumber(row?.user_id) || ""),
+    externalBattleKey(row?.battle_key || row?.battle_name)
+  ].join(":");
+}
+
+function mergeExternalHistoryStoredRow(primary, fallback) {
+  const merged = { ...fallback, ...primary };
+
+  for (const field of [...EXTERNAL_HISTORY_DATA_FIELDS, ...EXTERNAL_HISTORY_METADATA_FIELDS]) {
+    if (isBlankExternalHistoryValue(primary?.[field]) && !isBlankExternalHistoryValue(fallback?.[field])) {
+      merged[field] = fallback[field];
+    }
+  }
+
+  return merged;
+}
+
 async function externalHistoryBattleRowMap(env, userId, source = "") {
   const params = {
     select: [
@@ -17381,12 +18158,15 @@ async function externalHistoryBattleRowMap(env, userId, source = "") {
     limit: "2000"
   };
 
-  if (source) params.source = `eq.${source}`;
-
-  const rows = await supabaseSelect(env, EXTERNAL_PLAYER_HISTORY_TABLE, params).catch(err => {
-    if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
-    throw err;
-  });
+  const rows = source === "cw_bot"
+    ? await selectExternalHistoryTableRows(env, CW_BOT_HISTORY_TABLE, {
+        ...params,
+        source: "eq.cw_bot"
+      }).catch(err => {
+        if (String(err?.message || "").includes(CW_BOT_HISTORY_TABLE)) return [];
+        throw err;
+      })
+    : await selectExternalHistoryRows(env, source, params);
   const map = new Map();
 
   for (const row of rows) {
@@ -17420,6 +18200,7 @@ const EXTERNAL_HISTORY_METADATA_FIELDS = [
   "discord_message_url",
   "image_url",
   "raw_text",
+  "raw_payload",
   "raw_fingerprint"
 ];
 
@@ -17429,12 +18210,22 @@ function isBlankExternalHistoryValue(value) {
   return false;
 }
 
-function externalHistoryBackfillPatch(existing, incoming) {
+function externalHistoryBackfillPatch(existing, incoming, options = {}) {
   const patch = {};
   let hasDataBackfill = false;
+  const preferEarliestMessage = options.preferEarliestMessage === true;
+  const incomingMessageId = String(incoming?.discord_message_id || "");
+  const existingMessageId = String(existing?.discord_message_id || "");
+  const incomingIsEarlier = preferEarliestMessage
+    && /^\d+$/.test(incomingMessageId)
+    && /^\d+$/.test(existingMessageId)
+    && compareDiscordSnowflakes(incomingMessageId, existingMessageId) < 0;
 
   for (const field of EXTERNAL_HISTORY_DATA_FIELDS) {
-    if (
+    if (incomingIsEarlier && !isBlankExternalHistoryValue(incoming?.[field])) {
+      patch[field] = incoming[field];
+      hasDataBackfill = true;
+    } else if (
       isBlankExternalHistoryValue(existing?.[field]) &&
       !isBlankExternalHistoryValue(incoming?.[field])
     ) {
@@ -17443,16 +18234,18 @@ function externalHistoryBackfillPatch(existing, incoming) {
     }
   }
 
-  if (!hasDataBackfill) return null;
-
   for (const field of EXTERNAL_HISTORY_METADATA_FIELDS) {
-    if (
+    if (incomingIsEarlier && !isBlankExternalHistoryValue(incoming?.[field])) {
+      patch[field] = incoming[field];
+    } else if (
       isBlankExternalHistoryValue(existing?.[field]) &&
       !isBlankExternalHistoryValue(incoming?.[field])
     ) {
       patch[field] = incoming[field];
     }
   }
+
+  if (!hasDataBackfill && !incomingIsEarlier) return null;
 
   patch.updated_at = incoming.updated_at || new Date().toISOString();
   return patch;
@@ -17533,21 +18326,18 @@ async function fetchCwBotRowsForUsers(env, userIds) {
   const rows = [];
 
   for (const chunk of chunkValues(ids, 200)) {
-    const chunkRows = await supabaseSelectPaged(env, EXTERNAL_PLAYER_HISTORY_TABLE, {
+    const query = {
       select: "source,user_id,username,battle_key,battle_name,clan_name,final_rank,total_ranked,clan_rank,total_clan_members,global_rank,total_global_players,final_points,final_snapshot_at,status,is_manual_import,import_batch_id,imported_from,discord_message_url,image_url,created_at,updated_at,reviewed_at,reviewed_by",
-      source: "eq.cw_bot",
       user_id: postgrestNumberInFilter(chunk),
       status: "neq.rejected",
       order: "final_snapshot_at.desc.nullslast,updated_at.desc.nullslast,created_at.desc",
       limit: String(Math.min(5000, Math.max(1000, chunk.length * 50)))
-    }, Math.min(5000, Math.max(1000, chunk.length * 50)), 1000).catch(err => {
-      if (String(err?.message || "").includes(EXTERNAL_PLAYER_HISTORY_TABLE)) return [];
-      throw err;
-    });
+    };
+    const chunkRows = await selectExternalHistoryRows(env, "cw_bot", query);
     rows.push(...chunkRows);
   }
 
-  return rows;
+  return sortExternalHistoryRows(mergeExternalHistoryStorageRows(rows, []));
 }
 
 function externalHistoryStatusPriority(status) {
@@ -18716,6 +19506,17 @@ function globalRankRetentionRunLimit(env) {
   return clamp(Number(env.GLOBAL_RANK_RETENTION_RUN_LIMIT || 2000), 100, 10000);
 }
 
+function globalRankRetentionDeleteRunsPerPass(env) {
+  return clamp(
+    Number(
+      env.GLOBAL_RANK_RETENTION_DELETE_RUNS_PER_PASS ||
+      DEFAULT_GLOBAL_RANK_RETENTION_DELETE_RUNS_PER_PASS
+    ),
+    1,
+    25
+  );
+}
+
 function battleSnapshotRuntimeConfig(env) {
   return {
     member_snapshot_min_interval_minutes: memberSnapshotMinIntervalMinutes(env),
@@ -18742,7 +19543,9 @@ function globalRankRuntimeConfig(env) {
     retry_base_ms: globalRankRetryBaseMs(env),
     schedule_minutes: globalRankScheduleMinutes(env),
     schedule_offset_minutes: globalRankScheduleOffsetMinutes(env),
-    retention_hours: globalRankRetentionHours(env)
+    retention_enabled: String(env.GLOBAL_RANK_RETENTION_ENABLED || "false").toLowerCase() === "true",
+    retention_hours: globalRankRetentionHours(env),
+    retention_delete_runs_per_pass: globalRankRetentionDeleteRunsPerPass(env)
   };
 }
 
@@ -19862,6 +20665,56 @@ function publicCacheSeconds(env, key = "") {
     env?.PUBLIC_CACHE_SECONDS ||
     DEFAULT_PUBLIC_CACHE_SECONDS;
   return clamp(Number(value), 0, 3600);
+}
+
+function derivedSnapshotCacheSeconds(env) {
+  return clamp(
+    Number(env?.DERIVED_SNAPSHOT_CACHE_SECONDS || DEFAULT_DERIVED_SNAPSHOT_CACHE_SECONDS),
+    0,
+    86400
+  );
+}
+
+function derivedSnapshotCacheKey(kind, latest) {
+  const identity = [
+    String(kind || "derived"),
+    String(latest?.clan_name || CLANS_BATTLE_RUN_CLAN_NAME),
+    String(latest?.battle_key || "unknown"),
+    String(latest?.snapshot_id || latest?.fetched_at || "unknown")
+  ].map(value => encodeURIComponent(value)).join("/");
+
+  return new Request(`https://c0ld-derived-cache.internal/v2/${identity}`, {
+    method: "GET"
+  });
+}
+
+async function readDerivedSnapshotCache(env, kind, latest) {
+  if (derivedSnapshotCacheSeconds(env) <= 0) return null;
+  if (typeof caches === "undefined" || !caches?.default) return null;
+
+  try {
+    const response = await caches.default.match(derivedSnapshotCacheKey(kind, latest));
+    return response?.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDerivedSnapshotCache(env, kind, latest, data) {
+  const seconds = derivedSnapshotCacheSeconds(env);
+  if (seconds <= 0) return;
+  if (typeof caches === "undefined" || !caches?.default) return;
+
+  try {
+    await caches.default.put(
+      derivedSnapshotCacheKey(kind, latest),
+      json(data, 200, {
+        "Cache-Control": `public, max-age=${seconds}`
+      })
+    );
+  } catch {
+    // Cache availability must never block a live API response.
+  }
 }
 
 function cacheJson(data, env, secondsOverride = null) {

@@ -113,8 +113,6 @@ export default {
         response = await handleLeaguePlayerLocation(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/milestones") {
         response = await handleLeagueMilestones(request, env);
-      } else if (request.method === "GET" && url.pathname === "/api/leagues/player-milestones") {
-        response = await handleLeaguePlayerMilestones(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/leagues/top-leagues/window") {
         requireLeagueCollectionEnabled(env);
         response = await handleTopLeaguesWindowIngest(request, env);
@@ -1433,55 +1431,6 @@ async function handleLeagueMilestones(request, env) {
         rank,
         available: Boolean(row && !hidden),
         points: row && !hidden ? (toNumber(row.points) || 0) : null
-      };
-    })
-  }, env);
-}
-
-async function handleLeaguePlayerMilestones(request, env) {
-  const url = new URL(request.url);
-  const requestedRanks = String(url.searchParams.get("ranks") || "")
-    .split(",")
-    .map(toNumber)
-    .filter(rank => Number.isInteger(rank) && rank > 0 && rank <= 100000);
-  const ranks = [...new Set(requestedRanks.length ? requestedRanks : DEFAULT_LEAGUE_MILESTONE_RANKS)].sort((a, b) => a - b);
-  const maxRequested = ranks.length ? Math.max(...ranks) : 0;
-  const api = await fetchLeaguePlayersApi();
-  const livePlayers = leaguePlayersFromResponse(api)
-    .map(normalizeSoloLeaguePlayer)
-    .filter(row => row.user_id && row.league_name && !isLeaguePubliclyHidden(env, row.league_name))
-    .sort((a, b) => b.points - a.points || a.user_id - b.user_id);
-
-  livePlayers.forEach((row, index) => { row.rank = index + 1; });
-  const byRank = new Map(livePlayers.map(row => [Number(row.rank), row]));
-  const snapshotAt = livePlayers
-    .map(row => row.fetched_at)
-    .filter(Boolean)
-    .sort()
-    .pop() || new Date().toISOString();
-
-  return cacheJson({
-    ok: true,
-    generated_at: new Date().toISOString(),
-    snapshot_at: snapshotAt,
-    league_run_key: requestedRunKey(url, env),
-    league_run_label: leagueRunLabel(env, requestedRunKey(url, env)),
-    league_end_at: leagueRunEndAt(env, requestedRunKey(url, env)),
-    source: "big-games-public-league-players",
-    pool_is_partial: maxRequested > livePlayers.length,
-    top_available: livePlayers.length,
-    total_players: livePlayers.length,
-    rows: ranks.map(rank => {
-      const row = byRank.get(rank);
-      return {
-        rank,
-        available: Boolean(row),
-        points: row ? (toNumber(row.points ?? row.total_points) || 0) : null,
-        total_points: row ? (toNumber(row.total_points ?? row.points) || 0) : null,
-        user_id: row?.user_id || null,
-        username: row?.username || row?.display_name || null,
-        league_name: row?.league_name || null,
-        fetched_at: row?.fetched_at || snapshotAt
       };
     })
   }, env);

@@ -191,7 +191,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `INGEST_CLANS_LEADERBOARD` | `true` |
 | `CLAN_RANK_TOP_N` | `200`; number of clan battle ranks to store. |
 | `CLANS_SNAPSHOT_MIN_INTERVAL_MINUTES` | Optional. Defaults to `5`; prevents scheduled or accidental duplicate all-clans leaderboard snapshot writes for the same battle when the latest snapshot is newer than this. `force=1` bypasses it. |
-| `CLAN_BATTLES_SCAN_LIMIT` | Optional fallback scan size for `/api/clans/battles`. Defaults to `20000`; keep this low enough to avoid Cloudflare subrequest limits. |
+| `CLAN_BATTLES_SCAN_LIMIT` | Optional legacy fallback scan size for `/api/clans/battles?include_legacy=1`. Normal battle lists use `c0ld_battle_runs` metadata and do not scan raw leaderboard history. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
 | `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
 | `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Offset inside the schedule interval; keep `0` with the top-of-five-minute cron when you want all battle-data pulls aligned on `:00`, `:05`, `:10`, and so on. |
@@ -207,7 +207,9 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_NAME_SCAN_LIMIT` | Optional. Defaults to `50000`; maximum latest global-rank candidate rows to scan by stored raw username/display name when Roblox username lookup is unavailable or returns no match. |
 | `GLOBAL_RANK_RETENTION_HOURS` | Optional. Defaults to `24`; completed global-rank run data older than this is pruned only when global-rank retention is explicitly enabled. |
-| `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `false`; set `true` only after the final-snapshot/archive flow is in place and you intentionally want raw run cleanup. |
+| `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `false`. Set `true` to prune temporary global-rank scan runs while preserving the newest successful final run for every clan and battle forever. |
+| `GLOBAL_RANK_RETENTION_DELETE_RUNS_PER_PASS` | Optional. Defaults to `3`; caps cleanup work after each completed scan so an old backlog cannot create one large delete spike. |
+| `DERIVED_SNAPSHOT_CACHE_SECONDS` | Optional. Defaults to `3600`; caches immutable gain/history calculations by snapshot ID. A new snapshot always receives a new cache key. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
 | `GLOBAL_RANK_LEADERBOARD_LABEL` | Optional leaderboard placement label, such as `Update 84 Leaderboard`; preferred for profile Leaderboard History. |
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
@@ -285,13 +287,13 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `PS99_FFLAGS_ROLE_ID` | Optional Discord role ID mentioned only for public client-settings changes. |
 | `PS99_RESTARTS_ROLE_ID` | Optional Discord role ID mentioned only for confirmed PS99 restart alerts. Defaults to `1529578783131177131`. |
 | `PS99_DEV_BLOG_ROLE_ID` | Optional Discord role ID mentioned only for official BIG Games post alerts. |
-| `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migration `025` to allow profile-page CW_Bot message-link imports. |
+| `CW_BOT_IMPORT_ENABLED` | Optional. Defaults to `false`. Set to `true` after running migrations `025`, `026`, and `047` to allow CW_Bot message-link imports. |
 | `CW_BOT_USER_ID` | Optional. Defaults to `1219229814150398003`; Discord user/app ID that imported messages must be authored by. |
 | `CW_BOT_IMPORT_GUILD_IDS` | Optional comma-separated allowlist of Discord server IDs accepted for CW_Bot imports. |
 | `CW_BOT_IMPORT_CHANNEL_IDS` | Optional comma-separated allowlist of Discord channel IDs accepted for CW_Bot imports. |
 | `CW_BOT_IMPORT_REQUIRE_ADMIN` | Optional. Defaults to `false`; when `true`, imports require `INGEST_ADMIN_TOKEN`. |
-| `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_external_player_history` until reviewed. |
-| `CW_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in CW_Bot imported history. Set to `false` to allow the CW_Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
+| `CW_BOT_IMPORT_AUTO_APPROVE` | Optional. Defaults to `false`; when `false`, imported rows are saved as `pending` in `c0ld_cwbot_history_imports` until reviewed. |
+| `CW_BOT_IMPORT_PREVENT_OVERWRITE` | Optional. Defaults to `true`; skips a battle already present in CW_Bot imported history, except that the channel backfill can replace a later CW_Bot source row with an earlier CW_Bot message. Set to `false` to allow the CW_Bot source row to be inserted or updated. First-party tracked history is always protected regardless of this setting. |
 | `OPENAI_API_KEY` | Optional secret. Enables image OCR when the CW_Bot message is image-only. |
 | `CW_BOT_OCR_MODEL` | Optional. Model used for OCR. Defaults to `gpt-5.6`. |
 | `BIG_BOT_IMPORT_ENABLED` | Optional. Enables text-only Big Bot history imports. Falls back to `CW_BOT_IMPORT_ENABLED` when unset. |
@@ -426,8 +428,11 @@ Useful endpoints:
 | `/api/global/current` | Cached c0ld global ranks for the website leaderboard column. |
 | `/api/global/leaderboard` | Automatically serves the completed clan-derived global scan during a Clan Battle or the live public League-player Top 500 when no Clan Battle is active. Use `source=clans` or `source=leagues` only to override auto-detection while testing. |
 | `/api/global/search?q=Cinnamowopal` | Cached global rank lookup for Discord `/search` commands. It can return any player found in the latest global clan scan, not only c0ld members. |
-| `/api/external-history?user_id=123&source=cw_bot` | Approved external history rows for a player. Non-approved statuses require the admin token. |
+| `/api/external-history?user_id=123&source=cw_bot` | Approved CW-Bot history rows from `c0ld_cwbot_history_imports`. Non-approved statuses require the admin token. A read-only fallback covers legacy rows during deployment. |
 | `/api/external-history/cwbot/import` | Imports a real CW_Bot Discord message link for a profile. `POST` JSON with `user_id`, optional `username`, and `message_url`. |
+| `/api/external-history/cwbot/guild-channels` | Protected Discord channel discovery for a server-wide CW-Bot history import. Returns text/announcement channels, active threads, and parents that can contain archived public threads. |
+| `/api/external-history/cwbot/archived-threads` | Protected paginated discovery of public archived threads under one Discord channel. Used automatically by the guild importer. |
+| `/api/external-history/cwbot/channel-scan` | Protected, read-only scanner for one page of Discord channel history. It classifies CW_Bot history responses by direct history markers or a preceding `!history username` command and returns a resumable `next_before_message_id` cursor. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/persistent-posts/post` | Protected `POST` endpoint that creates or edits the combined Cutoffs, Roblox Status, and Versions posts. Add `?force=1`, and optionally `&type=cutoffs`, `&type=roblox-status`, or `&type=versions`. |
@@ -450,6 +455,69 @@ Useful endpoints:
 | `/api/ps99/ccu?limit=180` | Public one-minute PS99 universe CCU samples used as restart-audit context. |
 | `/api/ps99/alerts/test?type=both` | Protected end-to-end preview of the Discord PS99 version and/or restart alerts. Accepts `version`, `restart`, or `both`; restart tests also publish a five-minute webpage audio-test signal without creating a confirmed restart-history record. `POST` only. |
 | `/api/ps99/alerts/test?feed=all` | Protected webhook-only test for all five dedicated alert destinations. Accepts `roblox-updates`, `ps99-updates`, `ps99-fflags`, `ps99-restarts`, `ps99-dev-blogs`, or `all`. `POST` only. |
+
+Before a full CW_Bot history-channel backfill, run migration `047`, deploy the
+current clan API Worker, and then run the one-time straggler cleanup:
+
+```text
+supabase/migrations/047_cwbot_history_imports.sql
+supabase/manual-cleanups/2026-07-30-move-cwbot-history-stragglers.sql
+```
+
+Migration `047` atomically copies existing `source = 'cw_bot'` rows into
+`c0ld_cwbot_history_imports` before removing those copies from the shared
+external-history table. Big Bot and other sources remain in
+`c0ld_external_player_history`.
+
+CW-Bot history is supplementary. `/history` keeps native snapshot data when it
+exists, fills only missing rank/points fields from a matching CW-Bot battle,
+and adds a CW-Bot battle only when native history has no matching record.
+
+Then run:
+
+```powershell
+cd "C:\Users\oaadmin\Documents\GitHub\c0ld"
+.\scripts\import-cwbot-channel-history.ps1 -ScanOnly -Reset
+```
+
+The scan writes a resumable manifest under `%TEMP%` and does not write Supabase rows. Review its candidate and ignored counts, then rerun without `-ScanOnly` to import confirmed candidates oldest-first:
+
+```powershell
+.\scripts\import-cwbot-channel-history.ps1
+```
+
+The Discord bot must be present in the server and have `View Channel` plus `Read Message History` for the target channel. `CW_BOT_IMPORT_CHANNEL_IDS` must include `1489032381481619550` when that allowlist is configured. The runner requires the clan API Worker's `INGEST_ADMIN_TOKEN`; it automatically resumes after interruption and sends `prefer_earliest_message=true` so later repeated history posts cannot displace an earlier CW_Bot source message.
+
+To scan every readable text channel in one Discord server, set
+`CW_BOT_IMPORT_GUILD_IDS` to that server ID and remove
+`CW_BOT_IMPORT_CHANNEL_IDS`. Deploy the current clan API Worker, then run:
+
+```powershell
+cd "C:\Users\oaadmin\Documents\GitHub\c0ld"
+.\scripts\import-cwbot-guild-history.ps1 `
+  -GuildId "1457088639006670979" `
+  -ScanOnly `
+  -Reset
+```
+
+The guild wrapper discovers normal text/announcement channels and active
+threads, then gives each one a separate resumable checkpoint. After reviewing
+the checkpoint files, rerun the same command without `-ScanOnly` and `-Reset`
+to import the candidates. Channels the bot cannot read are reported and skipped
+without stopping the rest of the server scan.
+
+Archived public threads are intentionally a separate pass because Discord may
+deny archive enumeration even when ordinary channel discovery succeeds. Add
+`-IncludeArchivedThreads` when the bot has `View Channel` and `Read Message
+History` in the applicable parent channels:
+
+```powershell
+.\scripts\import-cwbot-guild-history.ps1 `
+  -GuildId "1457088639006670979" `
+  -ScanOnly `
+  -Reset `
+  -IncludeArchivedThreads
+```
 
 Clan activity tracking needs one baseline roster snapshot before it can detect
 joins, leaves, promotions, demotions, kick usage, or rank changes. After running
@@ -594,11 +662,14 @@ clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
 are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
 clan leaderboard is exhausted.
 
-Global-rank cleanup is intentionally opt-in. Leave
-`GLOBAL_RANK_RETENTION_ENABLED=false` until the final snapshot for a battle or
-league has been archived/verified. When enabled, the Worker prunes completed
-scan data outside `GLOBAL_RANK_RETENTION_HOURS`; do not enable it for a new
-event until the final-snapshot cleanup path is ready for that event type.
+Global-rank cleanup is intentionally opt-in. When
+`GLOBAL_RANK_RETENTION_ENABLED=true`, the Worker keeps all runs inside
+`GLOBAL_RANK_RETENTION_HOURS`, keeps the newest successful (`ok` or
+`completed`) run for every clan/battle forever, and removes only
+`GLOBAL_RANK_RETENTION_DELETE_RUNS_PER_PASS` old temporary runs after each
+completed scan. If an old event has no successful run, its newest non-running
+run is retained as a fallback. This cleanup is scoped to the clan global-rank
+tables; League history is not touched.
 
 For the fastest controlled Top 500 pull, use one-pass sharding. With:
 

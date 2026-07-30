@@ -139,7 +139,7 @@ function setStatus(text){document.getElementById("status").textContent=text}
 async function loadBattles(){
   const [memberBattles, clanBattles]=await Promise.all([
     getJson(API+"/api/battles?clan=c0ld&limit=100").catch(()=>({rows:[]})),
-    getJson(API+"/api/clans/battles?limit=100&scan_limit=20000").catch(()=>({rows:[]}))
+    getJson(API+"/api/clans/battles?limit=100").catch(()=>({rows:[]}))
   ]);
   const byKey=new Map();
   for(const row of [...(memberBattles.rows||[]),...(clanBattles.rows||[])]){
