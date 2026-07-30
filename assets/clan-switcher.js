@@ -517,7 +517,7 @@
   }
 
   async function loadLiveProfileForChart(id, clan) {
-    const current = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=${encodeURIComponent(clan.label)}`);
+    const current = await fetchJson(`${MEMBER_API_CURRENT_URL}?clan=${encodeURIComponent(clan.label)}&downtime=false`);
     const currentRow = findCurrentRow(current, id);
     const userId = currentRow?.user_id || (/^\d+$/.test(String(id)) ? String(id) : "");
 

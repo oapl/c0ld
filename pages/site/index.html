@@ -1685,7 +1685,7 @@
         await applyBattleSelection();
 
         if (activeBattle === "current") {
-          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "true" }), `live ${TRACKED_CLAN_DISPLAY} details`, forceFresh)
+          fetchLiveJson(withClanQuery(MEMBER_API_CURRENT_URL, { avatars: "true", downtime: "true" }), `live ${TRACKED_CLAN_DISPLAY} details`, forceFresh)
             .then(fullCurrentJson => {
               if (!fullCurrentJson || !Array.isArray(fullCurrentJson.rows) || activeBattle !== "current") return;
               currentData = {

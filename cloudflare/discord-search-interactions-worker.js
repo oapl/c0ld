@@ -3182,14 +3182,7 @@ async function buildHourlyClanReport(env, clanNameValue) {
     throw httpError(409, ingest.message || "No active clan battle is available for this hourly report.");
   }
 
-  const current = await hourlyClanApiRequest(env, "/api/current", {
-    query: {
-      clan,
-      avatars: 0,
-      downtime: 1,
-      fresh: 1
-    }
-  });
+  const current = await fetchHourlyClanCurrentForReport(env, clan);
   if (!Array.isArray(current.rows) || !current.rows.length) {
     throw httpError(409, `No current battle rows were returned for clan ${clan}.`);
   }
@@ -3209,11 +3202,59 @@ async function buildHourlyClanReport(env, clanNameValue) {
   };
 }
 
+async function fetchHourlyClanCurrentForReport(env, clan) {
+  const attempts = 3;
+  let lastCurrent = null;
+  let lastMissing = 0;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const current = await hourlyClanApiRequest(env, "/api/current", {
+      query: {
+        clan,
+        avatars: 0,
+        downtime: 1,
+        fresh: 1
+      }
+    });
+    const missing = hourlyMissingDowntimeCount(current);
+    if (!missing) return current;
+
+    lastCurrent = current;
+    lastMissing = missing;
+    if (attempt < attempts) await sleep(1000 * attempt);
+  }
+
+  const sample = (lastCurrent?.rows || [])
+    .filter(row => hourlyInactiveRowMissingDowntime(row))
+    .slice(0, 5)
+    .map(row => row.username || row.user_id)
+    .filter(Boolean)
+    .join(", ");
+  const apiHint = lastCurrent?.downtime_error ? ` Clan API downtime error: ${lastCurrent.downtime_error}` : "";
+  throw httpError(
+    502,
+    `Clan API returned ${lastMissing} inactive ${clan} row(s) without downtime_minutes${sample ? ` (${sample})` : ""}; refusing to post a stale offline board.${apiHint}`
+  );
+}
+
 function hourlyClanReportHasReliableGains(current) {
   return Array.isArray(current?.rows)
     && current.rows.some(row => hourlyOptionalNumber(
       hourlyFirstDefined(row.gain_1h, row.hourly_gain, row.hourly_points, row.one_hour_gain)
     ) !== null);
+}
+
+function hourlyMissingDowntimeCount(current) {
+  if (!Array.isArray(current?.rows) || !current.rows.length) return 0;
+  return current.rows.filter(row => hourlyInactiveRowMissingDowntime(row)).length;
+}
+
+function hourlyInactiveRowMissingDowntime(row) {
+  const gain = hourlyOptionalNumber(
+    hourlyFirstDefined(row?.gain_1h, row?.hourly_gain, row?.hourly_points, row?.one_hour_gain)
+  );
+  if (gain === null || gain > 0) return false;
+  return hourlyDowntimeMinutes(row) === null;
 }
 
 async function buildHourlyUserReport(env, usernameValue) {

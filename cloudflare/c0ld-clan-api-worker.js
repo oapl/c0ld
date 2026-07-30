@@ -1125,7 +1125,8 @@ async function handleCurrent(request, env) {
   const clan = url.searchParams.get("clan") || clanName(env);
   const requestedBattle = url.searchParams.get("battle") || "";
   const includeAvatars = !["0", "false", "no"].includes(String(url.searchParams.get("avatars") || "true").toLowerCase());
-  const includeDowntime = !["0", "false", "no"].includes(String(url.searchParams.get("downtime") || "true").toLowerCase());
+  const downtimeParam = String(url.searchParams.get("downtime") || "").toLowerCase();
+  const includeDowntime = ["1", "true", "yes", "y"].includes(downtimeParam);
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
@@ -1154,17 +1155,19 @@ async function handleCurrent(request, env) {
   }
 
   const rowsWithGains = await addGainFields(env, rows, latest);
-  const rowsWithDowntime = includeDowntime
-    ? await addDowntimeFields(env, rowsWithGains, latest).catch(() => rowsWithGains.map(row => ({
-      ...row,
-      last_gain_at: null,
-      downtime_minutes: null
-    })))
-    : rowsWithGains.map(row => ({
-      ...row,
-      last_gain_at: null,
-      downtime_minutes: null
-    }));
+  let downtimeError = null;
+  let rowsWithDowntime = rowsWithGains.map(row => ({
+    ...row,
+    last_gain_at: null,
+    downtime_minutes: null
+  }));
+  if (includeDowntime) {
+    try {
+      rowsWithDowntime = await addDowntimeFields(env, rowsWithGains, latest);
+    } catch (err) {
+      downtimeError = String(err?.message || err || "Unknown downtime enrichment error").slice(0, 500);
+    }
+  }
   const activeBattleMeta = !explicitBattle
     ? await fetchActiveClanBattleMeta(env).catch(() => null)
     : null;
@@ -1222,6 +1225,7 @@ async function handleCurrent(request, env) {
     icon_url: trackedClan?.icon_url || null,
     source: "c0ld-clan-api-worker",
     downtime_included: includeDowntime,
+    downtime_error: downtimeError,
     avatars_included: includeAvatars,
     rows: rowsWithDowntime.map(row => ({
       fetched_at: row.fetched_at,
