@@ -4,13 +4,18 @@ compatibility_date = "2026-06-20"
 
 [vars]
 LEAGUE_NAME = "YAMO"
-# Master safety switch. Leave false until Tap Heroes Part 2 collection should begin.
+# Master safety switch. Leave false until a League run should be collectible.
+# When true/auto, scheduled collection still obeys LEAGUE_RUN_START_AT and LEAGUE_RUN_END_AT.
 LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
 LEAGUE_RUN_KEY = "tap-heroes-part-2"
 LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
+# Optional current League start. If set, scheduled collection waits until this ISO time.
+LEAGUE_RUN_START_AT = ""
 # Current League end. Exposed by /api/health and /api/leagues/milestones.
 LEAGUE_RUN_END_AT = "2026-07-24T16:00:00Z"
+# Optional minutes after LEAGUE_RUN_END_AT during which scheduled final pulls may still run.
+LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES = "0"
 # The previous run is used only as a subtraction baseline. Its totals are never
 # counted or stored as Tap Heroes Part 2 points.
 LEAGUE_BASELINE_RUN_KEY = "active"

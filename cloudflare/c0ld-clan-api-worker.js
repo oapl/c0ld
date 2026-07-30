@@ -15647,7 +15647,7 @@ async function cleanupGlobalRankRetention(env, {
   currentBattleKey,
   currentBattleEndedAt
 }) {
-  if (String(env.GLOBAL_RANK_RETENTION_ENABLED || "true").toLowerCase() === "false") {
+  if (String(env.GLOBAL_RANK_RETENTION_ENABLED || "false").toLowerCase() !== "true") {
     return { deleted_runs: 0, disabled: true };
   }
 
@@ -17937,7 +17937,9 @@ function battleIngestGate({
     ? endMs + graceMinutes * 60 * 1000
     : NaN;
 
-  if (Number.isFinite(endMs) && scheduledMs !== null && scheduledMs > endMs) {
+  const scheduledStopMs = Number.isFinite(hardStopMs) ? hardStopMs : endMs;
+
+  if (Number.isFinite(scheduledStopMs) && scheduledMs !== null && scheduledMs > scheduledStopMs) {
     return {
       allowed: false,
       reason: "battle_final_pull_passed",

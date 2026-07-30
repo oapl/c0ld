@@ -54,10 +54,16 @@ export default {
       let response;
 
       if (request.method === "GET" && url.pathname === "/api/health") {
+        const scheduledCollection = leagueScheduledCollectionState(env);
         response = json({
           ok: true,
           service: "ps99-league-api",
           league_collection_enabled: leagueCollectionEnabled(env),
+          scheduled_collection_enabled: scheduledCollection.enabled,
+          scheduled_collection_reason: scheduledCollection.reason,
+          scheduled_collection_start_at: scheduledCollection.start_at,
+          scheduled_collection_end_at: scheduledCollection.end_at,
+          scheduled_collection_hard_stop_at: scheduledCollection.hard_stop_at,
           league_name: leagueName(env),
           league_names: leagueNames(env),
           c0ld_league_names: c0ldLeagueNames(env),
@@ -160,12 +166,13 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    if (!leagueCollectionEnabled(env)) {
-      console.log("scheduled league collection skipped: LEAGUE_COLLECTION_ENABLED is false");
+    const scheduledAt = scheduledEventTime(event);
+    const collectionState = leagueScheduledCollectionState(env, scheduledAt);
+    if (!collectionState.enabled) {
+      console.log("scheduled league collection skipped", JSON.stringify(collectionState));
       return;
     }
     ctx.waitUntil((async () => {
-      const scheduledAt = scheduledEventTime(event);
       const runKey = leagueRunKey(env);
 
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
@@ -3539,8 +3546,53 @@ async function normalizeTopLeagueRowsForRun(env, runKey, listName, rows, options
 function stableLeagueUserId(value) { let h = 2166136261; const text = String(value || "unknown"); for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return 9000000000000 + h; }
 function requireSupabase(env) { if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw httpError(500, "SUPABASE_URL and SUPABASE_SERVICE_KEY are required"); }
 function requireAdmin(request, env) { const expected = String(env.INGEST_ADMIN_TOKEN || "").trim(); if (!expected) throw httpError(500, "INGEST_ADMIN_TOKEN is not configured"); const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim(); if (token !== expected) throw httpError(401, "Unauthorized"); }
-function leagueCollectionEnabled(env) { return String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase() === "true"; }
-function requireLeagueCollectionEnabled(env) { if (!leagueCollectionEnabled(env)) throw httpError(409, "League collection is disabled. Set LEAGUE_COLLECTION_ENABLED=true to activate it."); }
+function leagueCollectionEnabled(env) { return leagueCollectionSwitchEnabled(env); }
+function leagueCollectionSwitchEnabled(env) {
+  const raw = String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase();
+  return raw !== "" && !FALSEY_ENV_VALUES.has(raw);
+}
+function requireLeagueCollectionEnabled(env) {
+  if (!leagueCollectionSwitchEnabled(env)) {
+    throw httpError(409, "League collection is disabled. Set LEAGUE_COLLECTION_ENABLED=true or auto to activate protected collection endpoints.");
+  }
+}
+function leagueScheduledCollectionState(env, scheduledAt = null) {
+  const runKey = leagueRunKey(env);
+  const nowMs = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
+    ? scheduledAt.getTime()
+    : Number.isFinite(Number(scheduledAt)) && Number(scheduledAt) > 0
+      ? Number(scheduledAt)
+      : Date.now();
+
+  const startAt = leagueRunStartAt(env, runKey);
+  const endAt = leagueRunEndAt(env, runKey);
+  const startMs = startAt ? new Date(startAt).getTime() : NaN;
+  const endMs = endAt ? new Date(endAt).getTime() : NaN;
+  const graceMinutes = leagueCollectionFinalPullGraceMinutes(env);
+  const hardStopMs = Number.isFinite(endMs) ? endMs + graceMinutes * 60 * 1000 : NaN;
+
+  const base = {
+    run_key: runKey,
+    start_at: startAt,
+    end_at: endAt,
+    hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null,
+    grace_minutes: graceMinutes
+  };
+
+  if (!leagueCollectionSwitchEnabled(env)) {
+    return { ...base, enabled: false, reason: "collection_disabled" };
+  }
+
+  if (Number.isFinite(startMs) && nowMs < startMs) {
+    return { ...base, enabled: false, reason: "league_not_started" };
+  }
+
+  if (Number.isFinite(hardStopMs) && nowMs > hardStopMs) {
+    return { ...base, enabled: false, reason: "league_ended" };
+  }
+
+  return { ...base, enabled: true, reason: "league_window_open" };
+}
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
 function csvLeagueNames(value) { return String(value || "").split(",").map(item => item.trim()).filter(Boolean); }
 function c0ldLeagueNames(env) { return [...new Set(csvLeagueNames(env.COLD_LEAGUE_NAMES))]; }
@@ -3711,6 +3763,20 @@ function leagueRunEndAt(env, runKey) {
     key === DEFAULT_LEAGUE_RUN_KEY ? DEFAULT_LEAGUE_RUN_END_AT : null
   );
   return parseTimestamp(mapped);
+}
+function leagueRunStartAt(env, runKey) {
+  const key = normalizeRunKey(runKey || leagueRunKey(env));
+  const configured = parseJsonObject(env.LEAGUE_RUN_STARTS_JSON || env.LEAGUE_EVENT_STARTS_JSON);
+  const mapped = firstDefined(
+    configured[key],
+    configured[key.toLowerCase()],
+    key === leagueRunKey(env) ? env.LEAGUE_RUN_START_AT : null,
+    key === leagueRunKey(env) ? env.LEAGUE_START_AT : null
+  );
+  return parseTimestamp(mapped);
+}
+function leagueCollectionFinalPullGraceMinutes(env) {
+  return clamp(Number(env.LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES || env.LEAGUE_FINAL_PULL_GRACE_MINUTES || 0), 0, 180);
 }
 function topLeaguesRunKey(env) {
   const configured = normalizeRunKey(env.TOP_LEAGUES_RUN_KEY || env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);

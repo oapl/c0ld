@@ -107,7 +107,7 @@ It is separate from the Discord auth Worker on purpose:
 
 ## Database setup
 
-Run this migration in Supabase SQL Editor:
+Run these migrations in Supabase SQL Editor:
 
 ```text
 supabase/migrations/004_c0ld_clan_snapshots.sql
@@ -117,7 +117,12 @@ supabase/migrations/019_clan_activity.sql
 supabase/migrations/021_ps99_version_history.sql
 supabase/migrations/024_home_awards_rpc.sql
 supabase/migrations/028_roblox_release_version_history.sql
+supabase/migrations/044_hot_path_indexes.sql
 ```
+
+`044_hot_path_indexes.sql` is a read-performance migration only. It adds targeted
+indexes for member downtime windows, latest all-clans metadata reads, and
+inventory snapshot item reads; it does not prune or rewrite stored history.
 
 It creates:
 
@@ -167,7 +172,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `AUTO_DETECT_BATTLE` | `true`; lets the Worker pick the active/latest API battle automatically. Set to `false` only when you want to force `CURRENT_BATTLE_NAME`. |
 | `ACTIVE_BATTLE_LOOKUP` | Optional. Defaults to `true`; reads Big Games' active battle metadata for display/start/end times. |
 | `SKIP_ENDED_BATTLE_INGEST` | Optional. Defaults to `true`; cron and normal manual ingests skip without writing snapshot rows when the active battle is ended or not started. |
-| `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES` | Optional. Defaults to `0`; blocks scheduled battle-data pulls as soon as the API battle end time has passed. |
+| `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES` | Optional. Defaults to `0`; when positive, scheduled battle-data pulls may continue until battle end plus this many minutes for a final capture. |
 | `CURRENT_BATTLE_DISPLAY_NAME` | Optional override. If blank, the Worker uses the API battle name or prettifies the battle key. |
 | `CURRENT_BATTLE_END_ISO` | Optional override. If blank, the Worker reads the API end timestamp when present. |
 | `SITE_ORIGINS` | `https://oapl.github.io,https://c0ld-clan.com,https://www.c0ld-clan.com` |
@@ -201,8 +206,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_RANK_RETRY_ATTEMPTS` | Optional. Defaults to `6`; repeated failures abort the run instead of skipping a range. |
 | `GLOBAL_RANK_RETRY_BASE_MS` | Optional. Defaults to `15000`; retry backoff base in milliseconds. |
 | `GLOBAL_RANK_NAME_SCAN_LIMIT` | Optional. Defaults to `50000`; maximum latest global-rank candidate rows to scan by stored raw username/display name when Roblox username lookup is unavailable or returns no match. |
-| `GLOBAL_RANK_RETENTION_HOURS` | Optional. Defaults to `24`; completed global-rank run data older than this is pruned while the battle/update is active. |
-| `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `true`; set `false` to disable global-rank run cleanup. |
+| `GLOBAL_RANK_RETENTION_HOURS` | Optional. Defaults to `24`; completed global-rank run data older than this is pruned only when global-rank retention is explicitly enabled. |
+| `GLOBAL_RANK_RETENTION_ENABLED` | Optional. Defaults to `false`; set `true` only after the final-snapshot/archive flow is in place and you intentionally want raw run cleanup. |
 | `GLOBAL_RANK_EVENT_NAME` | Optional legacy display override such as `LunarBattle2026`. |
 | `GLOBAL_RANK_LEADERBOARD_LABEL` | Optional leaderboard placement label, such as `Update 84 Leaderboard`; preferred for profile Leaderboard History. |
 | `PS99_UPDATE_LABEL` / `PS99_UPDATE_NUMBER` | Optional fallback for global leaderboard labels when `GLOBAL_RANK_LEADERBOARD_LABEL` is blank. |
@@ -301,7 +306,7 @@ Battle start/end values from the Big Games API can be ISO strings, Unix seconds,
 
 When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanently. The Worker checks active battle metadata before writing; ended/not-started battles return `skipped: true` and `rows_inserted: 0`. For deliberate backfills, add `?force=1` to a protected manual ingest URL.
 
-The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff. PS99 version scans, PS99 restart detection, and Roblox released-version checks are not battle data and continue after the battle gate closes.
+The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff. With a positive grace value, scheduled pulls can continue until battle end plus that grace window so a final after-end snapshot can land. PS99 version scans, PS99 restart detection, and Roblox released-version checks are not battle data and continue after the battle gate closes.
 
 ### Secrets
 
@@ -589,12 +594,11 @@ clans, which powers Discord output such as "Global Rank: #171 of 34.08k" and
 are found. It finalizes when `GLOBAL_RANK_CLAN_SCAN_LIMIT` is reached or the
 clan leaderboard is exhausted.
 
-After a global rank scan finalizes, the Worker prunes old completed scan data.
-While the same battle/update is active, it keeps a rolling
-`GLOBAL_RANK_RETENTION_HOURS` window. Once a battle/update is no longer current
-or its stored end time has passed, cleanup keeps the newest successful run as
-the final historical snapshot and deletes the older run/candidate/history/shard
-rows for that group.
+Global-rank cleanup is intentionally opt-in. Leave
+`GLOBAL_RANK_RETENTION_ENABLED=false` until the final snapshot for a battle or
+league has been archived/verified. When enabled, the Worker prunes completed
+scan data outside `GLOBAL_RANK_RETENTION_HOURS`; do not enable it for a new
+event until the final-snapshot cleanup path is ready for that event type.
 
 For the fastest controlled Top 500 pull, use one-pass sharding. With:
 
@@ -824,10 +828,11 @@ and the c0ld league overlap page.
 
 `LEAGUE_COLLECTION_ENABLED` is the master collection switch and defaults to
 `false`. While it is false, scheduled scans, normal manual ingest requests, and
-the page-triggered live overlap/window scans are all blocked. The protected,
-resumable League player-pool endpoint remains available for a deliberate final
-backfill after a League ends. Set the switch to `true` only when the configured
-league run should begin. `INGEST_LEAGUES`,
+the page-triggered live overlap/window scans are all blocked. When it is set to
+`true` or `auto`, scheduled collection also obeys `LEAGUE_RUN_START_AT`,
+`LEAGUE_RUN_END_AT`, and `LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES`. Protected
+administrator endpoints stay available while the master switch is enabled so a
+deliberate final backfill can still run after a League ends. `INGEST_LEAGUES`,
 `INGEST_TOP_LEAGUES`, and `INGEST_TRACKED_RANK_WINDOWS` remain optional
 sub-switches once the master switch is enabled.
 
@@ -926,12 +931,16 @@ Change `-TopLeagues` to `2000` or `3000` for a deeper future simulation. The
 script retries failed batches and does not replace the published pool until
 every requested League roster has succeeded.
 
-`LEAGUE_RUN_END_AT` is the ISO timestamp for the current League ending. It is
-returned by `/api/health` and `/api/leagues/milestones`; historical or alternate
-run endings can be mapped with `LEAGUE_RUN_ENDS_JSON`. BIG Games' public
-`/v1/leagues` and `/v1/leagues/players` responses do not currently include an
-event-ending field, so this timestamp is owned by the League Worker rather than
-inferred from leaderboard rows.
+`LEAGUE_RUN_START_AT` and `LEAGUE_RUN_END_AT` are ISO timestamps for the current
+League window. `LEAGUE_RUN_START_AT` is optional; if present, scheduled collection
+waits until that time. `LEAGUE_RUN_END_AT` is returned by `/api/health` and
+`/api/leagues/milestones`; historical or alternate run endings can be mapped with
+`LEAGUE_RUN_ENDS_JSON`, and starts can be mapped with `LEAGUE_RUN_STARTS_JSON`.
+`LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES` lets scheduled collection continue
+briefly after the end timestamp for a final capture. BIG Games' public
+`/v1/leagues` and `/v1/leagues/players` responses do not currently include a
+reliable event-ending field, so these timestamps are owned by the League Worker
+rather than inferred from leaderboard rows.
 
 League profile snapshot reads are paginated internally in 1,000-row batches, so
 the requested profile limit is honored instead of silently stopping at
