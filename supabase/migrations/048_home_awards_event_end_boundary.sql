@@ -1,6 +1,9 @@
 -- Migration 048: keep award calculations inside the canonical battle window.
 -- Grace-period snapshots remain archived, but they cannot alter final awards.
 
+create index if not exists c0ld_clan_snapshots_archive_clan_battle_user_fetched_idx
+  on public.c0ld_clan_snapshots_archive (clan_name, battle_key, user_id, fetched_at);
+
 create or replace function public.get_c0ld_home_awards(
   p_clan_name text default 'c0ld',
   p_battle_key text default null
@@ -14,6 +17,7 @@ as $$
 declare
   v_clan_name text;
   v_battle_key text;
+  v_battle_start_at timestamptz;
   v_battle_end_at timestamptz;
   v_result jsonb;
 begin
@@ -39,8 +43,8 @@ begin
     );
   end if;
 
-  select battle_ended_at
-    into v_battle_end_at
+  select battle_started_at, battle_ended_at
+    into v_battle_start_at, v_battle_end_at
     from public.c0ld_battle_runs
    where clan_name = v_clan_name
      and battle_key = v_battle_key
@@ -108,12 +112,15 @@ begin
     limit 1
   ),
   latest_snapshot as (
-    select max(fetched_at) as fetched_at from base
+    select snapshot_id, fetched_at
+    from base
+    order by fetched_at desc, snapshot_id desc
+    limit 1
   ),
   points_winner as (
     select user_id, total_points
     from base
-    where fetched_at = (select fetched_at from latest_snapshot)
+    where snapshot_id = (select snapshot_id from latest_snapshot)
     order by total_points desc, rank asc, user_id
     limit 1
   ),
@@ -178,9 +185,148 @@ begin
     group by base.user_id
   ),
   latest_players as materialized (
-    select user_id, rank as latest_rank, total_points as final_points
+    select
+      user_id,
+      rank as latest_rank,
+      total_points as final_points
     from base
-    where fetched_at = (select fetched_at from latest_snapshot)
+    where snapshot_id = (select snapshot_id from latest_snapshot)
+  ),
+  latest_member_rows as materialized (
+    select
+      latest_players.user_id,
+      latest_players.latest_rank,
+      latest_players.final_points,
+      snapshots.raw_member
+    from latest_players
+    join public.c0ld_clan_snapshots snapshots
+      on snapshots.clan_name = v_clan_name
+     and snapshots.battle_key = v_battle_key
+     and snapshots.snapshot_id = (select snapshot_id from latest_snapshot)
+     and snapshots.user_id = latest_players.user_id
+  ),
+  member_metadata as materialized (
+    select
+      latest_member_rows.user_id,
+      latest_member_rows.latest_rank,
+      latest_member_rows.final_points,
+      case
+        when raw_values.join_text ~ '^\d{13}$'
+          then to_timestamp(raw_values.join_text::double precision / 1000)
+        when raw_values.join_text ~ '^\d{10}(\.\d+)?$'
+          then to_timestamp(raw_values.join_text::double precision)
+        when raw_values.join_text ~ '^\d{4}-\d{2}-\d{2}[T ]'
+          then raw_values.join_text::timestamptz
+        else null
+      end as joined_at,
+      case
+        when raw_values.permission_text ~ '^-?\d+(\.\d+)?$'
+          then raw_values.permission_text::numeric
+        else null
+      end as permission_level,
+      nullif(raw_values.role_text, '') as role
+    from latest_member_rows
+    cross join lateral (
+      select
+        nullif(btrim(coalesce(
+          latest_member_rows.raw_member ->> 'JoinTime',
+          latest_member_rows.raw_member ->> 'joinTime',
+          latest_member_rows.raw_member ->> 'join_time',
+          latest_member_rows.raw_member ->> 'JoinedAt',
+          latest_member_rows.raw_member ->> 'joinedAt',
+          latest_member_rows.raw_member ->> 'joined_at',
+          ''
+        )), '') as join_text,
+        nullif(btrim(coalesce(
+          latest_member_rows.raw_member ->> 'PermissionLevel',
+          latest_member_rows.raw_member ->> 'permissionLevel',
+          latest_member_rows.raw_member ->> 'permission_level',
+          latest_member_rows.raw_member ->> 'Permissions',
+          latest_member_rows.raw_member ->> 'permissions',
+          ''
+        )), '') as permission_text,
+        lower(btrim(coalesce(
+          latest_member_rows.raw_member ->> 'Role',
+          latest_member_rows.raw_member ->> 'role',
+          latest_member_rows.raw_member ->> 'RankName',
+          latest_member_rows.raw_member ->> 'rankName',
+          latest_member_rows.raw_member ->> 'Title',
+          latest_member_rows.raw_member ->> 'title',
+          ''
+        ))) as role_text
+    ) raw_values
+  ),
+  member_battle_keys as materialized (
+    select member_metadata.user_id, battle_runs.battle_key
+    from member_metadata
+    join public.c0ld_battle_runs battle_runs
+      on battle_runs.clan_name = v_clan_name
+    where exists (
+      select 1
+      from public.c0ld_clan_snapshots history
+      where history.clan_name = v_clan_name
+        and history.battle_key = battle_runs.battle_key
+        and history.user_id = member_metadata.user_id
+      limit 1
+    )
+    or exists (
+      select 1
+      from public.c0ld_clan_snapshots_archive history
+      where history.clan_name = v_clan_name
+        and history.battle_key = battle_runs.battle_key
+        and history.user_id = member_metadata.user_id
+      limit 1
+    )
+    union
+    select imports.user_id, imports.battle_key
+    from public.c0ld_cwbot_history_imports imports
+    join member_metadata
+      on member_metadata.user_id = imports.user_id
+    where imports.status = 'approved'
+      and lower(btrim(coalesce(imports.clan_name, ''))) = lower(v_clan_name)
+  ),
+  member_battle_counts as materialized (
+    select
+      user_id,
+      count(distinct lower(regexp_replace(battle_key, '[^a-z0-9]+', '', 'g')))::integer as recorded_battles
+    from member_battle_keys
+    group by user_id
+  ),
+  rookie_pool as materialized (
+    select
+      member_metadata.user_id,
+      member_metadata.latest_rank,
+      member_metadata.final_points,
+      member_metadata.joined_at,
+      coalesce(member_battle_counts.recorded_battles, 1)::integer as recorded_battles,
+      member_metadata.permission_level,
+      member_metadata.role,
+      row_number() over (
+        order by
+          coalesce(member_battle_counts.recorded_battles, 1) asc,
+          member_metadata.joined_at desc nulls last,
+          member_metadata.final_points desc,
+          member_metadata.user_id
+      ) as priority_rank,
+      count(*) over () as eligible_count,
+      max(member_metadata.final_points) over () as max_final_points
+    from member_metadata
+    left join member_battle_counts using (user_id)
+    where coalesce(member_metadata.permission_level, 0) < 100
+      and coalesce(member_metadata.role, '') not like '%owner%'
+      and coalesce(member_battle_counts.recorded_battles, 1) <= 3
+  ),
+  rookie_candidates as materialized (
+    select
+      rookie_pool.*,
+      round(100 * (
+        coalesce(
+          1 - ((rookie_pool.priority_rank - 1)::numeric / greatest(rookie_pool.eligible_count - 1, 1)),
+          0
+        ) * 0.80 +
+        coalesce(rookie_pool.final_points::numeric / nullif(rookie_pool.max_final_points, 0), 0) * 0.20
+      ), 1) as score
+    from rookie_pool
   ),
   mvp_candidates as materialized (
     select
@@ -426,6 +572,38 @@ begin
           from sleeper_candidates
           join profiles using (user_id)
           order by sleeper_candidates.gain desc, sleeper_candidates.latest_rank asc, sleeper_candidates.user_id
+          limit 5
+        ) ranked
+      ),
+      'rookie', (
+        select coalesce(jsonb_agg(candidate order by recorded_battles asc, joined_at desc nulls last, final_points desc, user_id), '[]'::jsonb)
+        from (
+          select
+            rookie_candidates.user_id,
+            rookie_candidates.joined_at,
+            rookie_candidates.final_points,
+            rookie_candidates.recorded_battles,
+            jsonb_build_object(
+              'user_id', rookie_candidates.user_id,
+              'username', profiles.username,
+              'joined_at', rookie_candidates.joined_at,
+              'joined_during_battle', (
+                v_battle_start_at is not null and rookie_candidates.joined_at >= v_battle_start_at
+              ),
+              'recorded_battles', rookie_candidates.recorded_battles,
+              'final_points', rookie_candidates.final_points,
+              'latest_rank', rookie_candidates.latest_rank,
+              'permission_level', rookie_candidates.permission_level,
+              'role', rookie_candidates.role,
+              'score', rookie_candidates.score
+            ) as candidate
+          from rookie_candidates
+          join profiles using (user_id)
+          order by
+            rookie_candidates.recorded_battles asc,
+            rookie_candidates.joined_at desc nulls last,
+            rookie_candidates.final_points desc,
+            rookie_candidates.user_id
           limit 5
         ) ranked
       ),

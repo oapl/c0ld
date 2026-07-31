@@ -511,6 +511,10 @@ function rememberStat(stats,row){
       username:profile?.username||row.username||row.display_name||"Unknown player",
       avatar_url:profile?.avatar_url||row.avatar_url||null,
       profile,
+      joinedIso:null,
+      joinedAt:null,
+      permissionLevel:null,
+      role:"",
       firstSeenAt:null,
       latestSeenAt:null,
       startRank:null,
@@ -536,6 +540,14 @@ function rememberStat(stats,row){
   stat.user_id=stat.user_id??row.user_id??profile?.user_id??null;
   stat.username=profile?.username||row.username||row.display_name||stat.username;
   stat.avatar_url=profile?.avatar_url||row.avatar_url||stat.avatar_url;
+  const joinedAt=Date.parse(row?.join_time||row?.joined_at||"");
+  if(Number.isFinite(joinedAt)){
+    stat.joinedAt=joinedAt;
+    stat.joinedIso=new Date(joinedAt).toISOString();
+  }
+  const permissionLevel=finite(row?.permission_level);
+  if(permissionLevel!==null)stat.permissionLevel=permissionLevel;
+  if(row?.role)stat.role=String(row.role).trim().toLowerCase();
   return stat;
 }
 
@@ -864,24 +876,10 @@ function summaryAwardStat(award,extra={}){
   };
 }
 
-function summaryRookieStats(current){
-  const candidates=(Array.isArray(current?.rows)?current.rows:[]).map(row=>{
-    const profile=profileFor(row)||{};
-    const totalBattles=finite(profile.total_battles);
-    return {
-      ...summaryAwardStat({...row,...profile},{
-        finalPoints:pointsFor(row),
-        finalRank:rankFor(row),
-        totalBattles
-      }),
-      profile
-    };
-  }).filter(stat=>stat&&stat.totalBattles!==null&&stat.totalBattles<=3);
-  const maxPoints=Math.max(1,...candidates.map(stat=>stat.finalPoints));
-  return candidates
-    .map(stat=>({...stat,score:100*((1-(stat.totalBattles/4))*0.55+(stat.finalPoints/maxPoints)*0.45)}))
-    .sort((a,b)=>b.score-a.score||b.finalPoints-a.finalPoints)
-    .slice(0,5);
+function rookieJoinedLabel(stat){
+  if(!stat.joinedIso)return "join date unavailable";
+  const date=new Date(stat.joinedIso);
+  return "joined "+date.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
 }
 
 function summaryAwardCandidates(summary,key,fallback,extra){
@@ -923,7 +921,16 @@ function summaryAwardDefinitions(summary,current){
     finalRank:finite(award?.latest_rank??award?.rank),
     score:finite(award?.score)??100
   }));
-  const rookies=summaryRookieStats(current);
+  const rookies=summaryAwardCandidates(summary,"rookie",null,award=>({
+    finalPoints:finite(award?.final_points??award?.total_points)??0,
+    finalRank:finite(award?.latest_rank??award?.rank),
+    joinedIso:award?.joined_at||null,
+    joinedDuringBattle:award?.joined_during_battle===true,
+    recordedBattles:finite(award?.recorded_battles),
+    permissionLevel:finite(award?.permission_level),
+    role:String(award?.role||""),
+    score:finite(award?.score)??100
+  }));
 
   return [
     {
@@ -951,11 +958,12 @@ function summaryAwardDefinitions(summary,current){
     },
     {
       title:"Rookie of the War",
-      note:"Newest c0ld players weighted by battle output.",
-      weight:"tenure + output",
+      note:"Fewest recorded c0ld battles, then recent join date and battle output.",
+      weight:"history + join + output",
       items:rookies,
       metrics:stat=>[
-        {text:stat.totalBattles<=1?"first c0ld war":stat.totalBattles+" recorded battles",tone:"good"},
+        ...(stat.recordedBattles!==null?[{text:stat.recordedBattles+" recorded "+(stat.recordedBattles===1?"battle":"battles"),tone:"good"}]:[]),
+        {text:rookieJoinedLabel(stat)},
         {text:rankLabel(stat.finalRank)},
         {text:shortNum(stat.finalPoints)+" pts"}
       ]
@@ -1057,26 +1065,15 @@ function awardDefinitions(stats){
     })
     .filter(stat=>stat.improvement.eligible));
 
-  let rookies=players.filter(stat=>{
-    const history=historyOf(stat);
-    return history.firstC0ldWar||history.c0ldBattleCount<=3||history.tenureDays<=45;
-  });
-  if(!rookies.length)rookies=players.map(stat=>({...stat,rookieFallback:true}));
-  const rookie=sortTop(rookies.map(stat=>({
+  let rookies=players
+    .filter(stat=>(stat.permissionLevel===null||stat.permissionLevel<100)&&!String(stat.role||"").includes("owner"))
+    .map(stat=>({...stat,recordedBattles:historyOf(stat).c0ldBattleCount+1}))
+    .filter(stat=>stat.recordedBattles<=3)
+    .sort((a,b)=>a.recordedBattles-b.recordedBattles||(b.joinedAt??-Infinity)-(a.joinedAt??-Infinity)||b.finalPoints-a.finalPoints);
+  const rookie=rookies.slice(0,5).map((stat,index,list)=>({
     ...stat,
-    score:(()=>{
-      const history=historyOf(stat);
-      const battleNewness=history.firstC0ldWar?1:clamp(1-(history.c0ldBattleCount/5),0,1);
-      const tenureNewness=history.joinedC0ldAt?clamp(1-(history.tenureDays/60),0,1):(history.firstC0ldWar?1:0.45);
-      return 100*(
-        battleNewness*0.34+
-        tenureNewness*0.26+
-        (stat.finalPoints/maxPoints)*0.24+
-        rankScore(stat,totalPlayers)*0.12+
-        (stat.timeAtFirst/maxFirst)*0.04
-      );
-    })()
-  })));
+    score:100*((1-(index/Math.max(1,list.length-1)))*0.80+(stat.finalPoints/maxPoints)*0.20)
+  }));
 
   const throwers=sortTop(players
     .filter(stat=>stat.downtimeMs>0||stat.rankLoss>0||stat.timeAtLast>0)
@@ -1120,12 +1117,12 @@ function awardDefinitions(stats){
     },
     {
       title:"Rookie of the War",
-      note:"Newest c0ld players weighted by final output and time spent leading.",
-      weight:"new + output + lead",
+      note:"Fewest recorded c0ld battles, then recent join date and battle output.",
+      weight:"history + join + output",
       items:rookie,
       metrics:stat=>[
-        {text:historyOf(stat).firstC0ldWar?"first c0ld war":historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount<=1?"good":"warn"},
-        {text:daysLabel(historyOf(stat).tenureDays),tone:historyOf(stat).tenureDays<=45?"good":"warn"},
+        {text:stat.recordedBattles+" recorded "+(stat.recordedBattles===1?"battle":"battles"),tone:"good"},
+        {text:rookieJoinedLabel(stat)},
         {text:rankLabel(stat.finalRank)},
         {text:shortNum(stat.finalPoints)+" pts"},
         stat.timeAtFirst>0?{text:fmtDuration(stat.timeAtFirst)+" at #1",tone:"good"}:null

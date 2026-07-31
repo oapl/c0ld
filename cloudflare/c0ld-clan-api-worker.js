@@ -17,6 +17,8 @@ const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
 const CLAN_ACTIVITY_SUMMARY_TABLE = "c0ld_clan_activity_summary";
+const LEAGUE_SNAPSHOT_TABLE = "ps99_league_snapshots";
+const LEAGUE_CURRENT_TABLE = "ps99_league_current";
 const PS99_PLACES_TABLE = "c0ld_ps99_places";
 const PS99_VERSION_EVENTS_TABLE = "c0ld_ps99_version_events";
 const PS99_RESTART_STATE_TABLE = "c0ld_ps99_restart_state";
@@ -38,6 +40,7 @@ const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
 const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
 const DISCORD_OFFLINE_PING_CLANS_TABLE = "discord_offline_ping_clans";
+const DISCORD_OFFLINE_PING_LEAGUES_TABLE = "discord_offline_ping_leagues";
 const DISCORD_OFFLINE_PING_USERS_TABLE = "discord_offline_ping_users";
 const DISCORD_OFFLINE_PING_ALERT_STATE_TABLE = "discord_offline_ping_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
@@ -268,6 +271,12 @@ export default {
         response = await handleOfflinePingClans(request, env);
       } else if (
         ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
+        && url.pathname === "/api/offline/leagues"
+      ) {
+        requireAdmin(request, env);
+        response = await handleOfflinePingLeagues(request, env);
+      } else if (
+        ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
         && url.pathname === "/api/offline/users"
       ) {
         requireAdmin(request, env);
@@ -357,7 +366,8 @@ export default {
         requireAdmin(request, env);
         response = await handleOfflinePingCheck(env, "manual", {
           force: isForceRequest(url),
-          guildId: url.searchParams.get("guild_id") || ""
+          guildId: url.searchParams.get("guild_id") || "",
+          sourceMode: normalizeOfflineWatchSourceMode(url.searchParams.get("source_mode") || url.searchParams.get("source"))
         });
       } else if (request.method === "POST" && url.pathname === "/api/offline/test-post") {
         requireAdmin(request, env);
@@ -588,15 +598,17 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
       }
     }
 
-    if (offlinePingEnabled(env) && (force || shouldRunOfflinePingSchedule(env, scheduledAt))) {
-      jobs.push({
-        label: "offline-pings",
-        run: () => handleOfflinePingCheck(env, "schedule", {
-          force,
-          ...jobRunOptions
-        })
-      });
-    }
+  }
+
+  if (offlinePingEnabled(env) && (force || shouldRunOfflinePingSchedule(env, scheduledAt))) {
+    jobs.push({
+      label: "offline-pings",
+      run: () => handleOfflinePingCheck(env, "schedule", {
+        force,
+        skipClanWatches: !runBattleDataJobs,
+        ...jobRunOptions
+      })
+    });
   }
 
   if (String(env.INGEST_PS99_VERSION_HISTORY || "false").toLowerCase() === "true") {
@@ -1267,6 +1279,8 @@ async function handleCurrent(request, env) {
       user_id: toNumber(row.user_id),
       avatar_url: avatarMap.get(String(row.user_id)) || null,
       join_time: memberJoinIso(row),
+      permission_level: memberPermissionLevel(row.raw_member || {}),
+      role: memberRole(row.raw_member || {}, memberPermissionLevel(row.raw_member || {})),
       total_points: toNumber(row.total_points) || 0,
       last_gain_at: row.last_gain_at || null,
       downtime_minutes: row.downtime_minutes,
@@ -7096,7 +7110,7 @@ async function handleOfflinePingConfig(request, env) {
   const rawDestinationScope = body.destination_scope ?? body.channel_scope ?? body.scope;
   const destinationScope = normalizeOfflinePingDestinationScope(rawDestinationScope);
   if (rawDestinationScope !== undefined && !destinationScope) {
-    throw httpError(400, "Invalid offline destination scope. Use clan or users.");
+    throw httpError(400, "Invalid offline destination scope. Use clan, league, or users.");
   }
 
   const patch = {
@@ -7105,18 +7119,22 @@ async function handleOfflinePingConfig(request, env) {
   };
   if (destinationScope && body.channel_id !== undefined) {
     if (destinationScope === "clan") patch.clan_channel_id = stringOrNull(body.channel_id);
+    if (destinationScope === "league") patch.league_channel_id = stringOrNull(body.channel_id);
     if (destinationScope === "users") patch.users_channel_id = stringOrNull(body.channel_id);
   } else if (body.channel_id !== undefined) {
     patch.channel_id = stringOrNull(body.channel_id);
     patch.clan_channel_id = stringOrNull(body.channel_id);
+    patch.league_channel_id = stringOrNull(body.channel_id);
     patch.users_channel_id = stringOrNull(body.channel_id);
   }
   if (destinationScope && body.channel_type !== undefined) {
     if (destinationScope === "clan") patch.clan_channel_type = toNumber(body.channel_type);
+    if (destinationScope === "league") patch.league_channel_type = toNumber(body.channel_type);
     if (destinationScope === "users") patch.users_channel_type = toNumber(body.channel_type);
   } else if (body.channel_type !== undefined) {
     patch.channel_type = toNumber(body.channel_type);
     patch.clan_channel_type = toNumber(body.channel_type);
+    patch.league_channel_type = toNumber(body.channel_type);
     patch.users_channel_type = toNumber(body.channel_type);
   }
   if (body.minutes_threshold !== undefined || body.minutes !== undefined) {
@@ -7231,6 +7249,88 @@ async function handleOfflinePingClans(request, env) {
   });
 }
 
+async function handleOfflinePingLeagues(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+
+  if (request.method === "GET") {
+    if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "Missing or invalid guild_id.");
+    const rows = await supabaseSelect(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
+      select: "*",
+      guild_id: `eq.${guildId}`,
+      order: "league_name.asc",
+      limit: "1000"
+    });
+    return noStoreJson({
+      ok: true,
+      guild_id: guildId,
+      leagues: rows.map(normalizeOfflinePingLeagueOutput)
+    });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const requestedGuildId = String(body.guild_id || guildId || "").trim();
+  if (!/^\d{5,30}$/.test(requestedGuildId)) throw httpError(400, "Missing or invalid guild_id.");
+
+  if (request.method === "DELETE") {
+    const leagueName = String(body.league_name || body.name || body.league || "").trim();
+    const leagueKey = normalizeText(leagueName);
+    if (!leagueKey) throw httpError(400, "Add a league name to remove.");
+
+    const existing = await supabaseSelect(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
+      select: "*",
+      guild_id: `eq.${requestedGuildId}`,
+      league_key: `eq.${leagueKey}`,
+      limit: "1"
+    });
+
+    await supabaseDelete(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
+      guild_id: `eq.${requestedGuildId}`,
+      league_key: `eq.${leagueKey}`
+    });
+    await deleteOfflinePingLeagueAlertState(env, requestedGuildId, leagueKey);
+
+    return noStoreJson({
+      ok: true,
+      guild_id: requestedGuildId,
+      league_name: leagueName,
+      removed: Boolean(existing[0]),
+      league: existing[0] ? normalizeOfflinePingLeagueOutput(existing[0]) : null
+    });
+  }
+
+  const leagueNamesValue = Array.isArray(body.leagues)
+    ? body.leagues
+    : [body.league_name || body.name || body.league];
+  const now = new Date().toISOString();
+  const rows = leagueNamesValue
+    .map(value => String(value || "").trim())
+    .filter(Boolean)
+    .map(league => ({
+      guild_id: requestedGuildId,
+      league_name: league,
+      league_key: normalizeText(league),
+      enabled: body.enabled === undefined ? true : parseBooleanish(body.enabled) !== false,
+      created_by: stringOrNull(body.created_by || body.updated_by),
+      created_at: now,
+      updated_at: now
+    }))
+    .filter(row => row.league_key);
+
+  if (!rows.length) throw httpError(400, "Add at least one league name.");
+
+  await ensureOfflineGuildConfig(env, requestedGuildId, body);
+  await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, rows, "guild_id,league_key", 500);
+
+  return noStoreJson({
+    ok: true,
+    guild_id: requestedGuildId,
+    leagues: rows.map(normalizeOfflinePingLeagueOutput)
+  });
+}
+
 async function handleOfflinePingUsers(request, env) {
   requireSupabase(env);
 
@@ -7297,7 +7397,8 @@ async function handleOfflinePingUsers(request, env) {
       username: body.username || body.roblox_username,
       discord_user_id: body.discord_user_id,
       discord_label: body.discord_label,
-      clan_name: body.clan_name || body.clan,
+      clan_name: body.clan_name || body.clan || body.league_name || body.league,
+      source_mode: body.source_mode || body.source,
       channel_id: body.channel_id || body.channel,
       channel_type: body.channel_type
     }];
@@ -7317,7 +7418,8 @@ async function handleOfflinePingUsers(request, env) {
     const robloxUsername = String(identity.username || usernameInput).trim();
     const robloxKey = normalizeText(robloxUsername || usernameInput);
     const discordUserId = parseDiscordUserId(entry?.discord_user_id || entry?.discord || entry?.mention);
-    const clanNameValue = stringOrNull(entry?.clan_name || entry?.clan);
+    const clanNameValue = stringOrNull(entry?.clan_name || entry?.clan || entry?.league_name || entry?.league);
+    const sourceMode = normalizeOfflineWatchSourceMode(entry?.source_mode || entry?.source || body.source_mode || body.source) || "auto";
     const channelId = stringOrNull(entry?.channel_id || entry?.channel || body.channel_id || body.channel);
     const channelType = toNumber(entry?.channel_type ?? body.channel_type);
 
@@ -7338,6 +7440,7 @@ async function handleOfflinePingUsers(request, env) {
       roblox_user_id: toNumber(identity.user_id),
       roblox_username: robloxUsername || usernameInput,
       roblox_username_key: robloxKey || normalizeText(usernameInput),
+      source_mode: sourceMode,
       discord_user_id: discordUserId || null,
       discord_label: stringOrNull(entry?.discord_label || entry?.discord || entry?.mention),
       channel_id: channelId || null,
@@ -7445,6 +7548,18 @@ async function deleteOfflinePingClanAlertState(env, guildId, clanKey) {
   });
 }
 
+async function deleteOfflinePingLeagueAlertState(env, guildId, leagueKey) {
+  const guildIdText = String(guildId || "").trim();
+  const key = normalizeText(leagueKey);
+  if (!/^\d{5,30}$/.test(guildIdText) || !key) return;
+
+  await supabaseDelete(env, DISCORD_OFFLINE_PING_ALERT_STATE_TABLE, {
+    guild_id: `eq.${guildIdText}`,
+    scope: "eq.league",
+    subject_key: `eq.${key}`
+  });
+}
+
 async function resetOfflinePingAlertStateForGuild(env, guildId) {
   const guildIdText = String(guildId || "").trim();
   if (!/^\d{5,30}$/.test(guildIdText)) return;
@@ -7469,11 +7584,17 @@ async function handleOfflinePingStatus(request, env) {
   const configs = await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, configParams);
   const statusRows = [];
   for (const config of configs) {
-    const [clans, users, states] = await Promise.all([
+    const [clans, leagues, users, states] = await Promise.all([
       supabaseSelect(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
         select: "*",
         guild_id: `eq.${config.guild_id}`,
         order: "clan_name.asc",
+        limit: "1000"
+      }).catch(() => []),
+      supabaseSelect(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
+        select: "*",
+        guild_id: `eq.${config.guild_id}`,
+        order: "league_name.asc",
         limit: "1000"
       }).catch(() => []),
       supabaseSelect(env, DISCORD_OFFLINE_PING_USERS_TABLE, {
@@ -7492,6 +7613,7 @@ async function handleOfflinePingStatus(request, env) {
     statusRows.push({
       config: normalizeOfflinePingConfigOutput(config),
       clans: clans.map(normalizeOfflinePingClanOutput),
+      leagues: leagues.map(normalizeOfflinePingLeagueOutput),
       users: users.map(normalizeOfflinePingUserOutput),
       active_alerts: states.filter(row => row.alert_active === true).length,
       latest_states: states.slice(0, 25)
@@ -7523,7 +7645,7 @@ async function handleOfflinePingCheck(env, source, options = {}) {
   const results = [];
 
   for (const config of configs) {
-    results.push(await runOfflinePingGuildCheck(env, config, nowIso).catch(async err => {
+    results.push(await runOfflinePingGuildCheck(env, config, nowIso, options).catch(async err => {
       const message = String(err?.message || err || "Offline ping check failed.").slice(0, 1000);
       await supabaseUpsert(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, [{
         guild_id: config.guild_id,
@@ -7534,7 +7656,7 @@ async function handleOfflinePingCheck(env, source, options = {}) {
       return {
         ok: false,
         guild_id: config.guild_id,
-        channel_id: config.channel_id || config.clan_channel_id || config.users_channel_id || null,
+        channel_id: config.channel_id || config.clan_channel_id || config.league_channel_id || config.users_channel_id || null,
         message
       };
     }));
@@ -7560,6 +7682,7 @@ async function handleOfflinePingTestPost(request, env) {
   const thresholdMinutes = clamp(Number(body.minutes_threshold || body.minutes || offlineDefaultMinutes(env)), 1, 1440);
   const postRateMinutes = clamp(Number(body.post_rate_minutes || body.post_rate || offlineDefaultPostRateMinutes(env)), 1, 1440);
   const clanName = String(body.clan_name || body.clan || "c0ld").trim() || "c0ld";
+  const leagueName = String(body.league_name || body.league || "dezzz").trim() || "dezzz";
   const username = String(body.username || "Cinnamowopal").trim() || "Cinnamowopal";
   const destinationScope = normalizeOfflinePingDestinationScope(body.destination_scope || body.channel_scope || body.scope);
   const sampleAlerts = [
@@ -7587,10 +7710,23 @@ async function handleOfflinePingTestPost(request, env) {
         points: 9316,
         gain_1h: 0
       }
+    },
+    {
+      scope: "league",
+      watch: { league_name: leagueName },
+      status: {
+        username: "MercilessBanditTaken",
+        clan_name: leagueName,
+        offline_minutes: thresholdMinutes + 29,
+        points: 204,
+        gain_1h: 0
+      }
     }
   ];
   const previewAlerts = destinationScope
-    ? sampleAlerts.filter(alert => destinationScope === "users" ? alert.scope === "user" : alert.scope === "clan")
+    ? sampleAlerts.filter(alert => (
+        destinationScope === "users" ? alert.scope === "user" : alert.scope === destinationScope
+      ))
     : sampleAlerts;
   const messageBody = offlinePingAlertMessageBody(previewAlerts, checkedAt, {
     thresholdMinutes,
@@ -7614,7 +7750,7 @@ async function handleOfflinePingTestPost(request, env) {
   const guildId = String(body.guild_id || "").trim();
   if (!channelId && guildId) {
     const configs = await supabaseSelect(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, {
-      select: "guild_id,channel_id,clan_channel_id,users_channel_id",
+      select: "guild_id,channel_id,clan_channel_id,league_channel_id,users_channel_id",
       guild_id: `eq.${guildId}`,
       limit: "1"
     }).catch(() => []);
@@ -7638,19 +7774,29 @@ async function handleOfflinePingTestPost(request, env) {
   });
 }
 
-async function runOfflinePingGuildCheck(env, config, checkedAt) {
+async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
   const thresholdMinutes = clamp(Number(config.minutes_threshold || offlineDefaultMinutes(env)), 1, 1440);
   const postRateMinutes = clamp(Number(config.post_rate_minutes || offlineDefaultPostRateMinutes(env)), 1, 1440);
   const lookbackMinutes = thresholdMinutes + offlineLookbackBufferMinutes(env);
   const guildId = String(config.guild_id || "");
-  const [clanWatches, userWatches, states] = await Promise.all([
-    supabaseSelect(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
+  const requestedSourceMode = normalizeOfflineWatchSourceMode(options.sourceMode);
+  const includeClanWatches = requestedSourceMode !== "league" && options.skipClanWatches !== true;
+  const includeLeagueWatches = requestedSourceMode !== "clan";
+  const [clanWatches, leagueWatches, userWatchesRaw, states] = await Promise.all([
+    includeClanWatches ? supabaseSelect(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
       select: "*",
       guild_id: `eq.${guildId}`,
       enabled: "eq.true",
       order: "clan_name.asc",
       limit: "1000"
-    }).catch(() => []),
+    }).catch(() => []) : Promise.resolve([]),
+    includeLeagueWatches ? supabaseSelect(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
+      select: "*",
+      guild_id: `eq.${guildId}`,
+      enabled: "eq.true",
+      order: "league_name.asc",
+      limit: "1000"
+    }).catch(() => []) : Promise.resolve([]),
     supabaseSelect(env, DISCORD_OFFLINE_PING_USERS_TABLE, {
       select: "*",
       guild_id: `eq.${guildId}`,
@@ -7664,23 +7810,42 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
       limit: "5000"
     }).catch(() => [])
   ]);
+  const userWatches = userWatchesRaw.filter(watch => offlineUserWatchIncludedForCheck(watch, {
+    includeClan: includeClanWatches,
+    includeLeague: includeLeagueWatches
+  }));
   const stateByKey = new Map(states.map(row => [offlineStateMapKey(row), row]));
-  const bundleCache = new Map();
+  const clanBundleCache = new Map();
+  const leagueBundleCache = new Map();
   const stateUpdates = [];
   const dueAlerts = [];
   const checkedRows = [];
 
-  const getBundle = async clanNameValue => {
+  const getClanBundle = async clanNameValue => {
+    if (!includeClanWatches) return null;
     const clanKey = normalizeText(clanNameValue);
     if (!clanKey) return null;
-    if (!bundleCache.has(clanKey)) {
-      bundleCache.set(clanKey, fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes));
+    if (!clanBundleCache.has(clanKey)) {
+      clanBundleCache.set(clanKey, fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes));
     }
-    return bundleCache.get(clanKey);
+    return clanBundleCache.get(clanKey);
+  };
+
+  const getLeagueBundle = async leagueNameValue => {
+    if (!includeLeagueWatches) return null;
+    const leagueKey = normalizeText(leagueNameValue);
+    if (!leagueKey) return null;
+    if (!leagueBundleCache.has(leagueKey)) {
+      leagueBundleCache.set(leagueKey, fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes));
+    }
+    return leagueBundleCache.get(leagueKey);
   };
 
   for (const watch of userWatches) {
-    const status = await findOfflineMemberStatusForWatch(env, watch, getBundle, bundleCache, lookbackMinutes);
+    const status = await findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, {
+      includeClan: includeClanWatches,
+      includeLeague: includeLeagueWatches
+    });
     const subjectKey = offlineUserSubjectKey(watch);
     const trackedKey = status?.user_key || subjectKey;
     const stateKey = offlineStateMapKey({
@@ -7699,7 +7864,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
         status: null,
         alertActive: false,
         checkedAt,
-        lastError: "No current clan row found for this Roblox user."
+        lastError: "No current clan or league row found for this Roblox user."
       }), stateByKey.get(stateKey)));
       continue;
     }
@@ -7731,7 +7896,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
   }
 
   for (const watch of clanWatches) {
-    const bundle = await getBundle(watch.clan_name);
+    const bundle = await getClanBundle(watch.clan_name);
     const subjectKey = normalizeText(watch.clan_name || watch.clan_key);
     if (!bundle) continue;
 
@@ -7760,6 +7925,47 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
       if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
         dueAlerts.push({
           scope: "clan",
+          watch,
+          status,
+          stateKey,
+          stateRow: update
+        });
+      } else {
+        stateUpdates.push(offlineStateWithDeliveryState(update, existingState));
+      }
+    }
+  }
+
+  for (const watch of leagueWatches) {
+    const bundle = await getLeagueBundle(watch.league_name);
+    const subjectKey = normalizeText(watch.league_name || watch.league_key);
+    if (!bundle) continue;
+
+    for (const status of bundle.statuses) {
+      const trackedKey = status.user_key;
+      const stateKey = offlineStateMapKey({
+        guild_id: guildId,
+        scope: "league",
+        subject_key: subjectKey,
+        tracked_user_key: trackedKey
+      });
+      const offline = status.offline_minutes >= thresholdMinutes;
+      checkedRows.push(status);
+      const update = offlineStateRow({
+        guildId,
+        scope: "league",
+        subjectKey,
+        trackedUserKey: trackedKey,
+        watch,
+        status,
+        alertActive: offline,
+        checkedAt
+      });
+
+      const existingState = stateByKey.get(stateKey);
+      if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
+        dueAlerts.push({
+          scope: "league",
           watch,
           status,
           stateKey,
@@ -7885,10 +8091,12 @@ async function runOfflinePingGuildCheck(env, config, checkedAt) {
     guild_id: guildId,
     channel_id: config.channel_id || null,
     clan_channel_id: offlinePingDestinationChannelId(config, "clan") || null,
+    league_channel_id: offlinePingDestinationChannelId(config, "league") || null,
     users_channel_id: offlinePingDestinationChannelId(config, "users") || null,
     threshold_minutes: thresholdMinutes,
     post_rate_minutes: postRateMinutes,
     clan_watches: clanWatches.length,
+    league_watches: leagueWatches.length,
     user_watches: userWatches.length,
     checked_users: uniqueValues(checkedRows.map(row => row.user_key)).length,
     offline_candidates: dueAlerts.length,
@@ -7966,24 +8174,109 @@ async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes) {
   };
 }
 
-async function findOfflineMemberStatusForWatch(env, watch, getBundle, bundleCache, lookbackMinutes) {
-  const userId = toNumber(watch.roblox_user_id);
-  const usernameKey = normalizeText(watch.roblox_username);
-  const knownClan = String(watch.clan_name || "").trim();
-  if (knownClan) {
-    const bundle = await getBundle(knownClan);
-    return findOfflineStatusInBundle(bundle, userId, usernameKey);
+async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
+  const leagueNameText = String(leagueNameValue || "").trim();
+  const leagueKey = normalizeText(leagueNameText);
+  if (!leagueKey) return null;
+
+  const sinceIso = new Date(Date.now() - clamp(Number(lookbackMinutes || 60), 1, 1440 * 14) * 60 * 1000).toISOString();
+  let currentRows = await supabaseSelect(env, LEAGUE_CURRENT_TABLE, {
+    select: "league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time,fetched_at,updated_at",
+    league_name: `eq.${leagueNameText}`,
+    order: "fetched_at.desc,rank.asc",
+    limit: "500"
+  }).catch(() => []);
+  if (!currentRows.length) {
+    currentRows = await supabaseSelect(env, LEAGUE_CURRENT_TABLE, {
+      select: "league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time,fetched_at,updated_at",
+      league_name: `ilike.${leagueNameText}`,
+      order: "fetched_at.desc,rank.asc",
+      limit: "500"
+    }).catch(() => []);
   }
 
-  for (const bundlePromise of bundleCache.values()) {
+  const normalizedCurrent = mergeOfflineCurrentRows(currentRows.map(row => normalizeOfflineMemberRow(row, "league_current")));
+  const runKey = newestOfflineBattleKey(normalizedCurrent);
+
+  if (!runKey) {
+    return {
+      league_name: leagueNameText,
+      league_key: leagueKey,
+      battle_key: null,
+      battle_display_name: null,
+      statuses: []
+    };
+  }
+
+  const historyRows = await supabaseSelectPaged(env, LEAGUE_SNAPSHOT_TABLE, {
+    select: "fetched_at,league_run_key,league_name,rank,user_id,display_name,points,last_contribution_at",
+    league_run_key: `eq.${runKey}`,
+    league_name: `ilike.${leagueNameText}`,
+    fetched_at: `gte.${sinceIso}`,
+    order: "fetched_at.asc,user_id.asc"
+  }, 30000, 1000).catch(() => []);
+  const normalizedHistory = historyRows
+    .map(row => normalizeOfflineMemberRow(row, "league_history"))
+    .filter(row => row.battle_key === runKey);
+  const latest = normalizedCurrent.find(row => row.battle_key === runKey) || normalizedCurrent[0] || null;
+
+  return {
+    league_name: latest?.clan_name || leagueNameText,
+    league_key: leagueKey,
+    battle_key: runKey,
+    battle_display_name: runKey,
+    statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === runKey), normalizedHistory)
+  };
+}
+
+async function findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, options = {}) {
+  const userId = toNumber(watch.roblox_user_id);
+  const usernameKey = normalizeText(watch.roblox_username);
+  const sourceMode = normalizeOfflineWatchSourceMode(watch.source_mode);
+  const knownGroup = String(watch.clan_name || "").trim();
+  const includeClan = options.includeClan !== false;
+  const includeLeague = options.includeLeague !== false;
+
+  if (knownGroup && sourceMode === "league" && includeLeague) {
+    const bundle = await getLeagueBundle(knownGroup);
+    return findOfflineStatusInBundle(bundle, userId, usernameKey);
+  }
+  if (knownGroup && sourceMode === "clan" && includeClan) {
+    const bundle = await getClanBundle(knownGroup);
+    return findOfflineStatusInBundle(bundle, userId, usernameKey);
+  }
+  if (knownGroup) {
+    if (includeClan) {
+      const clanBundle = await getClanBundle(knownGroup);
+      const found = findOfflineStatusInBundle(clanBundle, userId, usernameKey);
+      if (found) return found;
+    }
+    if (includeLeague) {
+      const leagueBundle = await getLeagueBundle(knownGroup);
+      const found = findOfflineStatusInBundle(leagueBundle, userId, usernameKey);
+      if (found) return found;
+    }
+  }
+
+  for (const bundlePromise of clanBundleCache.values()) {
+    if (!includeClan) break;
     const bundle = await bundlePromise;
     const found = findOfflineStatusInBundle(bundle, userId, usernameKey);
     if (found) return found;
   }
 
-  const currentRows = await fetchOfflineCurrentRowsForUser(env, watch);
+  for (const bundlePromise of leagueBundleCache.values()) {
+    if (!includeLeague) break;
+    const bundle = await bundlePromise;
+    const found = findOfflineStatusInBundle(bundle, userId, usernameKey);
+    if (found) return found;
+  }
+
+  const currentRows = await fetchOfflineCurrentRowsForUser(env, watch, { includeClan, includeLeague });
   for (const current of currentRows) {
-    const bundle = await getBundle(current.clan_name);
+    const bundle = current.source_mode === "league"
+      ? await getLeagueBundle(current.clan_name)
+      : await getClanBundle(current.clan_name);
     const found = findOfflineStatusInBundle(bundle, userId, usernameKey);
     if (found) return found;
   }
@@ -7991,30 +8284,42 @@ async function findOfflineMemberStatusForWatch(env, watch, getBundle, bundleCach
   return null;
 }
 
-async function fetchOfflineCurrentRowsForUser(env, watch) {
+async function fetchOfflineCurrentRowsForUser(env, watch, options = {}) {
   const userId = toNumber(watch.roblox_user_id);
   const username = String(watch.roblox_username || "").trim();
   const filters = userId
     ? { user_id: `eq.${userId}` }
+    : { display_name: `ilike.${username}` };
+  const clanFilters = userId
+    ? { user_id: `eq.${userId}` }
     : { username: `ilike.${username}` };
-  const [activityRows, memberRows] = await Promise.all([
-    supabaseSelect(env, CLAN_ACTIVITY_CURRENT_TABLE, {
+  const includeClan = options.includeClan !== false;
+  const includeLeague = options.includeLeague !== false;
+  const [activityRows, memberRows, leagueRows] = await Promise.all([
+    includeClan ? supabaseSelect(env, CLAN_ACTIVITY_CURRENT_TABLE, {
       select: "battle_key,battle_display_name,clan_name,clan_key,member_rank,user_id,username,points,fetched_at,updated_at",
-      ...filters,
+      ...clanFilters,
       order: "fetched_at.desc",
       limit: "10"
-    }).catch(() => []),
-    supabaseSelect(env, CURRENT_TABLE, {
+    }).catch(() => []) : Promise.resolve([]),
+    includeClan ? supabaseSelect(env, CURRENT_TABLE, {
       select: "battle_key,battle_display_name,clan_name,rank,user_id,username,total_points,fetched_at,updated_at",
+      ...clanFilters,
+      order: "fetched_at.desc",
+      limit: "10"
+    }).catch(() => []) : Promise.resolve([]),
+    includeLeague ? supabaseSelect(env, LEAGUE_CURRENT_TABLE, {
+      select: "league_run_key,league_name,rank,user_id,display_name,points,last_contribution_at,fetched_at,updated_at",
       ...filters,
       order: "fetched_at.desc",
       limit: "10"
-    }).catch(() => [])
+    }).catch(() => []) : Promise.resolve([])
   ]);
 
   return mergeOfflineCurrentRows([
     ...activityRows.map(row => normalizeOfflineMemberRow(row, "activity_current")),
-    ...memberRows.map(row => normalizeOfflineMemberRow(row, "member_current"))
+    ...memberRows.map(row => normalizeOfflineMemberRow(row, "member_current")),
+    ...leagueRows.map(row => normalizeOfflineMemberRow(row, "league_current"))
   ]);
 }
 
@@ -8091,10 +8396,16 @@ function splitOfflinePingAlertsByDestination(config, alerts) {
   const groupsByKey = new Map();
 
   for (const alert of alerts) {
-    const scope = alert?.scope === "user" ? "users" : "clan";
+    const scope = alert?.scope === "user"
+      ? "users"
+      : alert?.scope === "league"
+        ? "league"
+        : "clan";
     const channelId = scope === "users"
       ? offlineUserWatchChannelId(alert?.watch) || offlinePingDestinationChannelId(config, "users")
-      : offlinePingDestinationChannelId(config, "clan");
+      : scope === "league"
+        ? offlinePingDestinationChannelId(config, "league")
+        : offlinePingDestinationChannelId(config, "clan");
     const key = `${scope}|${channelId || ""}`;
     if (!groupsByKey.has(key)) {
       groupsByKey.set(key, {
@@ -8112,15 +8423,35 @@ function splitOfflinePingAlertsByDestination(config, alerts) {
 function normalizeOfflinePingDestinationScope(value) {
   const text = String(value || "").trim().toLowerCase();
   if (["clan", "clans", "clan-wide", "clan_wide"].includes(text)) return "clan";
+  if (["league", "leagues", "league-wide", "league_wide"].includes(text)) return "league";
   if (["user", "users", "direct", "direct-users", "direct_users"].includes(text)) return "users";
   return "";
+}
+
+function normalizeOfflineWatchSourceMode(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text || ["auto", "any", "all"].includes(text)) return "auto";
+  if (["clan", "clans", "battle", "battles"].includes(text)) return "clan";
+  if (["league", "leagues"].includes(text)) return "league";
+  return "";
+}
+
+function offlineUserWatchIncludedForCheck(watch, options = {}) {
+  const sourceMode = normalizeOfflineWatchSourceMode(watch?.source_mode) || "auto";
+  const includeClan = options.includeClan !== false;
+  const includeLeague = options.includeLeague !== false;
+  if (sourceMode === "clan") return includeClan;
+  if (sourceMode === "league") return includeLeague;
+  return includeClan || includeLeague;
 }
 
 function offlinePingDestinationChannelId(config, scope) {
   const normalizedScope = normalizeOfflinePingDestinationScope(scope) || "clan";
   const scopedChannel = normalizedScope === "users"
     ? config?.users_channel_id
-    : config?.clan_channel_id;
+    : normalizedScope === "league"
+      ? config?.league_channel_id
+      : config?.clan_channel_id;
   return String(scopedChannel || config?.channel_id || "").trim();
 }
 
@@ -8131,6 +8462,7 @@ function offlineUserWatchChannelId(watch) {
 
 function hasOfflinePingDestination(config) {
   return /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "clan"))
+    || /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "league"))
     || /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "users"));
 }
 
@@ -8139,6 +8471,7 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
   const postRate = options.postRateMinutes || DEFAULT_OFFLINE_POST_RATE_MINUTES;
   const directAlerts = alerts.filter(alert => alert.scope === "user");
   const clanAlerts = alerts.filter(alert => alert.scope === "clan");
+  const leagueAlerts = alerts.filter(alert => alert.scope === "league");
   const sections = [];
 
   if (directAlerts.length) {
@@ -8159,6 +8492,18 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
       if (rows.length > 12) lines.push(`-# ...and ${rows.length - 12} more in ${escapeDiscordMarkdown(clanNameValue)}.`);
     }
     sections.push(["## Clan Watches", ...lines].join("\n").slice(0, 4000));
+  }
+
+  if (leagueAlerts.length) {
+    const byLeague = groupRowsBy(leagueAlerts, alert => normalizeText(alert.status.clan_name || alert.watch.league_name));
+    const lines = [];
+    for (const [leagueKey, rows] of byLeague.entries()) {
+      const leagueNameValue = rows[0]?.status?.clan_name || rows[0]?.watch?.league_name || leagueKey;
+      lines.push(`### ${escapeDiscordMarkdown(leagueNameValue)}`);
+      rows.slice(0, 12).forEach(alert => lines.push(offlineAlertLine(alert, false, { includeClan: false })));
+      if (rows.length > 12) lines.push(`-# ...and ${rows.length - 12} more in ${escapeDiscordMarkdown(leagueNameValue)}.`);
+    }
+    sections.push(["## League Watches", ...lines].join("\n").slice(0, 4000));
   }
 
   const mentionIds = uniqueValues(directAlerts
@@ -8244,14 +8589,21 @@ function offlineStateWithDeliveryState(row, existingState) {
 
 function normalizeOfflineMemberRow(row, source) {
   const userId = toNumber(row.user_id);
-  const username = String(row.username || (userId ? `user_${userId}` : "")).trim();
+  const sourceMode = String(source || "").startsWith("league") ? "league" : "clan";
+  const username = String(row.username || row.display_name || (userId ? `user_${userId}` : "")).trim();
   const userKey = userId ? `id:${userId}` : `name:${normalizeText(username)}`;
+  const groupName = sourceMode === "league"
+    ? (row.league_name || row.clan_name || "")
+    : (row.clan_name || row.league_name || "");
   return {
     source,
-    battle_key: row.battle_key || null,
-    battle_display_name: cleanBattleDisplayName(row.battle_key, row.battle_display_name),
-    clan_name: row.clan_name || "",
-    clan_key: normalizeText(row.clan_key || row.clan_name),
+    source_mode: sourceMode,
+    battle_key: row.battle_key || row.league_run_key || null,
+    battle_display_name: sourceMode === "league"
+      ? String(row.league_run_key || row.battle_display_name || "").trim()
+      : cleanBattleDisplayName(row.battle_key, row.battle_display_name),
+    clan_name: groupName,
+    clan_key: normalizeText(row.clan_key || row.league_key || groupName),
     rank: toNumber(row.member_rank ?? row.rank),
     user_id: userId,
     username,
@@ -8363,6 +8715,8 @@ function normalizeOfflinePingConfigOutput(row) {
     channel_type: toNumber(row.channel_type),
     clan_channel_id: row.clan_channel_id || row.channel_id || null,
     clan_channel_type: toNumber(row.clan_channel_type ?? row.channel_type),
+    league_channel_id: row.league_channel_id || row.channel_id || null,
+    league_channel_type: toNumber(row.league_channel_type ?? row.channel_type),
     users_channel_id: row.users_channel_id || row.channel_id || null,
     users_channel_type: toNumber(row.users_channel_type ?? row.channel_type),
     minutes_threshold: toNumber(row.minutes_threshold) || DEFAULT_OFFLINE_ALERT_MINUTES,
@@ -8390,6 +8744,18 @@ function normalizeOfflinePingClanOutput(row) {
   };
 }
 
+function normalizeOfflinePingLeagueOutput(row) {
+  return {
+    guild_id: String(row.guild_id || ""),
+    league_name: row.league_name || "",
+    league_key: row.league_key || normalizeText(row.league_name),
+    enabled: row.enabled !== false,
+    created_by: row.created_by || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
 function normalizeOfflinePingUserOutput(row) {
   return {
     guild_id: String(row.guild_id || ""),
@@ -8398,6 +8764,7 @@ function normalizeOfflinePingUserOutput(row) {
     roblox_user_id: toNumber(row.roblox_user_id),
     roblox_username: row.roblox_username || "",
     roblox_username_key: row.roblox_username_key || normalizeText(row.roblox_username),
+    source_mode: normalizeOfflineWatchSourceMode(row.source_mode) || "auto",
     discord_user_id: parseDiscordUserId(row.discord_user_id),
     discord_label: row.discord_label || null,
     channel_id: row.channel_id || null,

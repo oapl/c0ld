@@ -233,7 +233,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
 | `CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES` | Optional. Defaults to `25`; skips activity ingests when the latest roster snapshot for the same battle is newer than this. Use `bypass_recent=1` on a protected manual URL only when you intentionally want to override it. |
 | `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
-| `INGEST_OFFLINE_ALERTS` | Optional. Defaults to `false`. Set to `true` after running migration `040` to let scheduled clan pulls evaluate Discord no-gain/offline pings. |
+| `INGEST_OFFLINE_ALERTS` | Optional. Defaults to `false`. Set to `true` after running migrations `040` through `050` to let scheduled pulls evaluate Discord no-gain/offline pings. |
 | `OFFLINE_DEFAULT_MINUTES` | Optional. Defaults to `30`; initial no-gain threshold for a guild until `/offline minutes` changes it. |
 | `OFFLINE_DEFAULT_POST_RATE_MINUTES` | Optional. Defaults to `30`; initial minimum interval between repeat alerts for the same offline player. |
 | `OFFLINE_ALERT_SCHEDULE_MINUTES` | Optional. Defaults to `5`; how often the clan Worker evaluates configured offline pings. Keep the Cloudflare cron at least this frequent. |
@@ -1342,13 +1342,16 @@ every configured destination with `scripts/test-discord-hourly-clans.ps1`.
 ## Discord Offline Pings
 
 Offline pings are configured through the Luna Discord Worker and evaluated by
-`c0ld-clan-api-worker`. The signal is **no battle point gain for N minutes**;
-it does not use Discord presence or Roblox live presence.
+`c0ld-clan-api-worker`. The signal is **no clan-battle or League point gain for
+N minutes**; it does not use Discord presence or Roblox live presence.
 
-Run this migration first:
+Run these migrations first:
 
 ```text
 supabase/migrations/040_discord_offline_ping.sql
+supabase/migrations/041_discord_offline_split_channels.sql
+supabase/migrations/042_discord_offline_user_channels.sql
+supabase/migrations/050_discord_offline_league_pings.sql
 ```
 
 Register `/offline` with `scripts/discord-search-command-admin.ps1`, or call
@@ -1358,13 +1361,19 @@ the same admin token used for the other command registrations.
 Commands:
 
 ```text
-/offline assign channel:<channel>
+/offline assign clan channel:<channel>
+/offline assign league channel:<channel>
+/offline assign users channel:<channel>
 /offline minutes number:<minutes>
 /offline clan name:<clan>
-/offline user username:<roblox username> discord:<Discord user> clan:<optional clan hint>
-/offline users entries:<username: Foo discord: @Foo username: Bar discord: @Bar> clan:<optional clan hint>
+/offline league name:<league>
+/offline remove-clan name:<clan>
+/offline remove-league name:<league>
+/offline user username:<roblox username> discord:<Discord user> clan:<optional clan or League hint> source:<auto|clan|league>
+/offline users clan:<clan or League> user1:<roblox username> discord1:<Discord user> source:<auto|clan|league>
 /offline post-rate minutes:<minutes>
 /offline check
+/offline list
 ```
 
 The Discord Worker needs `CLAN_API_ADMIN_TOKEN` and the `CLAN_API_WORKER`
@@ -1372,6 +1381,11 @@ service binding, same as `/hourly`. The clan API Worker needs
 `DISCORD_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and
 `INGEST_OFFLINE_ALERTS=true` once you are ready for scheduled checks. Manual
 checks can be triggered with:
+
+League offline watches read from `ps99_league_current` and
+`ps99_league_snapshots`, so the League API Worker must still be collecting the
+watched League on its normal schedule. During League periods, scheduled offline
+checks continue for League watches even when clan battle data pulls are paused.
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -1385,6 +1399,7 @@ Preview the alarm format without waiting for a real no-gain alert:
 $body = @{
   webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
   clan_name = "c0ld"
+  league_name = "dezzz"
   username = "Cinnamowopal"
   minutes = 30
 } | ConvertTo-Json

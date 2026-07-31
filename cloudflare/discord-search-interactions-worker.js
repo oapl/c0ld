@@ -639,9 +639,9 @@ async function handleInteraction(request, env, ctx) {
   if (commandName === "offline") {
     const offlinePath = getOfflineSubcommandPath(interaction);
     const subcommand = offlinePath.group || offlinePath.subcommand;
-    const validAssignTarget = offlinePath.group !== "assign" || ["clan", "users"].includes(offlinePath.subcommand);
-    if (!validAssignTarget || !["assign", "enable", "disable", "minutes", "clan", "remove-clan", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign users`, `/offline enable`, `/offline disable`, `/offline minutes`, `/offline clan`, `/offline remove-clan`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
+    const validAssignTarget = offlinePath.group !== "assign" || ["clan", "league", "users"].includes(offlinePath.subcommand);
+    if (!validAssignTarget || !["assign", "enable", "disable", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline enable`, `/offline disable`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -2333,8 +2333,8 @@ async function completeOfflinePingInteraction(interaction, env) {
     }
 
     if (subcommand === "assign") {
-      if (!["clan", "users"].includes(assignTarget)) {
-        throw httpError(400, "Use `/offline assign clan channel:<channel>` or `/offline assign users channel:<channel>`.");
+      if (!["clan", "league", "users"].includes(assignTarget)) {
+        throw httpError(400, "Use `/offline assign clan channel:<channel>`, `/offline assign league channel:<channel>`, or `/offline assign users channel:<channel>`.");
       }
       const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
       const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
@@ -2354,7 +2354,11 @@ async function completeOfflinePingInteraction(interaction, env) {
           enabled: true
         }
       });
-      const label = assignTarget === "users" ? "Direct user offline pings" : "Clan offline pings";
+      const label = assignTarget === "users"
+        ? "Direct user offline pings"
+        : assignTarget === "league"
+          ? "League offline pings"
+          : "Clan offline pings";
       await editOriginalInteraction(interaction, {
         content: `${label} are assigned to <#${requestedChannelId}>. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`,
         embeds: [],
@@ -2428,6 +2432,27 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
+    if (subcommand === "league") {
+      const league = String(getCommandOption(interaction, "name") || "").trim();
+      if (!league) throw httpError(400, "Use `/offline league name:<league>`.");
+      await hourlyClanApiRequest(env, "/api/offline/leagues", {
+        method: "POST",
+        body: {
+          guild_id: guildId,
+          league_name: league,
+          created_by: actorId,
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Offline pings will watch every tracked member in League **${escapeDiscordMarkdown(league)}**. Use \`/offline list\` to confirm the League alert channel is assigned.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
     if (subcommand === "remove-clan") {
       const clan = String(getCommandOption(interaction, "name") || "").trim();
       if (!clan) throw httpError(400, "Use `/offline remove-clan name:<clan>`.");
@@ -2450,10 +2475,33 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
+    if (subcommand === "remove-league") {
+      const league = String(getCommandOption(interaction, "name") || "").trim();
+      if (!league) throw httpError(400, "Use `/offline remove-league name:<league>`.");
+      const payload = await hourlyClanApiRequest(env, "/api/offline/leagues", {
+        method: "DELETE",
+        body: {
+          guild_id: guildId,
+          league_name: league,
+          updated_by: actorId
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: payload.removed
+          ? `Offline pings stopped watching League **${escapeDiscordMarkdown(league)}**.`
+          : `No offline League watch was found for **${escapeDiscordMarkdown(league)}**.`,
+        embeds: [],
+        components: [],
+        allowed_mentions: { parse: [] }
+      });
+      return;
+    }
+
     if (subcommand === "user") {
       const username = String(getCommandOption(interaction, "username") || "").trim();
       const discordUserId = String(getCommandOption(interaction, "discord") || "").trim();
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
+      const sourceMode = normalizeOfflineSourceModeOption(getCommandOption(interaction, "source"));
       const requestedChannelId = String(getCommandOption(interaction, "channel") || "").trim();
       if (!username || !discordUserId) {
         throw httpError(400, "Use `/offline user username:<roblox name> discord:<Discord user>`.");
@@ -2474,6 +2522,7 @@ async function completeOfflinePingInteraction(interaction, env) {
           discord_user_id: discordUserId,
           discord_label: label,
           clan_name: clan || null,
+          source_mode: sourceMode,
           channel_id: requestedChannelId || null,
           channel_type: directChannel ? Number(directChannel.type) : null,
           created_by: actorId,
@@ -2484,8 +2533,9 @@ async function completeOfflinePingInteraction(interaction, env) {
       const channelText = requestedChannelId
         ? ` Alerts for this user will post in <#${requestedChannelId}>.`
         : "";
+      const sourceText = sourceMode === "auto" ? "" : ` Source: **${sourceMode === "league" ? "League" : "Clan"}**.`;
       await editOriginalInteraction(interaction, {
-        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> <@${discordUserId}>.${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> <@${discordUserId}>.${sourceText}${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2684,6 +2734,12 @@ function offlineDiscordUserLabel(interaction, userId) {
   return user?.global_name || user?.username || String(userId || "");
 }
 
+function normalizeOfflineSourceModeOption(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "clan" || text === "league") return text;
+  return "auto";
+}
+
 function formatOfflinePingListResponse(payload, guildId) {
   const guild = (payload?.guilds || [])
     .find(row => String(row?.config?.guild_id || "") === String(guildId || ""))
@@ -2694,19 +2750,24 @@ function formatOfflinePingListResponse(payload, guildId) {
       "## Offline Ping Setup",
       "No offline ping config is saved for this server yet.",
       "",
-      "Start with `/offline assign clan channel:#channel` and `/offline assign users channel:#channel`."
+      "Start with `/offline assign clan channel:#channel`, `/offline assign league channel:#channel`, or `/offline assign users channel:#channel`."
     ].join("\n");
   }
 
   const config = guild.config || {};
   const clans = (guild.clans || []).filter(row => row?.enabled !== false);
+  const leagues = (guild.leagues || []).filter(row => row?.enabled !== false);
   const users = (guild.users || []).filter(row => row?.enabled !== false);
   const clanChannel = formatOfflinePingChannel(config.clan_channel_id || config.channel_id);
+  const leagueChannel = formatOfflinePingChannel(config.league_channel_id || config.channel_id);
   const usersChannel = formatOfflinePingChannel(config.users_channel_id || config.channel_id);
   const warnings = [];
 
   if (clans.length && !validDiscordSnowflake(config.clan_channel_id || config.channel_id)) {
     warnings.push("Clan watches exist, but `/offline assign clan` has not been set.");
+  }
+  if (leagues.length && !validDiscordSnowflake(config.league_channel_id || config.channel_id)) {
+    warnings.push("League watches exist, but `/offline assign league` has not been set.");
   }
   const usersMissingDestination = users.some(row => !validDiscordSnowflake(row.channel_id));
   if (users.length && usersMissingDestination && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
@@ -2716,6 +2777,7 @@ function formatOfflinePingListResponse(payload, guildId) {
   const lines = [
     "## Offline Ping Setup",
     `**Clan alert channel:** ${clanChannel}`,
+    `**League alert channel:** ${leagueChannel}`,
     `**Direct user alert channel:** ${usersChannel}`,
     `**Threshold:** ${Math.max(1, Math.round(Number(config.minutes_threshold) || 30))}m with no point gain`,
     `**Re-alert rate:** ${Math.max(1, Math.round(Number(config.post_rate_minutes) || 30))}m`,
@@ -2726,6 +2788,9 @@ function formatOfflinePingListResponse(payload, guildId) {
     "",
     `### Watched Clans (${clans.length})`,
     ...formatOfflinePingClanRows(clans),
+    "",
+    `### Watched Leagues (${leagues.length})`,
+    ...formatOfflinePingLeagueRows(leagues),
     "",
     `### Direct User Watches (${users.length})`,
     ...formatOfflinePingUserRows(users)
@@ -2750,7 +2815,7 @@ function formatOfflinePingCheckResponse(payload) {
 
   if (!results.length) {
     lines.push("No eligible offline ping config was found for this server.");
-    lines.push("-# Make sure `/offline assign clan` or `/offline assign users` is set.");
+    lines.push("-# Make sure `/offline assign clan`, `/offline assign league`, or `/offline assign users` is set.");
     return lines.join("\n");
   }
 
@@ -2758,12 +2823,14 @@ function formatOfflinePingCheckResponse(payload) {
     const ok = result.ok === false ? "Failed" : "OK";
     const channels = [
       result.clan_channel_id ? `clan <#${result.clan_channel_id}>` : "",
+      result.league_channel_id ? `league <#${result.league_channel_id}>` : "",
       result.users_channel_id ? `users <#${result.users_channel_id}>` : "",
-      !result.clan_channel_id && !result.users_channel_id && result.channel_id ? `fallback <#${result.channel_id}>` : ""
+      !result.clan_channel_id && !result.league_channel_id && !result.users_channel_id && result.channel_id ? `fallback <#${result.channel_id}>` : ""
     ].filter(Boolean).join(" · ") || "no channel";
     lines.push([
       `### ${ok} · ${channels}`,
       `**Watched clans:** ${Math.max(0, Math.round(Number(result.clan_watches) || 0))}`,
+      `**Watched Leagues:** ${Math.max(0, Math.round(Number(result.league_watches) || 0))}`,
       `**Direct users:** ${Math.max(0, Math.round(Number(result.user_watches) || 0))}`,
       `**Checked users:** ${Math.max(0, Math.round(Number(result.checked_users) || 0))}`,
       `**Skipped no channel:** ${Math.max(0, Math.round(Number(result.alerts_skipped_no_channel) || 0))}`,
@@ -2786,6 +2853,15 @@ function formatOfflinePingClanRows(clans) {
   return rows;
 }
 
+function formatOfflinePingLeagueRows(leagues) {
+  if (!leagues.length) return ["None yet. Use `/offline league name:dezzz`."];
+  const rows = leagues
+    .slice(0, 20)
+    .map(row => `- **${escapeDiscordMarkdown(row.league_name || row.league_key || "Unknown")}**`);
+  if (leagues.length > rows.length) rows.push(`-# ...and ${leagues.length - rows.length} more.`);
+  return rows;
+}
+
 function formatOfflinePingUserRows(users) {
   if (!users.length) return ["None yet. Use `/offline user username:<roblox> discord:<discord user>`."];
   const rows = users
@@ -2799,8 +2875,10 @@ function formatOfflinePingUserRows(users) {
         ? `<@${discordUserId}>`
         : escapeDiscordMarkdown(row.discord_label || "no Discord mention");
       const clan = row.clan_name ? ` · ${escapeDiscordMarkdown(row.clan_name)}` : "";
+      const sourceMode = normalizeOfflineSourceModeOption(row.source_mode);
+      const source = sourceMode === "auto" ? "" : ` · ${sourceMode === "league" ? "League" : "Clan"}`;
       const channel = validDiscordSnowflake(row.channel_id) ? ` · <#${row.channel_id}>` : "";
-      return `- **${name}** -> ${discord}${clan}${channel}`;
+      return `- **${name}** -> ${discord}${clan}${source}${channel}`;
     });
   if (users.length > rows.length) rows.push(`-# ...and ${users.length - rows.length} more.`);
   return rows;
@@ -10747,12 +10825,26 @@ function offlineCommandPayload() {
     options: [
       {
         name: "assign",
-        description: "Assign separate channels for clan or direct user offline pings.",
+        description: "Assign separate channels for clan, league, or direct user offline pings.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
         options: [
           {
             name: "clan",
             description: "Assign where clan-wide offline pings are posted.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "channel",
+                description: "Text channel or thread; defaults to the current channel",
+                type: APPLICATION_COMMAND_OPTION_CHANNEL,
+                required: false,
+                channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+              }
+            ]
+          },
+          {
+            name: "league",
+            description: "Assign where league-wide offline pings are posted.",
             type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
             options: [
               {
@@ -10821,6 +10913,21 @@ function offlineCommandPayload() {
         ]
       },
       {
+        name: "league",
+        description: "Watch an entire League for no-gain offline alerts.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "PS99 League name, for example dezzz or YAMO",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
         name: "remove-clan",
         description: "Remove one clan from clan-wide offline alerts.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
@@ -10828,6 +10935,21 @@ function offlineCommandPayload() {
           {
             name: "name",
             description: "PS99 clan name to remove",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          }
+        ]
+      },
+      {
+        name: "remove-league",
+        description: "Remove one League from league-wide offline alerts.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "name",
+            description: "PS99 League name to remove",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: true,
             min_length: 1,
@@ -10856,11 +10978,22 @@ function offlineCommandPayload() {
           },
           {
             name: "clan",
-            description: "Optional clan hint if this player is not in the primary clan",
+            description: "Optional clan or League hint if this player is not in a watched group",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: false,
             min_length: 1,
             max_length: 100
+          },
+          {
+            name: "source",
+            description: "Use automatic lookup, clan data only, or League data only",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            choices: [
+              { name: "Auto", value: "auto" },
+              { name: "Clan", value: "clan" },
+              { name: "League", value: "league" }
+            ]
           },
           {
             name: "channel",
@@ -10878,13 +11011,24 @@ function offlineCommandPayload() {
         options: [
           {
             name: "clan",
-            description: "Clan these users belong to, for example c0ld or WMSY",
+            description: "Clan or League these users belong to, for example c0ld, WMSY, or dezzz",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: true,
             min_length: 1,
             max_length: 100
           },
-          ...offlineUsersBulkOptions()
+          ...offlineUsersBulkOptions(),
+          {
+            name: "source",
+            description: "Use automatic lookup, clan data only, or League data only",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            choices: [
+              { name: "Auto", value: "auto" },
+              { name: "Clan", value: "clan" },
+              { name: "League", value: "league" }
+            ]
+          }
         ]
       },
       {
@@ -10939,7 +11083,7 @@ function offlineCommandPayload() {
       },
       {
         name: "list",
-        description: "Show configured offline ping channels, clans, and direct user watches.",
+        description: "Show configured offline ping channels, clans, Leagues, and direct user watches.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       }
     ]
