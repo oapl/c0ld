@@ -3425,28 +3425,49 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
   {
     const alertDiscordUserId = String(tracker.discord_user_id || "").trim();
     const alertUsername = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
-    const alertDisplayItem = hatchDisplayItemName(featured);
+    const alertDisplayItem = hatchFullDisplayItemName(featured);
     const alertTier = hatchTierLabel(featured.tier);
     const alertTheme = hatchAlertTheme(featured.tier);
     const alertImageUrl = featured.image_url || HATCH_ALERT_THUMBNAIL_URL;
     const alertRap = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
     const alertQuantity = Number(featured.delta) > 1 ? ` x${shortInventoryNumber(featured.delta)}` : "";
-    const alertTimestamp = snapshots?.end?.captured_at || new Date().toISOString();
-    const alertUnix = Math.floor(new Date(alertTimestamp).getTime() / 1000);
     const alertPlayer = alertDiscordUserId
-      ? `**Player:** <@${alertDiscordUserId}> (${escapeDiscordMarkdown(alertUsername)})`
-      : `**Player:** ${escapeDiscordMarkdown(alertUsername)}`;
-    const alertExtra = gainedHtg.length > 1
-      ? `-# Also detected: ${gainedHtg.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${escapeDiscordMarkdown(hatchDisplayItemName(row))} x${shortInventoryNumber(row.delta)}`).join(", ")}`
+      ? `**Player:** **<@${alertDiscordUserId}>** (${escapeDiscordMarkdown(alertUsername)})`
+      : `**Player:** **${escapeDiscordMarkdown(alertUsername)}**`;
+    const alertAlsoAcquired = gainedHtg.length > 1
+      ? `*Also acquired:* ${gainedHtg.slice(1, 5).map(row => {
+          const quantity = Number(row.delta) > 1 ? ` x${shortInventoryNumber(row.delta)}` : "";
+          return `${escapeDiscordMarkdown(hatchFullDisplayItemName(row))}${quantity}`;
+        }).join(", ")}`
       : "";
     const alertLines = [
-      `### ${escapeDiscordMarkdown(alertUsername)} acquired a new HTG`,
+      `**${escapeDiscordMarkdown(alertUsername)} acquired a ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}**`,
       alertPlayer,
-      `**Item:** ${alertTheme.icon} **${alertTier}:** ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}`,
       `**RAP:** ${alertRap}`,
-      hatchAlertSnapshotLine(snapshots),
-      alertExtra
+      "-# *Luna ignores HTG's from purchases, mail, or trades. :brain: *"
     ].filter(Boolean);
+    const bodyComponents = [
+      {
+        type: 9,
+        components: [
+          {
+            type: 10,
+            content: alertLines.join("\n")
+          }
+        ],
+        accessory: {
+          type: 11,
+          media: { url: alertImageUrl },
+          description: `${alertTier} ${alertDisplayItem}`
+        }
+      }
+    ];
+    if (alertAlsoAcquired) {
+      bodyComponents.push(
+        { type: 14, divider: true, spacing: 1 },
+        { type: 10, content: alertAlsoAcquired }
+      );
+    }
 
     return {
       username: LUNA_WEBHOOK_USERNAME,
@@ -3457,31 +3478,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
         {
           type: 17,
           accent_color: alertTheme.accent,
-          components: [
-            {
-              type: 9,
-              components: [
-                {
-                  type: 10,
-                  content: [
-                    `## ${alertTheme.icon} ${alertTheme.title}`,
-                    `-# acquired <t:${alertUnix}:R>`
-                  ].join("\n")
-                }
-              ],
-              accessory: {
-                type: 11,
-                media: { url: alertImageUrl },
-                description: `${alertTier} ${alertDisplayItem}`
-              }
-            },
-            { type: 14, divider: true, spacing: 1 },
-            { type: 10, content: alertLines.join("\n") },
-            { type: 14, divider: true, spacing: 1 },
-            { type: 10, content: "-# Luna filters trade, booth, mail, and unstable inventory-data matches before posting HTG gain alerts." },
-            { type: 14, divider: true, spacing: 1 },
-            { type: 10, content: `${lunaHatchCreditLine()} | <t:${alertUnix}:R>` }
-          ]
+          components: bodyComponents
         }
       ]
     };
@@ -3498,22 +3495,6 @@ function hatchAlertTheme(tier) {
     return { title: "Titanic Acquired", icon: ":milky_way:", accent: 0xff5db8 };
   }
   return { title: "Huge Acquired", icon: ":sparkles:", accent: 0x34e1ef };
-}
-
-function hatchAlertSnapshotLine(snapshots) {
-  const startMs = new Date(snapshots?.start?.captured_at || 0).getTime();
-  const endMs = new Date(snapshots?.end?.captured_at || 0).getTime();
-  const hasStart = Number.isFinite(startMs) && startMs > 0;
-  const hasEnd = Number.isFinite(endMs) && endMs > 0;
-  if (hasStart && hasEnd) {
-    return `**Window:** <t:${Math.floor(startMs / 1000)}:t> - <t:${Math.floor(endMs / 1000)}:t>`;
-  }
-  if (hasEnd) return `**Detected:** <t:${Math.floor(endMs / 1000)}:F>`;
-  return "";
-}
-
-function lunaHatchCreditLine() {
-  return "-# :woman_genie: Luna, A Pet Sim 99 Bot :rainbow_flag: \u2219 by [Cinnamowopal](https://x.com/oapl_the_opal)";
 }
 
 async function sendHatchAlert(env, payload, tracker = null) {
@@ -3619,6 +3600,22 @@ async function markHatchSnapshotCheckedWithBaseline(env, tracker, snapshot, deci
 function hatchDisplayItemName(row) {
   const raw = String(firstString(row.display_name, row.item_id, row.item_key, "pet")).trim();
   return raw.replace(/^(Huge|Titanic|Gargantuan|Garg)\s+/i, "").trim() || raw;
+}
+
+function hatchFullDisplayItemName(row) {
+  const raw = String(firstString(row?.display_name, row?.item_id, row?.item_key, "pet")).trim();
+  if (/^(Huge|Titanic|Gargantuan|Garg)\s+/i.test(raw)) return raw.replace(/^Garg\s+/i, "Gargantuan ");
+  const tier = hatchTierTitle(row?.tier);
+  const name = hatchDisplayItemName(row);
+  return tier ? `${tier} ${name}` : name;
+}
+
+function hatchTierTitle(tier) {
+  const normalized = String(tier || "").toLowerCase();
+  if (normalized === "gargantuan") return "Gargantuan";
+  if (normalized === "titanic") return "Titanic";
+  if (normalized === "huge") return "Huge";
+  return "";
 }
 
 function hatchTierLabel(tier) {

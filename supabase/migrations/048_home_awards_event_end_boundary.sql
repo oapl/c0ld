@@ -94,13 +94,17 @@ begin
       lag(total_points) over (partition by user_id order by fetched_at) as previous_points
     from base
   ),
-  mvp as (
+  mvp_all as materialized (
     select base.user_id, sum(snapshot_intervals.duration_ms)::bigint as value_ms
     from base
     join snapshot_intervals using (fetched_at)
     where base.rank = 1
     group by base.user_id
-    order by value_ms desc, base.user_id
+  ),
+  mvp as (
+    select user_id, value_ms
+    from mvp_all
+    order by value_ms desc, user_id
     limit 1
   ),
   latest_snapshot as (
@@ -118,11 +122,12 @@ begin
       user_id,
       (array_agg(rank order by fetched_at asc) filter (where rank is not null))[1] as first_rank,
       (array_agg(rank order by fetched_at desc) filter (where rank is not null))[1] as latest_rank,
+      (array_agg(total_points order by fetched_at asc) filter (where total_points is not null))[1] as first_points,
       max(rank) filter (where rank is not null) as worst_rank
     from base
     group by user_id
   ),
-  sleeper as (
+  sleeper_all as materialized (
     select
       user_id,
       first_rank,
@@ -133,8 +138,18 @@ begin
     where first_rank is not null
       and latest_rank is not null
       and first_rank > latest_rank
+  ),
+  sleeper as (
+    select user_id, first_rank, latest_rank, gain, percentage
+    from sleeper_all
     order by gain desc, latest_rank asc, user_id
     limit 1
+  ),
+  sleeper_candidates as materialized (
+    select
+      sleeper_all.*,
+      round(coalesce(gain::numeric / nullif(max(gain) over (), 0), 0) * 100, 1) as score
+    from sleeper_all
   ),
   downtime_all as materialized (
     select
@@ -161,6 +176,32 @@ begin
     from base
     join snapshot_intervals using (fetched_at)
     group by base.user_id
+  ),
+  latest_players as materialized (
+    select user_id, rank as latest_rank, total_points as final_points
+    from base
+    where fetched_at = (select fetched_at from latest_snapshot)
+  ),
+  mvp_candidates as materialized (
+    select
+      latest_players.user_id,
+      latest_players.latest_rank,
+      latest_players.final_points,
+      greatest(latest_players.final_points - coalesce(rank_spans.first_points, 0), 0)::bigint as total_gain,
+      coalesce(mvp_all.value_ms, 0)::bigint as time_at_first_ms,
+      round(100 * (
+        coalesce(latest_players.final_points::numeric / nullif(max(latest_players.final_points) over (), 0), 0) * 0.55 +
+        coalesce(coalesce(mvp_all.value_ms, 0)::numeric / nullif(max(coalesce(mvp_all.value_ms, 0)) over (), 0), 0) * 0.20 +
+        coalesce(1 - ((latest_players.latest_rank - 1)::numeric / greatest(count(*) over () - 1, 1)), 0) * 0.15 +
+        coalesce(
+          greatest(latest_players.final_points - coalesce(rank_spans.first_points, 0), 0)::numeric /
+            nullif(max(greatest(latest_players.final_points - coalesce(rank_spans.first_points, 0), 0)) over (), 0),
+          0
+        ) * 0.10
+      ), 1) as score
+    from latest_players
+    join rank_spans using (user_id)
+    left join mvp_all using (user_id)
   ),
   marathon as (
     select
@@ -210,15 +251,52 @@ begin
     where rank is not null
     group by fetched_at
   ),
-  lvp as (
+  lvp_all as materialized (
     select base.user_id, sum(snapshot_intervals.duration_ms)::bigint as value_ms
     from base
     join snapshot_intervals using (fetched_at)
     join last_ranks using (fetched_at)
     where base.rank = last_ranks.last_rank
     group by base.user_id
-    order by value_ms desc, base.user_id
+  ),
+  lvp as (
+    select user_id, value_ms
+    from lvp_all
+    order by value_ms desc, user_id
     limit 1
+  ),
+  thrower_metrics as materialized (
+    select
+      latest_players.user_id,
+      latest_players.latest_rank,
+      latest_players.final_points,
+      coalesce(downtime_all.value_ms, 0)::bigint as downtime_ms,
+      coalesce(tracked_time.value_ms, 0)::bigint as tracked_ms,
+      round(
+        coalesce(downtime_all.value_ms, 0)::numeric /
+          nullif(coalesce(tracked_time.value_ms, 0), 0) * 100,
+        1
+      ) as downtime_pct,
+      greatest(latest_players.latest_rank - coalesce(rank_spans.first_rank, latest_players.latest_rank), 0)::integer as rank_loss,
+      coalesce(lvp_all.value_ms, 0)::bigint as time_at_last_ms
+    from latest_players
+    join rank_spans using (user_id)
+    left join downtime_all using (user_id)
+    left join tracked_time using (user_id)
+    left join lvp_all using (user_id)
+  ),
+  thrower_candidates as materialized (
+    select
+      thrower_metrics.*,
+      round(
+        coalesce(downtime_ms::numeric / nullif(max(downtime_ms) over (), 0), 0) * 38 +
+        coalesce(downtime_pct, 0) * 0.22 +
+        coalesce(rank_loss::numeric / nullif(max(rank_loss) over (), 0), 0) * 18 +
+        coalesce(time_at_last_ms::numeric / nullif(max(time_at_last_ms) over (), 0), 0) * 9,
+        1
+      ) as score
+    from thrower_metrics
+    where downtime_ms > 0 or rank_loss > 0 or time_at_last_ms > 0
   )
   select jsonb_build_object(
     'clan_name', v_clan_name,
@@ -305,6 +383,76 @@ begin
         )
         from underdog join profiles using (user_id)
       )
+    ),
+    'award_candidates', jsonb_build_object(
+      'mvp', (
+        select coalesce(jsonb_agg(candidate order by score desc, final_points desc, user_id), '[]'::jsonb)
+        from (
+          select
+            mvp_candidates.user_id,
+            mvp_candidates.score,
+            mvp_candidates.final_points,
+            jsonb_build_object(
+              'user_id', mvp_candidates.user_id,
+              'username', profiles.username,
+              'final_points', mvp_candidates.final_points,
+              'latest_rank', mvp_candidates.latest_rank,
+              'total_gain', mvp_candidates.total_gain,
+              'value_ms', mvp_candidates.time_at_first_ms,
+              'score', mvp_candidates.score
+            ) as candidate
+          from mvp_candidates
+          join profiles using (user_id)
+          order by mvp_candidates.score desc nulls last, mvp_candidates.final_points desc, mvp_candidates.user_id
+          limit 5
+        ) ranked
+      ),
+      'sleeper', (
+        select coalesce(jsonb_agg(candidate order by gain desc, latest_rank asc, user_id), '[]'::jsonb)
+        from (
+          select
+            sleeper_candidates.user_id,
+            sleeper_candidates.gain,
+            sleeper_candidates.latest_rank,
+            jsonb_build_object(
+              'user_id', sleeper_candidates.user_id,
+              'username', profiles.username,
+              'first_rank', sleeper_candidates.first_rank,
+              'latest_rank', sleeper_candidates.latest_rank,
+              'gain', sleeper_candidates.gain,
+              'percentage', sleeper_candidates.percentage,
+              'score', sleeper_candidates.score
+            ) as candidate
+          from sleeper_candidates
+          join profiles using (user_id)
+          order by sleeper_candidates.gain desc, sleeper_candidates.latest_rank asc, sleeper_candidates.user_id
+          limit 5
+        ) ranked
+      ),
+      'thrower', (
+        select coalesce(jsonb_agg(candidate order by score desc, downtime_ms desc, user_id), '[]'::jsonb)
+        from (
+          select
+            thrower_candidates.user_id,
+            thrower_candidates.score,
+            thrower_candidates.downtime_ms,
+            jsonb_build_object(
+              'user_id', thrower_candidates.user_id,
+              'username', profiles.username,
+              'final_points', thrower_candidates.final_points,
+              'latest_rank', thrower_candidates.latest_rank,
+              'value_ms', thrower_candidates.downtime_ms,
+              'downtime_pct', thrower_candidates.downtime_pct,
+              'rank_loss', thrower_candidates.rank_loss,
+              'time_at_last_ms', thrower_candidates.time_at_last_ms,
+              'score', thrower_candidates.score
+            ) as candidate
+          from thrower_candidates
+          join profiles using (user_id)
+          order by thrower_candidates.score desc nulls last, thrower_candidates.downtime_ms desc, thrower_candidates.user_id
+          limit 5
+        ) ranked
+      )
     )
   ) into v_result;
 
@@ -314,7 +462,8 @@ begin
     'battle_end_iso', v_battle_end_at,
     'calculated_at', now(),
     'snapshot_count', 0,
-    'awards', '{}'::jsonb
+    'awards', '{}'::jsonb,
+    'award_candidates', '{}'::jsonb
   ));
 end;
 $$;

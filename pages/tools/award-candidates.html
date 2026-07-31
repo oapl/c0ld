@@ -884,35 +884,65 @@ function summaryRookieStats(current){
     .slice(0,5);
 }
 
+function summaryAwardCandidates(summary,key,fallback,extra){
+  const groups=summary?.award_candidates&&typeof summary.award_candidates==="object"?summary.award_candidates:{};
+  const rows=Array.isArray(groups[key])&&groups[key].length?groups[key]:(fallback?[fallback]:[]);
+  return rows.map(award=>summaryAwardStat(award,extra(award))).filter(Boolean);
+}
+
+function summaryAwardWithCurrent(current,award){
+  if(!award||typeof award!=="object")return award;
+  const userId=String(award.user_id??"");
+  const currentRow=(Array.isArray(current?.rows)?current.rows:[]).find(row=>String(row?.user_id??row?.id??"")===userId)||{};
+  return {...currentRow,...award};
+}
+
 function summaryAwardDefinitions(summary,current){
   const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
-  const mvp=summaryAwardStat(awards.mvp,{valueMs:Number(awards.mvp?.value_ms)||0});
-  const sleeper=summaryAwardStat(awards.sleeper,{
-    firstRank:finite(awards.sleeper?.first_rank),
-    latestRank:finite(awards.sleeper?.latest_rank),
-    rankGain:finite(awards.sleeper?.gain),
-    percentage:finite(awards.sleeper?.percentage),
-    finalRank:finite(awards.sleeper?.latest_rank)
-  });
-  const downtime=summaryAwardStat(awards.downtime,{valueMs:Number(awards.downtime?.value_ms)||0});
+  const mvp=summaryAwardCandidates(summary,"mvp",summaryAwardWithCurrent(current,awards.mvp),award=>({
+    valueMs:Number(award?.value_ms)||0,
+    finalPoints:finite(award?.final_points??award?.total_points)??0,
+    finalRank:finite(award?.latest_rank??award?.rank),
+    totalGain:finite(award?.total_gain)??0,
+    score:finite(award?.score)??100
+  }));
+  const sleeper=summaryAwardCandidates(summary,"sleeper",awards.sleeper,award=>({
+    firstRank:finite(award?.first_rank),
+    latestRank:finite(award?.latest_rank),
+    rankGain:finite(award?.gain),
+    percentage:finite(award?.percentage),
+    finalRank:finite(award?.latest_rank),
+    score:finite(award?.score)??finite(award?.gain)??100
+  }));
+  const downtime=summaryAwardCandidates(summary,"thrower",summaryAwardWithCurrent(current,awards.downtime),award=>({
+    valueMs:Number(award?.value_ms)||0,
+    downtimePct:finite(award?.downtime_pct)??0,
+    rankLoss:finite(award?.rank_loss)??0,
+    timeAtLast:Number(award?.time_at_last_ms)||0,
+    finalPoints:finite(award?.final_points??award?.total_points)??0,
+    finalRank:finite(award?.latest_rank??award?.rank),
+    score:finite(award?.score)??100
+  }));
   const rookies=summaryRookieStats(current);
 
   return [
     {
       title:"MVP",
-      note:"Most observed time holding rank #1.",
-      weight:"server summary",
-      items:mvp?[mvp]:[],
+      note:"Final impact, time at #1, and finishing rank.",
+      weight:"points + lead time",
+      items:mvp,
       metrics:stat=>[
+        {text:shortNum(stat.finalPoints)+" pts"},
         {text:fmtDuration(stat.valueMs)+" at #1",tone:"good"},
-        {text:"calculated in Postgres"}
+        {text:rankLabel(stat.finalRank),tone:"good"},
+        {text:"+"+shortNum(stat.totalGain)}
       ]
     },
     {
       title:"Most Improved",
-      note:"Largest rank climb from first recorded rank to latest rank.",
-      weight:"server summary",
-      items:sleeper?[sleeper]:[],
+      note:"Largest rank climb from first recorded rank to final rank.",
+      weight:"rank improvement",
+      items:sleeper,
       metrics:stat=>[
         {text:rankLabel(stat.firstRank)+" -> "+rankLabel(stat.latestRank),tone:"good"},
         {text:"+"+(stat.rankGain||0)+" ranks",tone:"good"},
@@ -932,12 +962,14 @@ function summaryAwardDefinitions(summary,current){
     },
     {
       title:"Biggest Thrower",
-      note:"Most accumulated time without a recorded point gain.",
-      weight:"server summary",
-      items:downtime?[downtime]:[],
+      note:"Idle time, rank loss, and last-place exposure.",
+      weight:"idle + drop",
+      items:downtime,
       metrics:stat=>[
         {text:fmtDuration(stat.valueMs)+" idle",tone:"bad"},
-        {text:"no point-gain intervals"}
+        {text:stat.downtimePct.toFixed(0)+"% no-gain",tone:stat.downtimePct>35?"bad":"warn"},
+        {text:stat.rankLoss?("lost "+stat.rankLoss+" ranks"):"no rank loss"},
+        {text:fmtDuration(stat.timeAtLast)+" at last"}
       ]
     }
   ];

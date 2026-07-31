@@ -1295,25 +1295,33 @@ async function handleHomeAwards(request, env) {
   }
 
   const awards = result.awards && typeof result.awards === "object" ? result.awards : {};
-  const userIds = Object.values(awards)
+  const candidateGroups = result.award_candidates && typeof result.award_candidates === "object"
+    ? result.award_candidates
+    : {};
+  const candidateAwards = Object.values(candidateGroups)
+    .flatMap(rows => Array.isArray(rows) ? rows : []);
+  const userIds = [...Object.values(awards), ...candidateAwards]
     .map(award => toNumber(award?.user_id))
     .filter(Boolean);
   const avatarMap = await resolveRobloxAvatarHeadshots(userIds, env).catch(() => new Map());
-  const enrichedAwards = Object.fromEntries(Object.entries(awards).map(([key, award]) => [
+  const enrichAward = award => award && typeof award === "object"
+    ? {
+        ...award,
+        avatar_url: avatarMap.get(String(award.user_id)) || award.avatar_url || null
+      }
+    : null;
+  const enrichedAwards = Object.fromEntries(Object.entries(awards).map(([key, award]) => [key, enrichAward(award)]));
+  const enrichedCandidateGroups = Object.fromEntries(Object.entries(candidateGroups).map(([key, rows]) => [
     key,
-    award && typeof award === "object"
-      ? {
-          ...award,
-          avatar_url: avatarMap.get(String(award.user_id)) || null
-        }
-      : null
+    Array.isArray(rows) ? rows.map(enrichAward).filter(Boolean) : []
   ]));
 
   return cacheJson({
     ...result,
     generated_at: new Date().toISOString(),
     source: "postgres_award_summary",
-    awards: enrichedAwards
+    awards: enrichedAwards,
+    award_candidates: enrichedCandidateGroups
   }, env, 60);
 }
 
