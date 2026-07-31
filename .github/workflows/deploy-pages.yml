@@ -60,6 +60,9 @@ jobs:
           touch _site/.nojekyll
           printf '%s\n' 'c0ld-clan.com' > _site/CNAME
 
+      - name: Generate WMSY award candidates route
+        run: cp _site/award-candidates.html _site/wmsy-award-candidates.html
+
       - name: Generate individual clan pages
         run: node scripts/generate-clan-pages.js _site
 

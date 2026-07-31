@@ -82,7 +82,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 </head>
 <body>
 <header>
-  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="logo-wrap"><a href="index.html"><img id="site-logo" class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
   <div class="menu">
     <a href="index.html">c0ld Leaderboard</a>
     <a href="clans.html">Clans Leaderboard</a>
@@ -143,7 +143,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
       <h2 class="section-title">Milestones</h2>
       <div id="milestones-meta" class="subtle"></div>
     </div>
-    <div class="milestone-head" aria-hidden="true"><span>Placement</span><span>c0ld</span><span>Members</span></div>
+    <div class="milestone-head" aria-hidden="true"><span>Placement</span><span id="milestone-clan-heading">c0ld</span><span>Members</span></div>
     <div id="milestones-list"></div>
   </section>
 </main>
@@ -152,18 +152,27 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 <script src="assets/protected-page.js"></script>
 <script>
 const API="https://c0ld-clan-api-worker.opal-dde.workers.dev";
-const CLAN="c0ld";
+const IS_WMSY_PAGE=/(?:^|\/)wmsy-award-candidates\.html$/i.test(location.pathname);
+const CLAN=IS_WMSY_PAGE?"WMSY":"c0ld";
+const CLAN_LABEL=IS_WMSY_PAGE?"WMSY":"c0ld";
 const HISTORY_LIMIT=50000;
 const MAX_INTERVAL_MS=12*60*1000;
 const FINAL_PUSH_MS=12*60*60*1000;
 const PROFILE_FETCH_CONCURRENCY=6;
-const FALLBACK_AVATAR="assets/c0ld-kitsune-logo.gif";
+const FALLBACK_AVATAR=IS_WMSY_PAGE?"assets/mascots/wmsy-frog.png":"assets/c0ld-kitsune-logo.gif";
 let battles=[];
 let playerById=new Map();
 let playerByName=new Map();
 let loading=false;
 let battleSelectionPinned=new URLSearchParams(location.search).has("battle");
 const BATTLE_DISCOVERY_INTERVAL_MS=5*60*1000;
+
+document.title=CLAN_LABEL+" Superlative Candidates";
+document.documentElement.style.setProperty("--link",IS_WMSY_PAGE?"#74d99f":"#ff9b96");
+const pageLogo=document.getElementById("site-logo");
+if(pageLogo){pageLogo.src=FALLBACK_AVATAR;pageLogo.alt=CLAN_LABEL}
+const milestoneClanHeading=document.getElementById("milestone-clan-heading");
+if(milestoneClanHeading)milestoneClanHeading.textContent=CLAN_LABEL;
 
 const els={
   status:document.getElementById("status"),
@@ -210,7 +219,7 @@ function shortNum(value){const number=Number(value);if(!Number.isFinite(number))
 function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
 function fmtScore(value){const number=Number(value);return Number.isFinite(number)?number.toFixed(1):"0.0"}
 function rankLabel(rank){return rank?("#"+Math.trunc(rank)):"-"}
-function daysLabel(days){const number=Number(days);if(!Number.isFinite(number)||number<=0)return"joined this war";if(number<1)return"under 1d c0ld";if(number<14)return Math.round(number)+"d c0ld";if(number<70)return Math.round(number/7)+"w c0ld";return Math.round(number/30)+"mo c0ld"}
+function daysLabel(days){const number=Number(days);if(!Number.isFinite(number)||number<=0)return"joined this war";if(number<1)return"under 1d "+CLAN_LABEL;if(number<14)return Math.round(number)+"d "+CLAN_LABEL;if(number<70)return Math.round(number/7)+"w "+CLAN_LABEL;return Math.round(number/30)+"mo "+CLAN_LABEL}
 function setStatus(text){els.status.textContent=text}
 function showError(message){els.error.textContent=message;els.error.style.display=message?"block":"none"}
 
@@ -958,7 +967,7 @@ function summaryAwardDefinitions(summary,current){
     },
     {
       title:"Rookie of the War",
-      note:"Fewest recorded c0ld battles, then recent join date and battle output.",
+      note:"Fewest recorded "+CLAN_LABEL+" battles, then recent join date and battle output.",
       weight:"history + join + output",
       items:rookies,
       metrics:stat=>[
@@ -1097,18 +1106,18 @@ function awardDefinitions(stats){
         {text:fmtDuration(stat.timeAtFirst)+" at #1"},
         {text:rankLabel(stat.finalRank),tone:"good"},
         {text:"+"+shortNum(stat.totalGain)},
-        {text:historyOf(stat).c0ldBattleCount+" prior c0ld",tone:historyOf(stat).c0ldBattleCount?"good":"warn"}
+        {text:historyOf(stat).c0ldBattleCount+" prior "+CLAN_LABEL,tone:historyOf(stat).c0ldBattleCount?"good":"warn"}
       ]
     },
     {
       title:"Most Improved",
-      note:"Previous c0ld rank jump first; current climb only when needed.",
+      note:"Previous "+CLAN_LABEL+" rank jump first; current climb only when needed.",
       weight:"rank improvement",
       items:improved,
       metrics:stat=>[
         stat.improvement?.previousRank
           ? {text:"prev CB "+rankLabel(stat.improvement.previousRank)+" -> final "+rankLabel(stat.finalRank),tone:"good"}
-          : {text:"no previous c0ld rank",tone:"warn"},
+          : {text:"no previous "+CLAN_LABEL+" rank",tone:"warn"},
         {text:stat.worstRank?("war low "+rankLabel(stat.worstRank)+" -> "+rankLabel(stat.finalRank)):"no rank swing",tone:stat.improvement?.currentRecovery?"good":"warn"},
         stat.improvement?.previousJump?{text:"+"+stat.improvement.previousJump+" vs prev CB",tone:"good"}:null,
         !stat.improvement?.previousJump&&stat.improvement?.currentRecovery?{text:"+"+stat.improvement.currentRecovery+" in-war ranks",tone:"good"}:null,
@@ -1117,7 +1126,7 @@ function awardDefinitions(stats){
     },
     {
       title:"Rookie of the War",
-      note:"Fewest recorded c0ld battles, then recent join date and battle output.",
+      note:"Fewest recorded "+CLAN_LABEL+" battles, then recent join date and battle output.",
       weight:"history + join + output",
       items:rookie,
       metrics:stat=>[
@@ -1242,7 +1251,7 @@ function renderCustomSummary(summary){
 function milestoneRank(row){return finite(row?.global_rank)}
 function milestonePlayerName(row){return row?.username||row?.display_name||(row?.user_id?("user_"+row.user_id):"Unknown player")}
 function milestoneMemberList(rows){
-  if(!rows.length)return '<span class="milestone-members">No c0ld members in this band.</span>';
+  if(!rows.length)return '<span class="milestone-members">No '+esc(CLAN_LABEL)+' members in this band.</span>';
   return '<span class="milestone-members">'+rows.map(row=>'<span class="milestone-member">'+esc(milestonePlayerName(row))+' #'+Math.trunc(milestoneRank(row))+'</span>').join(" ")+'</span>';
 }
 function renderMilestones(globalCurrent){

@@ -6879,9 +6879,10 @@ async function editOriginalInteraction(interaction, data) {
   const token = String(interaction.token || "").trim();
   if (!applicationId || !token) throw httpError(500, "Discord interaction token is missing.");
 
-  const endpoint = `${DISCORD_API_BASE}/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(token)}/messages/@original`;
   const { _file, ...messageData } = data || {};
   const payload = stripUndefined(messageData);
+  const usesComponentsV2 = Boolean(Number(payload.flags || 0) & MESSAGE_FLAG_COMPONENTS_V2);
+  const endpoint = `${DISCORD_API_BASE}/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(token)}/messages/@original${usesComponentsV2 ? "?with_components=true" : ""}`;
   let body;
   let headers;
 
@@ -11036,9 +11037,13 @@ async function htgApiProbe(env, useServiceBinding, base, path, options = {}) {
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
 
-  const response = useServiceBinding
-    ? await env.INVENTORY_API_WORKER.fetch(request)
-    : await fetch(request);
+  const response = await withHatchApiTimeout(
+    useServiceBinding
+      ? env.INVENTORY_API_WORKER.fetch(request)
+      : fetch(request),
+    env,
+    url
+  );
   const text = await response.text();
   let payload = null;
   try {
@@ -11086,9 +11091,13 @@ async function hatchApiRequest(env, path, options = {}) {
   }
 
   const request = new Request(url.toString(), init);
-  const response = useServiceBinding
-    ? await env.INVENTORY_API_WORKER.fetch(request)
-    : await fetch(request);
+  const response = await withHatchApiTimeout(
+    useServiceBinding
+      ? env.INVENTORY_API_WORKER.fetch(request)
+      : fetch(request),
+    env,
+    url
+  );
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
     const source = useServiceBinding
@@ -11100,6 +11109,18 @@ async function hatchApiRequest(env, path, options = {}) {
     );
   }
   return payload;
+}
+
+function withHatchApiTimeout(promise, env, url) {
+  const timeoutMs = Math.max(2000, Math.min(25000, Number(env.HTG_API_TIMEOUT_MS || env.INVENTORY_API_TIMEOUT_MS || 8000) || 8000));
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(httpError(
+      504,
+      `HTG tracker API timed out after ${Math.round(timeoutMs / 1000)}s while calling ${url.pathname}. Check inventory-detector-worker logs and HATCH_BIG_GAMES_* variables.`
+    )), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 function hasInventoryApiServiceBinding(env) {
