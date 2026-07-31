@@ -61,6 +61,8 @@ export default {
           league_collection_enabled: leagueCollectionEnabled(env),
           scheduled_collection_enabled: scheduledCollection.enabled,
           scheduled_collection_reason: scheduledCollection.reason,
+          scheduled_collection_phase: scheduledCollection.collection_phase,
+          scheduled_collection_in_grace_period: scheduledCollection.in_grace_period === true,
           scheduled_collection_start_at: scheduledCollection.start_at,
           scheduled_collection_end_at: scheduledCollection.end_at,
           scheduled_collection_hard_stop_at: scheduledCollection.hard_stop_at,
@@ -172,10 +174,11 @@ export default {
     }
     ctx.waitUntil((async () => {
       const runKey = leagueRunKey(env);
+      const scheduledSource = source => leagueCollectionSource(source, collectionState);
 
       if (String(env.INGEST_LEAGUES || "true").toLowerCase() !== "false") {
         if (isScheduledCadenceDue(scheduledAt, trackedLeagueRefreshMinutes(env))) {
-          await handleTrackedLeaguesIngest(env, "schedule:tracked", runKey, { allowApiFallback: false })
+          await handleTrackedLeaguesIngest(env, scheduledSource("schedule:tracked"), runKey, { allowApiFallback: false })
             .then(logScheduledLeagueIngest("tracked"))
             .catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err)));
         }
@@ -183,7 +186,7 @@ export default {
         if (generalLeagueRefreshEnabled(env) && isScheduledCadenceDue(scheduledAt, generalLeagueRefreshMinutes(env))) {
           const names = await generalLeagueNamesDueForRefresh(env, runKey, scheduledAt);
           if (names.length) {
-            await handleTrackedLeaguesIngest(env, "schedule:general", runKey, {
+            await handleTrackedLeaguesIngest(env, scheduledSource("schedule:general"), runKey, {
               names,
               concurrency: generalLeagueRefreshConcurrency(env),
               allowApiFallback: false
@@ -201,7 +204,7 @@ export default {
         const scheduledTopLeaguesListName = scheduledTopLeaguesScheduledLimit > DEFAULT_TOP_LEAGUES_LIMIT
           ? ALL_TOP_LEAGUES_NAME
           : TOP_LEAGUES_NAME;
-        await handleTopLeaguesIngest(env, "schedule", topLeaguesRunKey(env), {
+        await handleTopLeaguesIngest(env, scheduledSource("schedule"), topLeaguesRunKey(env), {
           listName: scheduledTopLeaguesListName,
           limit: scheduledTopLeaguesScheduledLimit,
           pageSize: scheduledTopLeaguesListName === ALL_TOP_LEAGUES_NAME ? allTopLeaguesPageSize(env) : topLeaguesPageSize(env),
@@ -210,7 +213,7 @@ export default {
         }).catch(err => console.error("scheduled top leagues ingest failed", err?.message || String(err)));
       }
       if (shouldRunTrackedRankWindowRefresh(env)) {
-        await handleTrackedLeagueRankWindowRefresh(env, "schedule:rank-window", topLeaguesRunKey(env))
+        await handleTrackedLeagueRankWindowRefresh(env, scheduledSource("schedule:rank-window"), topLeaguesRunKey(env))
           .catch(err => console.error("scheduled tracked league rank-window refresh failed", err?.message || String(err)));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
@@ -222,6 +225,7 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
   const fetchedAt = new Date().toISOString();
   const requested = String(requestedLeague || leagueName(env)).trim() || leagueName(env);
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
+  const publishCurrent = isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt);
   const api = await fetchLeagueApi(requested, { env });
   const league = api.data || api;
   let summary = summarizeLeague(league, requested);
@@ -255,17 +259,20 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
 
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${summary.league_name}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
-    await maybeSendInactivityAlerts(env, { runKey, leagueName: summary.league_name, fetchedAt, snapshotId, rows: dbRows }).catch(err => console.error("inactivity alerts failed", err?.message || String(err)));
+    if (publishCurrent) {
+      await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${summary.league_name}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+      await maybeSendInactivityAlerts(env, { runKey, leagueName: summary.league_name, fetchedAt, snapshotId, rows: dbRows }).catch(err => console.error("inactivity alerts failed", err?.message || String(err)));
+    }
   }
 
-  return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, snapshot_retention: "permanent" }, 202);
+  return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, published_current: publishCurrent, snapshot_retention: "permanent" }, 202);
 }
 
 async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options = {}) {
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || leagueRunKey(env));
+  const publishCurrent = isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt);
   const names = uniqueLeagueNames(Array.isArray(options.names) ? options.names : leagueNames(env));
   const concurrency = clamp(Number(options.concurrency || env.LEAGUE_INGEST_CONCURRENCY || env.INGEST_LEAGUES_CONCURRENCY || 8), 1, 12);
   const results = await mapLimit(names, concurrency, async requested => {
@@ -310,8 +317,10 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
 
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
-    await deleteStaleCurrentLeagueRows(env, runKey, leagueNamesWritten, fetchedAt);
+    if (publishCurrent) {
+      await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+      await deleteStaleCurrentLeagueRows(env, runKey, leagueNamesWritten, fetchedAt);
+    }
   }
 
   return json({
@@ -322,6 +331,7 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
     requested_count: names.length,
     leagues_written: leagueNamesWritten.length,
     rows_inserted: dbRows.length,
+    published_current: publishCurrent,
     failed_count: results.filter(result => !result.ok).length,
     results: results.map(({ rows, ...result }) => result)
   }, 202);
@@ -331,6 +341,7 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
   requireSupabase(env);
   const fetchedAt = new Date().toISOString();
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
+  const publishCurrent = isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt);
   const listName = options.listName || TOP_LEAGUES_NAME;
   const limit = clamp(Number(options.limit || (source === "schedule" ? scheduledTopLeaguesLimit(env) : topLeaguesLimit(env))), 1, MAX_TOP_LEAGUES_LIMIT);
   const top = await fetchTopLeagues(limit, { pageDelayMs: options.pageDelayMs ?? topLeaguesPageDelayMs(env), pageSize: options.pageSize, allowApiFallback: options.allowApiFallback !== false });
@@ -348,10 +359,12 @@ async function handleTopLeaguesIngest(env, source, requestedRunKey, options = {}
 
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+    if (publishCurrent) {
+      await replaceCurrentRows(env, CURRENT_TABLE, { league_run_key: `eq.${runKey}`, league_name: `eq.${listName}` }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
+    }
   }
 
-  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, source: top.source, requested_limit: limit, page_size: top.page_size }, 202);
+  return json({ ok: true, league_run_key: runKey, league_name: listName, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, published_current: publishCurrent, source: top.source, requested_limit: limit, page_size: top.page_size }, 202);
 }
 
 async function handleTopLeaguesWindowIngest(request, env) {
@@ -495,7 +508,9 @@ async function handleTrackedLeagueRankWindowRefresh(env, source, requestedRunKey
 
   if (dbRows.length) {
     await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+    if (isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) {
+      await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+    }
   }
 
   return json({
@@ -562,7 +577,9 @@ async function persistTopLeagueWindowRows(env, runKey, rows, options = {}) {
   }));
 
   await supabaseInsert(env, SNAPSHOT_TABLE, dbRows);
-  await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  if (isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) {
+    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  }
 }
 
 async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
@@ -578,7 +595,9 @@ async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
   }));
 
   await supabaseUpsert(env, SNAPSHOT_TABLE, dbRows, "league_run_key,snapshot_id,user_id");
-  await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  if (isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) {
+    await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  }
   return dbRows.length;
 }
 
@@ -640,7 +659,7 @@ async function handleCurrent(request, env) {
   if (isLeaguePubliclyHidden(env, requested)) {
     return cacheJson(hiddenLeaguePayload(env, runKey, requested), env);
   }
-  let rows = await supabaseSelect(env, CURRENT_TABLE, {
+  let rows = await selectLeagueCurrentRows(env, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${requested}`,
@@ -648,7 +667,7 @@ async function handleCurrent(request, env) {
     limit: "500"
   });
   if (!rows.length) {
-    rows = await supabaseSelect(env, CURRENT_TABLE, {
+    rows = await selectLeagueCurrentRows(env, {
       select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
       league_run_key: `eq.${runKey}`,
       league_name: `ilike.${requested}`,
@@ -850,7 +869,7 @@ async function handleLeaguePlayerMilestones(request, env) {
     .sort((a, b) => b.points - a.points || a.user_id - b.user_id);
   const generatedAt = new Date().toISOString();
   const storedRanks = [...new Set([1, ...ranks.filter(rank => rank > directLimit)])];
-  const storedRows = await supabaseSelect(env, CURRENT_TABLE, {
+  const storedRows = await selectLeagueCurrentRows(env, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_icon,rank,user_id,display_name,points,raw_member,raw_league",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
@@ -902,7 +921,7 @@ async function handleLeaguePlayerPoolStatus(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const runKey = requestedRunKey(url, env);
-  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+  const rows = await selectLeagueCurrentRows(env, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,rank,user_id,points,raw_league",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
@@ -1045,7 +1064,7 @@ async function fetchLeaguePlayerPoolManifestWindow(env, runKey, offset, limit, t
   const startRank = offset + 1;
   const endRank = Math.min(topLimit, offset + limit);
   const expected = Math.max(0, endRank - startRank + 1);
-  const readList = listName => supabaseSelect(env, CURRENT_TABLE, {
+  const readList = listName => selectLeagueCurrentRows(env, {
     select,
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${listName}`,
@@ -1222,7 +1241,10 @@ async function finalizeLeaguePlayerPool(env, context) {
     ...simulatedRows.map(row => ({ kind: "simulated", row }))
   ];
   const usernameMap = await resolveRobloxUsernames(combined.map(item => item.row.user_id), env).catch(() => new Map());
-  const snapshotId = `league_player_pool:${context.runKey}:${context.scanId}`;
+  const publishCurrent = isLeagueSnapshotAtOrBeforeEnd(env, context.runKey, context.fetchedAt);
+  const snapshotId = publishCurrent
+    ? `league_player_pool:${context.runKey}:${context.scanId}`
+    : `league_player_pool:${context.runKey}:${context.scanId}:grace:${context.fetchedAt}`;
   const totalPlayers = combined.length;
   const metadata = {
     pool_scan_id: context.scanId,
@@ -1289,17 +1311,19 @@ async function finalizeLeaguePlayerPool(env, context) {
     dbRows,
     "league_run_key,snapshot_id,user_id"
   );
-  await supabaseUpsertBatches(
-    env,
-    CURRENT_TABLE,
-    dbRows.map(row => ({ ...row, updated_at: context.fetchedAt })),
-    "league_run_key,league_name,user_id"
-  );
-  await supabaseDelete(env, CURRENT_TABLE, {
-    league_run_key: `eq.${context.runKey}`,
-    league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
-    updated_at: `lt.${context.fetchedAt}`
-  });
+  if (publishCurrent) {
+    await supabaseUpsertBatches(
+      env,
+      CURRENT_TABLE,
+      dbRows.map(row => ({ ...row, updated_at: context.fetchedAt })),
+      "league_run_key,league_name,user_id"
+    );
+    await supabaseDelete(env, CURRENT_TABLE, {
+      league_run_key: `eq.${context.runKey}`,
+      league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+      updated_at: `lt.${context.fetchedAt}`
+    });
+  }
   await supabaseDelete(env, CURRENT_TABLE, {
     league_run_key: `eq.${context.runKey}`,
     league_name: `eq.${LEAGUE_PLAYER_POOL_STAGING_NAME}`
@@ -1308,7 +1332,8 @@ async function finalizeLeaguePlayerPool(env, context) {
   return {
     snapshot_id: snapshotId,
     total_players: totalPlayers,
-    top_leagues_scanned: markerRanks.size
+    top_leagues_scanned: markerRanks.size,
+    published_current: publishCurrent
   };
 }
 
@@ -1386,7 +1411,7 @@ async function handleLeagueMilestones(request, env) {
   const requestedListName = requestedTopLeagueListName(url, maxRequestedRank, env);
   const rankFilter = `in.(${ranks.join(",")})`;
   const select = "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league";
-  const readList = listName => supabaseSelect(env, CURRENT_TABLE, {
+  const readList = listName => selectLeagueCurrentRows(env, {
     select,
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${listName}`,
@@ -1441,7 +1466,7 @@ async function handleC0ldDiscoveredLeagues(request, env) {
   const url = new URL(request.url);
   const runKey = requestedTopLeaguesRunKey(url, env);
   const limit = clamp(Number(url.searchParams.get("limit") || 500), 1, 5000);
-  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+  const rows = await selectLeagueCurrentRows(env, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${COLD_DISCOVERED_LEAGUES_NAME}`,
@@ -1616,12 +1641,19 @@ async function handleHistory(request, env) {
     order: "fetched_at.desc,rank.asc",
     limit: String(limit)
   };
+  const historyParamRename = {};
   if (hoursParam !== "all") {
     const hours = clamp(Number(hoursParam || 24), 1, 24 * 365 * 20);
-    params.fetched_at = `gte.${new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()}`;
+    params.fetched_at_gte = `gte.${new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()}`;
+    historyParamRename.fetched_at_gte = "fetched_at";
+  }
+  const runEndAt = leagueRunEndAt(env, runKey);
+  if (runEndAt) {
+    params.fetched_at_lte = `lte.${runEndAt}`;
+    historyParamRename.fetched_at_lte = "fetched_at";
   }
   if (userId) params.user_id = `eq.${userId}`;
-  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, params, { paramRename: historyParamRename });
   let visibleRows;
   if (isAggregateLeagueListName(requested)) {
     visibleRows = rows.filter(row => !isLeaguePubliclyHidden(env, row.display_name));
@@ -1662,6 +1694,8 @@ async function handleProfile(request, env) {
   const usernameMap = await resolveRobloxUsernames([userId], env).catch(() => new Map());
   const resolvedUsername = usernameMap.get(userId) || null;
   const visibleRows = rows.filter(row =>
+    isLeagueSnapshotAtOrBeforeEnd(env, row.league_run_key, row.fetched_at)
+    &&
     !isAggregateLeagueListName(row.league_name)
     && !isLeaguePubliclyHidden(env, row.league_name)
   );
@@ -1669,7 +1703,10 @@ async function handleProfile(request, env) {
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
   const summaries = rawSummaries.map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
-  const leaderboardSummaries = summarizeLeaguePlayerPoolProfileRows(playerPoolRows, env)
+  const leaderboardSummaries = summarizeLeaguePlayerPoolProfileRows(
+    playerPoolRows.filter(row => isLeagueSnapshotAtOrBeforeEnd(env, row.league_run_key, row.fetched_at)),
+    env
+  )
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0))
     .slice(0, summaryLimit)
     .map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
@@ -2132,7 +2169,7 @@ async function fetchStoredTopLeagueRows(env, runKey, listName, limit, offset = 0
 
   while (fetched < rawLimit) {
     const take = Math.min(pageSize, rawLimit - fetched);
-    const page = await supabaseSelect(env, CURRENT_TABLE, {
+    const page = await selectLeagueCurrentRows(env, {
       select,
       league_run_key: `eq.${runKey}`,
       league_name: `eq.${listName}`,
@@ -2168,7 +2205,7 @@ async function fetchStoredTopLeagueRowsWindowForOverlap(env, runKey, offset, lim
     return { source: "stored-window", list_name: listName, snapshot_at: null, total_available: offset, rows: [] };
   }
 
-  const rows = await supabaseSelect(env, CURRENT_TABLE, {
+  const rows = await selectLeagueCurrentRows(env, {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${listName}`,
@@ -2464,7 +2501,7 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
 
   for (const label of labels) {
     if (id) {
-      const byId = await supabaseSelect(env, CURRENT_TABLE, {
+      const byId = await selectLeagueCurrentRows(env, {
         select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
@@ -2477,7 +2514,7 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
     }
 
     if (name) {
-      const byName = await supabaseSelect(env, CURRENT_TABLE, {
+      const byName = await selectLeagueCurrentRows(env, {
         select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
@@ -2488,7 +2525,7 @@ async function fetchStoredLeagueRank(env, runKey, leagueNameValue, leagueId = nu
       const exactRank = (toNumber(byName[0]?.points) || 0) > 0 ? visibleLeagueRank(byName[0]?.rank) : null;
       if (exactRank !== null) return exactRank;
 
-      const byLooseName = await supabaseSelect(env, CURRENT_TABLE, {
+      const byLooseName = await selectLeagueCurrentRows(env, {
         select: "rank,points,fetched_at,display_name,league_id",
         league_run_key: `eq.${runKey}`,
         league_name: `eq.${label}`,
@@ -2519,14 +2556,14 @@ async function fetchStoredTopLeagueRowsByNames(env, runKey, listName, names, lim
   };
 
   try {
-    return dedupeStoredTopLeagueRows(await supabaseSelect(env, CURRENT_TABLE, filters));
+    return dedupeStoredTopLeagueRows(await selectLeagueCurrentRows(env, filters));
   } catch (err) {
     console.warn("stored top league bulk lookup failed", err?.message || String(err));
   }
 
   const rows = [];
   for (const name of uniqueNames) {
-    const found = await supabaseSelect(env, CURRENT_TABLE, {
+    const found = await selectLeagueCurrentRows(env, {
       select,
       league_run_key: `eq.${runKey}`,
       league_name: `eq.${listName}`,
@@ -3282,6 +3319,42 @@ async function deleteStaleCurrentLeagueRows(env, runKey, names, fetchedAt) {
   });
 }
 async function supabaseSelect(env, table, params = {}, options = {}) { return supabaseFetch(env, table, { method: "GET", params, paramRename: options.paramRename }); }
+async function selectLeagueCurrentRows(env, params = {}, options = {}) {
+  const currentRows = await supabaseSelect(env, CURRENT_TABLE, params, options);
+  const runKey = postgrestEqualityValue(params.league_run_key);
+  const leagueFilter = String(params.league_name || "").trim();
+  const endAt = runKey ? leagueRunEndAt(env, runKey) : null;
+  if (!runKey || !leagueFilter || !endAt) return currentRows;
+
+  const latestCurrent = latestMeta(currentRows);
+  if (latestCurrent && isLeagueSnapshotAtOrBeforeEnd(env, runKey, latestCurrent.fetched_at)) {
+    return currentRows;
+  }
+
+  const metaRows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: "snapshot_id,fetched_at",
+    league_run_key: `eq.${runKey}`,
+    league_name: leagueFilter,
+    fetched_at: `lte.${endAt}`,
+    order: "fetched_at.desc",
+    limit: "1"
+  });
+  const snapshotId = String(metaRows[0]?.snapshot_id || "").trim();
+  if (!snapshotId) {
+    return currentRows.filter(row => isLeagueSnapshotAtOrBeforeEnd(env, runKey, row.fetched_at));
+  }
+
+  const snapshotParams = {
+    ...params,
+    snapshot_id: `eq.${snapshotId}`
+  };
+  delete snapshotParams.updated_at;
+  return supabaseSelect(env, SNAPSHOT_TABLE, snapshotParams, options);
+}
+function postgrestEqualityValue(value) {
+  const text = String(value || "").trim();
+  return text.toLowerCase().startsWith("eq.") ? text.slice(3) : "";
+}
 async function supabaseSelectAll(env, table, params = {}, options = {}) {
   const pageSize = clamp(Number(options.pageSize || 1000), 1, 1000);
   const maxRows = clamp(Number(options.maxRows || 10000), pageSize, 100000);
@@ -3529,18 +3602,30 @@ function leagueScheduledCollectionState(env, scheduledAt = null) {
   };
 
   if (!leagueCollectionSwitchEnabled(env)) {
-    return { ...base, enabled: false, reason: "collection_disabled" };
+    return { ...base, enabled: false, reason: "collection_disabled", collection_phase: "closed", in_grace_period: false };
   }
 
   if (Number.isFinite(startMs) && nowMs < startMs) {
-    return { ...base, enabled: false, reason: "league_not_started" };
+    return { ...base, enabled: false, reason: "league_not_started", collection_phase: "not_started", in_grace_period: false };
   }
 
   if (Number.isFinite(hardStopMs) && nowMs > hardStopMs) {
-    return { ...base, enabled: false, reason: "league_ended" };
+    return { ...base, enabled: false, reason: "league_ended", collection_phase: "closed", in_grace_period: false };
   }
 
-  return { ...base, enabled: true, reason: "league_window_open" };
+  const inGracePeriod = Number.isFinite(endMs) && nowMs > endMs;
+  return {
+    ...base,
+    enabled: true,
+    reason: inGracePeriod ? "league_grace_period" : "league_window_open",
+    collection_phase: inGracePeriod ? "grace_period" : "active_event",
+    in_grace_period: inGracePeriod
+  };
+}
+function leagueCollectionSource(source, collectionState) {
+  const clean = String(source || "unknown").trim() || "unknown";
+  if (collectionState?.in_grace_period !== true) return clean;
+  return clean.endsWith(":grace_period") ? clean : `${clean}:grace_period`;
 }
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
 function csvLeagueNames(value) { return String(value || "").split(",").map(item => item.trim()).filter(Boolean); }
@@ -3712,6 +3797,13 @@ function leagueRunEndAt(env, runKey) {
     key === DEFAULT_LEAGUE_RUN_KEY ? DEFAULT_LEAGUE_RUN_END_AT : null
   );
   return parseTimestamp(mapped);
+}
+function isLeagueSnapshotAtOrBeforeEnd(env, runKey, snapshotAt) {
+  const endAt = leagueRunEndAt(env, runKey);
+  if (!endAt) return true;
+  const endMs = new Date(endAt).getTime();
+  const snapshotMs = new Date(snapshotAt || 0).getTime();
+  return Number.isFinite(endMs) && Number.isFinite(snapshotMs) && snapshotMs <= endMs;
 }
 function leagueRunStartAt(env, runKey) {
   const key = normalizeRunKey(runKey || leagueRunKey(env));

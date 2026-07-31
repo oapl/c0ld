@@ -1,6 +1,7 @@
 param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev",
   [string]$GuildId = "1457088639006670979",
+  [string]$TGuildId = "1457088639006670979",
   [string]$KmsGuildId = "1529193730022838392",
   [int]$MaxAttempts = 8,
   [switch]$KeepGlobalCommands
@@ -108,6 +109,7 @@ $commandsToDelete = @(
   "htg",
   "offline",
   "kms",
+  "t",
   "duck",
   "duplicate",
   "duplicatecheck"
@@ -130,6 +132,10 @@ $commandsToRegister = @(
   "/admin/register-htg-command",
   "/admin/register-offline-command"
 )
+
+if ($GuildId -eq $TGuildId) {
+  $commandsToRegister += "/admin/register-t-command"
+}
 
 Write-Host "Resetting guild commands for $GuildId..." -ForegroundColor Cyan
 if (-not $KeepGlobalCommands) {
@@ -162,7 +168,11 @@ foreach ($name in $commandsToDelete) {
   Start-Sleep -Milliseconds 900
 }
 
-Write-Host "Re-registering guild commands, excluding /kms..." -ForegroundColor Cyan
+if ($GuildId -eq $TGuildId) {
+  Write-Host "Re-registering guild commands, excluding /kms and including guild-only /t..." -ForegroundColor Cyan
+} else {
+  Write-Host "Re-registering guild commands, excluding /kms..." -ForegroundColor Cyan
+}
 
 foreach ($path in $commandsToRegister) {
   $query = New-QueryString @{ guild_id = $GuildId }

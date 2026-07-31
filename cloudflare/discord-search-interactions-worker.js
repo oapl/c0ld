@@ -62,10 +62,13 @@ const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
+const HOURLY_LEAGUE_ASSIGNMENT_PREFIX = "league:";
 const HTG_BUILD_ID = "htg-debug-2026-07-27i";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
 const SELF_TIMEOUT_DAYS = 7;
+const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
+const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
 let chartDuckImagePromise = null;
 const historyRenderMemoryCache = new Map();
 
@@ -160,6 +163,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-kms-command") {
         requireAdmin(request, env);
         return await registerKmsCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-t-command") {
+        requireAdmin(request, env);
+        return await registerTCommand(url, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/htg/status") {
@@ -471,6 +479,28 @@ async function handleInteraction(request, env, ctx) {
   }
 
   const commandName = String(interaction.data?.name || "").toLowerCase();
+  if (commandName === "t") {
+    const guildId = tCommandGuildId(env);
+    if (String(interaction.guild_id || "").trim() !== guildId) {
+      return interactionJson(messageResponse("This command can only be used in the configured c0ld server.", true));
+    }
+
+    if (!memberHasTCommandRole(interaction, env)) {
+      return interactionJson(messageResponse("You do not have access to use `/t`.", true));
+    }
+
+    const message = getCommandOption(interaction, "message");
+    if (!message) {
+      return interactionJson(messageResponse("Use `/t message:<message>`.", true));
+    }
+
+    ctx.waitUntil(completeTInteraction(interaction, env, message));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: MESSAGE_FLAG_EPHEMERAL }
+    });
+  }
+
   if (commandName === "version") {
     ctx.waitUntil(completeVersionInteraction(interaction, env));
     return interactionJson({
@@ -582,9 +612,9 @@ async function handleInteraction(request, env, ctx) {
 
   if (commandName === "hourly") {
     const subcommand = getSubcommandName(interaction);
-    if (!["clan", "user", "remove", "alert"].includes(subcommand)) {
+    if (!["clan", "user", "league", "remove", "alert"].includes(subcommand)) {
       return interactionJson(messageResponse(
-        "Use `/hourly clan clan:<clan name> channel:<channel>`, `/hourly user username:<roblox username> channel:<channel>`, `/hourly alert user:<user> channel:<channel>`, or `/hourly remove channel:<channel>`.",
+        "Use `/hourly clan clan:<clan name> channel:<channel>`, `/hourly user username:<roblox username> channel:<channel>`, `/hourly league league:<league name> channel:<channel>`, `/hourly alert user:<user> channel:<channel>`, or `/hourly remove channel:<channel>`.",
         true
       ));
     }
@@ -744,6 +774,10 @@ async function buildSearchResponse(query, env) {
     : row.clan_rank
       ? `🔰 Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
       : null;
+  const eventState = await hourlyClanDeliveryEventState(env).catch(() => null);
+  const freshnessLines = eventState?.reason === "event_ended"
+    ? ["Clan battle has ended"]
+    : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
   const embed = {
     title: "Global Search Results",
     color: 0x58a6ff,
@@ -757,8 +791,7 @@ async function buildSearchResponse(query, env) {
       `🏆 Global Rank: **${rank(row.global_rank)}${row.total_global_players ? ` of ${shortNumber(row.total_global_players)}` : ""}**`,
       betterThanLine(row),
       "",
-      `Last Update: ${discordTime(row.fetched_at)}`,
-      "Updates every 20 minutes"
+      ...freshnessLines
     ].filter(line => line !== null).join("\n")
   };
 
@@ -2125,6 +2158,7 @@ async function completeHourlyClanInteraction(interaction, env) {
     const actorId = interactionUserId(interaction);
     const clan = String(getCommandOption(interaction, "clan") || "").trim();
     const username = String(getCommandOption(interaction, "username") || getCommandOption(interaction, "user_name") || "").trim();
+    const league = String(getCommandOption(interaction, "league") || getCommandOption(interaction, "name") || "").trim();
     const requestedChannelId = String(getCommandOption(interaction, "channel") || sourceChannelId).trim();
 
     if (!guildId) throw httpError(400, "Hourly posts can only be assigned inside a Discord server.");
@@ -2175,7 +2209,7 @@ async function completeHourlyClanInteraction(interaction, env) {
       await editOriginalInteraction(interaction, {
         content: assignmentPayload.assignment
           ? `Hourly alerts for ${destination} will mention <@${alertUserId}> when Luna posts the picture.`
-          : `No hourly reporting assignment was found for ${destination}. Assign one first with \`/hourly clan\` or \`/hourly user\`.`,
+          : `No hourly reporting assignment was found for ${destination}. Assign one first with \`/hourly clan\`, \`/hourly user\`, or \`/hourly league\`.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2183,12 +2217,16 @@ async function completeHourlyClanInteraction(interaction, env) {
       return;
     }
 
-    const targetType = subcommand === "user" ? "user" : "clan";
-    const targetName = targetType === "user" ? username : clan;
+    const targetType = subcommand === "user" ? "user" : subcommand === "league" ? "league" : "clan";
+    const targetName = targetType === "user" ? username : targetType === "league" ? league : clan;
     if (!targetName) {
-      throw httpError(400, targetType === "user"
-        ? "Use `/hourly user username:<roblox username> channel:<text channel or thread>`."
-        : "Use `/hourly clan clan:<clan name> channel:<text channel or thread>`.");
+      throw httpError(400,
+        targetType === "user"
+          ? "Use `/hourly user username:<roblox username> channel:<text channel or thread>`."
+          : targetType === "league"
+            ? "Use `/hourly league league:<league name> channel:<text channel or thread>`."
+            : "Use `/hourly clan clan:<clan name> channel:<text channel or thread>`."
+      );
     }
 
     const channel = await resolveHourlyClanChannel(interaction, env, requestedChannelId);
@@ -2224,11 +2262,13 @@ async function completeHourlyClanInteraction(interaction, env) {
     }
 
     const destination = `<#${requestedChannelId}>`;
-    const targetLabel = targetType === "user" ? "user" : "clan";
+    const targetLabel = targetType === "user" ? "user" : targetType === "league" ? "league" : "clan";
     await editOriginalInteraction(interaction, {
-      content: preview.ok
-        ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}. The first image was posted and Luna will refresh it hourly.`
-        : `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but the first image could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
+      content: preview.ok && preview.skipped
+        ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but posting is paused: ${escapeDiscordMarkdown(preview.message || preview.reason || "no recognized event is active")}`
+        : preview.ok
+          ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}. The first image was posted and Luna will refresh it hourly.`
+          : `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but the first image could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
@@ -2881,6 +2921,7 @@ async function runHourlyClanAssignments(env, options = {}) {
     force || hourlyAssignmentDue(assignment, now, { alignToHour, postMinute })
   ));
   const reportPromises = new Map();
+  const eventStatePromises = new Map();
   const results = [];
 
   for (const assignment of eligible) {
@@ -2889,6 +2930,16 @@ async function runHourlyClanAssignments(env, options = {}) {
     let claimAcquired = force;
 
     try {
+      const eventKind = targetType === "league" ? "league" : "clan_battle";
+      if (!eventStatePromises.has(eventKind)) {
+        eventStatePromises.set(eventKind, hourlyDeliveryEventState(env, targetType, now));
+      }
+      const eventState = await eventStatePromises.get(eventKind);
+      if (!eventState.active) {
+        results.push(hourlyInactiveEventResult(assignment, eventState));
+        continue;
+      }
+
       if (!force) {
         const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
         if (!claim.claimed) {
@@ -2900,6 +2951,7 @@ async function runHourlyClanAssignments(env, options = {}) {
             target_name: targetName,
             clan_name: targetType === "clan" ? targetName : null,
             username: targetType === "user" ? targetName : null,
+            league_name: targetType === "league" ? targetName : null,
             channel_id: assignment.channel_id,
             assignment_key: String(assignment.assignment_key || "")
           });
@@ -2910,7 +2962,7 @@ async function runHourlyClanAssignments(env, options = {}) {
 
       const reportKey = `${targetType}:${normalizeSearchKey(targetName)}`;
       if (!reportPromises.has(reportKey)) {
-        reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment));
+        reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment, { eventState }));
       }
       const report = await reportPromises.get(reportKey);
       const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
@@ -2926,6 +2978,7 @@ async function runHourlyClanAssignments(env, options = {}) {
         target_name: targetName,
         clan_name: targetType === "clan" ? targetName : null,
         username: targetType === "user" ? targetName : null,
+        league_name: targetType === "league" ? targetName : null,
         channel_id: assignment.channel_id,
         message_id: posted.id || null
       });
@@ -2942,6 +2995,7 @@ async function runHourlyClanAssignments(env, options = {}) {
         target_name: targetName,
         clan_name: targetType === "clan" ? targetName : null,
         username: targetType === "user" ? targetName : null,
+        league_name: targetType === "league" ? targetName : null,
         channel_id: assignment.channel_id,
         error: message
       });
@@ -3080,6 +3134,7 @@ async function hourlyClanAssignmentStatus(env) {
         target_name: hourlyAssignmentTargetName(assignment),
         clan_name: hourlyAssignmentTargetType(assignment) === "clan" ? hourlyAssignmentTargetName(assignment) : null,
         username: hourlyAssignmentTargetType(assignment) === "user" ? hourlyAssignmentTargetName(assignment) : null,
+        league_name: hourlyAssignmentTargetType(assignment) === "league" ? hourlyAssignmentTargetName(assignment) : null,
         enabled: assignment.enabled !== false,
         due: hourlyAssignmentDue(assignment, now, {
           alignToHour: true,
@@ -3112,6 +3167,12 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
     return { ok: true, skipped: true, reason: "not_due" };
   }
 
+  const targetType = hourlyAssignmentTargetType(assignment);
+  const eventState = await hourlyDeliveryEventState(env, targetType, now);
+  if (!eventState.active) {
+    return hourlyInactiveEventResult(assignment, eventState);
+  }
+
   let claimAcquired = force;
   try {
     if (!force) {
@@ -3122,7 +3183,7 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
       claimAcquired = true;
     }
 
-    const report = await buildHourlyAssignmentReport(env, assignment);
+    const report = await buildHourlyAssignmentReport(env, assignment, { eventState });
     const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
     await updateHourlyClanAssignmentDelivery(env, assignment, {
       last_posted_at: new Date(now).toISOString(),
@@ -3143,31 +3204,166 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
 
 function hourlyAssignmentTargetType(assignment) {
   const raw = String(assignment?.clan_name || "").trim();
-  return raw.toLowerCase().startsWith(HOURLY_USER_ASSIGNMENT_PREFIX) ? "user" : "clan";
+  const lower = raw.toLowerCase();
+  if (lower.startsWith(HOURLY_USER_ASSIGNMENT_PREFIX)) return "user";
+  if (lower.startsWith(HOURLY_LEAGUE_ASSIGNMENT_PREFIX)) return "league";
+  return "clan";
 }
 
 function hourlyAssignmentTargetName(assignment) {
   const raw = String(assignment?.clan_name || "").trim();
-  if (raw.toLowerCase().startsWith(HOURLY_USER_ASSIGNMENT_PREFIX)) {
+  const lower = raw.toLowerCase();
+  if (lower.startsWith(HOURLY_USER_ASSIGNMENT_PREFIX)) {
     return raw.slice(HOURLY_USER_ASSIGNMENT_PREFIX.length).trim();
+  }
+  if (lower.startsWith(HOURLY_LEAGUE_ASSIGNMENT_PREFIX)) {
+    return raw.slice(HOURLY_LEAGUE_ASSIGNMENT_PREFIX.length).trim();
   }
   return raw;
 }
 
 function hourlyStoredAssignmentTarget(targetType, targetName) {
   const clean = String(targetName || "").trim();
-  return targetType === "user" ? `${HOURLY_USER_ASSIGNMENT_PREFIX}${clean}` : clean;
+  if (targetType === "user") return `${HOURLY_USER_ASSIGNMENT_PREFIX}${clean}`;
+  if (targetType === "league") return `${HOURLY_LEAGUE_ASSIGNMENT_PREFIX}${clean}`;
+  return clean;
 }
 
 function hourlyReportSnapshotAt(report) {
   return report?.snapshot_at || report?.current?.snapshot_at || null;
 }
 
-async function buildHourlyAssignmentReport(env, assignment) {
+async function buildHourlyAssignmentReport(env, assignment, options = {}) {
   const targetType = hourlyAssignmentTargetType(assignment);
   const targetName = hourlyAssignmentTargetName(assignment);
+  const eventState = options.eventState || await hourlyDeliveryEventState(env, targetType);
+  if (!eventState.active) {
+    throw httpError(409, hourlyInactiveEventMessage(eventState));
+  }
   if (targetType === "user") return buildHourlyUserReport(env, targetName);
+  if (targetType === "league") return buildHourlyLeagueReport(env, targetName);
   return buildHourlyClanReport(env, targetName);
+}
+
+async function hourlyDeliveryEventState(env, targetType, now = Date.now()) {
+  return targetType === "league"
+    ? hourlyLeagueDeliveryEventState(env, now)
+    : hourlyClanDeliveryEventState(env, now);
+}
+
+async function hourlyClanDeliveryEventState(env, now = Date.now()) {
+  try {
+    const payload = await hourlyClanApiRequest(env, "/api/health", {
+      query: { fresh: 1, _: now }
+    });
+    return hourlyRecognizedEventState({
+      kind: "clan_battle",
+      key: payload.active_battle_key,
+      label: payload.active_battle_display_name,
+      startAt: payload.active_battle_started_at,
+      endAt: payload.active_battle_ended_at,
+      now
+    });
+  } catch (err) {
+    return {
+      active: false,
+      recognized: false,
+      event_kind: "clan_battle",
+      reason: "event_status_unavailable",
+      message: `Clan Battle status could not be verified: ${err?.message || String(err)}`
+    };
+  }
+}
+
+async function hourlyLeagueDeliveryEventState(env, now = Date.now()) {
+  const attempts = [];
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/health", target.base);
+    apiUrl.searchParams.set("fresh", "1");
+    apiUrl.searchParams.set("_", String(now));
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    attempts.push(result);
+    if (result.response_ok && result.payload?.ok !== false) {
+      return hourlyRecognizedEventState({
+        kind: "league",
+        key: result.payload?.league_run_key,
+        label: result.payload?.league_run_label,
+        startAt: result.payload?.scheduled_collection_start_at,
+        endAt: result.payload?.league_end_at || result.payload?.scheduled_collection_end_at,
+        now
+      });
+    }
+  }
+
+  const last = attempts[attempts.length - 1] || {};
+  return {
+    active: false,
+    recognized: false,
+    event_kind: "league",
+    reason: "event_status_unavailable",
+    message: last.message || "League status could not be verified."
+  };
+}
+
+function hourlyRecognizedEventState({ kind, key, label, startAt, endAt, now = Date.now() }) {
+  const eventKey = String(key || "").trim();
+  const startMs = new Date(startAt || 0).getTime();
+  const endMs = new Date(endAt || 0).getTime();
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const base = {
+    event_kind: kind,
+    event_key: eventKey || null,
+    event_label: String(label || eventKey || "").trim() || null,
+    starts_at: Number.isFinite(startMs) && startMs > 0 ? new Date(startMs).toISOString() : null,
+    ends_at: Number.isFinite(endMs) && endMs > 0 ? new Date(endMs).toISOString() : null
+  };
+
+  if (!eventKey) {
+    return { ...base, active: false, recognized: false, reason: "no_recognized_event" };
+  }
+  if (!Number.isFinite(endMs) || endMs <= 0) {
+    return { ...base, active: false, recognized: false, reason: "event_end_unknown" };
+  }
+  if (Number.isFinite(startMs) && startMs > 0 && nowMs < startMs) {
+    return { ...base, active: false, recognized: true, reason: "event_not_started" };
+  }
+  if (nowMs >= endMs) {
+    return { ...base, active: false, recognized: true, reason: "event_ended" };
+  }
+  return { ...base, active: true, recognized: true, reason: "event_active" };
+}
+
+function hourlyInactiveEventResult(assignment, eventState) {
+  const targetType = hourlyAssignmentTargetType(assignment);
+  const targetName = hourlyAssignmentTargetName(assignment);
+  return {
+    ok: true,
+    skipped: true,
+    reason: eventState?.reason || "event_inactive",
+    message: hourlyInactiveEventMessage(eventState),
+    event: eventState || null,
+    target_type: targetType,
+    target_name: targetName,
+    clan_name: targetType === "clan" ? targetName : null,
+    username: targetType === "user" ? targetName : null,
+    league_name: targetType === "league" ? targetName : null,
+    channel_id: assignment?.channel_id || null,
+    assignment_key: String(assignment?.assignment_key || "")
+  };
+}
+
+function hourlyInactiveEventMessage(eventState) {
+  const name = eventState?.event_kind === "league" ? "League" : "Clan Battle";
+  if (eventState?.reason === "event_ended") {
+    return `${name} ${eventState.event_label || eventState.event_key || ""} has ended; hourly Discord posting is paused.`.replace(/\s+/g, " ").trim();
+  }
+  if (eventState?.reason === "event_not_started") {
+    return `${name} ${eventState.event_label || eventState.event_key || ""} has not started; hourly Discord posting is paused.`.replace(/\s+/g, " ").trim();
+  }
+  if (eventState?.reason === "event_end_unknown") {
+    return `${name} has no recognized end time; hourly Discord posting is paused.`;
+  }
+  return eventState?.message || `No active, recognized ${name} period is available; hourly Discord posting is paused.`;
 }
 
 async function buildHourlyClanReport(env, clanNameValue) {
@@ -3281,6 +3477,321 @@ async function buildHourlyUserReport(env, usernameValue) {
   };
 }
 
+async function buildHourlyLeagueReport(env, leagueNameValue) {
+  const leagueName = String(leagueNameValue || "").trim();
+  if (!leagueName) throw httpError(400, "The hourly league assignment has no league name.");
+
+  const payload = await fetchLeagueCurrentPayload(leagueName, env);
+  if (!Array.isArray(payload.rows) || !payload.rows.length) {
+    throw httpError(409, `No current league member rows were returned for ${leagueName}.`);
+  }
+
+  const displayLeagueName = String(payload.league_name || leagueName).trim() || leagueName;
+  let historyRows = [];
+  try {
+    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, 24);
+    historyRows = Array.isArray(historyPayload.rows) ? historyPayload.rows : [];
+  } catch {
+    historyRows = [];
+  }
+
+  return {
+    current: payload,
+    snapshot_at: hourlyLeagueSnapshotAt(payload),
+    filename: `luna-hourly-league-${hourlyFilenamePart(displayLeagueName)}-${Date.now()}.png`,
+    bytes: await renderHourlyLeagueBoardPng(payload, historyRows)
+  };
+}
+
+async function renderHourlyLeagueBoardPng(payload, historyRows) {
+  const [fonts, leagueIcon] = await Promise.all([
+    loadHistoryFonts(),
+    hourlyLoadLeagueIcon(payload).catch(() => null)
+  ]);
+  const width = 1600;
+  const height = 900;
+  const color = {
+    background: [8, 9, 18, 255],
+    panel: [20, 23, 36, 255],
+    panelDeep: [13, 17, 27, 255],
+    inset: [15, 20, 27, 255],
+    row: [25, 29, 43, 255],
+    rowAlt: [18, 22, 34, 255],
+    line: [54, 64, 100, 255],
+    grid: [35, 45, 58, 255],
+    white: [242, 245, 252, 255],
+    muted: [160, 172, 195, 255],
+    quiet: [105, 119, 148, 255],
+    cyan: [52, 225, 239, 255],
+    blue: [88, 166, 255, 255],
+    violet: [112, 106, 255, 255],
+    pink: [255, 93, 178, 255],
+    green: [76, 211, 132, 255],
+    yellow: [247, 211, 83, 255],
+    red: [231, 79, 84, 255],
+    zero: [118, 127, 146, 255],
+    smokeCyan: [51, 230, 241, 255],
+    smokeViolet: [118, 72, 255, 255],
+    smokePink: [255, 92, 183, 255]
+  };
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
+  const rows = hourlyLeagueCurrentRows(payload);
+  const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
+  const runLabel = String(payload?.league_run_label || payload?.league_run_key || "Current league").trim();
+  const snapshotAt = hourlyLeagueSnapshotAt(payload);
+  const leaguePoints = hourlyLeaguePoints(payload, rows);
+  const hourlyGain = rows.reduce((sum, row) => sum + Math.max(0, hourlyLeagueMemberGain(row, "gain_1h") || 0), 0);
+  const capacity = positiveInteger(payload?.member_capacity);
+  const memberText = capacity ? `${fullNumber(rows.length)}/${fullNumber(capacity)}` : fullNumber(rows.length);
+
+  canvas.fillRect(32, 30, width - 64, height - 60, color.panel);
+  hourlyDrawMysticSmoke(canvas, width, height, color);
+  hourlyDrawPanelFrame(canvas, 32, 30, width - 64, height - 60, color.line);
+
+  const header = { x: 54, y: 54, w: 1492, h: 132 };
+  hourlyDrawPanel(canvas, header.x, header.y, header.w, header.h, color.panelDeep, color.line);
+  hourlyDrawLeagueIcon(canvas, fonts, displayLeagueName, leagueIcon, header.x + 24, header.y + 24, 84, color);
+  canvas.drawFontText(fonts.bold, `${historyCardText(displayLeagueName, 28)} Member Progress`, header.x + 128, header.y + 26, 36, color.white, 520);
+  canvas.drawFontText(fonts.regular, `${historyCardText(runLabel, 48)} - Updates every 15 minutes`, header.x + 130, header.y + 78, 18, color.muted, 620);
+  canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(snapshotAt)}`, header.x + 130, header.y + 106, 16, color.quiet, 620);
+
+  const cardY = header.y + 24;
+  const cardW = 178;
+  const cardGap = 14;
+  const cardStart = header.x + header.w - (cardW * 4 + cardGap * 3) - 24;
+  hourlyDrawLeagueStatCard(canvas, fonts, "League Points", shortNumber(leaguePoints), cardStart, cardY, cardW, 84, color, color.cyan);
+  hourlyDrawLeagueStatCard(canvas, fonts, "Current Rank", rank(payload?.league_rank), cardStart + (cardW + cardGap), cardY, cardW, 84, color, color.yellow);
+  hourlyDrawLeagueStatCard(canvas, fonts, "1h Gain", `+${shortNumber(hourlyGain)}`, cardStart + (cardW + cardGap) * 2, cardY, cardW, 84, color, color.green);
+  hourlyDrawLeagueStatCard(canvas, fonts, "Members", memberText, cardStart + (cardW + cardGap) * 3, cardY, cardW, 84, color, color.pink);
+
+  hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, {
+    x: 54,
+    y: 206,
+    w: 1492,
+    h: 310
+  }, color);
+
+  hourlyDrawLeagueRosterTable(canvas, fonts, rows, {
+    x: 54,
+    y: 540,
+    w: 1492,
+    h: 306
+  }, color);
+
+  canvas.drawFontText(fonts.regular, "c0ld League hourly board", 58, 858, 14, color.quiet, 420);
+  const site = "c0ld-clan.com/league.html";
+  const siteWidth = canvas.measureFontText(fonts.regular, site, 14);
+  canvas.drawFontText(fonts.regular, site, width - 58 - siteWidth, 858, 14, color.quiet, siteWidth + 4);
+
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+async function hourlyLoadLeagueIcon(payload) {
+  const url = leagueIconUrl(payload?.league_icon);
+  return url ? loadHistoryAvatar(url) : null;
+}
+
+function hourlyDrawLeagueIcon(canvas, fonts, leagueName, icon, x, y, size, color) {
+  hourlyBlendCircle(canvas, x + size / 2, y + size / 2, size / 2 + 12, color.cyan, 34);
+  hourlyFillRoundedRect(canvas, x, y, size, size, 16, color.line);
+  hourlyFillRoundedRect(canvas, x + 2, y + 2, size - 4, size - 4, 14, color.inset);
+  if (icon) {
+    canvas.drawImageCover(icon, x + 7, y + 7, size - 14, size - 14, true);
+    return;
+  }
+
+  const mark = historyCardText(String(leagueName || "LG").slice(0, 2).toUpperCase(), 2);
+  const markWidth = canvas.measureFontText(fonts.bold, mark, 28);
+  canvas.drawFontText(fonts.bold, mark, x + size / 2 - markWidth / 2, y + 28, 28, color.white, size - 16);
+}
+
+function hourlyDrawLeagueStatCard(canvas, fonts, label, value, x, y, width, height, color, accent) {
+  hourlyBlendRoundedRect(canvas, x, y, width, height, 9, color.inset, 230);
+  canvas.fillRect(x, y, width, 2, accent);
+  canvas.drawFontText(fonts.regular, label, x + 14, y + 14, 13, color.muted, width - 28);
+  hourlyDrawFittedText(canvas, fonts.bold, value, x + 14, y + 39, 24, accent, width - 28);
+}
+
+function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, color) {
+  hourlyDrawPanel(canvas, area.x, area.y, area.w, area.h, color.panelDeep, color.line);
+  canvas.drawFontText(fonts.bold, "24-Hour Member Growth", area.x + 22, area.y + 18, 23, color.white, 420);
+  canvas.drawFontText(fonts.regular, "Hourly gain rate from stored 15-minute league snapshots", area.x + 22, area.y + 52, 14, color.muted, 520);
+
+  const hours = 24;
+  const members = leagueChartMembers(payload).slice(0, 4);
+  const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
+  const legendY = area.y + 28;
+  const legendW = Math.floor((area.w - 540) / 4);
+  series.slice(0, 4).forEach((item, index) => {
+    const x = area.x + 510 + index * legendW;
+    canvas.fillRect(x, legendY + 13, 22, 4, item.color);
+    const gain = Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0;
+    const label = canvas.fitFontText(fonts.bold, `${historyCardText(item.name, 20)} +${shortNumber(gain)}`, 14, legendW - 32);
+    canvas.drawFontText(fonts.bold, label, x + 30, legendY + 3, 14, color.white, legendW - 32);
+  });
+
+  const plot = { x: area.x + 42, y: area.y + 84, w: area.w - 84, h: area.h - 126 };
+  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
+  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+
+  const allPoints = series.flatMap(item => item.points || []);
+  if (!allPoints.length) {
+    canvas.drawFontText(fonts.regular, "Not enough stored history to chart this league yet.", plot.x + 28, plot.y + 48, 19, color.muted, plot.w - 56);
+    return;
+  }
+
+  const maxT = Math.max(...allPoints.map(point => point.t));
+  const minT = maxT - hours * 60 * 60 * 1000;
+  const maxYValue = Math.max(1, ...allPoints.map(point => Math.max(0, Number(point.value) || 0)));
+  const yMax = maxYValue + Math.max(1, maxYValue * 0.16);
+  const xForTime = time => plot.x + ((time - minT) / Math.max(1, maxT - minT)) * plot.w;
+  const yForValue = value => plot.y + (1 - Math.max(0, Math.min(1, (Number(value) || 0) / yMax))) * plot.h;
+
+  for (let index = 0; index <= 4; index += 1) {
+    const y = plot.y + (index / 4) * plot.h;
+    const value = yMax - (index / 4) * yMax;
+    const label = shortNumber(value);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    canvas.fillRect(plot.x, y, plot.w, 1, color.grid);
+    canvas.drawFontText(fonts.regular, label, Math.max(10, plot.x - labelWidth - 12), y - 8, 12, color.muted, labelWidth + 4);
+  }
+
+  for (let index = 0; index <= 4; index += 1) {
+    const time = minT + (index / 4) * (maxT - minT);
+    const x = plot.x + (index / 4) * plot.w;
+    const label = chartHourAxisLabel(time);
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    canvas.fillRect(x, plot.y, 1, plot.h, [25, 34, 45, 255]);
+    canvas.drawFontText(fonts.regular, label, Math.max(plot.x, Math.min(plot.x + plot.w - labelWidth, x - labelWidth / 2)), plot.y + plot.h + 24, 12, color.muted, labelWidth + 6);
+  }
+
+  for (const item of series) {
+    const points = (item.points || [])
+      .filter(point => Number.isFinite(point.t) && point.t >= minT && point.t <= maxT)
+      .sort((a, b) => a.t - b.t);
+    let previous = null;
+    for (const point of points) {
+      const x = Math.max(plot.x + 2, Math.min(plot.x + plot.w - 2, xForTime(point.t)));
+      const y = Math.max(plot.y + 2, Math.min(plot.y + plot.h - 2, yForValue(point.value)));
+      if (previous && !point.breakBefore) {
+        chartDrawLine(canvas, previous.x, previous.y, x, y, item.color, 3);
+      }
+      previous = { x, y };
+    }
+    if (previous) chartFillCircle(canvas, previous.x, previous.y, 4, item.color);
+  }
+}
+
+function hourlyDrawLeagueRosterTable(canvas, fonts, rows, area, color) {
+  hourlyDrawPanel(canvas, area.x, area.y, area.w, area.h, color.panelDeep, color.line);
+  canvas.drawFontText(fonts.bold, "Member Snapshot", area.x + 22, area.y + 18, 22, color.white, 360);
+  canvas.drawFontText(fonts.regular, `Showing top ${Math.min(9, rows.length)} of ${rows.length}`, area.x + 230, area.y + 24, 13, color.muted, 240);
+
+  const headerY = area.y + 58;
+  const rowStartY = area.y + 86;
+  const rowHeight = 30;
+  const cols = {
+    rank: area.x + 25,
+    player: area.x + 116,
+    points: area.x + 840,
+    gain5m: area.x + 980,
+    gain1h: area.x + 1110,
+    gain6h: area.x + 1240,
+    gain12h: area.x + 1370,
+    gain24h: area.x + area.w - 28
+  };
+  hourlyDrawLeagueTableHeader(canvas, fonts, cols, headerY, color);
+
+  rows.slice(0, 9).forEach((row, index) => {
+    const y = rowStartY + index * rowHeight;
+    hourlyFillRoundedRect(canvas, area.x + 14, y, area.w - 28, rowHeight - 3, 5, index % 2 ? color.rowAlt : color.row);
+    const rankText = row._rank ? `#${fullNumber(row._rank)}` : `#${index + 1}`;
+    canvas.drawFontText(fonts.bold, rankText, cols.rank, y + 6, 16, color.white, 70);
+    hourlyDrawLeagueMemberAvatar(canvas, fonts, row._name, cols.player, y + 3, 24, color);
+    canvas.drawFontText(fonts.bold, historyCardText(row._name, 30), cols.player + 34, y + 3, 15, color.white, 290);
+    canvas.drawFontText(fonts.regular, String(row.user_id || row.id || "").slice(0, 20), cols.player + 34, y + 18, 10, color.muted, 210);
+    hourlyDrawRightText(canvas, fonts.bold, row.points_redacted === true ? "Hidden" : shortNumber(row._points), cols.points, y + 6, 16, color.white, 120);
+    hourlyDrawLeagueGain(canvas, fonts, row, "gain_5m", cols.gain5m, y + 6, color);
+    hourlyDrawLeagueGain(canvas, fonts, row, "gain_1h", cols.gain1h, y + 6, color);
+    hourlyDrawLeagueGain(canvas, fonts, row, "gain_6h", cols.gain6h, y + 6, color);
+    hourlyDrawLeagueGain(canvas, fonts, row, "gain_12h", cols.gain12h, y + 6, color);
+    hourlyDrawLeagueGain(canvas, fonts, row, "gain_24h", cols.gain24h, y + 6, color);
+  });
+
+  if (!rows.length) {
+    canvas.drawFontText(fonts.regular, "No current member rows were available.", area.x + 26, rowStartY + 10, 18, color.muted, area.w - 52);
+  }
+}
+
+function hourlyDrawLeagueTableHeader(canvas, fonts, cols, y, color) {
+  canvas.drawFontText(fonts.regular, "Rank", cols.rank, y, 13, color.muted, 70);
+  canvas.drawFontText(fonts.regular, "Player", cols.player, y, 13, color.muted, 220);
+  hourlyDrawRightText(canvas, fonts.regular, "Points", cols.points, y, 13, color.muted, 80);
+  hourlyDrawRightText(canvas, fonts.regular, "5m", cols.gain5m, y, 13, color.muted, 60);
+  hourlyDrawRightText(canvas, fonts.regular, "1h", cols.gain1h, y, 13, color.muted, 60);
+  hourlyDrawRightText(canvas, fonts.regular, "6h", cols.gain6h, y, 13, color.muted, 60);
+  hourlyDrawRightText(canvas, fonts.regular, "12h", cols.gain12h, y, 13, color.muted, 60);
+  hourlyDrawRightText(canvas, fonts.regular, "24h", cols.gain24h, y, 13, color.muted, 60);
+}
+
+function hourlyDrawLeagueMemberAvatar(canvas, fonts, name, x, y, size, color) {
+  hourlyFillRoundedRect(canvas, x, y, size, size, 6, [33, 39, 52, 255]);
+  const initials = historyCardText(String(name || "?").trim().slice(0, 2).toUpperCase(), 2);
+  const width = canvas.measureFontText(fonts.bold, initials, 10);
+  canvas.drawFontText(fonts.bold, initials, x + size / 2 - width / 2, y + 7, 10, color.muted, size - 4);
+}
+
+function hourlyDrawLeagueGain(canvas, fonts, row, key, rightX, y, color) {
+  const value = hourlyLeagueMemberGain(row, key);
+  const text = hourlyLeagueDeltaText(value);
+  hourlyDrawRightText(canvas, fonts.bold, text, rightX, y, 15, hourlyLeagueDeltaColor(value, color), 78);
+}
+
+function hourlyLeagueCurrentRows(payload) {
+  return (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map((row, index) => ({
+      ...row,
+      _index: index,
+      _rank: positiveInteger(row.rank) || index + 1,
+      _name: leagueMemberName(row),
+      _points: finiteNumber(row.total_points ?? row.points) || 0
+    }))
+    .sort((a, b) => (a._rank || 999999) - (b._rank || 999999) || b._points - a._points || String(a._name).localeCompare(String(b._name)));
+}
+
+function hourlyLeaguePoints(payload, rows) {
+  const direct = finiteNumber(payload?.league_points);
+  if (direct !== null) return direct;
+  return (rows || []).reduce((sum, row) => sum + Math.max(0, Number(row._points) || 0), 0);
+}
+
+function hourlyLeagueMemberGain(row, key) {
+  return finiteNumber(row?.[key]);
+}
+
+function hourlyLeagueDeltaText(value) {
+  if (value === null || value === undefined) return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  if (number > 0) return `+${shortNumber(number)}`;
+  if (number < 0) return shortNumber(number);
+  return "0";
+}
+
+function hourlyLeagueDeltaColor(value, color) {
+  if (value === null || value === undefined) return color.muted;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return color.muted;
+  if (number > 0) return color.green;
+  if (number < 0) return color.red;
+  return color.zero;
+}
+
+function hourlyLeagueSnapshotAt(payload) {
+  return payload?.snapshot_at || payload?.fetched_at || payload?.updated_at || payload?.generated_at || null;
+}
+
 async function postHourlyClanReport(env, channelId, report, assignment = {}) {
   const filename = report.filename;
   const alertUserId = hourlyAlertUserId(assignment);
@@ -3312,6 +3823,55 @@ async function postHourlyClanReport(env, channelId, report, assignment = {}) {
     throw httpError(
       response.status === 403 ? 403 : 502,
       responsePayload.message || `Discord hourly clan post failed (${response.status}).`
+    );
+  }
+  return responsePayload;
+}
+
+async function completeTInteraction(interaction, env, message) {
+  try {
+    await postTCommandMessage(interaction, env, message);
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `Could not send that message: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      attachments: [],
+      allowed_mentions: { parse: [] }
+    }).catch(() => null);
+    return;
+  }
+
+  await deleteOriginalInteraction(interaction).catch(() => editOriginalInteraction(interaction, {
+    content: "Sent.",
+    embeds: [],
+    components: [],
+    attachments: [],
+    allowed_mentions: { parse: [] }
+  }).catch(() => null));
+}
+
+async function postTCommandMessage(interaction, env, message) {
+  const channelId = String(interaction?.channel_id || "").trim();
+  const content = String(message || "").trim();
+  if (!channelId) throw httpError(400, "Discord interaction channel is missing.");
+  if (!content) throw httpError(400, "Message cannot be blank.");
+
+  const response = await fetch(
+    `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      headers: discordBotHeaders(env, {
+        "Content-Type": "application/json"
+      }),
+      body: JSON.stringify({ content })
+    }
+  );
+  const responsePayload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(
+      response.status === 403 ? 403 : 502,
+      responsePayload.message || `Discord /t message post failed (${response.status}).`
     );
   }
   return responsePayload;
@@ -4341,13 +4901,17 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
 
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
   const snapshotAt = payload.snapshot_at || payload.fetched_at || payload.updated_at;
+  const eventState = await hourlyLeagueDeliveryEventState(env).catch(() => null);
+  const freshnessLine = eventState?.reason === "event_ended"
+    ? "-# League has ended"
+    : `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`;
   const leagueDetails = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
     content: [
       `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
       `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
       `**Global Rank**: ${rank(payload.league_rank)}`,
-      `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`
+      freshnessLine
     ].join("\n")
   };
   const thumbnailUrl = leagueIconUrl(payload.league_icon);
@@ -5504,6 +6068,23 @@ async function editOriginalInteraction(interaction, data) {
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
     throw httpError(502, payload.message || `Discord history response update failed (${res.status}).`);
+  }
+}
+
+async function deleteOriginalInteraction(interaction) {
+  const applicationId = String(interaction.application_id || "").trim();
+  const token = String(interaction.token || "").trim();
+  if (!applicationId || !token) throw httpError(500, "Discord interaction token is missing.");
+
+  const endpoint = `${DISCORD_API_BASE}/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(token)}/messages/@original`;
+  const res = await fetch(endpoint, {
+    method: "DELETE",
+    headers: { Accept: "application/json" }
+  });
+
+  if (!res.ok && res.status !== 404) {
+    const payload = await res.json().catch(() => ({}));
+    throw httpError(502, payload.message || `Discord interaction response delete failed (${res.status}).`);
   }
 }
 
@@ -8211,6 +8792,19 @@ async function registerKmsCommand(url, env) {
   return registerCommand(url, env, kmsCommandPayload());
 }
 
+async function registerTCommand(url, env) {
+  const requestedGuildId = String(url.searchParams.get("guild_id") || tCommandGuildId(env)).trim();
+  const requiredGuildId = tCommandGuildId(env);
+  if (requestedGuildId !== requiredGuildId) {
+    throw httpError(400, `/t can only be registered in guild ${requiredGuildId}.`);
+  }
+
+  const scopedUrl = new URL(url.toString());
+  scopedUrl.searchParams.set("scope", "guild");
+  scopedUrl.searchParams.set("guild_id", requiredGuildId);
+  return registerCommand(scopedUrl, env, tCommandPayload());
+}
+
 async function registerRewardCommandSet(url, env) {
   const payloads = rewardCommandPayloads();
   const results = [];
@@ -8234,6 +8828,15 @@ async function registerRewardCommandSet(url, env) {
 }
 
 async function registerAllCommands(url, env) {
+  const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
+  const guildId = requestedScope === "guild"
+    ? String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim()
+    : "";
+
+  if (requestedScope === "guild" && !guildId) {
+    throw httpError(400, "A guild_id is required when scope=guild.");
+  }
+
   const payloads = [
     searchCommandPayload(),
     versionCommandPayload(),
@@ -8249,14 +8852,8 @@ async function registerAllCommands(url, env) {
     offlineCommandPayload(),
     kmsCommandPayload()
   ];
-
-  const requestedScope = String(url.searchParams.get("scope") || "global").trim().toLowerCase();
-  const guildId = requestedScope === "guild"
-    ? String(url.searchParams.get("guild_id") || env.DISCORD_GUILD_ID || "").trim()
-    : "";
-
-  if (requestedScope === "guild" && !guildId) {
-    throw httpError(400, "A guild_id is required when scope=guild.");
+  if (requestedScope === "guild" && guildId === tCommandGuildId(env)) {
+    payloads.push(tCommandPayload());
   }
 
   const scopedUrl = new URL(url.toString());
@@ -8313,6 +8910,10 @@ async function syncGlobalCommands(url, env) {
   ];
 
   const deletedGuildCommands = [];
+  const preservedGuildCommands = [];
+  const preservedGuildCommandNames = guildId === tCommandGuildId(env)
+    ? new Set(["t"])
+    : new Set();
 
   if (guildId) {
     const guildEndpoint = discordCommandsEndpoint(applicationId, guildId);
@@ -8337,6 +8938,14 @@ async function syncGlobalCommands(url, env) {
     for (const command of Array.isArray(guildCommands) ? guildCommands : []) {
       const commandId = String(command?.id || "").trim();
       if (!commandId) continue;
+      const commandName = String(command?.name || "").trim().toLowerCase();
+      if (preservedGuildCommandNames.has(commandName)) {
+        preservedGuildCommands.push({
+          id: commandId,
+          name: command.name || null
+        });
+        continue;
+      }
 
       const deleteResponse = await fetch(
         `${guildEndpoint}/${encodeURIComponent(commandId)}`,
@@ -8416,6 +9025,7 @@ async function syncGlobalCommands(url, env) {
     ok: true,
     guild_id: guildId || null,
     deleted_guild_commands: deletedGuildCommands,
+    preserved_guild_commands: preservedGuildCommands,
     global_commands: Array.isArray(globalPayload)
       ? globalPayload.map(command => ({
           id: command.id,
@@ -9972,6 +10582,28 @@ function hourlyCommandPayload() {
         ]
       },
       {
+        name: "league",
+        description: "Post a league's hourly member-progress picture in a text channel or thread.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "league",
+            description: "PS99 league name, for example dezzz",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          },
+          {
+            name: "channel",
+            description: "Text channel or thread; defaults to the current destination",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          }
+        ]
+      },
+      {
         name: "remove",
         description: "Remove the hourly picture assignment from a text channel or thread.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
@@ -10323,6 +10955,25 @@ function kmsCommandPayload() {
   };
 }
 
+function tCommandPayload() {
+  return {
+    name: "t",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Send a message as the bot.",
+    dm_permission: false,
+    options: [
+      {
+        name: "message",
+        description: "Message to send",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 2000
+      }
+    ]
+  };
+}
+
 function plainInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "-";
@@ -10355,6 +11006,25 @@ function memberHasAllowedRole(interaction, env) {
     : [];
 
   return memberRoles.some(roleId => allowedRoleIds.includes(roleId));
+}
+
+function memberHasTCommandRole(interaction, env) {
+  const roleId = tCommandRoleId(env);
+  if (!roleId) return false;
+
+  const memberRoles = Array.isArray(interaction?.member?.roles)
+    ? interaction.member.roles.map(role => String(role))
+    : [];
+
+  return memberRoles.includes(roleId);
+}
+
+function tCommandGuildId(env) {
+  return String(env.T_COMMAND_GUILD_ID || DEFAULT_T_COMMAND_GUILD_ID).trim();
+}
+
+function tCommandRoleId(env) {
+  return String(env.T_COMMAND_ROLE_ID || DEFAULT_T_COMMAND_ROLE_ID).trim();
 }
 
 async function memberCanManageServerTracker(interaction, env, options = {}) {

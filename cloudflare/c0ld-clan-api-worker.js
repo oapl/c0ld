@@ -195,6 +195,8 @@ export default {
           active_battle_ended_at: activeBattleMeta?.endedAt || null,
           ingest_open: gate.allowed,
           ingest_skip_reason: gate.allowed ? null : gate.reason,
+          collection_phase: gate.collection_phase || (gate.allowed ? "active_event" : "closed"),
+          in_grace_period: gate.in_grace_period === true,
           battle_data_cutoff: {
             source: "active_battle_ended_at",
             final_pull_grace_minutes: battleFinalPullGraceMinutes(env),
@@ -766,7 +768,7 @@ async function fetchHourlyAssignmentClanNames(env, configuredClans = []) {
 
   for (const row of rows) {
     const raw = String(row?.clan_name || "").trim();
-    if (!raw || raw.toLowerCase().startsWith("user:")) continue;
+    if (!raw || raw.toLowerCase().startsWith("user:") || raw.toLowerCase().startsWith("league:")) continue;
 
     const key = normalizeText(raw);
     if (!key || seen.has(key)) continue;
@@ -1072,10 +1074,12 @@ async function handleIngest(env, source, requestedClan, force = false, options =
     .map((row, index) => ({ ...row, rank: index + 1 }));
 
   const snapshotId = `${clan}:${resolvedBattleKey}:${fetchedAt}`;
+  const storedSource = battleCollectionSource(source, ingestGate);
+  const publishCurrent = isSnapshotAtOrBeforeEventEnd(fetchedAt, battleMeta.endedAt);
   const rows = ranked.map(row => ({
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
-    source,
+    source: storedSource,
     clan_name: clan,
     battle_key: resolvedBattleKey,
     battle_display_name: battleMeta.displayName,
@@ -1090,19 +1094,24 @@ async function handleIngest(env, source, requestedClan, force = false, options =
   }));
 
   if (rows.length) {
-    const previousGainState = await fetchCurrentMemberGainState(env, clan);
-    const currentRows = rows.map(row => ({
-      ...row,
-      ...nextMemberGainState(row, previousGainState.get(String(row.user_id)), fetchedAt),
-      updated_at: fetchedAt
-    }));
-
     await supabaseInsert(env, SNAPSHOT_TABLE, rows);
-    await replaceCurrentRows(env, CURRENT_TABLE, {
-      clan_name: `eq.${clan}`
-    }, currentRows);
+    if (publishCurrent) {
+      const previousGainState = await fetchCurrentMemberGainState(env, clan);
+      const currentRows = rows.map(row => ({
+        ...row,
+        ...nextMemberGainState(row, previousGainState.get(String(row.user_id)), fetchedAt),
+        updated_at: fetchedAt
+      }));
+
+      await replaceCurrentRows(env, CURRENT_TABLE, {
+        clan_name: `eq.${clan}`
+      }, currentRows);
+    }
   }
 
+  const existingBattleRun = publishCurrent
+    ? null
+    : await fetchBattleRun(env, clan, resolvedBattleKey).catch(() => null);
   await upsertBattleRun(env, {
     clan_name: clan,
     battle_key: resolvedBattleKey,
@@ -1110,8 +1119,8 @@ async function handleIngest(env, source, requestedClan, force = false, options =
     battle_started_at: battleMeta.startedAt,
     battle_ended_at: battleMeta.endedAt,
     last_seen_at: fetchedAt,
-    latest_snapshot_id: snapshotId,
-    latest_snapshot_at: fetchedAt,
+    latest_snapshot_id: publishCurrent ? snapshotId : existingBattleRun?.latest_snapshot_id || null,
+    latest_snapshot_at: publishCurrent ? fetchedAt : existingBattleRun?.latest_snapshot_at || null,
     is_active: !battleMeta.endedAt || new Date(battleMeta.endedAt).getTime() > Date.now(),
     updated_at: fetchedAt
   });
@@ -1125,6 +1134,10 @@ async function handleIngest(env, source, requestedClan, force = false, options =
     battle_display_name: battleMeta.displayName,
     battle_started_at: battleMeta.startedAt,
     battle_ended_at: battleMeta.endedAt,
+    source: storedSource,
+    collection_phase: ingestGate.collection_phase || "active_event",
+    in_grace_period: ingestGate.in_grace_period === true,
+    published_current: publishCurrent,
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
     rows_inserted: rows.length
@@ -1155,6 +1168,13 @@ async function handleCurrent(request, env) {
   } else {
     rows = await fetchCurrentRows(env, clan);
     latest = latestMetaFromRows(rows);
+    if (latest && !isSnapshotAtOrBeforeEventEnd(latest.fetched_at, latest.battle_ended_at)) {
+      const canonicalLatest = await fetchLatestSnapshotMeta(env, clan, latest.battle_key);
+      if (canonicalLatest) {
+        latest = canonicalLatest;
+        rows = await fetchSnapshotRows(env, canonicalLatest.snapshot_id);
+      }
+    }
   }
 
   if (!latest) {
@@ -5087,11 +5107,12 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
           stopReasons: [stopReason]
         }
       });
-      const publishCurrent = await shouldPublishGlobalRankCurrent(env, {
-        runKey,
-        clan,
-        startedAt
-      });
+      const publishCurrent = isSnapshotAtOrBeforeEventEnd(startedAt, battleMeta.endedAt) &&
+        await shouldPublishGlobalRankCurrent(env, {
+          runKey,
+          clan,
+          startedAt
+        });
       const finalized = await finalizeGlobalRankRun(env, {
         runKey,
         clan,
@@ -5440,11 +5461,12 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
         foundMemberCount,
         shardSummary
       });
-      const publishCurrent = await shouldPublishGlobalRankCurrent(env, {
-        runKey,
-        clan,
-        startedAt
-      });
+      const publishCurrent = isSnapshotAtOrBeforeEventEnd(startedAt, battleMeta.endedAt) &&
+        await shouldPublishGlobalRankCurrent(env, {
+          runKey,
+          clan,
+          startedAt
+        });
       const finalized = await finalizeGlobalRankRun(env, {
         runKey,
         clan,
@@ -5830,11 +5852,12 @@ async function handleClansIngest(env, source, force = false, options = {}) {
 
   const clans = await fetchTopClans(env);
   const snapshotId = `clans:${resolvedBattleKey}:${fetchedAt}`;
+  const storedSource = battleCollectionSource(source, ingestGate);
 
   const rows = clans.map(row => ({
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
-    source,
+    source: storedSource,
     battle_key: resolvedBattleKey,
     battle_display_name: battleMeta.displayName,
     battle_started_at: battleMeta.startedAt,
@@ -5846,18 +5869,24 @@ async function handleClansIngest(env, source, force = false, options = {}) {
     icon_url: row.icon_url,
     raw_clan: row.raw_clan
   }));
+  const publishCurrent = isSnapshotAtOrBeforeEventEnd(fetchedAt, battleMeta.endedAt);
 
   if (rows.length) {
     await supabaseInsert(env, CLANS_SNAPSHOT_TABLE, rows);
-    await replaceCurrentRows(env, CLANS_CURRENT_TABLE, {
-      snapshot_id: "not.is.null"
-    }, rows.map(row => ({
-      ...row,
-      updated_at: fetchedAt
-    })));
+    if (publishCurrent) {
+      await replaceCurrentRows(env, CLANS_CURRENT_TABLE, {
+        snapshot_id: "not.is.null"
+      }, rows.map(row => ({
+        ...row,
+        updated_at: fetchedAt
+      })));
+    }
   }
 
   await pruneOldTableRows(env, CLANS_SNAPSHOT_TABLE, fetchedAt);
+  const existingBattleRun = publishCurrent
+    ? null
+    : await fetchBattleRun(env, CLANS_BATTLE_RUN_CLAN_NAME, resolvedBattleKey).catch(() => null);
   await upsertBattleRun(env, {
     clan_name: CLANS_BATTLE_RUN_CLAN_NAME,
     battle_key: resolvedBattleKey,
@@ -5865,8 +5894,8 @@ async function handleClansIngest(env, source, force = false, options = {}) {
     battle_started_at: battleMeta.startedAt,
     battle_ended_at: battleMeta.endedAt,
     last_seen_at: fetchedAt,
-    latest_snapshot_id: snapshotId,
-    latest_snapshot_at: fetchedAt,
+    latest_snapshot_id: publishCurrent ? snapshotId : existingBattleRun?.latest_snapshot_id || null,
+    latest_snapshot_at: publishCurrent ? fetchedAt : existingBattleRun?.latest_snapshot_at || null,
     is_active: !battleMeta.endedAt || new Date(battleMeta.endedAt).getTime() > Date.now(),
     updated_at: fetchedAt
   });
@@ -5881,6 +5910,10 @@ async function handleClansIngest(env, source, force = false, options = {}) {
     battle_display_name: battleMeta.displayName,
     battle_started_at: battleMeta.startedAt,
     battle_ended_at: battleMeta.endedAt,
+    source: storedSource,
+    collection_phase: ingestGate.collection_phase || "active_event",
+    in_grace_period: ingestGate.in_grace_period === true,
+    published_current: publishCurrent,
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
     rows_inserted: rows.length
@@ -5912,6 +5945,13 @@ async function handleClansCurrent(request, env) {
       limit
     });
     latest = latestClanMetaFromRows(rows);
+    if (latest && !isSnapshotAtOrBeforeEventEnd(latest.fetched_at, latest.battle_ended_at)) {
+      const canonicalLatest = await fetchLatestClanSnapshotMeta(env, latest.battle_key);
+      if (canonicalLatest) {
+        latest = canonicalLatest;
+        rows = await fetchClanSnapshotRows(env, canonicalLatest.snapshot_id, limit);
+      }
+    }
   }
 
   const activeBattleMeta = latest && !explicitBattle
@@ -16091,6 +16131,12 @@ async function cleanupGlobalRankRetention(env, {
     groups.get(key).push(row);
   }
 
+  const battleEndByKey = new Map();
+  await Promise.all([...groups.keys()].map(async battleKeyValue => {
+    const run = await fetchBattleRun(env, clan, battleKeyValue).catch(() => null);
+    battleEndByKey.set(battleKeyValue, isoToMs(run?.battle_ended_at));
+  }));
+
   const deleteRows = new Map();
   for (const [battleKeyValue, group] of groups.entries()) {
     const sorted = group
@@ -16098,10 +16144,15 @@ async function cleanupGlobalRankRetention(env, {
       .sort((a, b) => globalRankRunSortTime(b) - globalRankRunSortTime(a));
     const isCurrentBattle = currentBattleKey && battleKeyValue === String(currentBattleKey);
     const isEndedGroup = !isCurrentBattle || currentBattleEnded;
+    const battleEndMs = battleEndByKey.get(battleKeyValue) ||
+      (isCurrentBattle ? isoToMs(currentBattleEndedAt) : null);
     const keepFinal = isEndedGroup
       ? (
-        sorted.find(row => ["ok", "completed"].includes(String(row.status || "").toLowerCase())) ||
-        sorted[0] ||
+        sorted.find(row =>
+          ["ok", "completed"].includes(String(row.status || "").toLowerCase()) &&
+          (!battleEndMs || globalRankRunSnapshotTime(row) <= battleEndMs)
+        ) ||
+        (!battleEndMs ? sorted[0] : null) ||
         null
       )
       : null;
@@ -16109,7 +16160,7 @@ async function cleanupGlobalRankRetention(env, {
     for (const row of sorted) {
       const runKey = String(row.run_key || "").trim();
       if (!runKey) continue;
-      if (runKey === currentRunKey) continue;
+      if (runKey === currentRunKey && (!isEndedGroup || runKey === String(keepFinal?.run_key || ""))) continue;
       if (keepFinal?.run_key && runKey === String(keepFinal.run_key)) continue;
 
       const runMs = globalRankRunSortTime(row);
@@ -16136,6 +16187,10 @@ async function cleanupGlobalRankRetention(env, {
 
 function globalRankRunSortTime(row) {
   return isoToMs(row?.finished_at) || isoToMs(row?.updated_at) || isoToMs(row?.started_at) || 0;
+}
+
+function globalRankRunSnapshotTime(row) {
+  return isoToMs(row?.started_at) || isoToMs(row?.updated_at) || isoToMs(row?.finished_at) || 0;
 }
 
 async function deleteGlobalRankRunData(env, runKeys) {
@@ -16250,7 +16305,8 @@ async function finalizeGlobalRankRun(env, {
 
   return {
     rows: finalRows,
-    foundMemberCount: finalRows.filter(row => row.found).length
+    foundMemberCount: finalRows.filter(row => row.found).length,
+    publishedCurrent: publishCurrent
   };
 }
 
@@ -17177,13 +17233,26 @@ async function fetchNearestClanSnapshotRows(env, latest, targetMs, toleranceMin)
 }
 
 async function fetchLatestSnapshotMeta(env, clan, battle) {
-  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+  const battleRun = await fetchBattleRun(env, clan, battle).catch(() => null);
+  const params = {
     select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at",
     clan_name: `eq.${clan}`,
     battle_key: `eq.${battle}`,
     order: "fetched_at.desc",
     limit: "1"
-  });
+  };
+  if (battleRun?.battle_ended_at) params.fetched_at = `lte.${battleRun.battle_ended_at}`;
+  let rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+
+  if (
+    rows[0]?.battle_ended_at &&
+    !isSnapshotAtOrBeforeEventEnd(rows[0].fetched_at, rows[0].battle_ended_at)
+  ) {
+    rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+      ...params,
+      fetched_at: `lte.${rows[0].battle_ended_at}`
+    });
+  }
 
   return rows[0] || null;
 }
@@ -17304,12 +17373,25 @@ async function fetchSnapshotRows(env, snapshotId) {
 }
 
 async function fetchLatestClanSnapshotMeta(env, battle) {
-  const rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, {
+  const battleRun = await fetchBattleRun(env, CLANS_BATTLE_RUN_CLAN_NAME, battle).catch(() => null);
+  const params = {
     select: "snapshot_id,fetched_at,battle_key,battle_display_name,battle_started_at,battle_ended_at",
     battle_key: `eq.${battle}`,
     order: "fetched_at.desc",
     limit: "1"
-  });
+  };
+  if (battleRun?.battle_ended_at) params.fetched_at = `lte.${battleRun.battle_ended_at}`;
+  let rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, params);
+
+  if (
+    rows[0]?.battle_ended_at &&
+    !isSnapshotAtOrBeforeEventEnd(rows[0].fetched_at, rows[0].battle_ended_at)
+  ) {
+    rows = await supabaseSelect(env, CLANS_SNAPSHOT_TABLE, {
+      ...params,
+      fetched_at: `lte.${rows[0].battle_ended_at}`
+    });
+  }
 
   return rows[0] || null;
 }
@@ -18703,11 +18785,11 @@ function battleIngestGate({
   now = null
 }) {
   if (force) {
-    return { allowed: true, reason: "forced" };
+    return { allowed: true, reason: "forced", collection_phase: "forced", in_grace_period: false };
   }
 
   if (String(env.SKIP_ENDED_BATTLE_INGEST || "true").toLowerCase() === "false") {
-    return { allowed: true, reason: "disabled" };
+    return { allowed: true, reason: "disabled", collection_phase: "unrestricted", in_grace_period: false };
   }
 
   const meta = battleMeta || activeBattleMeta || {};
@@ -18733,6 +18815,8 @@ function battleIngestGate({
     return {
       allowed: false,
       reason: "battle_final_pull_passed",
+      collection_phase: "closed",
+      in_grace_period: false,
       message: "Scheduled battle data pull is after the configured final pull time; ingest skipped without writing snapshot rows.",
       battle_key: battleKey || activeBattleMeta?.battleKey || null,
       battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
@@ -18747,6 +18831,8 @@ function battleIngestGate({
     return {
       allowed: false,
       reason: "battle_final_pull_hard_stop",
+      collection_phase: "closed",
+      in_grace_period: false,
       message: "Battle data pull hard stop has passed; ingest skipped without writing snapshot rows.",
       battle_key: battleKey || activeBattleMeta?.battleKey || null,
       battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
@@ -18761,6 +18847,8 @@ function battleIngestGate({
     return {
       allowed: false,
       reason: "battle_ended",
+      collection_phase: "closed",
+      in_grace_period: false,
       message: "Battle has ended; ingest skipped without writing snapshot rows.",
       battle_key: battleKey || activeBattleMeta?.battleKey || null,
       battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
@@ -18775,6 +18863,8 @@ function battleIngestGate({
     return {
       allowed: false,
       reason: "battle_not_started",
+      collection_phase: "not_started",
+      in_grace_period: false,
       message: "Battle has not started yet; ingest skipped without writing snapshot rows.",
       battle_key: battleKey || activeBattleMeta?.battleKey || null,
       battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
@@ -18783,9 +18873,14 @@ function battleIngestGate({
     };
   }
 
+  const collectionTimeMs = Math.max(nowMs, scheduledMs ?? nowMs);
+  const inGracePeriod = Number.isFinite(endMs) && collectionTimeMs > endMs;
+
   return {
     allowed: true,
-    reason: "battle_open",
+    reason: inGracePeriod ? "battle_grace_period" : "battle_open",
+    collection_phase: inGracePeriod ? "grace_period" : "active_event",
+    in_grace_period: inGracePeriod,
     battle_key: battleKey || activeBattleMeta?.battleKey || null,
     battle_display_name: meta.displayName || activeBattleMeta?.displayName || null,
     battle_started_at: startedAt,
@@ -18856,6 +18951,8 @@ function skippedIngestResponse({
     ok: true,
     skipped: true,
     reason: gate.reason,
+    collection_phase: gate.collection_phase || "closed",
+    in_grace_period: gate.in_grace_period === true,
     message: gate.message || "Ingest skipped without writing snapshot rows.",
     scope,
     source,
@@ -19153,6 +19250,11 @@ function normalizeGlobalCandidateSearchOutput(row, {
 }
 
 async function findLatestGlobalRankSearchRun(env, clan, battleKeyValue = null) {
+  const requestedBattle = String(battleKeyValue || "").trim();
+  const battleRun = requestedBattle
+    ? await fetchBattleRun(env, clan, requestedBattle).catch(() => null)
+    : await fetchLatestBattleRun(env, clan).catch(() => null);
+  const resolvedBattle = requestedBattle || String(battleRun?.battle_key || "").trim();
   const params = {
     select: "*",
     clan_name: `eq.${clan}`,
@@ -19160,8 +19262,8 @@ async function findLatestGlobalRankSearchRun(env, clan, battleKeyValue = null) {
     order: "started_at.desc",
     limit: "20"
   };
-  const requestedBattle = String(battleKeyValue || "").trim();
-  if (requestedBattle) params.battle_key = `eq.${requestedBattle}`;
+  if (resolvedBattle) params.battle_key = `eq.${resolvedBattle}`;
+  if (battleRun?.battle_ended_at) params.started_at = `lte.${battleRun.battle_ended_at}`;
 
   const completed = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, params);
 
@@ -19547,6 +19649,12 @@ function globalRankRuntimeConfig(env) {
     retention_hours: globalRankRetentionHours(env),
     retention_delete_runs_per_pass: globalRankRetentionDeleteRunsPerPass(env)
   };
+}
+
+function battleCollectionSource(source, gate) {
+  const clean = String(source || "unknown").trim() || "unknown";
+  if (gate?.in_grace_period !== true) return clean;
+  return clean.endsWith(":grace_period") ? clean : `${clean}:grace_period`;
 }
 
 function globalRankRetryAttempts(env) {
@@ -20226,11 +20334,16 @@ function discordHourlyAssignmentKey(channelId, storedTarget) {
 
   const lower = raw.toLowerCase();
   const isUser = lower.startsWith("user:");
-  const target = isUser ? raw.slice("user:".length).trim() : raw;
+  const isLeague = lower.startsWith("league:");
+  const target = isUser
+    ? raw.slice("user:".length).trim()
+    : isLeague
+      ? raw.slice("league:".length).trim()
+      : raw;
   const key = normalizeText(target);
   if (!key) return "";
 
-  return `${channel}:${isUser ? "user" : "clan"}:${key}`;
+  return `${channel}:${isUser ? "user" : isLeague ? "league" : "clan"}:${key}`;
 }
 
 function battleKey(env) {
@@ -20590,6 +20703,13 @@ function isoToMs(value) {
   if (!value) return null;
   const ms = new Date(value).getTime();
   return Number.isNaN(ms) ? null : ms;
+}
+
+function isSnapshotAtOrBeforeEventEnd(snapshotAt, eventEndAt) {
+  const eventEndMs = isoToMs(eventEndAt);
+  if (!eventEndMs) return true;
+  const snapshotMs = isoToMs(snapshotAt);
+  return Boolean(snapshotMs && snapshotMs <= eventEndMs);
 }
 
 function clamp(value, min, max) {

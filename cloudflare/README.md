@@ -699,12 +699,13 @@ the one-pass scan below the request count produced by one Supabase write per
 clan. Completed consumers select by scan start time, so an older slow request
 cannot replace a newer complete result merely by finishing later.
 
-## Discord `/search`, `/history`, `/version`, and reward command Worker
+## Discord `/search`, `/history`, `/version`, `/t`, and reward command Worker
 
 `discord-search-interactions-worker.js` is the Cloudflare-only Discord command
 Worker. It does not use a Gateway bot process. Discord sends slash command
 interactions to the Worker over HTTPS, and the Worker reads cached global-rank
-data from `c0ld-clan-api-worker`.
+data from `c0ld-clan-api-worker`. The guild-only `/t` command posts the provided
+message into the current channel or thread as the bot.
 
 Create a separate Cloudflare Worker, for example:
 
@@ -729,6 +730,8 @@ Required Worker variables:
 | `GLOBAL_SCAN_CLAN` | Usually `c0ld`. Selects which global scan cache to read; it does not restrict results to c0ld members. |
 | `DISCORD_APPLICATION_ID` | Discord application/client ID. Required for the admin command-registration endpoint. |
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
+| `T_COMMAND_GUILD_ID` | Optional guild ID allowed to register and run `/t`. Defaults to `1457088639006670979`. |
+| `T_COMMAND_ROLE_ID` | Optional exact role ID allowed to run `/t`. Defaults to `1489032322056589413`. |
 | `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` and `/history` replies visible only to the user. |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`. Leave blank to allow everyone. |
 | `SEARCH_CHART_ENABLED` | Optional. Defaults to `true`; attaches a generated points/rank activity chart to `/search` responses. |
@@ -760,8 +763,9 @@ Required Worker secrets:
 | Secret | Purpose |
 |---|---|
 | `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
-| `DISCORD_BOT_TOKEN` | Bot token used to register commands and post Luna's scheduled hourly clan images. |
+| `DISCORD_BOT_TOKEN` | Bot token used to register commands, post Luna's scheduled hourly clan images, and send `/t` messages. |
 | `REGISTER_ADMIN_TOKEN` | Your private bearer token for the command-registration endpoints. |
+| `LEAGUE_INGEST_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the League API Worker. Required when `/lg info` or `/hourly league` needs to refresh stale or missing league snapshots. |
 | `CLAN_API_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the Clan API Worker. Required by `/hourly`. |
 
 In the Discord Developer Portal, open the application's **General Information**
@@ -781,6 +785,10 @@ permission integer you generated, the URL shape is:
 ```text
 https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=84992&scope=bot%20applications.commands
 ```
+
+For `/t`, the bot must be able to post wherever the command is used. In Discord
+server/channel permissions, give the bot `View Channel`, `Send Messages`, and
+`Send Messages in Threads` for thread destinations.
 
 Register or update the slash commands:
 
@@ -805,11 +813,18 @@ Invoke-RestMethod -Method Post `
 Invoke-RestMethod -Method Post `
   -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-history-command?guild_id=YOUR_GUILD_ID" `
   -Headers @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-t-command?guild_id=1457088639006670979" `
+  -Headers @{ Authorization = "Bearer $token" }
 ```
 
 Use `guild_id` while testing because it usually appears immediately in that
 server. Omit `?guild_id=...` once you want a global command, but expect Discord's
 global command cache to take longer to appear.
+
+Do not register `/t` globally. The Worker rejects `/t` outside guild
+`1457088639006670979`, and `register-t-command` forces guild registration.
 
 To hide `/search` from users, use `DISCORD_ALLOWED_ROLE_IDS` in your worker
 environment. If this variable is blank, `/search` and `/history` are open to
@@ -1126,8 +1141,8 @@ token for the selected linked Roblox account; users do not need to revoke first.
 
 ### Hatch alert tracker
 
-The Discord `/htg` command uses the same Big Games OAuth callback and hourly
-inventory snapshots to post Huge, Titanic, and Gargantuan hatch alerts. Apply:
+The Discord `/htg` command uses the same Big Games OAuth callback and scheduled
+inventory snapshots to post Huge, Titanic, and Gargantuan gain alerts. Apply:
 
 ```text
 supabase/migrations/035_hatch_tracker.sql
@@ -1145,16 +1160,18 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
-| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish hatches from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
-| `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new hatches are not missed because of cached Big Games inventory data. |
+| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
+| `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
+| `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new HTG gains are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
-| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. |
+| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. Once a tracker is armed, broad backfill/bulk-gain guards no longer suppress new HTG deltas; source and historical filters still apply. |
 | `HATCH_BASELINE_STABLE_COMPARISONS` | Optional. Defaults to `1`; number of clean snapshot comparisons required after setup or a baseline reset before HTG alerts can post. |
-| `HATCH_BACKFILL_MIN_ITEM_GROWTH` | Optional. Defaults to `25`; minimum snapshot stack-count jump considered a possible inventory backfill when HTG gains are present. |
+| `HATCH_BACKFILL_MIN_ITEM_GROWTH` | Optional. Defaults to `25`; minimum snapshot stack-count jump considered a possible inventory backfill while the tracker is warming up. |
 | `HATCH_BACKFILL_ITEM_GROWTH_RATIO` | Optional. Defaults to `0.05`; required stack-count growth ratio for the backfill guard. |
-| `HATCH_BACKFILL_HTG_GAIN_COUNT` | Optional. Defaults to `2`; HTG gained count that can trigger the bulk-gain backfill guard. |
-| `HATCH_BACKFILL_TOTAL_GAIN_COUNT` | Optional. Defaults to `20`; total gained stack count that can trigger the bulk-inventory backfill guard. |
-| `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored hatch alerts when no `/htg assign` channel exists. |
+| `HATCH_BACKFILL_HTG_GAIN_COUNT` | Optional. Defaults to `2`; HTG gained count that can trigger the bulk-gain backfill guard while a tracker is still warming up. |
+| `HATCH_BACKFILL_TOTAL_GAIN_COUNT` | Optional. Defaults to `20`; total gained stack count that can trigger the bulk-inventory backfill guard while the tracker is warming up. |
+| `INVENTORY_SNAPSHOT_ITEM_READ_LIMIT` | Optional. Defaults to `50000`; maximum snapshot item rows read when comparing full inventories for HTG and inventory diffs. |
+| `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored HTG gain alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
 
 Required/optional secrets on `inventory-detector-worker`:
@@ -1168,11 +1185,13 @@ Required/optional secrets on `inventory-detector-worker`:
 | `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
 | `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
 
-The HTG detector source filter removes matching Huge, Titanic, and Gargantuan
-inventory gains when those same pets appear as received trade items, booth
-purchases, or incoming mail within the snapshot window. If the source endpoints
-cannot be read, Luna returns that in the `source_filter` result and leaves the
-candidate gains unfiltered.
+The HTG detector looks for new Huge, Titanic, and Gargantuan inventory deltas,
+then removes matching gains when those same pets appear as received trade items,
+booth purchases, or incoming mail within the snapshot window. It also suppresses
+unstable baseline/backfill data while a tracker is warming up; after that,
+detected HTG gains are not dropped just because other inventory also changed. If the source
+endpoints cannot be read, Luna returns that in the `source_filter` result and
+leaves the candidate gains unfiltered.
 
 Set these on `c0ld-discord-search`:
 
@@ -1195,7 +1214,7 @@ The user flow is:
   return which linked Roblox account approved a generic OAuth link.
 - `/htg accounts` lists every Roblox account connected to the user's Discord
   account.
-- `/htg assign channel:<channel>` sets the only hatch-alert destination for the
+- `/htg assign channel:<channel>` sets the only HTG gain-alert destination for the
   Discord server. Once one or more assigned channels exist, the inventory Worker
   posts only to those assigned channels and ignores the legacy channel/webhook
   fallback.
@@ -1243,12 +1262,14 @@ inside `board.summary`.
 
 ## Luna global `/hourly` picture posts
 
-The Luna Discord interactions Worker supports hourly image posts for either
-a PS99 clan board or a single user's `/search` picture:
+The Luna Discord interactions Worker supports hourly image posts for a PS99
+clan board, a single user's `/search` picture, or a league member-progress
+picture:
 
 ```text
 /hourly clan clan:WMSY channel:#hourly-gains
 /hourly user username:Cinnamowopal channel:#hourly-gains
+/hourly league league:dezzz channel:#hourly-gains
 ```
 
 `channel` is optional and defaults to the channel or thread where the command
@@ -1271,24 +1292,32 @@ Add this secret to `discord-search-interactions-worker.js`:
 | Secret | Purpose |
 |---|---|
 | `CLAN_API_ADMIN_TOKEN` | Must equal `INGEST_ADMIN_TOKEN` on `c0ld-clan-api-worker`. It lets Luna collect an assigned clan's current battle snapshot and manage saved destinations. |
+| `LEAGUE_INGEST_ADMIN_TOKEN` | Must equal `INGEST_ADMIN_TOKEN` on `yamo-league-api-worker` if `/hourly league` needs to refresh stale or missing league snapshots. |
 
 Keep the existing `CLAN_API_WORKER` service binding when possible. The Luna
+Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
+`/hourly league` reuses the stored league snapshots behind `/lg info`, renders a
+c0ld-themed member progress image, posts a preview immediately, then refreshes
+hourly with the same scheduler as clan and user boards.
+
 Worker needs an hourly cron trigger:
 
 ```text
 0 * * * *
 ```
 
-Assignments are stored per Discord channel/thread ID. Assigning the same
-destination again replaces its hourly target without affecting assignments in
-other servers. Luna posts a first image immediately, then one image per hour.
-Each assigned clan or user is collected independently.
+Assignments are stored per Discord channel/thread and target. A clan board, user
+board, and league board can coexist in the same channel/thread because each
+saved target gets its own assignment key. Luna posts a first image immediately,
+then one image per hour. Each assigned clan, user, or league is collected
+independently.
 
 Use `GET /admin/hourly/status` with the Luna Discord Worker's admin token to
 verify stored assignments, due state, the last Discord error, and whether the
-required bot/API tokens are present. If `/hourly clan` or `/hourly user` works
-but no hourly post follows, make sure the worker receiving Discord interactions
-is the same deployed worker that has the `0 * * * *` cron trigger.
+required bot/API tokens are present. If `/hourly clan`, `/hourly user`, or
+`/hourly league` works but no hourly post follows, make sure the worker
+receiving Discord interactions is the same deployed worker that has the
+`0 * * * *` cron trigger.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for

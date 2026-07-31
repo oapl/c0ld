@@ -31,6 +31,9 @@ SEARCH_CHART_RESTART_MARKERS = "false"
 DISCORD_APPLICATION_ID = "YOUR_DISCORD_APPLICATION_ID"
 # Optional. Use this while testing so the command appears in one server quickly.
 DISCORD_GUILD_ID = ""
+# Guild-only /t relay command. Defaults match the c0ld server and allowed role.
+T_COMMAND_GUILD_ID = "1457088639006670979"
+T_COMMAND_ROLE_ID = "1489032322056589413"
 # Optional. Comma-separated Discord role IDs allowed to use /search and /history.
 # Leave blank to allow everyone who can see the command.
 DISCORD_ALLOWED_ROLE_IDS = ""

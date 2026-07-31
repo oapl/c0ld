@@ -78,7 +78,7 @@ if ($Remove) {
     ConvertTo-Json -Depth 8
 
   Write-Host ""
-  Write-Host "After removing it, run /hourly clan or /hourly user inside the intended Discord thread and leave the optional channel blank." -ForegroundColor Cyan
+  Write-Host "After removing it, run /hourly clan, /hourly user, or /hourly league inside the intended Discord thread and leave the optional channel blank." -ForegroundColor Cyan
 }
 
 if ($ForceRun) {

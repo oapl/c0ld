@@ -4,6 +4,8 @@ param(
 
   [string]$GuildId = "",
 
+  [string]$TGuildId = "1457088639006670979",
+
   [Parameter(Mandatory = $true)]
   [string]$Token,
 
@@ -179,7 +181,11 @@ if (-not $SkipDelete) {
 }
 
 if (-not $SkipRegister) {
-  Write-Host "Registering /search, /version, /clan, /lg, /htg, /offline, and /kms..." -ForegroundColor Cyan
+  if ((-not $RegisterGlobal) -and $GuildId -eq $TGuildId) {
+    Write-Host "Registering /search, /version, /clan, /lg, /htg, /offline, /kms, and guild-only /t..." -ForegroundColor Cyan
+  } else {
+    Write-Host "Registering /search, /version, /clan, /lg, /htg, /offline, and /kms..." -ForegroundColor Cyan
+  }
   $registerPaths = @(
     "/admin/register-search-command",
     "/admin/register-version-command",
@@ -189,6 +195,9 @@ if (-not $SkipRegister) {
     "/admin/register-offline-command",
     "/admin/register-kms-command"
   )
+  if ((-not $RegisterGlobal) -and $GuildId -eq $TGuildId) {
+    $registerPaths += "/admin/register-t-command"
+  }
   foreach ($path in $registerPaths) {
     $registerPath = if ($RegisterGlobal) {
       "${path}?scope=global"

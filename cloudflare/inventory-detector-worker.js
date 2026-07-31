@@ -33,7 +33,6 @@ const HATCH_SOURCE_ENDPOINTS = Object.freeze([
 const BIG_GAMES_GRANT_KEY = "big_games_inventory";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DISCORD_COMPONENTS_V2_FLAG = 1 << 15;
-const HATCH_ALERT_COLOR = 0xff9b96;
 const LUNA_WEBHOOK_USERNAME = "Luna";
 const LUNA_AVATAR_URL = "https://i.imgur.com/rVVo99A.png";
 const HATCH_ALERT_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
@@ -51,9 +50,11 @@ const DEFAULT_HATCH_BACKFILL_ITEM_GROWTH_RATIO = 0.05;
 const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
 const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
 const DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS = 48;
+const DEFAULT_HTG_SCAN_INTERVAL_MINUTES = 5;
+const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-2026-07-29b";
+const INVENTORY_BUILD_ID = "inventory-htg-gained-2026-07-31a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -129,12 +130,14 @@ export default {
           hatch_tracker: {
             big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
+            scan_interval_minutes: htgScanIntervalMinutes(env),
             baseline_protection_enabled: envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true),
             baseline_stable_comparisons: hatchBaselineStableComparisons(env),
             backfill_min_item_growth: hatchBackfillMinItemGrowth(env),
             backfill_item_growth_ratio: hatchBackfillItemGrowthRatio(env),
             backfill_htg_gain_count: hatchBackfillHtgGainCount(env),
             backfill_total_gain_count: hatchBackfillTotalGainCount(env),
+            snapshot_item_read_limit: inventorySnapshotItemReadLimit(env),
             channel_configured: Boolean(assignedHatchChannelCount || hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
             assigned_channel_count: assignedHatchChannelCount,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
@@ -203,17 +206,21 @@ export default {
       const users = await trackedInventoryUsers(env);
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
       const results = await Promise.allSettled(users.map(async user => {
-        if (!await inventoryScanIsDue(env, user, now, { synchronized: true })) return { skipped: true, user };
         const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id).catch(error => {
           console.warn("Scheduled hatch tracker lookup failed", error?.message || error);
           return null;
         });
+        const htgTracked = !!tracker;
+        const dueOptions = htgTracked
+          ? { minIntervalMinutes: htgScanIntervalMinutes(env) }
+          : { synchronized: true };
+        if (!await inventoryScanIsDue(env, user, now, dueOptions)) return { skipped: true, user, htg_tracked: htgTracked };
         const forceHatchRefresh = !!tracker && envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true);
         const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env), { force: forceHatchRefresh });
         if (tracker && result.snapshot?.id) {
           result.hatch_alert = await postHatchAlertIfNeeded(env, user, result.snapshot, { source: "schedule", tracker })
             .catch(error => {
-              console.warn("Scheduled hatch alert check failed", error?.message || error);
+              console.warn("Scheduled HTG gain alert check failed", error?.message || error);
               return { posted: false, error: error?.message || String(error) };
             });
         }
@@ -699,8 +706,8 @@ async function handleHatchTrackerCommand(request, env) {
       account: accountSelector,
       tracker: await hatchTrackerStatus(env, discordUserId),
       message: accountSelector === "all"
-        ? `${hatchTierResponseLabel(selectedTier)} hatch alerts were disabled for your connected HTG accounts.`
-        : `${hatchTierResponseLabel(selectedTier)} hatch alerts were disabled for ${hatchTrackerRowLabel(targets[0])}.`
+        ? `${hatchTierResponseLabel(selectedTier)} HTG gain alerts were disabled for your connected HTG accounts.`
+        : `${hatchTierResponseLabel(selectedTier)} HTG gain alerts were disabled for ${hatchTrackerRowLabel(targets[0])}.`
     });
   }
 
@@ -724,8 +731,8 @@ async function handleHatchTrackerCommand(request, env) {
       expires_at: auth.expires_at,
       tracker: await hatchTrackerStatus(env, discordUserId),
       message: accountLabel
-        ? `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued for ${accountLabel}. Approve that same linked Roblox account in Big Games.`
-        : `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued. Connect each Big Games linked Roblox account you want tracked.`
+        ? `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are queued for ${accountLabel}. Approve that same linked Roblox account in Big Games.`
+        : `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are queued. Connect each Big Games linked Roblox account you want tracked.`
     });
   }
 
@@ -747,7 +754,7 @@ async function handleHatchTrackerCommand(request, env) {
       authorize_url: auth.authorize_url,
       expires_at: auth.expires_at,
       tracker: await hatchTrackerStatus(env, discordUserId),
-      message: `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued for ${auth.username || auth.user_id || accountSelector}. Approve that same linked Roblox account in Big Games.`
+      message: `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are queued for ${auth.username || auth.user_id || accountSelector}. Approve that same linked Roblox account in Big Games.`
     });
   }
 
@@ -811,8 +818,8 @@ async function handleHatchTrackerCommand(request, env) {
       expires_at: auth.expires_at,
       tracker: await hatchTrackerStatus(env, discordUserId),
       message: expiredRows.length === 1
-        ? `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued for ${hatchTrackerRowLabel(firstExpired)}, but Big Games authorization needs to be refreshed.`
-        : `${hatchTierResponseLabel(selectedTier)} hatch alerts are queued for ${expiredRows.length} accounts. Refresh ${hatchTrackerRowLabel(firstExpired)} with this link, then run the command again for the next account.`
+        ? `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are queued for ${hatchTrackerRowLabel(firstExpired)}, but Big Games authorization needs to be refreshed.`
+        : `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are queued for ${expiredRows.length} accounts. Refresh ${hatchTrackerRowLabel(firstExpired)} with this link, then run the command again for the next account.`
     });
   }
 
@@ -823,8 +830,8 @@ async function handleHatchTrackerCommand(request, env) {
     account: accountSelector,
     tracker: await hatchTrackerStatus(env, discordUserId),
     message: accountSelector === "all"
-      ? `${hatchTierResponseLabel(selectedTier)} hatch alerts are enabled for ${selectedRows.length} connected HTG account${selectedRows.length === 1 ? "" : "s"}.`
-      : `${hatchTierResponseLabel(selectedTier)} hatch alerts are enabled for ${hatchTrackerRowLabel(selectedRows[0])}.`
+      ? `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are enabled for ${selectedRows.length} connected HTG account${selectedRows.length === 1 ? "" : "s"}.`
+      : `${hatchTierResponseLabel(selectedTier)} HTG gain alerts are enabled for ${hatchTrackerRowLabel(selectedRows[0])}.`
   });
 }
 
@@ -2285,7 +2292,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
   const start = endIndex > 0 ? snapshots[endIndex - 1] : snapshots[snapshots.length - 2];
   if (!start || !end || start.id === end.id) {
     await markHatchSnapshotChecked(env, tracker, latestSnapshot.id);
-    return { posted: false, reason: "Need at least two snapshots before hatch alerts can compare inventory.", snapshot_id: latestSnapshot.id };
+    return { posted: false, reason: "Need at least two snapshots before HTG gain alerts can compare inventory.", snapshot_id: latestSnapshot.id };
   }
 
   const diff = await buildDiffFromSnapshots(env, start, end);
@@ -2320,8 +2327,8 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     };
   }
   const sourceFilter = await filterHatchSourceGains(env, userId, historyFilter.rows, { start, end });
-  const hatched = sourceFilter.rows;
-  if (!hatched.length) {
+  const gainedHtg = sourceFilter.rows;
+  if (!gainedHtg.length) {
     await markHatchSnapshotChecked(env, tracker, latestSnapshot.id);
     return {
       posted: false,
@@ -2334,8 +2341,8 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     };
   }
 
-  const featured = pickFeaturedHatch(hatched);
-  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, hatched, { start, end });
+  const featured = pickFeaturedHatch(gainedHtg);
+  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, { start, end });
   const discordResponse = await sendHatchAlert(env, payload, tracker);
   const now = new Date().toISOString();
 
@@ -2358,7 +2365,7 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     rap: featured.rap || 0,
     icon: featured.icon || null,
     image_url: featured.image_url || null,
-    all_gained: hatched.map(compactHatchCandidate),
+    all_gained: gainedHtg.map(compactHatchCandidate),
     discord_response: discordResponse || {},
     created_at: now
   }], "minimal");
@@ -2704,6 +2711,7 @@ function hatchSnapshotBackfillRisk(env, state, start, end, diff, candidates) {
   const reasons = [];
 
   if (
+    !state.armed &&
     candidateGainCount > 0 &&
     itemGrowth >= hatchBackfillMinItemGrowth(env) &&
     itemGrowthRatio >= hatchBackfillItemGrowthRatio(env)
@@ -2711,15 +2719,17 @@ function hatchSnapshotBackfillRisk(env, state, start, end, diff, candidates) {
     reasons.push("inventory_item_count_jump");
   }
   if (
+    !state.armed &&
     candidateGainCount >= hatchBackfillHtgGainCount(env) &&
-    (!state.armed || itemGrowth >= Math.min(hatchBackfillMinItemGrowth(env), candidateGainCount))
+    itemGrowth >= Math.min(hatchBackfillMinItemGrowth(env), candidateGainCount)
   ) {
     reasons.push("bulk_htg_gain");
   }
   if (
+    !state.armed &&
     candidateGainCount > 0 &&
     totalGainCount >= hatchBackfillTotalGainCount(env) &&
-    (!state.armed || itemGrowth >= hatchBackfillMinItemGrowth(env))
+    itemGrowth >= hatchBackfillMinItemGrowth(env)
   ) {
     reasons.push("bulk_inventory_gain");
   }
@@ -3014,7 +3024,7 @@ function compactHatchSourceFilterSummary(filter) {
   };
 }
 
-function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapshots) {
+function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snapshots) {
   {
     const alertDiscordUserId = String(tracker.discord_user_id || "").trim();
     const alertUsername = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
@@ -3029,11 +3039,11 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
     const alertPlayer = alertDiscordUserId
       ? `**Player:** <@${alertDiscordUserId}> (${escapeDiscordMarkdown(alertUsername)})`
       : `**Player:** ${escapeDiscordMarkdown(alertUsername)}`;
-    const alertExtra = hatched.length > 1
-      ? `-# Also detected: ${hatched.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${escapeDiscordMarkdown(hatchDisplayItemName(row))} x${shortInventoryNumber(row.delta)}`).join(", ")}`
+    const alertExtra = gainedHtg.length > 1
+      ? `-# Also detected: ${gainedHtg.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${escapeDiscordMarkdown(hatchDisplayItemName(row))} x${shortInventoryNumber(row.delta)}`).join(", ")}`
       : "";
     const alertLines = [
-      `### ${escapeDiscordMarkdown(alertUsername)} found something magical`,
+      `### ${escapeDiscordMarkdown(alertUsername)} acquired a new HTG`,
       alertPlayer,
       `**Item:** ${alertTheme.icon} **${alertTier}:** ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}`,
       `**RAP:** ${alertRap}`,
@@ -3058,7 +3068,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
                   type: 10,
                   content: [
                     `## ${alertTheme.icon} ${alertTheme.title}`,
-                    `-# detected <t:${alertUnix}:R>`
+                    `-# acquired <t:${alertUnix}:R>`
                   ].join("\n")
                 }
               ],
@@ -3071,7 +3081,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
             { type: 14, divider: true, spacing: 1 },
             { type: 10, content: alertLines.join("\n") },
             { type: 14, divider: true, spacing: 1 },
-            { type: 10, content: "-# Luna filters trade, booth, and mail matches before posting HTG alerts." },
+            { type: 10, content: "-# Luna filters trade, booth, mail, and unstable inventory-data matches before posting HTG gain alerts." },
             { type: 14, divider: true, spacing: 1 },
             { type: 10, content: `${lunaHatchCreditLine()} | <t:${alertUnix}:R>` }
           ]
@@ -3082,70 +3092,15 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, hatched, snapsho
 
 }
 
-/*
-  const discordUserId = String(tracker.discord_user_id || "").trim();
-  const username = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
-  const displayItem = hatchDisplayItemName(featured);
-  const tier = hatchTierLabel(featured.tier);
-  const tierEmoji = featured.tier === "gargantuan" ? "💎" : featured.tier === "titanic" ? "🌌" : "✨";
-  const imageUrl = featured.image_url || "";
-  const rapLine = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
-  const extra = hatched.length > 1
-    ? `\n-# Also detected: ${hatched.slice(1, 5).map(row => `${hatchTierLabel(row.tier)} ${hatchDisplayItemName(row)} x${shortInventoryNumber(row.delta)}`).join(", ")}`
-    : "";
-  const timestamp = snapshots?.end?.captured_at || new Date().toISOString();
-  const unix = Math.floor(new Date(timestamp).getTime() / 1000);
-  const templateContext = {
-    username: escapeDiscordMarkdown(username),
-    displayItem: escapeDiscordMarkdown(displayItem),
-    tier,
-    tierEmoji,
-    rapLine,
-    quantityText: Number(featured.delta) > 1 ? ` x${shortInventoryNumber(featured.delta)}` : "",
-    extra
-  };
-  const alertText = hatchAlertTemplate(featured.tier, templateContext);
-
-  return {
-    username: LUNA_WEBHOOK_USERNAME,
-    allowed_mentions: discordUserId ? { users: [discordUserId] } : { parse: [] },
-    flags: DISCORD_COMPONENTS_V2_FLAG,
-    components: [
-      {
-        type: 17,
-        accent_color: HATCH_ALERT_COLOR,
-        components: [
-          { type: 10, content: `## HTG Alerts ${discordUserId ? `||<@${discordUserId}>||` : ""}` },
-          { type: 14, divider: true, spacing: 1 },
-          imageUrl
-            ? {
-                type: 9,
-                components: [{ type: 10, content: alertText }],
-                accessory: {
-                  type: 11,
-                  media: { url: imageUrl },
-                  description: `${tier} ${displayItem}`
-                }
-              }
-            : { type: 10, content: alertText },
-          { type: 14, divider: true, spacing: 1 },
-          { type: 10, content: `${lunaHatchCreditLine()} | <t:${unix}:R>` }
-        ]
-      }
-    ]
-  };
-}
-*/
-
 function hatchAlertTheme(tier) {
   const normalized = String(tier || "").toLowerCase();
   if (normalized === "gargantuan") {
-    return { title: "Gargantuan Alert", icon: ":gem:", accent: 0xffd44d };
+    return { title: "Gargantuan Acquired", icon: ":gem:", accent: 0xffd44d };
   }
   if (normalized === "titanic") {
-    return { title: "Titanic Alert", icon: ":milky_way:", accent: 0xff5db8 };
+    return { title: "Titanic Acquired", icon: ":milky_way:", accent: 0xff5db8 };
   }
-  return { title: "Huge Alert", icon: ":sparkles:", accent: 0x34e1ef };
+  return { title: "Huge Acquired", icon: ":sparkles:", accent: 0x34e1ef };
 }
 
 function hatchAlertSnapshotLine(snapshots) {
@@ -3164,56 +3119,12 @@ function lunaHatchCreditLine() {
   return "-# :woman_genie: Luna, A Pet Sim 99 Bot :rainbow_flag: \u2219 by [Cinnamowopal](https://x.com/oapl_the_opal)";
 }
 
-function hatchAlertTemplate(tier, context) {
-  if (tier === "gargantuan") return gargantuanHatchAlertTemplate(context);
-  if (tier === "titanic") return titanicHatchAlertTemplate(context);
-  return hugeHatchAlertTemplate(context);
-}
-
-function hugeHatchAlertTemplate(context) {
-  return [
-    ".⋆˚࿔𖥔 ݁ ˖𓂃.˖✧˖.𓂃˖ ࣪ ⊹✶°⋆.",
-    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
-    `💎 **RAP:** ${context.rapLine}`,
-    "┊         ┊       ┊   ┊    ┊        ┊",
-    "┊         ┊       ┊   ┊   ˚★⋆｡˚  ⋆",
-    "┊         ┊       ┊   ⋆",
-    "┊         ┊       ★⋆",
-    "┊ ◦",
-    "★⋆      ┊ .  ˚",
-    "           ˚★",
-    context.extra
-  ].filter(Boolean).join("\n");
-}
-
-function titanicHatchAlertTemplate(context) {
-  return [
-    "✦・ﾟ: *✧･ﾟ:* TITANIC HATCH *:･ﾟ✧*:･ﾟ✦",
-    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
-    `💎 **RAP:** ${context.rapLine}`,
-    "━━━━━━━━━━━━━━━━━━━━",
-    "˚₊‧꒰ა ☆ ໒꒱ ‧₊˚",
-    context.extra
-  ].filter(Boolean).join("\n");
-}
-
-function gargantuanHatchAlertTemplate(context) {
-  return [
-    "✧･ﾟ: *✧･ﾟ:* GARGANTUAN HATCH *:･ﾟ✧*:･ﾟ✧",
-    `🙇‍♀️ **${context.username}** hatched ${context.tierEmoji} **${context.tier}** ${context.displayItem}${context.quantityText}`,
-    `💎 **RAP:** ${context.rapLine}`,
-    "━━━━━━━━━━━━━━━━━━━━",
-    "⋆｡ﾟ☁︎｡⋆｡ ﾟ☾ ﾟ｡⋆",
-    context.extra
-  ].filter(Boolean).join("\n");
-}
-
 async function sendHatchAlert(env, payload, tracker = null) {
   const assignedConfigs = await fetchEnabledHatchGuildConfigs(env).catch(() => []);
   const botToken = String(env.DISCORD_BOT_TOKEN || "").trim();
   if (assignedConfigs.length) {
     if (!botToken) {
-      throw httpError(500, "HTG hatch-alert channels are assigned, but DISCORD_BOT_TOKEN is not set on the inventory Worker.");
+      throw httpError(500, "HTG gain-alert channels are assigned, but DISCORD_BOT_TOKEN is not set on the inventory Worker.");
     }
     const alertGuildIds = hatchTrackerAlertGuildIds(tracker);
     const targetConfigs = alertGuildIds.length
@@ -3225,8 +3136,8 @@ async function sendHatchAlert(env, payload, tracker = null) {
       throw httpError(
         409,
         alertGuildIds.length
-          ? "HTG hatch alerts are enabled for this account, but none of its enabled servers have an assigned HTG channel."
-          : "HTG hatch alerts need a server binding. Run /htg enable in the server that should receive this account's alerts."
+          ? "HTG gain alerts are enabled for this account, but none of its enabled servers have an assigned HTG channel."
+          : "HTG gain alerts need a server binding. Run /htg enable in the server that should receive this account's alerts."
       );
     }
     const destinations = [];
@@ -3240,7 +3151,7 @@ async function sendHatchAlert(env, payload, tracker = null) {
         response: posted
       });
     }
-    if (!destinations.length) throw httpError(500, "HTG hatch-alert assignments exist, but none contain a channel_id.");
+    if (!destinations.length) throw httpError(500, "HTG gain-alert assignments exist, but none contain a channel_id.");
     return { ok: true, mode: "assigned_channels", destinations };
   }
 
@@ -3268,7 +3179,7 @@ async function sendHatchAlertBotMessage(channelId, botToken, payload) {
     body: JSON.stringify(botPayload)
   });
   const text = await res.text();
-  if (!res.ok) throw httpError(res.status, `Discord hatch alert bot post failed: ${text.slice(0, 500)}`);
+  if (!res.ok) throw httpError(res.status, `Discord HTG gain alert bot post failed: ${text.slice(0, 500)}`);
   try { return text ? JSON.parse(text) : { ok: true }; } catch { return { ok: true, response: text }; }
 }
 
@@ -4023,7 +3934,7 @@ async function getLatestSnapshot(env, userId, options = {}) {
   return rows[0] || null;
 }
 async function getSnapshotItems(env, snapshotId) {
-  const rows = await supabaseSelectAll(env, ITEM_TABLE, { snapshot_id: `eq.${snapshotId}`, order: "id.asc" }, 10000);
+  const rows = await supabaseSelectAll(env, ITEM_TABLE, { snapshot_id: `eq.${snapshotId}`, order: "id.asc" }, inventorySnapshotItemReadLimit(env));
   return rows.map(normalizeStoredItem);
 }
 function normalizeStoredItem(item) {
@@ -4382,7 +4293,36 @@ async function isCurrentLeagueMember(env, userId, leagueName, runKey) {
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
-async function inventoryScanIsDue(env, user, now = new Date(), options = {}) { requireSupabase(env); const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID)); if (!latest?.captured_at) return true; const latestTime = new Date(latest.captured_at).getTime(); if (options.synchronized && envBool(env.INVENTORY_SYNC_COHORT, true)) { if (now.getTime() - latestTime < 5 * 60000) return false; const intervalMs = 60 * 60000; const currentCohort = Math.floor(now.getTime() / intervalMs); const latestCohort = Math.floor(latestTime / intervalMs); return latest.source !== "schedule" || latestCohort < currentCohort; } return now.getTime() - latestTime >= inventoryMinFetchIntervalMinutes(env) * 60000; }
+function htgScanIntervalMinutes(env) {
+  const value = Number(env.HTG_SCAN_INTERVAL_MINUTES || env.HATCH_SCAN_INTERVAL_MINUTES || DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
+  return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_HTG_SCAN_INTERVAL_MINUTES;
+}
+function inventorySnapshotItemReadLimit(env) {
+  const value = Number(env.INVENTORY_SNAPSHOT_ITEM_READ_LIMIT || DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT);
+  return Number.isFinite(value) ? Math.max(10000, Math.min(200000, Math.floor(value))) : DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT;
+}
+async function inventoryScanIsDue(env, user, now = new Date(), options = {}) {
+  requireSupabase(env);
+  const latest = await getLatestSnapshot(env, String(user.user_id || DEFAULT_USER_ID));
+  if (!latest?.captured_at) return true;
+
+  const latestTime = new Date(latest.captured_at).getTime();
+  const elapsedMs = now.getTime() - latestTime;
+  const requestedInterval = Number(options.minIntervalMinutes);
+  if (Number.isFinite(requestedInterval)) {
+    return elapsedMs >= Math.max(5, Math.min(1440, requestedInterval)) * 60000;
+  }
+
+  if (options.synchronized && envBool(env.INVENTORY_SYNC_COHORT, true)) {
+    if (elapsedMs < 5 * 60000) return false;
+    const intervalMs = 60 * 60000;
+    const currentCohort = Math.floor(now.getTime() / intervalMs);
+    const latestCohort = Math.floor(latestTime / intervalMs);
+    return latest.source !== "schedule" || latestCohort < currentCohort;
+  }
+
+  return elapsedMs >= inventoryMinFetchIntervalMinutes(env) * 60000;
+}
 function localDateString(date, env) { return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone(env), year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
 function localHourMinute(date, env) { const parts = new Intl.DateTimeFormat("en-US", { timeZone: timeZone(env), hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date); return { hour: Number(parts.find(p => p.type === "hour")?.value || 0), minute: Number(parts.find(p => p.type === "minute")?.value || 0) }; }
 function isMountainMidnight(date, env) { const { hour, minute } = localHourMinute(date, env); return hour === 0 && minute <= 10; }

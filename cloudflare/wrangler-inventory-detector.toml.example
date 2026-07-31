@@ -17,10 +17,12 @@ BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_ME"
 BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
 HATCH_BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_WITH_LUNA_HTG_APP"
 HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
-# HTG defaults to these four scopes so source filtering can distinguish hatches
-# from trade, booth, or mail gains. Register them on the Luna HTG Big Games app.
+# HTG defaults to these four scopes so source filtering can distinguish tracked
+# HTG inventory gains from trade, booth, or mail gains. Register them on the Luna
+# HTG Big Games app.
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
+HTG_SCAN_INTERVAL_MINUTES = "5"
 HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"
@@ -29,6 +31,7 @@ HATCH_BACKFILL_MIN_ITEM_GROWTH = "25"
 HATCH_BACKFILL_ITEM_GROWTH_RATIO = "0.05"
 HATCH_BACKFILL_HTG_GAIN_COUNT = "2"
 HATCH_BACKFILL_TOTAL_GAIN_COUNT = "20"
+INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = "50000"
 INVENTORY_OAUTH_RETURN_URL = "https://c0ld-clan.com/league-inv-test.html"
 # HTG is Discord-bot only. Leave this blank unless you build a dedicated HTG return page.
 HATCH_TRACKER_RETURN_URL = ""
@@ -38,10 +41,10 @@ HATCH_ALERT_CHANNEL_ID = ""
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
-# One scheduled collection per hour for every configured or actively opted-in
-# account. OAuth callback tests that request refresh=true are counted separately.
+# HTG-enabled accounts scan on the HTG interval above. Normal inventory accounts
+# still use the hourly synchronized cohort unless manually refreshed.
 [triggers]
-crons = ["17 * * * *"]
+crons = ["*/5 * * * *"]
 
 # Required secrets:
 # wrangler secret put SUPABASE_SERVICE_KEY

@@ -1,6 +1,7 @@
 param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev",
   [string]$KmsGuildId = "1529193730022838392",
+  [string]$TGuildId = "1457088639006670979",
   [string[]]$CleanupGuildIds = @("1457088639006670979", "1529193730022838392"),
   [int]$MaxAttempts = 8
 )
@@ -107,6 +108,7 @@ $commandsToDelete = @(
   "htg",
   "offline",
   "kms",
+  "t",
   "duck",
   "duplicate",
   "duplicatecheck"
@@ -172,6 +174,13 @@ if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
   Start-Sleep -Milliseconds 1100
 }
 
+if (-not [string]::IsNullOrWhiteSpace($TGuildId)) {
+  Write-Host "Registering guild-only /t in guild $TGuildId..." -ForegroundColor Cyan
+  $tQuery = New-QueryString @{ guild_id = $TGuildId }
+  Invoke-DiscordWorkerAdmin -Method POST -Path "/admin/register-t-command$tQuery" | ConvertTo-Json -Depth 8
+  Start-Sleep -Milliseconds 1100
+}
+
 Write-Host "Current global commands:" -ForegroundColor Cyan
 Invoke-DiscordWorkerAdmin -Path "/admin/commands?scope=global" |
   ConvertTo-Json -Depth 8
@@ -182,6 +191,15 @@ if (-not [string]::IsNullOrWhiteSpace($KmsGuildId)) {
   Invoke-DiscordWorkerAdmin -Path "/admin/commands$kmsListQuery" |
     Select-Object -ExpandProperty results |
     ForEach-Object { $_.commands | Where-Object { $_.name -eq "kms" } } |
+    ConvertTo-Json -Depth 8
+}
+
+if (-not [string]::IsNullOrWhiteSpace($TGuildId)) {
+  Write-Host "Current /t guild command in ${TGuildId}:" -ForegroundColor Cyan
+  $tListQuery = New-QueryString @{ scope = "guild"; guild_id = $TGuildId }
+  Invoke-DiscordWorkerAdmin -Path "/admin/commands$tListQuery" |
+    Select-Object -ExpandProperty results |
+    ForEach-Object { $_.commands | Where-Object { $_.name -eq "t" } } |
     ConvertTo-Json -Depth 8
 }
 

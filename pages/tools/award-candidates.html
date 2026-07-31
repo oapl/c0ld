@@ -162,6 +162,8 @@ let battles=[];
 let playerById=new Map();
 let playerByName=new Map();
 let loading=false;
+let battleSelectionPinned=new URLSearchParams(location.search).has("battle");
+const BATTLE_DISCOVERY_INTERVAL_MS=5*60*1000;
 
 const els={
   status:document.getElementById("status"),
@@ -354,15 +356,50 @@ async function loadPlayers(){
 }
 
 async function loadBattles(){
-  const data=await fetchJson(API+"/api/battles?clan="+encodeURIComponent(CLAN)+"&limit=100",{rows:[]});
+  const previous=els.battleSelect.value;
+  const data=await fetchJson(API+"/api/battles?clan="+encodeURIComponent(CLAN)+"&limit=100");
   battles=(Array.isArray(data.rows)?data.rows:[]).sort((a,b)=>new Date(b.last_snapshot||b.latest_snapshot_at||0)-new Date(a.last_snapshot||a.latest_snapshot_at||0));
-  els.battleSelect.innerHTML='<option value="current">Current Battle</option>'+battles.map(row=>{
+  els.battleSelect.innerHTML=battles.map((row,index)=>{
     const key=row.battle||row.battle_key;
     const name=row.display_name||row.battle_display_name||key;
-    return '<option value="'+esc(key)+'">'+esc(name)+'</option>';
+    return '<option value="'+esc(key)+'">'+esc(index===0?name+" (Latest)":name)+'</option>';
   }).join("");
   const requested=new URLSearchParams(location.search).get("battle");
-  if(requested&&[...els.battleSelect.options].some(option=>option.value===requested))els.battleSelect.value=requested;
+  const optionValues=new Set([...els.battleSelect.options].map(option=>option.value));
+  if(!battles.length){
+    els.battleSelect.innerHTML='<option value="current">Latest Detected Battle</option>';
+    battleSelectionPinned=false;
+  }else if(battleSelectionPinned&&requested&&optionValues.has(requested)){
+    els.battleSelect.value=requested;
+  }else if(battleSelectionPinned&&previous&&optionValues.has(previous)){
+    els.battleSelect.value=previous;
+  }else{
+    battleSelectionPinned=false;
+    els.battleSelect.selectedIndex=0;
+  }
+  return previous!==els.battleSelect.value;
+}
+
+function latestBattleKey(){
+  return String(battles[0]?.battle||battles[0]?.battle_key||"").trim();
+}
+
+function syncBattleUrl(selected){
+  const url=new URL(location.href);
+  if(!battleSelectionPinned&&selected===latestBattleKey())url.searchParams.delete("battle");
+  else if(selected&&selected!=="current")url.searchParams.set("battle",selected);
+  else url.searchParams.delete("battle");
+  history.replaceState(null,"",url);
+}
+
+async function refreshDetectedBattle(){
+  if(loading||battleSelectionPinned)return;
+  try{
+    const changed=await loadBattles();
+    if(changed)await loadCandidates();
+  }catch(error){
+    console.warn("Latest battle refresh failed",error);
+  }
 }
 
 function battleHours(battle){
@@ -1242,9 +1279,7 @@ async function loadCandidates(){
     renderCustomSummary(summary);
     setStatus("Loaded fast award summary from "+(summary.source_snapshot_at?relativeTime(summary.source_snapshot_at):"latest snapshot")+".");
     loadMilestones().catch(error=>console.warn("Milestones failed",error));
-    const url=new URL(location.href);
-    if(selected==="current")url.searchParams.delete("battle");else url.searchParams.set("battle",selected);
-    history.replaceState(null,"",url);
+    syncBattleUrl(selected);
   }catch(error){
     console.error(error);
     showError(error.message||String(error));
@@ -1289,9 +1324,7 @@ async function loadFullCandidates(){
     renderCustom(stats);
     await loadMilestones();
     setStatus("Loaded "+stats.length.toLocaleString("en-US")+" players from "+snapshots.length.toLocaleString("en-US")+" snapshots.");
-    const url=new URL(location.href);
-    if(selected==="current")url.searchParams.delete("battle");else url.searchParams.set("battle",selected);
-    history.replaceState(null,"",url);
+    syncBattleUrl(selected);
   }catch(error){
     console.error(error);
     showError(error.message||String(error));
@@ -1308,7 +1341,10 @@ async function loadFullCandidates(){
 }
 
 els.loadBtn.addEventListener("click",loadCandidates);
-els.battleSelect.addEventListener("change",loadCandidates);
+els.battleSelect.addEventListener("change",()=>{
+  battleSelectionPinned=els.battleSelect.value!==latestBattleKey();
+  loadCandidates();
+});
 els.fullBtn.addEventListener("click",loadFullCandidates);
 
 async function initPage(){
@@ -1319,6 +1355,7 @@ async function initPage(){
   });
   await Promise.all([loadPlayers(),loadBattles()]);
   await loadCandidates();
+  setInterval(refreshDetectedBattle,BATTLE_DISCOVERY_INTERVAL_MS);
 }
 
 initPage().catch(error=>{
