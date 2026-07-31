@@ -352,7 +352,13 @@ begin
   marathon as (
     select
       tracked_time.user_id,
-      greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::bigint as value_ms
+      greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::bigint as value_ms,
+      tracked_time.value_ms::bigint as tracked_ms,
+      round(
+        greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::numeric /
+          nullif(tracked_time.value_ms, 0) * 100,
+        1
+      ) as uptime_pct
     from tracked_time
     left join downtime_all using (user_id)
     order by value_ms desc, tracked_time.user_id
@@ -515,7 +521,9 @@ begin
         select jsonb_build_object(
           'user_id', marathon.user_id,
           'username', profiles.username,
-          'value_ms', marathon.value_ms
+          'value_ms', marathon.value_ms,
+          'tracked_ms', marathon.tracked_ms,
+          'uptime_pct', marathon.uptime_pct
         )
         from marathon join profiles using (user_id)
       ),

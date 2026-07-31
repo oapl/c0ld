@@ -5950,7 +5950,7 @@ async function handleClansCurrent(request, env) {
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
-  const limit = String(Number(env.CLAN_RANK_TOP_N || 100));
+  const limit = String(clamp(Number(url.searchParams.get("limit") || env.CLAN_RANK_TOP_N || 100), 1, 500));
 
   let latest = null;
   let rows = [];

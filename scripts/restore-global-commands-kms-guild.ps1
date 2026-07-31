@@ -93,6 +93,9 @@ function New-QueryString {
 $commandsToDelete = @(
   "search",
   "version",
+  "ram",
+  "rdp",
+  "top",
   "rewards",
   "history",
   "clan",
@@ -117,6 +120,9 @@ $commandsToDelete = @(
 $globalCommandsToRegister = @(
   "/admin/register-search-command",
   "/admin/register-version-command",
+  "/admin/register-ram-command",
+  "/admin/register-rdp-command",
+  "/admin/register-top-command",
   "/admin/register-rewards-command",
   "/admin/register-history-command",
   "/admin/register-clan-command",

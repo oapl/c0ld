@@ -1180,7 +1180,7 @@ function customIdeas(stats){
   return [
     {title:"Locked TF In",stat:byLockedIn,metric:stat=>"+"+shortNum(stat.finalPushGain)+" pts in final 12h"},
     {title:"Gotta Catch 'em All",stat:byChaos,metric:stat=>stat.rankChanges+" rank changes"},
-    {title:"Hates Touching Grass",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active"},
+    {title:"Hates Touching Grass",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active · "+(stat.trackedMs?((stat.uptimeMs/stat.trackedMs)*100).toFixed(1):"0.0")+"% uptime"},
     {title:"Underdog",stat:byComeback,metric:stat=>rankLabel(stat.worstRank)+" worst, "+rankLabel(stat.finalRank)+" final"},
     {title:"Most Consistent 🧠",stat:byConsistent,metric:stat=>fmtDuration(stat.downtimeMs)+" without point gain"}
   ];
@@ -1204,7 +1204,12 @@ function renderCustomSummary(summary){
   const ideas=[
     {title:"Locked TF In",award:awards.locked_in,metric:award=>"+"+shortNum(award.gain)+" pts in final 12h"},
     {title:"Gotta Catch 'em All",award:awards.glasses,metric:award=>(finite(award.rank_changes)??0)+" rank changes"},
-    {title:"Hates Touching Grass",award:awards.marathon,metric:award=>fmtDuration(Number(award.value_ms)||0)+" active"},
+    {title:"Hates Touching Grass",award:awards.marathon,metric:award=>{
+      const uptimeMs=Number(award.value_ms)||0;
+      const trackedMs=Number(award.tracked_ms)||0;
+      const uptimePct=finite(award.uptime_pct)??(trackedMs?(uptimeMs/trackedMs)*100:0);
+      return fmtDuration(uptimeMs)+" active · "+uptimePct.toFixed(1)+"% uptime";
+    }},
     {title:"Underdog",award:awards.underdog,metric:award=>rankLabel(award.worst_rank)+" worst, "+rankLabel(award.latest_rank)+" final"},
     {title:"Most Consistent 🧠",award:awards.downtime,metric:award=>fmtDuration(Number(award.value_ms)||0)+" without point gain"}
   ];

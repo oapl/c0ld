@@ -233,7 +233,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the activity schedule interval. |
 | `CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES` | Optional. Defaults to `25`; skips activity ingests when the latest roster snapshot for the same battle is newer than this. Use `bypass_recent=1` on a protected manual URL only when you intentionally want to override it. |
 | `CLAN_ACTIVITY_CLAN_DELAY_MS` | Optional. Defaults to `250`; delay between clan detail pulls during activity scans. |
-| `INGEST_OFFLINE_ALERTS` | Optional. Defaults to `false`. Set to `true` after running migrations `040` through `050` to let scheduled pulls evaluate Discord no-gain/offline pings. |
+| `INGEST_OFFLINE_ALERTS` | Optional. Defaults to `false`. Set to `true` after running offline migrations `040`, `041`, `042`, and `050` to let scheduled pulls evaluate Discord no-gain/offline pings. |
 | `OFFLINE_DEFAULT_MINUTES` | Optional. Defaults to `30`; initial no-gain threshold for a guild until `/offline minutes` changes it. |
 | `OFFLINE_DEFAULT_POST_RATE_MINUTES` | Optional. Defaults to `30`; initial minimum interval between repeat alerts for the same offline player. |
 | `OFFLINE_ALERT_SCHEDULE_MINUTES` | Optional. Defaults to `5`; how often the clan Worker evaluates configured offline pings. Keep the Cloudflare cron at least this frequent. |
@@ -1370,7 +1370,7 @@ Commands:
 /offline remove-clan name:<clan>
 /offline remove-league name:<league>
 /offline user username:<roblox username> discord:<Discord user> clan:<optional clan or League hint> source:<auto|clan|league>
-/offline users clan:<clan or League> user1:<roblox username> discord1:<Discord user> source:<auto|clan|league>
+/offline users clan:<clan or League> user1:<roblox username> discord1:<Discord user>
 /offline post-rate minutes:<minutes>
 /offline check
 /offline list
