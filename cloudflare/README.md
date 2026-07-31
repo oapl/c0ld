@@ -732,7 +732,7 @@ Required Worker variables:
 | `DISCORD_GUILD_ID` | Optional test server ID. Guild commands appear much faster than global commands. |
 | `T_COMMAND_GUILD_ID` | Optional guild ID allowed to register and run `/t`. Defaults to `1457088639006670979`. |
 | `T_COMMAND_ROLE_ID` | Optional exact role ID allowed to run `/t`. Defaults to `1489032322056589413`. |
-| `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful `/search` and `/history` replies visible only to the user. |
+| `DISCORD_EPHEMERAL_RESPONSES` | Optional. Set `true` to make successful lookup replies such as `/search`, `/history`, `/top`, and `/clan info` visible only to the user. |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional comma-separated role IDs allowed to use `/search` and `/history`. Leave blank to allow everyone. |
 | `SEARCH_CHART_ENABLED` | Optional. Defaults to `true`; attaches a generated points/rank activity chart to `/search` responses. |
 | `SEARCH_CHART_RESTART_MARKERS` | Optional. Defaults to `false`; when set to `true`, overlays stored PS99 restart events on the `/search` chart. PS99 version update markers are shown automatically when available. |
@@ -794,28 +794,27 @@ Register or update the slash commands:
 
 ```powershell
 $token = "YOUR_REGISTER_ADMIN_TOKEN"
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-search-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
+$worker = "https://YOUR-DISCORD-WORKER.workers.dev"
+$guildId = "YOUR_GUILD_ID"
+
+foreach ($path in @(
+  "/admin/register-search-command",
+  "/admin/register-version-command",
+  "/admin/register-ram-command",
+  "/admin/register-rdp-command",
+  "/admin/register-top-command",
+  "/admin/register-clan-command",
+  "/admin/register-rewards-command",
+  "/admin/register-history-command"
+)) {
+  $uri = "${worker}${path}?guild_id=${guildId}"
+  Invoke-RestMethod -Method Post `
+    -Uri $uri `
+    -Headers @{ Authorization = "Bearer $token" }
+}
 
 Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-version-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-clan-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-rewards-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-history-command?guild_id=YOUR_GUILD_ID" `
-  -Headers @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://YOUR-DISCORD-WORKER.workers.dev/admin/register-t-command?guild_id=1457088639006670979" `
+  -Uri "${worker}/admin/register-t-command?guild_id=1457088639006670979" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 

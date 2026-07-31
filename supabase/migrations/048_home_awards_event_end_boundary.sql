@@ -364,7 +364,22 @@ begin
     order by value_ms desc, tracked_time.user_id
     limit 1
   ),
-  locked_in as (
+  least_uptime as (
+    select
+      tracked_time.user_id,
+      greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::bigint as value_ms,
+      tracked_time.value_ms::bigint as tracked_ms,
+      round(
+        greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::numeric /
+          nullif(tracked_time.value_ms, 0) * 100,
+        1
+      ) as uptime_pct
+    from tracked_time
+    left join downtime_all using (user_id)
+    order by value_ms asc, tracked_time.user_id
+    limit 1
+  ),
+  final_push_gains as materialized (
     select
       user_id,
       sum(greatest(total_points - previous_points, 0))::bigint as gain
@@ -372,7 +387,17 @@ begin
     where previous_points is not null
       and fetched_at >= (select fetched_at from latest_snapshot) - interval '12 hours'
     group by user_id
+  ),
+  locked_in as (
+    select user_id, gain
+    from final_push_gains
     order by gain desc, user_id
+    limit 1
+  ),
+  locked_out as (
+    select user_id, gain
+    from final_push_gains
+    order by gain asc, user_id
     limit 1
   ),
   underdog as (
@@ -517,6 +542,14 @@ begin
         )
         from locked_in join profiles using (user_id)
       ),
+      'locked_out', (
+        select jsonb_build_object(
+          'user_id', locked_out.user_id,
+          'username', profiles.username,
+          'gain', locked_out.gain
+        )
+        from locked_out join profiles using (user_id)
+      ),
       'marathon', (
         select jsonb_build_object(
           'user_id', marathon.user_id,
@@ -526,6 +559,16 @@ begin
           'uptime_pct', marathon.uptime_pct
         )
         from marathon join profiles using (user_id)
+      ),
+      'least_uptime', (
+        select jsonb_build_object(
+          'user_id', least_uptime.user_id,
+          'username', profiles.username,
+          'value_ms', least_uptime.value_ms,
+          'tracked_ms', least_uptime.tracked_ms,
+          'uptime_pct', least_uptime.uptime_pct
+        )
+        from least_uptime join profiles using (user_id)
       ),
       'underdog', (
         select jsonb_build_object(

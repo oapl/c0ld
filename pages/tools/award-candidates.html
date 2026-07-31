@@ -58,7 +58,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .section+.section{margin-top:28px}
 .section-header{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
 .section-title{margin:0;font-size:18px}
-.custom-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
+.custom-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0}
 .custom-card{padding:14px;border-right:1px solid var(--border);min-height:150px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .custom-card:last-child{border-right:0}
 .custom-title{font-size:14px;font-weight:800;margin-bottom:10px}
@@ -1173,17 +1173,27 @@ function renderAwards(defs){
 function customIdeas(stats){
   const players=stats.filter(stat=>stat.finalPoints>0);
   const byLockedIn=[...players].sort((a,b)=>b.finalPushGain-a.finalPushGain||b.finalPoints-a.finalPoints)[0];
+  const byLockedOut=[...players].sort((a,b)=>a.finalPushGain-b.finalPushGain||a.finalPoints-b.finalPoints)[0];
   const byChaos=[...players].sort((a,b)=>b.rankChanges-a.rankChanges||b.worstDrop-a.worstDrop)[0];
   const byMarathon=[...players].sort((a,b)=>b.uptimeMs-a.uptimeMs||b.finalPoints-a.finalPoints)[0];
   const byComeback=[...players].sort((a,b)=>(b.worstRank-b.finalRank)-(a.worstRank-a.finalRank)||b.totalGain-a.totalGain)[0];
-  const byConsistent=[...players].sort((a,b)=>b.downtimeMs-a.downtimeMs||b.downtimePct-a.downtimePct)[0];
+  const byLeastUptime=[...players].filter(stat=>stat.trackedMs>0).sort((a,b)=>a.uptimeMs-b.uptimeMs||a.finalPoints-b.finalPoints)[0];
   return [
     {title:"Locked TF In",stat:byLockedIn,metric:stat=>"+"+shortNum(stat.finalPushGain)+" pts in final 12h"},
+    {title:"Locked TF OUT",stat:byLockedOut,metric:stat=>"+"+shortNum(stat.finalPushGain)+" pts in final 12h"},
     {title:"Gotta Catch 'em All",stat:byChaos,metric:stat=>stat.rankChanges+" rank changes"},
-    {title:"Hates Touching Grass",stat:byMarathon,metric:stat=>fmtDuration(stat.uptimeMs)+" active · "+(stat.trackedMs?((stat.uptimeMs/stat.trackedMs)*100).toFixed(1):"0.0")+"% uptime"},
+    {title:"Highest Uptime",stat:byMarathon,metric:stat=>uptimeMetric(stat.uptimeMs,stat.trackedMs)},
     {title:"Underdog",stat:byComeback,metric:stat=>rankLabel(stat.worstRank)+" worst, "+rankLabel(stat.finalRank)+" final"},
-    {title:"Most Consistent 🧠",stat:byConsistent,metric:stat=>fmtDuration(stat.downtimeMs)+" without point gain"}
+    {title:"Least Uptime",stat:byLeastUptime,metric:stat=>uptimeMetric(stat.uptimeMs,stat.trackedMs)}
   ];
+}
+
+function uptimeMetric(uptimeMs,trackedMs,explicitPct=null){
+  const active=Math.max(0,Number(uptimeMs)||0);
+  const tracked=Math.max(0,Number(trackedMs)||0);
+  const supplied=finite(explicitPct);
+  const percentage=supplied??(tracked?(active/tracked)*100:0);
+  return fmtDuration(active)+" active · "+percentage.toFixed(1)+"% uptime";
 }
 
 function renderCustom(stats){
@@ -1203,15 +1213,11 @@ function renderCustomSummary(summary){
   const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
   const ideas=[
     {title:"Locked TF In",award:awards.locked_in,metric:award=>"+"+shortNum(award.gain)+" pts in final 12h"},
+    {title:"Locked TF OUT",award:awards.locked_out,metric:award=>"+"+shortNum(award.gain)+" pts in final 12h"},
     {title:"Gotta Catch 'em All",award:awards.glasses,metric:award=>(finite(award.rank_changes)??0)+" rank changes"},
-    {title:"Hates Touching Grass",award:awards.marathon,metric:award=>{
-      const uptimeMs=Number(award.value_ms)||0;
-      const trackedMs=Number(award.tracked_ms)||0;
-      const uptimePct=finite(award.uptime_pct)??(trackedMs?(uptimeMs/trackedMs)*100:0);
-      return fmtDuration(uptimeMs)+" active · "+uptimePct.toFixed(1)+"% uptime";
-    }},
+    {title:"Highest Uptime",award:awards.marathon,metric:award=>uptimeMetric(award.value_ms,award.tracked_ms,award.uptime_pct)},
     {title:"Underdog",award:awards.underdog,metric:award=>rankLabel(award.worst_rank)+" worst, "+rankLabel(award.latest_rank)+" final"},
-    {title:"Most Consistent 🧠",award:awards.downtime,metric:award=>fmtDuration(Number(award.value_ms)||0)+" without point gain"}
+    {title:"Least Uptime",award:awards.least_uptime,metric:award=>uptimeMetric(award.value_ms,award.tracked_ms,award.uptime_pct)}
   ];
   els.customMeta.textContent="";
   els.customGrid.innerHTML=ideas.map(idea=>{
