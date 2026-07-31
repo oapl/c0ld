@@ -9553,6 +9553,7 @@ async function syncGlobalCommands(url, env) {
   let attempts = 0;
   let globalResponse;
   let globalPayload;
+  let lastRetryAfterSeconds = null;
 
   while (attempts < 6) {
     attempts += 1;
@@ -9570,26 +9571,35 @@ async function syncGlobalCommands(url, env) {
     if (globalResponse.status !== 429) break;
 
     const retryAfterSeconds = Number(
-      globalPayload?.retry_after ??
-      globalResponse.headers.get("retry-after") ??
-      1
+        globalPayload?.retry_after ??
+        globalResponse.headers.get("retry-after") ??
+        1
     );
-    await sleep(
-      Math.max(
-        1000,
-        Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 500
-      )
+    lastRetryAfterSeconds = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1;
+    const waitMs = Math.max(
+      1000,
+      Math.ceil(lastRetryAfterSeconds * 1000) + 500
     );
+    if (attempts >= 6 || waitMs > 25000) break;
+
+    await sleep(waitMs);
   }
 
   if (!globalResponse?.ok) {
-    throw httpError(
-      502,
-      discordApiErrorMessage(
+    const message = globalResponse?.status === 429 && lastRetryAfterSeconds !== null
+      ? `Discord is rate limiting global command sync. Retry after about ${Math.ceil(lastRetryAfterSeconds)} seconds.`
+      : discordApiErrorMessage(
         globalResponse?.status || 502,
         globalPayload?.message || `Discord global command synchronization failed (${globalResponse?.status || "unknown"}).`
-      )
-    );
+      );
+    const err = httpError(globalResponse?.status === 429 ? 429 : 502, message);
+    err.details = {
+      discord_status: globalResponse?.status || null,
+      retry_after_seconds: lastRetryAfterSeconds,
+      attempts,
+      discord_response: globalPayload || null
+    };
+    throw err;
   }
 
   return json({

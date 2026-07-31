@@ -364,19 +364,19 @@ begin
     order by value_ms desc, tracked_time.user_id
     limit 1
   ),
-  least_uptime as (
+  most_downtime as (
     select
       tracked_time.user_id,
-      greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::bigint as value_ms,
+      coalesce(downtime_all.value_ms, 0)::bigint as value_ms,
       tracked_time.value_ms::bigint as tracked_ms,
       round(
-        greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::numeric /
+        coalesce(downtime_all.value_ms, 0)::numeric /
           nullif(tracked_time.value_ms, 0) * 100,
         1
-      ) as uptime_pct
+      ) as downtime_pct
     from tracked_time
     left join downtime_all using (user_id)
-    order by value_ms asc, tracked_time.user_id
+    order by downtime_pct desc nulls last, value_ms desc, tracked_time.user_id
     limit 1
   ),
   final_push_gains as materialized (
@@ -560,15 +560,15 @@ begin
         )
         from marathon join profiles using (user_id)
       ),
-      'least_uptime', (
+      'most_downtime', (
         select jsonb_build_object(
-          'user_id', least_uptime.user_id,
+          'user_id', most_downtime.user_id,
           'username', profiles.username,
-          'value_ms', least_uptime.value_ms,
-          'tracked_ms', least_uptime.tracked_ms,
-          'uptime_pct', least_uptime.uptime_pct
+          'value_ms', most_downtime.value_ms,
+          'tracked_ms', most_downtime.tracked_ms,
+          'downtime_pct', most_downtime.downtime_pct
         )
-        from least_uptime join profiles using (user_id)
+        from most_downtime join profiles using (user_id)
       ),
       'underdog', (
         select jsonb_build_object(

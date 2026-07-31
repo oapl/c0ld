@@ -790,7 +790,22 @@ For `/t`, the bot must be able to post wherever the command is used. In Discord
 server/channel permissions, give the bot `View Channel`, `Send Messages`, and
 `Send Messages in Threads` for thread destinations.
 
-Register or update the slash commands:
+For the normal production/global update, sync the global command set:
+
+```powershell
+$token = "YOUR_REGISTER_ADMIN_TOKEN"
+$worker = "https://YOUR-DISCORD-WORKER.workers.dev"
+
+Invoke-RestMethod -Method Post `
+  -Uri "${worker}/admin/sync-global-commands?guild_id=1457088639006670979" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+The `guild_id` on `sync-global-commands` is only used to clean up old guild
+commands in that server while preserving the guild-only `/t` command. The
+commands themselves are registered globally.
+
+For guild-only testing, register or update the slash commands with `guild_id`:
 
 ```powershell
 $token = "YOUR_REGISTER_ADMIN_TOKEN"
