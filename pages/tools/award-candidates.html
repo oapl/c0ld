@@ -73,6 +73,19 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .milestone-members{color:var(--muted);font-size:12px;line-height:1.55}
 .milestone-member{color:var(--text);white-space:nowrap}
 .milestone-member+.milestone-member::before{content:" · ";color:var(--muted)}
+.downtime-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.downtime-scroll{width:100%;overflow-x:auto}
+.downtime-head,.downtime-row{display:grid;grid-template-columns:52px minmax(210px,1fr) 84px 128px 84px 128px;gap:14px;align-items:center;min-width:760px;padding:10px 16px}
+.downtime-head{background:var(--panel-2);color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.downtime-row{border-top:1px solid rgba(48,54,61,.78);font-size:13px}
+.downtime-row:nth-child(even){background:rgba(255,255,255,.014)}
+.downtime-rank{color:var(--muted);font-weight:800;font-variant-numeric:tabular-nums}
+.downtime-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.downtime-value{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.downtime-value.down{color:var(--bad)}
+.downtime-value.up{color:var(--good)}
+.downtime-total{color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.copy-status{max-width:420px;text-align:right}
 .empty,.message{padding:24px;color:var(--muted)}
 .error{padding:14px 16px;margin-bottom:18px;border:1px solid rgba(248,81,73,.45);border-radius:8px;background:rgba(248,81,73,.1);color:#ffb4ad;display:none}
 @media(max-width:1100px){.awards-grid{grid-template-columns:1fr}.custom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-card{border-bottom:1px solid var(--border)}}
@@ -140,6 +153,23 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 
   <section class="section">
     <div class="section-header">
+      <div>
+        <h2 class="section-title">Downtime Leaderboard</h2>
+        <div class="subtle">Final roster ordered by highest downtime percentage.</div>
+      </div>
+      <div class="downtime-actions">
+        <div id="downtime-meta" class="subtle copy-status"></div>
+        <button id="copy-downtime-btn" type="button" disabled>Copy for Discord</button>
+      </div>
+    </div>
+    <div class="downtime-scroll">
+      <div class="downtime-head" aria-hidden="true"><span>#</span><span>Username</span><span>Down</span><span>Down Total</span><span>Up</span><span>Up Total</span></div>
+      <div id="downtime-list"></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-header">
       <h2 class="section-title">Milestones</h2>
       <div id="milestones-meta" class="subtle"></div>
     </div>
@@ -165,6 +195,8 @@ let playerById=new Map();
 let playerByName=new Map();
 let loading=false;
 let battleSelectionPinned=new URLSearchParams(location.search).has("battle");
+let downtimeDiscordChunks=[];
+let downtimeDiscordChunkIndex=0;
 const BATTLE_DISCOVERY_INTERVAL_MS=5*60*1000;
 
 document.title=CLAN_LABEL+" Superlative Candidates";
@@ -187,6 +219,9 @@ const els={
   awardsGrid:document.getElementById("awards-grid"),
   customGrid:document.getElementById("custom-grid"),
   customMeta:document.getElementById("custom-meta"),
+  downtimeMeta:document.getElementById("downtime-meta"),
+  downtimeList:document.getElementById("downtime-list"),
+  copyDowntimeBtn:document.getElementById("copy-downtime-btn"),
   milestonesMeta:document.getElementById("milestones-meta"),
   milestonesList:document.getElementById("milestones-list")
 };
@@ -217,6 +252,7 @@ function fmtDate(value){const date=new Date(value||0);return Number.isNaN(date.g
 function relativeTime(value){const time=new Date(value||0).getTime();if(!Number.isFinite(time)||!value)return"-";const seconds=Math.round((Date.now()-time)/1000);const future=seconds<0;const absolute=Math.abs(seconds);let amount,unit;if(absolute<60){amount=absolute;unit="sec"}else if(absolute<3600){amount=Math.round(absolute/60);unit="min"}else if(absolute<86400){amount=Math.round(absolute/3600);unit="hr"}else{amount=Math.round(absolute/86400);unit="day"}if(amount!==1)unit+="s";return future?"in "+amount+" "+unit:amount+" "+unit+" ago"}
 function shortNum(value){const number=Number(value);if(!Number.isFinite(number))return"-";const abs=Math.abs(number);if(abs>=1e12)return(number/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(abs>=1e9)return(number/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(abs>=1e6)return(number/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(abs>=1e3)return(number/1e3).toFixed(2).replace(/\.00$/,"")+"K";return number.toLocaleString("en-US")}
 function fmtDuration(ms){const total=Math.max(0,Math.round(Number(ms)||0));const minutes=Math.floor(total/60000);if(minutes<60)return minutes+"m";const hours=Math.floor(minutes/60);const rem=minutes%60;if(hours<24)return hours+"h "+rem+"m";const days=Math.floor(hours/24);return days+"d "+(hours%24)+"h"}
+function fmtDetailedDuration(ms){const totalMinutes=Math.floor(Math.max(0,Number(ms)||0)/60000);const days=Math.floor(totalMinutes/1440);const hours=Math.floor((totalMinutes%1440)/60);const minutes=totalMinutes%60;if(days)return days+"d "+hours+"h "+minutes+"m";if(hours)return hours+"h "+minutes+"m";return minutes+"m"}
 function fmtScore(value){const number=Number(value);return Number.isFinite(number)?number.toFixed(1):"0.0"}
 function rankLabel(rank){return rank?("#"+Math.trunc(rank)):"-"}
 function daysLabel(days){const number=Number(days);if(!Number.isFinite(number)||number<=0)return"joined this war";if(number<1)return"under 1d "+CLAN_LABEL;if(number<14)return Math.round(number)+"d "+CLAN_LABEL;if(number<70)return Math.round(number/7)+"w "+CLAN_LABEL;return Math.round(number/30)+"mo "+CLAN_LABEL}
@@ -1248,6 +1284,113 @@ function renderCustomSummary(summary){
   }).join("");
 }
 
+function normalizeDowntimeRow(row){
+  const downtimeMs=Math.max(0,finite(row?.downtime_ms??row?.downtimeMs)??0);
+  const trackedMs=Math.max(0,finite(row?.tracked_ms??row?.trackedMs)??0);
+  const uptimeMs=Math.max(0,finite(row?.uptime_ms??row?.uptimeMs)??(trackedMs-downtimeMs));
+  const suppliedDown=finite(row?.downtime_pct??row?.downtimePct);
+  const downtimePct=clamp(suppliedDown??(trackedMs?(downtimeMs/trackedMs)*100:0),0,100);
+  const suppliedUp=finite(row?.uptime_pct??row?.uptimePct);
+  const uptimePct=clamp(suppliedUp??(trackedMs?(uptimeMs/trackedMs)*100:100-downtimePct),0,100);
+  return {...row,downtimeMs,trackedMs,uptimeMs,downtimePct,uptimePct};
+}
+
+function latestRosterDowntimeRows(stats){
+  const rows=Array.isArray(stats)?stats:[];
+  const latestSeen=Math.max(0,...rows.map(row=>finite(row?.latestSeenAt)??0));
+  return rows
+    .filter(row=>(finite(row?.latestSeenAt)??0)===latestSeen)
+    .map(normalizeDowntimeRow);
+}
+
+function downtimeSort(a,b){
+  return b.downtimePct-a.downtimePct||b.downtimeMs-a.downtimeMs||playerName(a).localeCompare(playerName(b),undefined,{sensitivity:"base"});
+}
+
+function discordDowntimeLine(row,index){
+  return "`"+String(index+1).padStart(2,"0")+".` **"+playerName(row).replace(/\*/g,"\\*")+"** | Down `"+row.downtimePct.toFixed(1)+"%` | `"+fmtDetailedDuration(row.downtimeMs)+"` | Up `"+row.uptimePct.toFixed(1)+"%` | `"+fmtDetailedDuration(row.uptimeMs)+"`";
+}
+
+function buildDiscordDowntimeChunks(rows,battleLabel){
+  const titleBase="**"+CLAN_LABEL+" Downtime — "+String(battleLabel||"Latest Battle")+"**";
+  const header="` #  Username | Down | Total | Up | Total`";
+  const groups=[];
+  let current=[];
+  let currentLength=titleBase.length+header.length+4;
+  rows.forEach((row,index)=>{
+    const line=discordDowntimeLine(row,index);
+    if(current.length&&currentLength+line.length+1>1750){groups.push(current);current=[];currentLength=titleBase.length+header.length+4}
+    current.push(line);
+    currentLength+=line.length+1;
+  });
+  if(current.length)groups.push(current);
+  return groups.map((lines,index)=>{
+    const part=groups.length>1?" · Part "+(index+1)+"/"+groups.length:"";
+    return titleBase.slice(0,-2)+part+"**\n"+header+"\n"+lines.join("\n");
+  });
+}
+
+function resetDowntimeCopy(rows,battleLabel){
+  downtimeDiscordChunks=buildDiscordDowntimeChunks(rows,battleLabel);
+  downtimeDiscordChunkIndex=0;
+  els.copyDowntimeBtn.disabled=!downtimeDiscordChunks.length;
+  els.copyDowntimeBtn.textContent="Copy for Discord";
+  els.downtimeMeta.textContent=rows.length
+    ? rows.length+" member"+(rows.length===1?"":"s")+" · "+downtimeDiscordChunks.length+" Discord-sized part"+(downtimeDiscordChunks.length===1?"":"s")
+    : "No downtime data available.";
+}
+
+function renderDowntimeLeaderboard(inputRows,battleLabel){
+  const rows=(Array.isArray(inputRows)?inputRows:[]).map(normalizeDowntimeRow).sort(downtimeSort).slice(0,75);
+  if(!rows.length){
+    els.downtimeList.innerHTML='<div class="empty">No downtime data was found for this battle.</div>';
+    resetDowntimeCopy([],battleLabel);
+    return;
+  }
+  els.downtimeList.innerHTML=rows.map((row,index)=>'<div class="downtime-row">'+
+    '<div class="downtime-rank">'+(index+1)+'.</div>'+
+    '<a class="downtime-name" href="'+esc(profileHref(row))+'">'+esc(playerName(row))+'</a>'+
+    '<div class="downtime-value down">'+row.downtimePct.toFixed(1)+'%</div>'+
+    '<div class="downtime-total">'+esc(fmtDetailedDuration(row.downtimeMs))+'</div>'+
+    '<div class="downtime-value up">'+row.uptimePct.toFixed(1)+'%</div>'+
+    '<div class="downtime-total">'+esc(fmtDetailedDuration(row.uptimeMs))+'</div>'+
+  '</div>').join("");
+  resetDowntimeCopy(rows,battleLabel);
+}
+
+async function copyText(text){
+  if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(text);
+  const area=document.createElement("textarea");
+  area.value=text;
+  area.style.position="fixed";
+  area.style.opacity="0";
+  document.body.appendChild(area);
+  area.select();
+  const copied=document.execCommand("copy");
+  area.remove();
+  if(!copied)throw new Error("Clipboard copy failed.");
+}
+
+async function copyNextDowntimePart(){
+  if(!downtimeDiscordChunks.length)return;
+  const part=downtimeDiscordChunkIndex;
+  try{
+    await copyText(downtimeDiscordChunks[part]);
+    const copiedPart=part+1;
+    if(copiedPart>=downtimeDiscordChunks.length){
+      downtimeDiscordChunkIndex=0;
+      els.copyDowntimeBtn.textContent="Copy Again";
+      els.downtimeMeta.textContent="Copied final part "+copiedPart+"/"+downtimeDiscordChunks.length+".";
+    }else{
+      downtimeDiscordChunkIndex=copiedPart;
+      els.copyDowntimeBtn.textContent="Copy Part "+(copiedPart+1)+" of "+downtimeDiscordChunks.length;
+      els.downtimeMeta.textContent="Copied part "+copiedPart+"/"+downtimeDiscordChunks.length+". Paste it, then copy the next part.";
+    }
+  }catch(error){
+    els.downtimeMeta.textContent=error.message||"Clipboard copy failed.";
+  }
+}
+
 function milestoneRank(row){return finite(row?.global_rank)}
 function milestonePlayerName(row){return row?.username||row?.display_name||(row?.user_id?("user_"+row.user_id):"Unknown player")}
 function milestoneMemberList(rows){
@@ -1320,6 +1463,7 @@ async function loadCandidates(){
   els.fullBtn.disabled=true;
   els.awardsGrid.innerHTML="";
   els.customGrid.innerHTML="";
+  renderDowntimeLeaderboard([],"");
   els.milestonesMeta.textContent="";
   els.milestonesList.className="";
   els.milestonesList.textContent="";
@@ -1334,6 +1478,7 @@ async function loadCandidates(){
     renderFastSummary(effectiveBattle,current,summary);
     renderAwards(summaryAwardDefinitions(summary,current));
     renderCustomSummary(summary);
+    renderDowntimeLeaderboard(summary?.downtime_leaderboard,effectiveBattle);
     setStatus("Loaded fast award summary from "+(summary.source_snapshot_at?relativeTime(summary.source_snapshot_at):"latest snapshot")+".");
     loadMilestones().catch(error=>console.warn("Milestones failed",error));
     syncBattleUrl(selected);
@@ -1343,6 +1488,7 @@ async function loadCandidates(){
     setStatus("Award summary load failed.");
     els.awardsGrid.innerHTML="";
     els.customGrid.innerHTML="";
+    renderDowntimeLeaderboard([],"");
     els.milestonesList.className="message";
     els.milestonesList.textContent="";
   }finally{
@@ -1361,6 +1507,7 @@ async function loadFullCandidates(){
   els.fullBtn.disabled=true;
   els.awardsGrid.innerHTML="";
   els.customGrid.innerHTML="";
+  renderDowntimeLeaderboard([],"");
   els.milestonesMeta.textContent="";
   els.milestonesList.className="";
   els.milestonesList.textContent="";
@@ -1379,6 +1526,7 @@ async function loadFullCandidates(){
     renderSummary(effectiveBattle,current,snapshots,stats);
     renderAwards(awardDefinitions(stats));
     renderCustom(stats);
+    renderDowntimeLeaderboard(latestRosterDowntimeRows(stats),effectiveBattle);
     await loadMilestones();
     setStatus("Loaded "+stats.length.toLocaleString("en-US")+" players from "+snapshots.length.toLocaleString("en-US")+" snapshots.");
     syncBattleUrl(selected);
@@ -1388,6 +1536,7 @@ async function loadFullCandidates(){
     setStatus("Candidate load failed.");
     els.awardsGrid.innerHTML="";
     els.customGrid.innerHTML="";
+    renderDowntimeLeaderboard([],"");
     els.milestonesList.className="message";
     els.milestonesList.textContent="";
   }finally{
@@ -1403,6 +1552,7 @@ els.battleSelect.addEventListener("change",()=>{
   loadCandidates();
 });
 els.fullBtn.addEventListener("click",loadFullCandidates);
+els.copyDowntimeBtn.addEventListener("click",copyNextDowntimePart);
 
 async function initPage(){
   await C0LD_PROTECTED.requirePage({

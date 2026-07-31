@@ -474,6 +474,34 @@ begin
       ) as score
     from thrower_metrics
     where downtime_ms > 0 or rank_loss > 0 or time_at_last_ms > 0
+  ),
+  downtime_leaderboard as materialized (
+    select
+      latest_players.user_id,
+      profiles.username,
+      coalesce(downtime_all.value_ms, 0)::bigint as downtime_ms,
+      coalesce(tracked_time.value_ms, 0)::bigint as tracked_ms,
+      greatest(
+        coalesce(tracked_time.value_ms, 0) - coalesce(downtime_all.value_ms, 0),
+        0
+      )::bigint as uptime_ms,
+      round(
+        coalesce(downtime_all.value_ms, 0)::numeric /
+          nullif(coalesce(tracked_time.value_ms, 0), 0) * 100,
+        1
+      ) as downtime_pct,
+      round(
+        greatest(
+          coalesce(tracked_time.value_ms, 0) - coalesce(downtime_all.value_ms, 0),
+          0
+        )::numeric /
+          nullif(coalesce(tracked_time.value_ms, 0), 0) * 100,
+        1
+      ) as uptime_pct
+    from latest_players
+    join profiles using (user_id)
+    left join downtime_all using (user_id)
+    left join tracked_time using (user_id)
   )
   select jsonb_build_object(
     'clan_name', v_clan_name,
@@ -482,6 +510,28 @@ begin
     'calculated_at', now(),
     'source_snapshot_at', (select fetched_at from latest_snapshot),
     'snapshot_count', (select count(distinct snapshot_id) from base),
+    'downtime_leaderboard', (
+      select coalesce(
+        jsonb_agg(
+          jsonb_build_object(
+            'user_id', downtime_leaderboard.user_id,
+            'username', downtime_leaderboard.username,
+            'downtime_ms', downtime_leaderboard.downtime_ms,
+            'downtime_pct', coalesce(downtime_leaderboard.downtime_pct, 0),
+            'uptime_ms', downtime_leaderboard.uptime_ms,
+            'uptime_pct', coalesce(downtime_leaderboard.uptime_pct, 0),
+            'tracked_ms', downtime_leaderboard.tracked_ms
+          )
+          order by
+            downtime_leaderboard.downtime_pct desc nulls last,
+            downtime_leaderboard.downtime_ms desc,
+            lower(coalesce(downtime_leaderboard.username, '')),
+            downtime_leaderboard.user_id
+        ),
+        '[]'::jsonb
+      )
+      from downtime_leaderboard
+    ),
     'awards', jsonb_build_object(
       'mvp', (
         select jsonb_build_object(
@@ -691,6 +741,7 @@ begin
     'battle_end_iso', v_battle_end_at,
     'calculated_at', now(),
     'snapshot_count', 0,
+    'downtime_leaderboard', '[]'::jsonb,
     'awards', '{}'::jsonb,
     'award_candidates', '{}'::jsonb
   ));

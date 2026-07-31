@@ -57,7 +57,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-gained-2026-07-31a";
+const INVENTORY_BUILD_ID = "inventory-htg-account-bound-domain-2026-07-31a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -178,6 +178,8 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/hatch/oauth/start") {
         requireAdmin(request, env);
         response = await handleHatchOAuthStart(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/hatch/oauth/authorize") {
+        response = await handleHatchOAuthAuthorizeRedirect(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/hatch/tracker") {
         requireAdmin(request, env);
         response = await handleHatchTrackerCommand(request, env);
@@ -369,23 +371,40 @@ async function handleHatchOAuthStart(request, env) {
     }
   }], "state_hash");
 
-  const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
-  authorizeUrl.searchParams.set("client_id", oauthApp.clientId);
-  authorizeUrl.searchParams.set("redirect_uri", oauthApp.redirectUri);
-  authorizeUrl.searchParams.set("scope", bigGamesOAuthScopeString(env, "hatch_tracker"));
-  authorizeUrl.searchParams.set("code_challenge", challenge);
-  authorizeUrl.searchParams.set("code_challenge_method", "S256");
-  authorizeUrl.searchParams.set("state", state);
+  const authorizeUrl = bigGamesAuthorizeUrl(env, oauthApp, "hatch_tracker", state, challenge);
 
   return json({
     ok: true,
     user_id: targetAccount?.user_id || null,
     username: targetAccount?.username || null,
-    authorize_url: authorizeUrl.toString(),
+    authorize_url: authorizeUrl,
+    short_authorize_url: hatchOAuthShortAuthorizeUrl(env, state),
     expires_at: expiresAt,
     tracker: await hatchTrackerStatus(env, discordUserId),
     message: "Open authorize_url and approve access within 10 minutes."
   });
+}
+
+async function handleHatchOAuthAuthorizeRedirect(request, env) {
+  requireSupabase(env);
+  requireHatchBigGamesOAuth(env);
+  const url = new URL(request.url);
+  const state = String(url.searchParams.get("state") || "").trim();
+  if (!state) return oauthHtml(false, "This authorization link is missing its state. Start /htg setup again.");
+
+  const pending = await fetchPendingOAuthState(env, state);
+  if (!pending || pending.used_at || new Date(pending.expires_at).getTime() <= Date.now()) {
+    return oauthHtml(false, "This authorization link is invalid, expired, or was already used. Start /htg setup again.");
+  }
+
+  if (pendingOAuthPurpose(pending) !== "hatch_tracker") {
+    return oauthHtml(false, "This authorization link is not for the HTG tracker. Start /htg setup again.");
+  }
+
+  const oauthApp = bigGamesOAuthAppForPendingState(env, pending);
+  const verifier = await openSecret(pending.code_verifier_ciphertext, oauthApp.clientSecret, "big-games-pkce-verifier");
+  const authorizeUrl = bigGamesAuthorizeUrl(env, oauthApp, "hatch_tracker", state, await sha256Base64Url(verifier));
+  return Response.redirect(authorizeUrl, 302);
 }
 
 async function handleOAuthCallback(request, env) {
@@ -396,12 +415,7 @@ async function handleOAuthCallback(request, env) {
   if (!state) return oauthHtml(false, "The callback did not include an authorization state.");
 
   const stateHash = await sha256Base64Url(state);
-  const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
-    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest,metadata",
-    state_hash: `eq.${stateHash}`,
-    limit: "1"
-  });
-  const pending = states[0];
+  const pending = await fetchPendingOAuthState(env, state);
   if (!pending || pending.used_at || new Date(pending.expires_at).getTime() <= Date.now()) {
     return oauthHtml(false, "This authorization link is invalid, expired, or was already used. Start again.");
   }
@@ -470,8 +484,11 @@ async function handleOAuthCallback(request, env) {
       return oauthCompletion(pending, false, `HTG authorization could not verify the approving Roblox account: ${error?.message || error}. Start /htg setup again and approve the same linked Roblox account.`);
     }
     if (!profileAccount.user_id) {
-      await markOAuthStateUsed(env, stateHash);
-      return oauthCompletion(pending, false, "HTG authorization could not identify the approving Roblox account from Big Games Profile data. Start `/htg setup` again and approve the same linked Roblox account.");
+      if (!invitedUserId) {
+        await markOAuthStateUsed(env, stateHash);
+        return oauthCompletion(pending, false, "Luna could not confirm which Roblox account approved this authorization. Start `/htg setup account:<roblox username>` so the approval can be tied to a specific account.");
+      }
+      console.warn("Big Games profile identity was unavailable; using account-bound HTG setup target", invitedUserId);
     }
   }
   let targetUserId = invitedUserId || profileAccount.user_id || tokenAccount.user_id;
@@ -1793,6 +1810,39 @@ function bigGamesOAuthApp(env, purpose = "inventory", options = {}) {
 
 function bigGamesOAuthScopeString(env, purpose = "inventory") {
   return bigGamesOAuthScopes(env, purpose).join(" ");
+}
+
+function bigGamesAuthorizeUrl(env, oauthApp, purpose, state, challenge) {
+  const authorizeUrl = new URL(BIG_GAMES_AUTHORIZE_URL);
+  authorizeUrl.searchParams.set("client_id", oauthApp.clientId);
+  authorizeUrl.searchParams.set("redirect_uri", oauthApp.redirectUri);
+  authorizeUrl.searchParams.set("scope", bigGamesOAuthScopeString(env, purpose));
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("state", state);
+  return authorizeUrl.toString();
+}
+
+async function fetchPendingOAuthState(env, state) {
+  const stateHash = await sha256Base64Url(state);
+  const states = await supabaseSelect(env, OAUTH_STATES_TABLE, {
+    select: "state_hash,code_verifier_ciphertext,expires_at,used_at,target_roblox_user_id,target_roblox_username,return_url,force_ingest,metadata",
+    state_hash: `eq.${stateHash}`,
+    limit: "1"
+  });
+  return states[0] || null;
+}
+
+function hatchOAuthShortAuthorizeUrl(env, state) {
+  const base = String(
+    env.HATCH_OAUTH_PUBLIC_BASE ||
+    env.INVENTORY_PUBLIC_BASE ||
+    env.INVENTORY_PUBLIC_URL ||
+    "https://inventory-detector-worker.opal-dde.workers.dev"
+  ).trim().replace(/\/+$/, "");
+  const url = new URL("/api/hatch/oauth/authorize", base);
+  url.searchParams.set("state", state);
+  return url.toString();
 }
 
 function bigGamesOAuthScopes(env, purpose = "inventory") {
@@ -3956,7 +4006,15 @@ async function verifyHtgGrantIdentity(env, grant, expectedUserId, accessToken) {
   const profile = await fetchProfileWithAccessToken(env, accessToken);
   const account = authorizedInventoryAccount(profile);
   if (!account.user_id) {
-    throw httpError(403, `HTG Big Games authorization for Roblox user ${normalizedExpected} could not be verified from Profile data. Run /htg setup again.`);
+    const savedUserId = String(grant?.roblox_user_id || "").trim();
+    if (savedUserId === normalizedExpected && grant?.metadata?.identity_verified === false) {
+      return {
+        user_id: normalizedExpected,
+        username: firstString(grant?.metadata?.username, normalizedExpected),
+        identity_unavailable: true
+      };
+    }
+    throw httpError(403, `HTG Big Games authorization for Roblox user ${normalizedExpected} could not be verified from Profile data. Run /htg setup account:<roblox username> again.`);
   }
   if (String(account.user_id) !== normalizedExpected) {
     await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});

@@ -63,7 +63,7 @@ const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HOURLY_LEAGUE_ASSIGNMENT_PREFIX = "league:";
-const HTG_BUILD_ID = "htg-debug-2026-07-27i";
+const HTG_BUILD_ID = "htg-debug-2026-07-31-account-required";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
 const SELF_TIMEOUT_DAYS = 7;
@@ -821,7 +821,7 @@ async function handleInteraction(request, env, ctx) {
     const subcommand = getSubcommandName(interaction);
     const hatchSubcommand = subcommand === "setup" || subcommand === "alert" ? "tracker" : subcommand;
     if (!["tracker", "accounts", "enable", "disable", "assign"].includes(hatchSubcommand)) {
-      return interactionJson(messageResponse("Use `/htg setup`, `/htg accounts`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
+      return interactionJson(messageResponse("Use `/htg setup account:<roblox username>`, `/htg accounts`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
     }
 
     if (hatchSubcommand === "assign") {
@@ -1969,7 +1969,7 @@ function buildHatchSetupMessage(payload, context = {}) {
   const page = normalizedHtgSetupPage(context.page);
   const pages = htgSetupPages(payload, context);
   const current = pages[page];
-  const authUrl = String(payload.authorize_url || "").trim();
+  const authUrl = htgDiscordButtonUrl(payload);
   const setupError = String(payload.setup_error || "").trim();
   const imageUrl = htgSetupPageImageUrl(context.env, page);
   const thumbnailUrl = String(context.env?.HTG_SETUP_THUMBNAIL_URL || LUNA_REWARD_THUMBNAIL_URL || "").trim();
@@ -1977,7 +1977,7 @@ function buildHatchSetupMessage(payload, context = {}) {
   if (page === 0 && setupError) {
     footerLines.push(`-# Setup issue: ${escapeDiscordMarkdown(setupError)}`);
   } else if (page === 0 && !authUrl) {
-    footerLines.push("-# No auth button is shown until you provide `account:<roblox name>`.");
+    footerLines.push("-# No auth button was generated. Run `/htg setup account:<roblox username>` again.");
   }
 
   const titleText = {
@@ -2065,14 +2065,14 @@ function buildHatchSetupMessage(payload, context = {}) {
 }
 
 function htgSetupPages(payload, context = {}) {
-  const authUrl = String(payload?.authorize_url || "").trim();
+  const authUrl = htgDiscordButtonUrl(payload);
   const targetAccount = String(payload?.username || payload?.user_id || context.account || "").trim();
   const targetLabel = targetAccount
     ? escapeDiscordMarkdown(targetAccount)
     : "the Roblox account you put in the command";
   const connectInstructions = authUrl
     ? `Click the Connect Big Games DB button to approve inventory access for ${targetLabel}.`
-    : "Run `/htg setup account:<roblox username>` to create an account-bound Connect Big Games DB button first.";
+    : "Run `/htg setup account:<roblox username>` to create an account-bound Connect Big Games DB button.";
 
   return [
     {
@@ -2150,6 +2150,18 @@ function htgSetupButtons({ ownerId, page, pageCount, authUrl }) {
   return controls.slice(0, 5);
 }
 
+function htgDiscordButtonUrl(payload) {
+  const candidates = [
+    payload?.short_authorize_url,
+    payload?.authorize_url
+  ];
+  for (const value of candidates) {
+    const url = String(value || "").trim();
+    if (url && url.length <= 512) return url;
+  }
+  return "";
+}
+
 function parseHtgSetupCustomId(value) {
   const parts = String(value || "").split("|");
   if (parts[0] !== "htgsetup") return null;
@@ -2195,7 +2207,7 @@ function htgSetupImageUrls(env) {
 
 function buildHatchTrackerMessage(payload, context = {}) {
   const tracker = payload.tracker || {};
-  const authUrl = String(payload.authorize_url || "").trim();
+  const authUrl = htgDiscordButtonUrl(payload);
   const accounts = Array.isArray(tracker.accounts) ? tracker.accounts : [];
   const accountLines = accounts.length
     ? accounts.slice(0, 12).map(hatchTrackerAccountLine)
@@ -11718,7 +11730,7 @@ function htgCommandPayload() {
     name: "account",
     description: "Roblox username to connect; use id:<number> only to force a Roblox user ID",
     type: APPLICATION_COMMAND_OPTION_STRING,
-    required: false
+    required: true
   };
 
   return {
@@ -11729,7 +11741,7 @@ function htgCommandPayload() {
     options: [
       {
         name: "setup",
-        description: "Show your private Big Games auth link and hatch alert instructions.",
+        description: "Connect one Roblox account to your private HTG tracker.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [setupAccountOption]
       },
