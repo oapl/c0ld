@@ -9481,13 +9481,15 @@ async function syncGlobalCommands(url, env) {
   ];
 
   const deletedGuildCommands = [];
+  const guildCommandsToDelete = [];
   const preservedGuildCommands = [];
   const preservedGuildCommandNames = guildId === tCommandGuildId(env)
     ? new Set(["t"])
     : new Set();
+  let guildEndpoint = "";
 
   if (guildId) {
-    const guildEndpoint = discordCommandsEndpoint(applicationId, guildId);
+    guildEndpoint = discordCommandsEndpoint(applicationId, guildId);
     const guildResponse = await fetch(guildEndpoint, {
       headers: {
         Authorization: `Bot ${botToken}`,
@@ -9518,29 +9520,7 @@ async function syncGlobalCommands(url, env) {
         continue;
       }
 
-      const deleteResponse = await fetch(
-        `${guildEndpoint}/${encodeURIComponent(commandId)}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bot ${botToken}`,
-            Accept: "application/json"
-          }
-        }
-      );
-
-      if (!deleteResponse.ok && deleteResponse.status !== 404) {
-        const payload = await deleteResponse.json().catch(() => ({}));
-        throw httpError(
-          502,
-          discordApiErrorMessage(
-            deleteResponse.status,
-            payload.message || `Discord guild command delete failed (${deleteResponse.status}).`
-          )
-        );
-      }
-
-      deletedGuildCommands.push({
+      guildCommandsToDelete.push({
         id: commandId,
         name: command.name || null
       });
@@ -9600,6 +9580,32 @@ async function syncGlobalCommands(url, env) {
       discord_response: globalPayload || null
     };
     throw err;
+  }
+
+  for (const command of guildCommandsToDelete) {
+    const deleteResponse = await fetch(
+      `${guildEndpoint}/${encodeURIComponent(command.id)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bot ${botToken}`,
+          Accept: "application/json"
+        }
+      }
+    );
+
+    if (!deleteResponse.ok && deleteResponse.status !== 404) {
+      const payload = await deleteResponse.json().catch(() => ({}));
+      throw httpError(
+        502,
+        discordApiErrorMessage(
+          deleteResponse.status,
+          payload.message || `Discord guild command delete failed (${deleteResponse.status}).`
+        )
+      );
+    }
+
+    deletedGuildCommands.push(command);
   }
 
   return json({

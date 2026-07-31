@@ -1248,12 +1248,13 @@ function milestoneMemberList(rows){
 function renderMilestones(globalCurrent){
   const currentRows=Array.isArray(globalCurrent?.rows)?globalCurrent.rows:[];
   const rows=currentRows
-    .filter(row=>row?.found!==false&&milestoneRank(row)!==null&&milestoneRank(row)<=1000)
+    .filter(row=>row?.found!==false&&milestoneRank(row)!==null&&milestoneRank(row)>=1)
     .sort((a,b)=>milestoneRank(a)-milestoneRank(b));
   const bands=[
     {label:"Top 100",min:1,max:100},
     {label:"101-500",min:101,max:500},
-    {label:"501-1,000",min:501,max:1000}
+    {label:"501-1,000",min:501,max:1000},
+    {label:"1,001+",min:1001,max:Infinity}
   ];
   const snapshotAt=globalCurrent?.snapshot_at||globalCurrent?.run?.finished_at||globalCurrent?.run?.updated_at;
   els.milestonesMeta.textContent=snapshotAt?"Global snapshot · "+relativeTime(snapshotAt):"Latest global snapshot";
