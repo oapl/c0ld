@@ -6,6 +6,7 @@ const OAUTH_STATES_TABLE = "ps99_inventory_oauth_states";
 const HATCH_TRACKER_USERS_TABLE = "ps99_hatch_tracker_users";
 const HATCH_ALERTS_TABLE = "ps99_hatch_alerts";
 const HATCH_GUILD_CONFIG_TABLE = "ps99_hatch_tracker_guilds";
+const HTG_INVENTORY_STATE_TABLE = "ps99_htg_inventory_state";
 const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
@@ -51,6 +52,7 @@ const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
 const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
 const DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS = 48;
 const DEFAULT_HTG_SCAN_INTERVAL_MINUTES = 5;
+const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
@@ -131,6 +133,9 @@ export default {
             big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
             scan_interval_minutes: htgScanIntervalMinutes(env),
+            shard_count: htgShardCount(env),
+            current_shard: htgCurrentShard(env, new Date()),
+            require_source_filter: htgRequireSourceFilter(env),
             baseline_protection_enabled: envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true),
             baseline_stable_comparisons: hatchBaselineStableComparisons(env),
             backfill_min_item_growth: hatchBackfillMinItemGrowth(env),
@@ -206,25 +211,34 @@ export default {
       const users = await trackedInventoryUsers(env);
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
       const results = await Promise.allSettled(users.map(async user => {
+        const result = { user };
         const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id).catch(error => {
           console.warn("Scheduled hatch tracker lookup failed", error?.message || error);
           return null;
         });
-        const htgTracked = !!tracker;
-        const dueOptions = htgTracked
-          ? { minIntervalMinutes: htgScanIntervalMinutes(env) }
-          : { synchronized: true };
-        if (!await inventoryScanIsDue(env, user, now, dueOptions)) return { skipped: true, user, htg_tracked: htgTracked };
-        const forceHatchRefresh = !!tracker && envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true);
-        const result = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env), { force: forceHatchRefresh });
-        if (tracker && result.snapshot?.id) {
-          result.hatch_alert = await postHatchAlertIfNeeded(env, user, result.snapshot, { source: "schedule", tracker })
-            .catch(error => {
-              console.warn("Scheduled HTG gain alert check failed", error?.message || error);
-              return { posted: false, error: error?.message || String(error) };
-            });
+
+        if (tracker) {
+          const schedule = htgScheduleDecision(env, tracker, user.user_id, now);
+          if (schedule.due) {
+            result.htg_alert = await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule })
+              .catch(error => {
+                console.warn("Scheduled HTG gain alert check failed", error?.message || error);
+                return { posted: false, error: error?.message || String(error) };
+              });
+          } else {
+            result.htg_alert = { posted: false, skipped: true, ...schedule };
+          }
         }
-        if (!result.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) await postHourlyDiffIfNeeded(env, user);
+
+        if (user.inventory_enabled !== false && await inventoryScanIsDue(env, user, now, { synchronized: true })) {
+          result.inventory = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env), { force: false });
+          if (!result.inventory.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) {
+            await postHourlyDiffIfNeeded(env, user);
+          }
+        } else {
+          result.inventory = { skipped: true, reason: "Regular inventory snapshot is not due." };
+        }
+
         return result;
       }));
       for (const result of results) if (result.status === "rejected") console.warn("Scheduled inventory scan failed", result.reason?.message || result.reason);
@@ -839,11 +853,11 @@ async function handleHatchAlertCheck(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
   const user = requestUser(url);
-  const latest = await getLatestSnapshot(env, user.user_id);
-  if (!latest) return json({ ok: false, message: "No inventory snapshot exists for that user yet." }, 404);
+  const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id);
+  if (!tracker) return json({ ok: false, message: "HTG gain alerts are not enabled for that Roblox account." }, 404);
   return json({
     ok: true,
-    ...(await postHatchAlertIfNeeded(env, user, latest, {
+    ...(await postHtgGainAlertIfNeeded(env, user, tracker, {
       source: "manual",
       force: parseBool(url.searchParams.get("force")) === true
     }))
@@ -904,6 +918,7 @@ async function handleHatchDiagnostics(request, env) {
     roblox_user_id: `eq.${user.user_id}`,
     order: "created_at.desc"
   }, 25).catch(error => [{ error: error?.message || String(error) }]);
+  const htgStateRows = await fetchHtgInventoryStateRows(env, user.user_id).catch(error => [{ error: error?.message || String(error) }]);
   const guildConfigs = await fetchEnabledHatchGuildConfigs(env).catch(error => [{ error: error?.message || String(error) }]);
   const latest = snapshots[snapshots.length - 1] || null;
   const uncheckedLatest = !!tracker && !!latest && String(tracker.last_checked_snapshot_id || "") !== String(latest.id || "");
@@ -933,6 +948,7 @@ async function handleHatchDiagnostics(request, env) {
     snapshot_count: snapshots.length,
     item_timeline: itemTimeline,
     recent_diffs: recentDiffs,
+    htg_state_rows: htgStateRows.map(row => row.error ? row : compactHtgStateRow(row)),
     alert_rows: alertRows,
     enabled_guild_configs: guildConfigs.map(config => ({
       guild_id: config.guild_id || null,
@@ -2275,6 +2291,164 @@ async function postHourlyDiffIfNeeded(env, user, options = {}) {
   return { posted: true, post_key: postKey, totals: payload.totals };
 }
 
+async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
+  const userId = String(user?.user_id || tracker?.roblox_user_id || "").trim();
+  if (!userId) return { posted: false, reason: "No Roblox user_id was provided." };
+  if (!tracker) return { posted: false, reason: "HTG gain alerts are not enabled for this Roblox account." };
+
+  const now = new Date();
+  if (!options.force) {
+    const schedule = options.schedule || htgScheduleDecision(env, tracker, userId, now, { ignoreShard: true });
+    if (!schedule.due) return { posted: false, skipped: true, ...schedule };
+  }
+
+  const checkedAt = now.toISOString();
+  const raw = options.rawInventory || await fetchHtgInventory(env, { user_id: userId, username: user?.username || tracker.roblox_username || userId }, {
+    forceRefresh: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true)
+  });
+  const inventorySelection = selectOwnedInventoryItems(raw, env);
+  const rawItems = inventorySelection.items;
+  const sourceMeta = inventorySourceMeta(raw);
+  if (envBool(env.INVENTORY_REJECT_EMPTY, true) && !rawItems.length) {
+    console.warn("Big Games HTG inventory payload did not contain a verified owned-item array.", inventoryPayloadShape(raw));
+    throw httpError(502, "Big Games returned no verified owned-inventory item array; HTG state was not advanced.");
+  }
+
+  const previousRows = await fetchHtgInventoryStateRows(env, userId);
+  const currentRows = normalizeHtgInventoryStateRows(rawItems, tracker, user, checkedAt, {
+    source: sourceMeta,
+    inventory_selection_method: inventorySelection.method,
+    inventory_items_path: inventorySelection.path
+  });
+  const state = hatchTrackerBaselineState(tracker);
+  const hasCompactBaseline = !!firstString(tracker?.metadata?.htg_state?.last_checked_at);
+  if (!state.armed || !hasCompactBaseline) {
+    await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+      checkedAt,
+      source: sourceMeta,
+      inventorySelection
+    });
+    await markHtgGainStateChecked(env, tracker, {
+      checkedAt,
+      rawItemCount: rawItems.length,
+      htgItemCount: sumHtgStateCounts(currentRows),
+      reason: "HTG compact inventory baseline was saved."
+    });
+    return {
+      posted: false,
+      reason: "HTG compact inventory baseline was saved; future scans can alert on new HTG gains.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source: sourceMeta
+    };
+  }
+
+  const candidates = await buildHtgGainCandidates(env, currentRows, previousRows, tracker);
+  if (!candidates.length) {
+    await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+      checkedAt,
+      source: sourceMeta,
+      inventorySelection
+    });
+    await markHtgGainStateChecked(env, tracker, {
+      checkedAt,
+      rawItemCount: rawItems.length,
+      htgItemCount: sumHtgStateCounts(currentRows),
+      reason: "No enabled Huge, Titanic, or Gargantuan gains were detected."
+    });
+    return {
+      posted: false,
+      reason: "No enabled Huge, Titanic, or Gargantuan gains were detected.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source: sourceMeta
+    };
+  }
+
+  const period = htgGainSourceWindow(env, tracker, previousRows, checkedAt);
+  const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
+  if (!sourceFilter.available && htgRequireSourceFilter(env)) {
+    return {
+      posted: false,
+      reason: "HTG source filter was unavailable, so compact HTG state was not advanced.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      source: sourceMeta
+    };
+  }
+
+  const gainedHtg = sourceFilter.rows;
+  if (!gainedHtg.length) {
+    await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+      checkedAt,
+      source: sourceMeta,
+      inventorySelection
+    });
+    await markHtgGainStateChecked(env, tracker, {
+      checkedAt,
+      rawItemCount: rawItems.length,
+      htgItemCount: sumHtgStateCounts(currentRows),
+      reason: "All enabled Huge, Titanic, or Gargantuan gains matched trade, booth, or mail activity."
+    });
+    return {
+      posted: false,
+      reason: "All enabled Huge, Titanic, or Gargantuan gains matched trade, booth, or mail activity.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      source: sourceMeta
+    };
+  }
+
+  const featured = pickFeaturedHatch(gainedHtg);
+  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, period);
+  const discordResponse = await sendHatchAlert(env, payload, tracker);
+
+  await supabaseInsert(env, HATCH_ALERTS_TABLE, [{
+    tracker_id: tracker.id || null,
+    discord_user_id: tracker.discord_user_id,
+    roblox_user_id: Number(userId),
+    roblox_username: firstString(user.username, tracker.roblox_username, userId),
+    snapshot_start_id: null,
+    snapshot_end_id: null,
+    period_start: period.start.captured_at,
+    period_end: period.end.captured_at,
+    tier: featured.tier,
+    item_key: featured.item_key,
+    item_class: featured.item_class,
+    item_id: featured.item_id,
+    display_name: featured.display_name,
+    variant: featured.variant,
+    delta: featured.delta,
+    rap: featured.rap || 0,
+    icon: featured.icon || null,
+    image_url: featured.image_url || null,
+    all_gained: gainedHtg.map(compactHatchCandidate),
+    discord_response: discordResponse || {},
+    created_at: checkedAt
+  }], "minimal");
+
+  await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+    checkedAt,
+    source: sourceMeta,
+    inventorySelection
+  });
+  await markHtgGainStateChecked(env, tracker, {
+    checkedAt,
+    rawItemCount: rawItems.length,
+    htgItemCount: sumHtgStateCounts(currentRows),
+    reason: "HTG gain alert posted.",
+    alert: true
+  });
+
+  return {
+    posted: true,
+    tier: featured.tier,
+    item: featured.display_name,
+    delta: featured.delta,
+    htg_state: compactHtgStateSummary(currentRows, previousRows),
+    source_filter: compactHatchSourceFilterSummary(sourceFilter),
+    source: sourceMeta
+  };
+}
+
 async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
   if (!latestSnapshot?.id) return { posted: false, reason: "No latest snapshot was provided." };
   const userId = String(user.user_id || latestSnapshot.roblox_user_id || "").trim();
@@ -2539,6 +2713,229 @@ function compactHatchCandidate(row) {
     rap: row.rap || 0,
     image_url: row.image_url || null
   };
+}
+
+async function fetchHtgInventoryStateRows(env, userId) {
+  return supabaseSelectAll(env, HTG_INVENTORY_STATE_TABLE, {
+    select: "*",
+    roblox_user_id: `eq.${String(userId || "").trim()}`,
+    order: "item_match_key.asc"
+  }, 10000);
+}
+
+function normalizeHtgInventoryStateRows(rawItems, tracker, user, checkedAt, context = {}) {
+  const userId = String(user?.user_id || tracker?.roblox_user_id || "").trim();
+  const username = firstString(user?.username, tracker?.roblox_username, userId);
+  const rows = new Map();
+  for (const item of rawItems || []) {
+    const row = normalizeHtgInventoryStateItem(item, userId, username, checkedAt, context);
+    if (!row) continue;
+    const existing = rows.get(row.item_match_key);
+    if (!existing) {
+      rows.set(row.item_match_key, row);
+      continue;
+    }
+    existing.count += row.count;
+    existing.rap = Math.max(Number(existing.rap || 0), Number(row.rap || 0));
+    existing.raw = row.raw || existing.raw;
+    existing.metadata.stack_count = Number(existing.metadata.stack_count || 1) + 1;
+  }
+  return [...rows.values()].sort((a, b) =>
+    (HATCH_TIER_PRIORITY[b.tier] || 0) - (HATCH_TIER_PRIORITY[a.tier] || 0)
+    || String(a.display_name).localeCompare(String(b.display_name))
+    || String(a.variant).localeCompare(String(b.variant))
+  );
+}
+
+function normalizeHtgInventoryStateItem(item, userId, username, checkedAt, context = {}) {
+  if (!item || typeof item !== "object") return null;
+  const rawData = item.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  const itemClass = item.class || item.category || item.collection || item.type || "Pet";
+  const itemId = item.id || item.itemId || item.configName || item.name || rawData.id || null;
+  const displayName = item.displayName || item.display_name || item.name || itemId || item.stackKey || "Unknown item";
+  const variant = getVariant(item);
+  const count = Math.max(0, Number(itemCount(item) || 0));
+  if (count <= 0) return null;
+  const row = {
+    roblox_user_id: Number(userId),
+    roblox_username: username || null,
+    item_key: getItemKey(item, itemClass, itemId, variant),
+    item_class: itemClass,
+    item_category: item.category || item.collection || itemClass || null,
+    item_id: itemId,
+    display_name: displayName,
+    variant,
+    count,
+    rap: itemRap(item),
+    icon: item.icon || item.goldenIcon || null,
+    raw: item
+  };
+  const tier = hatchTier(row);
+  if (!tier) return null;
+  const sourceMatchKey = hatchSourceMatchKey(row) || row.item_key;
+  return {
+    ...row,
+    tier,
+    item_match_key: `${tier}|${sourceMatchKey}`,
+    match_key: sourceMatchKey,
+    image_url: null,
+    last_seen_at: checkedAt,
+    last_checked_at: checkedAt,
+    metadata: {
+      stack_count: 1,
+      source_fetched_at: context.source?.fetched_at || null,
+      source_is_stale: context.source?.is_stale ?? null,
+      inventory_selection_method: context.inventory_selection_method || null,
+      inventory_items_path: context.inventory_items_path || null
+    }
+  };
+}
+
+async function buildHtgGainCandidates(env, currentRows, previousRows, tracker) {
+  const previous = new Map((previousRows || []).map(row => [row.item_match_key, Number(row.count || 0)]));
+  const enabledTiers = new Set(hatchTrackerEnabledTiers(tracker));
+  const gained = [];
+  for (const row of currentRows || []) {
+    if (!enabledTiers.has(row.tier)) continue;
+    const before = Math.max(0, Number(previous.get(row.item_match_key) || 0));
+    const after = Math.max(0, Number(row.count || 0));
+    const delta = after - before;
+    if (delta <= 0) continue;
+    gained.push({ ...row, before, after, delta });
+  }
+  return hatchAlertCandidates(env, gained);
+}
+
+async function saveHtgInventoryState(env, tracker, user, currentRows, previousRows, scan = {}) {
+  const checkedAt = firstString(scan.checkedAt, new Date().toISOString());
+  const currentKeys = new Set((currentRows || []).map(row => row.item_match_key));
+  const missingIds = (previousRows || [])
+    .filter(row => Number(row.count || 0) > 0 && !currentKeys.has(row.item_match_key) && row.id)
+    .map(row => row.id);
+
+  for (const ids of chunks(missingIds, 100)) {
+    if (!ids.length) continue;
+    await supabaseUpdate(env, HTG_INVENTORY_STATE_TABLE, { id: `in.(${ids.join(",")})` }, {
+      count: 0,
+      last_checked_at: checkedAt,
+      updated_at: checkedAt,
+      metadata: {
+        source_fetched_at: scan.source?.fetched_at || null,
+        source_is_stale: scan.source?.is_stale ?? null,
+        inventory_selection_method: scan.inventorySelection?.method || null,
+        inventory_items_path: scan.inventorySelection?.path || null,
+        absent_in_latest_scan: true
+      }
+    });
+  }
+
+  const rows = (currentRows || []).map(row => ({
+    tracker_id: tracker?.id || null,
+    discord_user_id: tracker?.discord_user_id || null,
+    roblox_user_id: Number(row.roblox_user_id || user?.user_id || tracker?.roblox_user_id),
+    roblox_username: firstString(row.roblox_username, user?.username, tracker?.roblox_username) || null,
+    item_match_key: row.item_match_key,
+    tier: row.tier,
+    item_key: row.item_key || null,
+    item_class: row.item_class || null,
+    item_id: row.item_id || null,
+    display_name: row.display_name || null,
+    variant: row.variant || null,
+    count: Number(row.count || 0),
+    rap: Number(row.rap || 0),
+    icon: row.icon || null,
+    image_url: row.image_url || null,
+    raw: row.raw || {},
+    metadata: row.metadata || {},
+    last_seen_at: checkedAt,
+    last_checked_at: checkedAt,
+    updated_at: checkedAt
+  }));
+  await supabaseUpsert(env, HTG_INVENTORY_STATE_TABLE, rows, "roblox_user_id,item_match_key");
+}
+
+async function markHtgGainStateChecked(env, tracker, scan = {}) {
+  const checkedAt = firstString(scan.checkedAt, new Date().toISOString());
+  const metadata = hatchTrackerMetadataWithHtgState(
+    hatchTrackerMetadataWithBaseline(tracker?.metadata, {
+      armed: true,
+      snapshot_id: firstString(tracker?.last_checked_snapshot_id),
+      captured_at: checkedAt,
+      item_count: Number(scan.rawItemCount || 0),
+      stable_comparisons: hatchBaselineStableComparisons(env),
+      reset_reason: firstString(scan.reason),
+      risk_reasons: []
+    }),
+    {
+      last_checked_at: checkedAt,
+      htg_item_count: Number(scan.htgItemCount || 0),
+      raw_item_count: Number(scan.rawItemCount || 0),
+      reason: firstString(scan.reason)
+    }
+  );
+  const patch = {
+    metadata,
+    last_checked_at: checkedAt,
+    updated_at: checkedAt
+  };
+  if (scan.alert) {
+    patch.last_alert_at = checkedAt;
+  }
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), patch);
+}
+
+function hatchTrackerMetadataWithHtgState(metadata, statePatch) {
+  const base = plainObject(metadata);
+  return {
+    ...base,
+    htg_state: {
+      ...plainObject(base.htg_state),
+      ...(statePatch || {}),
+      updated_at: new Date().toISOString()
+    }
+  };
+}
+
+function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
+  const end = { captured_at: checkedAt };
+  const latestPreviousCheck = (previousRows || [])
+    .map(row => new Date(row.last_checked_at || row.updated_at || 0).getTime())
+    .filter(time => Number.isFinite(time) && time > 0)
+    .sort((a, b) => b - a)[0];
+  const fallbackStart = new Date(new Date(checkedAt).getTime() - htgScanIntervalMinutes(env) * 60000).toISOString();
+  const startAt = firstString(
+    tracker?.last_checked_at,
+    latestPreviousCheck ? new Date(latestPreviousCheck).toISOString() : "",
+    tracker?.metadata?.hatch_baseline?.captured_at,
+    fallbackStart
+  );
+  return { start: { captured_at: startAt }, end };
+}
+
+function compactHtgStateRow(row) {
+  return {
+    item_match_key: row.item_match_key || null,
+    tier: row.tier || null,
+    display_name: row.display_name || null,
+    variant: row.variant || null,
+    count: Number(row.count || 0),
+    rap: Number(row.rap || 0),
+    last_seen_at: row.last_seen_at || null,
+    last_checked_at: row.last_checked_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function compactHtgStateSummary(currentRows, previousRows) {
+  return {
+    previous_rows: (previousRows || []).length,
+    current_rows: (currentRows || []).length,
+    current_count: sumHtgStateCounts(currentRows)
+  };
+}
+
+function sumHtgStateCounts(rows) {
+  return (rows || []).reduce((total, row) => total + Math.max(0, Number(row.count || 0)), 0);
 }
 
 async function filterHatchHistoricalInventoryEchoes(env, userId, rows, context = {}) {
@@ -3427,6 +3824,30 @@ async function fetchInventory(env, user, options = {}) {
   return fetchPublicInventory(usernameOrId);
 }
 
+async function fetchHtgInventory(env, user, options = {}) {
+  const userId = String(user?.user_id || DEFAULT_USER_ID).trim();
+  const grant = await getUsableOAuthGrant(env, userId, "hatch_tracker");
+  if (!grant) throw httpError(401, `No usable HTG Big Games authorization exists for Roblox user ${userId}. Run /htg setup again.`);
+  const missing = missingOAuthScopes(env, "hatch_tracker", grant.scope || "");
+  if (missing.includes(BIG_GAMES_INVENTORY_SCOPE)) {
+    throw httpError(403, `HTG Big Games authorization is missing inventory scope for Roblox user ${userId}. Run /htg setup again.`);
+  }
+  const accessToken = await openOAuthAccessToken(env, grant, "hatch_tracker");
+  let payload;
+  try {
+    payload = await fetchInventoryWithAccessToken(env, accessToken, options);
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    }
+    throw error;
+  }
+  try {
+    await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
+  } catch {}
+  return payload;
+}
+
 function pickPreviousSnapshots(snapshots) {
   const snaps = sortAsc(snapshots);
   return {
@@ -4242,7 +4663,7 @@ function requireAllowedOrigin(request, env) {
     throw httpError(403, "This inventory retry origin is not allowed.");
   }
 }
-function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME) })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME }]; }
+function configuredUsers(env) { try { const parsed = JSON.parse(env.INVENTORY_USERS_JSON || "[]"); if (Array.isArray(parsed) && parsed.length) return parsed.map(u => ({ user_id: String(u.user_id || u.id || DEFAULT_USER_ID), username: String(u.username || DEFAULT_USERNAME), inventory_enabled: true })); } catch {} return [{ user_id: DEFAULT_USER_ID, username: DEFAULT_USERNAME, inventory_enabled: true }]; }
 async function trackedInventoryUsers(env) {
   const users = new Map(configuredUsers(env).map(user => [String(user.user_id), user]));
   if (!envBool(env.INVENTORY_LEAGUE_FEATURE, true) || !supabaseUrl(env)) return [...users.values()];
@@ -4256,9 +4677,14 @@ async function trackedInventoryUsers(env) {
     for (const grant of grants) {
       const userId = String(grant.roblox_user_id || "").trim();
       if (!userId) continue;
+      const existing = users.get(userId) || {};
+      const oauthApp = String(grant.metadata?.oauth_app || grant.metadata?.purpose || "inventory").trim();
+      const htgOnly = oauthApp === "hatch_tracker";
       users.set(userId, {
         user_id: userId,
-        username: String(grant.metadata?.username || users.get(userId)?.username || userId).trim()
+        username: String(grant.metadata?.username || existing.username || userId).trim(),
+        inventory_enabled: existing.inventory_enabled === true || !htgOnly,
+        htg_oauth: existing.htg_oauth === true || htgOnly
       });
     }
   } catch (error) {
@@ -4296,6 +4722,48 @@ function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENT
 function htgScanIntervalMinutes(env) {
   const value = Number(env.HTG_SCAN_INTERVAL_MINUTES || env.HATCH_SCAN_INTERVAL_MINUTES || DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
   return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_HTG_SCAN_INTERVAL_MINUTES;
+}
+function htgShardCount(env) {
+  const fallback = htgScanIntervalMinutes(env);
+  const value = Number(env.HTG_SHARD_COUNT || env.HATCH_SHARD_COUNT || fallback);
+  return Number.isFinite(value) ? Math.max(1, Math.min(1440, Math.floor(value))) : fallback;
+}
+function htgCurrentShard(env, now = new Date()) {
+  const count = htgShardCount(env);
+  return Math.floor(now.getTime() / 60000) % count;
+}
+function htgUserShard(userId, shardCount) {
+  const count = Math.max(1, Number(shardCount || 1));
+  const text = String(userId || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % count;
+}
+function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {}) {
+  const shardCount = htgShardCount(env);
+  const currentShard = htgCurrentShard(env, now);
+  const userShard = htgUserShard(userId, shardCount);
+  if (!options.ignoreShard && userShard !== currentShard) {
+    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard };
+  }
+
+  const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
+  if (!Number.isFinite(lastChecked) || lastChecked <= 0) {
+    return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard };
+  }
+
+  const intervalMs = htgScanIntervalMinutes(env) * 60000;
+  const elapsedMs = now.getTime() - lastChecked;
+  if (elapsedMs < Math.max(0, intervalMs - 30000)) {
+    return { due: false, reason: "HTG scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000) };
+  }
+  return { due: true, reason: "HTG scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000) };
+}
+function htgRequireSourceFilter(env) {
+  return envBool(firstString(env.HTG_REQUIRE_SOURCE_FILTER, env.HATCH_REQUIRE_SOURCE_FILTER), DEFAULT_HTG_REQUIRE_SOURCE_FILTER);
 }
 function inventorySnapshotItemReadLimit(env) {
   const value = Number(env.INVENTORY_SNAPSHOT_ITEM_READ_LIMIT || DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT);

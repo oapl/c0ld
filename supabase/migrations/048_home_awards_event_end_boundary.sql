@@ -1,0 +1,326 @@
+-- Migration 048: keep award calculations inside the canonical battle window.
+-- Grace-period snapshots remain archived, but they cannot alter final awards.
+
+create or replace function public.get_c0ld_home_awards(
+  p_clan_name text default 'c0ld',
+  p_battle_key text default null
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_clan_name text;
+  v_battle_key text;
+  v_battle_end_at timestamptz;
+  v_result jsonb;
+begin
+  v_clan_name := coalesce(nullif(btrim(p_clan_name), ''), 'c0ld');
+  v_battle_key := nullif(btrim(p_battle_key), '');
+
+  if v_battle_key is null then
+    select battle_key
+      into v_battle_key
+      from public.c0ld_battle_runs
+     where clan_name = v_clan_name
+     order by latest_snapshot_at desc nulls last
+     limit 1;
+  end if;
+
+  if v_battle_key is null then
+    return jsonb_build_object(
+      'clan_name', v_clan_name,
+      'battle', null,
+      'calculated_at', now(),
+      'snapshot_count', 0,
+      'awards', '{}'::jsonb
+    );
+  end if;
+
+  select battle_ended_at
+    into v_battle_end_at
+    from public.c0ld_battle_runs
+   where clan_name = v_clan_name
+     and battle_key = v_battle_key
+   order by updated_at desc nulls last
+   limit 1;
+
+  with
+  base as materialized (
+    select
+      snapshot_id,
+      fetched_at,
+      user_id,
+      username,
+      rank,
+      total_points
+    from public.c0ld_clan_snapshots
+    where clan_name = v_clan_name
+      and battle_key = v_battle_key
+      and (v_battle_end_at is null or fetched_at <= v_battle_end_at)
+  ),
+  snapshot_intervals as materialized (
+    select
+      fetched_at,
+      coalesce(
+        least(
+          greatest(extract(epoch from (next_at - fetched_at)) * 1000, 0),
+          600000
+        )::bigint,
+        0
+      ) as duration_ms
+    from (
+      select
+        fetched_at,
+        lead(fetched_at) over (order by fetched_at) as next_at
+      from (select distinct fetched_at from base) snapshot_times
+    ) intervals
+  ),
+  profiles as materialized (
+    select
+      user_id,
+      (array_agg(username order by fetched_at desc)
+        filter (where username is not null and btrim(username) <> ''))[1] as username
+    from base
+    group by user_id
+  ),
+  sequenced as materialized (
+    select
+      base.*,
+      lag(fetched_at) over (partition by user_id order by fetched_at) as previous_at,
+      lag(rank) over (partition by user_id order by fetched_at) as previous_rank,
+      lag(total_points) over (partition by user_id order by fetched_at) as previous_points
+    from base
+  ),
+  mvp as (
+    select base.user_id, sum(snapshot_intervals.duration_ms)::bigint as value_ms
+    from base
+    join snapshot_intervals using (fetched_at)
+    where base.rank = 1
+    group by base.user_id
+    order by value_ms desc, base.user_id
+    limit 1
+  ),
+  latest_snapshot as (
+    select max(fetched_at) as fetched_at from base
+  ),
+  points_winner as (
+    select user_id, total_points
+    from base
+    where fetched_at = (select fetched_at from latest_snapshot)
+    order by total_points desc, rank asc, user_id
+    limit 1
+  ),
+  rank_spans as (
+    select
+      user_id,
+      (array_agg(rank order by fetched_at asc) filter (where rank is not null))[1] as first_rank,
+      (array_agg(rank order by fetched_at desc) filter (where rank is not null))[1] as latest_rank,
+      max(rank) filter (where rank is not null) as worst_rank
+    from base
+    group by user_id
+  ),
+  sleeper as (
+    select
+      user_id,
+      first_rank,
+      latest_rank,
+      (first_rank - latest_rank)::integer as gain,
+      round(((first_rank - latest_rank)::numeric / nullif(first_rank, 0)) * 100, 1) as percentage
+    from rank_spans
+    where first_rank is not null
+      and latest_rank is not null
+      and first_rank > latest_rank
+    order by gain desc, latest_rank asc, user_id
+    limit 1
+  ),
+  downtime_all as materialized (
+    select
+      user_id,
+      sum(
+        least(
+          greatest(extract(epoch from (fetched_at - previous_at)) * 1000, 0),
+          600000
+        )
+      )::bigint as value_ms
+    from sequenced
+    where previous_at is not null
+      and total_points = previous_points
+    group by user_id
+  ),
+  downtime as (
+    select user_id, value_ms
+    from downtime_all
+    order by value_ms desc, user_id
+    limit 1
+  ),
+  tracked_time as materialized (
+    select base.user_id, sum(snapshot_intervals.duration_ms)::bigint as value_ms
+    from base
+    join snapshot_intervals using (fetched_at)
+    group by base.user_id
+  ),
+  marathon as (
+    select
+      tracked_time.user_id,
+      greatest(tracked_time.value_ms - coalesce(downtime_all.value_ms, 0), 0)::bigint as value_ms
+    from tracked_time
+    left join downtime_all using (user_id)
+    order by value_ms desc, tracked_time.user_id
+    limit 1
+  ),
+  locked_in as (
+    select
+      user_id,
+      sum(greatest(total_points - previous_points, 0))::bigint as gain
+    from sequenced
+    where previous_points is not null
+      and fetched_at >= (select fetched_at from latest_snapshot) - interval '12 hours'
+    group by user_id
+    order by gain desc, user_id
+    limit 1
+  ),
+  underdog as (
+    select
+      user_id,
+      worst_rank,
+      latest_rank,
+      greatest(worst_rank - latest_rank, 0)::integer as gain
+    from rank_spans
+    where worst_rank is not null
+      and latest_rank is not null
+    order by gain desc, latest_rank asc, user_id
+    limit 1
+  ),
+  glasses as (
+    select user_id, count(*)::integer as rank_changes
+    from sequenced
+    where previous_rank is not null
+      and rank is not null
+      and rank <> previous_rank
+    group by user_id
+    order by rank_changes desc, user_id
+    limit 1
+  ),
+  last_ranks as materialized (
+    select fetched_at, max(rank) as last_rank
+    from base
+    where rank is not null
+    group by fetched_at
+  ),
+  lvp as (
+    select base.user_id, sum(snapshot_intervals.duration_ms)::bigint as value_ms
+    from base
+    join snapshot_intervals using (fetched_at)
+    join last_ranks using (fetched_at)
+    where base.rank = last_ranks.last_rank
+    group by base.user_id
+    order by value_ms desc, base.user_id
+    limit 1
+  )
+  select jsonb_build_object(
+    'clan_name', v_clan_name,
+    'battle', v_battle_key,
+    'battle_end_iso', v_battle_end_at,
+    'calculated_at', now(),
+    'source_snapshot_at', (select fetched_at from latest_snapshot),
+    'snapshot_count', (select count(distinct snapshot_id) from base),
+    'awards', jsonb_build_object(
+      'mvp', (
+        select jsonb_build_object(
+          'user_id', mvp.user_id,
+          'username', profiles.username,
+          'value_ms', mvp.value_ms
+        )
+        from mvp join profiles using (user_id)
+      ),
+      'points', (
+        select jsonb_build_object(
+          'user_id', points_winner.user_id,
+          'username', profiles.username,
+          'total_points', points_winner.total_points
+        )
+        from points_winner join profiles using (user_id)
+      ),
+      'sleeper', (
+        select jsonb_build_object(
+          'user_id', sleeper.user_id,
+          'username', profiles.username,
+          'first_rank', sleeper.first_rank,
+          'latest_rank', sleeper.latest_rank,
+          'gain', sleeper.gain,
+          'percentage', sleeper.percentage
+        )
+        from sleeper join profiles using (user_id)
+      ),
+      'downtime', (
+        select jsonb_build_object(
+          'user_id', downtime.user_id,
+          'username', profiles.username,
+          'value_ms', downtime.value_ms
+        )
+        from downtime join profiles using (user_id)
+      ),
+      'glasses', (
+        select jsonb_build_object(
+          'user_id', glasses.user_id,
+          'username', profiles.username,
+          'rank_changes', glasses.rank_changes
+        )
+        from glasses join profiles using (user_id)
+      ),
+      'lvp', (
+        select jsonb_build_object(
+          'user_id', lvp.user_id,
+          'username', profiles.username,
+          'value_ms', lvp.value_ms
+        )
+        from lvp join profiles using (user_id)
+      ),
+      'locked_in', (
+        select jsonb_build_object(
+          'user_id', locked_in.user_id,
+          'username', profiles.username,
+          'gain', locked_in.gain
+        )
+        from locked_in join profiles using (user_id)
+      ),
+      'marathon', (
+        select jsonb_build_object(
+          'user_id', marathon.user_id,
+          'username', profiles.username,
+          'value_ms', marathon.value_ms
+        )
+        from marathon join profiles using (user_id)
+      ),
+      'underdog', (
+        select jsonb_build_object(
+          'user_id', underdog.user_id,
+          'username', profiles.username,
+          'worst_rank', underdog.worst_rank,
+          'latest_rank', underdog.latest_rank,
+          'gain', underdog.gain
+        )
+        from underdog join profiles using (user_id)
+      )
+    )
+  ) into v_result;
+
+  return coalesce(v_result, jsonb_build_object(
+    'clan_name', v_clan_name,
+    'battle', v_battle_key,
+    'battle_end_iso', v_battle_end_at,
+    'calculated_at', now(),
+    'snapshot_count', 0,
+    'awards', '{}'::jsonb
+  ));
+end;
+$$;
+
+revoke all on function public.get_c0ld_home_awards(text, text) from public, anon, authenticated;
+grant execute on function public.get_c0ld_home_awards(text, text) to service_role;
+
+comment on function public.get_c0ld_home_awards(text, text) is
+  'Calculates home-page battle awards using only snapshots at or before the canonical battle end.';

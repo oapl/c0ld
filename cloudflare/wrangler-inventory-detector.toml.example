@@ -23,6 +23,8 @@ HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
 HTG_SCAN_INTERVAL_MINUTES = "5"
+HTG_SHARD_COUNT = "5"
+HTG_REQUIRE_SOURCE_FILTER = "true"
 HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"
@@ -41,10 +43,11 @@ HATCH_ALERT_CHANNEL_ID = ""
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
-# HTG-enabled accounts scan on the HTG interval above. Normal inventory accounts
-# still use the hourly synchronized cohort unless manually refreshed.
+# HTG-enabled accounts are sharded across this every-minute cron. With the
+# default 5 shards, each user is scanned about every 5 minutes. Normal inventory
+# accounts still use the hourly synchronized cohort unless manually refreshed.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # Required secrets:
 # wrangler secret put SUPABASE_SERVICE_KEY

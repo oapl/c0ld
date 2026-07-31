@@ -864,10 +864,29 @@ function summaryAwardStat(award,extra={}){
   };
 }
 
-function summaryAwardDefinitions(summary){
+function summaryRookieStats(current){
+  const candidates=(Array.isArray(current?.rows)?current.rows:[]).map(row=>{
+    const profile=profileFor(row)||{};
+    const totalBattles=finite(profile.total_battles);
+    return {
+      ...summaryAwardStat({...row,...profile},{
+        finalPoints:pointsFor(row),
+        finalRank:rankFor(row),
+        totalBattles
+      }),
+      profile
+    };
+  }).filter(stat=>stat&&stat.totalBattles!==null&&stat.totalBattles<=3);
+  const maxPoints=Math.max(1,...candidates.map(stat=>stat.finalPoints));
+  return candidates
+    .map(stat=>({...stat,score:100*((1-(stat.totalBattles/4))*0.55+(stat.finalPoints/maxPoints)*0.45)}))
+    .sort((a,b)=>b.score-a.score||b.finalPoints-a.finalPoints)
+    .slice(0,5);
+}
+
+function summaryAwardDefinitions(summary,current){
   const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
   const mvp=summaryAwardStat(awards.mvp,{valueMs:Number(awards.mvp?.value_ms)||0});
-  const points=summaryAwardStat(awards.points,{finalPoints:Number(awards.points?.total_points)||0});
   const sleeper=summaryAwardStat(awards.sleeper,{
     firstRank:finite(awards.sleeper?.first_rank),
     latestRank:finite(awards.sleeper?.latest_rank),
@@ -876,8 +895,7 @@ function summaryAwardDefinitions(summary){
     finalRank:finite(awards.sleeper?.latest_rank)
   });
   const downtime=summaryAwardStat(awards.downtime,{valueMs:Number(awards.downtime?.value_ms)||0});
-  const glasses=summaryAwardStat(awards.glasses,{rankChanges:finite(awards.glasses?.rank_changes)??0});
-  const lvp=summaryAwardStat(awards.lvp,{valueMs:Number(awards.lvp?.value_ms)||0});
+  const rookies=summaryRookieStats(current);
 
   return [
     {
@@ -888,16 +906,6 @@ function summaryAwardDefinitions(summary){
       metrics:stat=>[
         {text:fmtDuration(stat.valueMs)+" at #1",tone:"good"},
         {text:"calculated in Postgres"}
-      ]
-    },
-    {
-      title:"Point Leader",
-      note:"Most points in the selected battle.",
-      weight:"server summary",
-      items:points?[points]:[],
-      metrics:stat=>[
-        {text:shortNum(stat.finalPoints)+" pts",tone:"good"},
-        {text:"latest battle snapshot"}
       ]
     },
     {
@@ -912,6 +920,17 @@ function summaryAwardDefinitions(summary){
       ]
     },
     {
+      title:"Rookie of the War",
+      note:"Newest c0ld players weighted by battle output.",
+      weight:"tenure + output",
+      items:rookies,
+      metrics:stat=>[
+        {text:stat.totalBattles<=1?"first c0ld war":stat.totalBattles+" recorded battles",tone:"good"},
+        {text:rankLabel(stat.finalRank)},
+        {text:shortNum(stat.finalPoints)+" pts"}
+      ]
+    },
+    {
       title:"Biggest Thrower",
       note:"Most accumulated time without a recorded point gain.",
       weight:"server summary",
@@ -919,26 +938,6 @@ function summaryAwardDefinitions(summary){
       metrics:stat=>[
         {text:fmtDuration(stat.valueMs)+" idle",tone:"bad"},
         {text:"no point-gain intervals"}
-      ]
-    },
-    {
-      title:"Gotta Catch 'em All",
-      note:"Most rank changes throughout the battle.",
-      weight:"server summary",
-      items:glasses?[glasses]:[],
-      metrics:stat=>[
-        {text:String(Math.trunc(stat.rankChanges||0))+" rank changes",tone:"warn"},
-        {text:"battle movement"}
-      ]
-    },
-    {
-      title:"Last Place Legend",
-      note:"Most observed time holding the lowest tracked clan rank.",
-      weight:"server summary",
-      items:lvp?[lvp]:[],
-      metrics:stat=>[
-        {text:fmtDuration(stat.valueMs)+" in last",tone:"bad"},
-        {text:"lowest rank exposure"}
       ]
     }
   ];
@@ -1174,13 +1173,13 @@ function renderCustom(stats){
 function renderCustomSummary(summary){
   const awards=summary?.awards&&typeof summary.awards==="object"?summary.awards:{};
   const ideas=[
-    {title:"Point Crown",award:awards.points,metric:award=>shortNum(award.total_points)+" points"},
-    {title:"Rank Climber",award:awards.sleeper,metric:award=>"+"+(finite(award.gain)??0)+" ranks"},
-    {title:"Chaos Agent",award:awards.glasses,metric:award=>(finite(award.rank_changes)??0)+" rank changes"},
-    {title:"Idle Legend",award:awards.downtime,metric:award=>fmtDuration(Number(award.value_ms)||0)+" idle"},
-    {title:"Last Place Legend",award:awards.lvp,metric:award=>fmtDuration(Number(award.value_ms)||0)+" in last"}
+    {title:"Locked TF In",award:awards.locked_in,metric:award=>"+"+shortNum(award.gain)+" pts in final 12h"},
+    {title:"Gotta Catch 'em All",award:awards.glasses,metric:award=>(finite(award.rank_changes)??0)+" rank changes"},
+    {title:"Hates Touching Grass",award:awards.marathon,metric:award=>fmtDuration(Number(award.value_ms)||0)+" active"},
+    {title:"Underdog",award:awards.underdog,metric:award=>rankLabel(award.worst_rank)+" worst, "+rankLabel(award.latest_rank)+" final"},
+    {title:"Most Consistent 🧠",award:awards.downtime,metric:award=>fmtDuration(Number(award.value_ms)||0)+" without point gain"}
   ];
-  els.customMeta.textContent="Fast summary. Use Full Analysis for the older, deeper candidate scoring.";
+  els.customMeta.textContent="";
   els.customGrid.innerHTML=ideas.map(idea=>{
     if(!idea.award)return '<div class="custom-card"><div class="custom-title">'+esc(idea.title)+'</div><div class="custom-metric">No candidate.</div></div>';
     const stat=summaryAwardStat(idea.award);
@@ -1275,7 +1274,7 @@ async function loadCandidates(){
     const effectiveBattle=selected==="current"?(summary?.battle||current.battle||battles[0]?.battle||"current"):selected;
     if(!summary)throw new Error("No award summary was returned.");
     renderFastSummary(effectiveBattle,current,summary);
-    renderAwards(summaryAwardDefinitions(summary));
+    renderAwards(summaryAwardDefinitions(summary,current));
     renderCustomSummary(summary);
     setStatus("Loaded fast award summary from "+(summary.source_snapshot_at?relativeTime(summary.source_snapshot_at):"latest snapshot")+".");
     loadMilestones().catch(error=>console.warn("Milestones failed",error));

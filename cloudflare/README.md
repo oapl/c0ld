@@ -1139,15 +1139,16 @@ tokens expire after 30 days and must then be authorized again; there is no
 refresh-token endpoint. Re-running the setup/authorization flow issues a new
 token for the selected linked Roblox account; users do not need to revoke first.
 
-### Hatch alert tracker
+### HTG gain alert tracker
 
 The Discord `/htg` command uses the same Big Games OAuth callback and scheduled
-inventory snapshots to post Huge, Titanic, and Gargantuan gain alerts. Apply:
+inventory checks to post Huge, Titanic, and Gargantuan gain alerts. Apply:
 
 ```text
 supabase/migrations/035_hatch_tracker.sql
 supabase/migrations/036_hatch_tracker_guild_channels.sql
 supabase/migrations/037_hatch_tracker_multi_account.sql
+supabase/migrations/049_htg_inventory_state.sql
 ```
 
 Set these on `inventory-detector-worker`. The regular `BIG_GAMES_*` app can
@@ -1162,9 +1163,11 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
 | `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
+| `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5`, the Worker checks one fifth of users per minute and each user lands about every five minutes. |
+| `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries later instead of posting an unverified gain or losing the delta. |
 | `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new HTG gains are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
-| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. Once a tracker is armed, broad backfill/bulk-gain guards no longer suppress new HTG deltas; source and historical filters still apply. |
+| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. Once a tracker is armed, broad backfill/bulk-gain guards no longer suppress new HTG deltas; source filtering still applies. |
 | `HATCH_BASELINE_STABLE_COMPARISONS` | Optional. Defaults to `1`; number of clean snapshot comparisons required after setup or a baseline reset before HTG alerts can post. |
 | `HATCH_BACKFILL_MIN_ITEM_GROWTH` | Optional. Defaults to `25`; minimum snapshot stack-count jump considered a possible inventory backfill while the tracker is warming up. |
 | `HATCH_BACKFILL_ITEM_GROWTH_RATIO` | Optional. Defaults to `0.05`; required stack-count growth ratio for the backfill guard. |
@@ -1185,13 +1188,26 @@ Required/optional secrets on `inventory-detector-worker`:
 | `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
 | `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
 
-The HTG detector looks for new Huge, Titanic, and Gargantuan inventory deltas,
-then removes matching gains when those same pets appear as received trade items,
-booth purchases, or incoming mail within the snapshot window. It also suppresses
-unstable baseline/backfill data while a tracker is warming up; after that,
-detected HTG gains are not dropped just because other inventory also changed. If the source
-endpoints cannot be read, Luna returns that in the `source_filter` result and
-leaves the candidate gains unfiltered.
+The HTG detector uses a compact state table rather than full snapshot
+comparisons for frequent checks. Each scan fetches the current Big Games
+inventory, extracts only Huge, Titanic, and Gargantuan pet stacks, compares them
+against `ps99_htg_inventory_state`, then removes matching gains when those same
+pets appear as received trade items, booth purchases, or incoming mail within
+the scan window. It also suppresses unstable baseline/backfill data while a
+tracker is warming up; after that, detected HTG gains are not dropped just
+because other inventory also changed. If source endpoints cannot be read and
+`HTG_REQUIRE_SOURCE_FILTER=true`, Luna does not post or advance the compact
+state; it retries on a later scheduled scan.
+
+Use an every-minute cron for the inventory Worker when HTG sharding is enabled:
+
+```text
+* * * * *
+```
+
+With the default five shards, this still gives each HTG user an approximately
+five-minute check interval, but spreads API calls and database writes across
+five separate scheduled invocations.
 
 Set these on `c0ld-discord-search`:
 
