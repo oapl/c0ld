@@ -159,6 +159,7 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
       </div>
       <div class="downtime-actions">
         <div id="downtime-meta" class="subtle copy-status"></div>
+        <button id="copy-downtime-only-btn" type="button" disabled>Copy Downtime only</button>
         <button id="copy-downtime-btn" type="button" disabled>Copy for Discord</button>
       </div>
     </div>
@@ -197,6 +198,7 @@ let loading=false;
 let battleSelectionPinned=new URLSearchParams(location.search).has("battle");
 let downtimeDiscordChunks=[];
 let downtimeDiscordChunkIndex=0;
+let downtimeOnlyText="";
 const BATTLE_DISCOVERY_INTERVAL_MS=5*60*1000;
 
 document.title=CLAN_LABEL+" Superlative Candidates";
@@ -221,6 +223,7 @@ const els={
   customMeta:document.getElementById("custom-meta"),
   downtimeMeta:document.getElementById("downtime-meta"),
   downtimeList:document.getElementById("downtime-list"),
+  copyDowntimeOnlyBtn:document.getElementById("copy-downtime-only-btn"),
   copyDowntimeBtn:document.getElementById("copy-downtime-btn"),
   milestonesMeta:document.getElementById("milestones-meta"),
   milestonesList:document.getElementById("milestones-list")
@@ -1330,9 +1333,17 @@ function buildDiscordDowntimeChunks(rows,battleLabel){
   });
 }
 
+function buildDowntimeOnlyText(rows,battleLabel){
+  const title="**"+CLAN_LABEL+" Downtime - "+String(battleLabel||"Latest Battle")+"**";
+  const lines=rows.map((row,index)=>(index+1)+". **"+playerName(row).replace(/\*/g,"\\*")+"** "+row.downtimePct.toFixed(1)+"%");
+  return [title,...lines].join("\n");
+}
+
 function resetDowntimeCopy(rows,battleLabel){
   downtimeDiscordChunks=buildDiscordDowntimeChunks(rows,battleLabel);
   downtimeDiscordChunkIndex=0;
+  downtimeOnlyText=buildDowntimeOnlyText(rows,battleLabel);
+  els.copyDowntimeOnlyBtn.disabled=!rows.length||downtimeOnlyText.length>2000;
   els.copyDowntimeBtn.disabled=!downtimeDiscordChunks.length;
   els.copyDowntimeBtn.textContent="Copy for Discord";
   els.downtimeMeta.textContent=rows.length
@@ -1386,6 +1397,16 @@ async function copyNextDowntimePart(){
       els.copyDowntimeBtn.textContent="Copy Part "+(copiedPart+1)+" of "+downtimeDiscordChunks.length;
       els.downtimeMeta.textContent="Copied part "+copiedPart+"/"+downtimeDiscordChunks.length+". Paste it, then copy the next part.";
     }
+  }catch(error){
+    els.downtimeMeta.textContent=error.message||"Clipboard copy failed.";
+  }
+}
+
+async function copyDowntimeOnly(){
+  if(!downtimeOnlyText)return;
+  try{
+    await copyText(downtimeOnlyText);
+    els.downtimeMeta.textContent="Copied downtime-only list · "+downtimeOnlyText.length.toLocaleString("en-US")+"/2,000 characters.";
   }catch(error){
     els.downtimeMeta.textContent=error.message||"Clipboard copy failed.";
   }
@@ -1552,6 +1573,7 @@ els.battleSelect.addEventListener("change",()=>{
   loadCandidates();
 });
 els.fullBtn.addEventListener("click",loadFullCandidates);
+els.copyDowntimeOnlyBtn.addEventListener("click",copyDowntimeOnly);
 els.copyDowntimeBtn.addEventListener("click",copyNextDowntimePart);
 
 async function initPage(){

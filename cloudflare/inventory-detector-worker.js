@@ -27,6 +27,7 @@ const BIG_GAMES_HATCH_TRACKER_SCOPES = Object.freeze([
   BIG_GAMES_BOOTH_SCOPE,
   BIG_GAMES_MAIL_SCOPE
 ]);
+const HATCH_OAUTH_STATE_BYTES = 16;
 const HATCH_SOURCE_ENDPOINTS = Object.freeze([
   { key: "trades", label: "trade", scope: BIG_GAMES_TRADE_SCOPE, envUrl: "BIG_GAMES_TRADES_URL", defaultUrl: BIG_GAMES_TRADES_URL },
   { key: "booth", label: "booth", scope: BIG_GAMES_BOOTH_SCOPE, envUrl: "BIG_GAMES_BOOTH_URL", defaultUrl: BIG_GAMES_BOOTH_URL },
@@ -57,7 +58,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-account-bound-domain-2026-07-31a";
+const INVENTORY_BUILD_ID = "inventory-htg-direct-bg-link-2026-07-31a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -318,7 +319,7 @@ async function handleHatchOAuthStart(request, env) {
   const guildId = optionalDiscordSnowflake(body.guild_id, "guild_id");
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
-  const state = randomBase64Url(32);
+  const state = randomBase64Url(HATCH_OAUTH_STATE_BYTES);
   const verifier = randomBase64Url(64);
   const challenge = await sha256Base64Url(verifier);
   const selectedTier = normalizeHatchTierSelection(body.tier || "all");

@@ -16,7 +16,8 @@ LEAGUE_API_BASE = "https://yamo-league-api-worker.YOUR-SUBDOMAIN.workers.dev"
 BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_ME"
 BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
 HATCH_BIG_GAMES_CLIENT_ID = "bgapp_REPLACE_WITH_LUNA_HTG_APP"
-HATCH_BIG_GAMES_REDIRECT_URI = "https://inventory-detector-worker.YOUR-SUBDOMAIN.workers.dev/api/inventory/oauth/callback"
+HATCH_BIG_GAMES_REDIRECT_URI = "https://luna.c0ld-clan.com/api/inventory/oauth/callback"
+HATCH_OAUTH_PUBLIC_BASE = "https://luna.c0ld-clan.com"
 # HTG defaults to these four scopes so source filtering can distinguish tracked
 # HTG inventory gains from trade, booth, or mail gains. Register them on the Luna
 # HTG Big Games app.

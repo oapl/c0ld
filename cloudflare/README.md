@@ -1173,7 +1173,8 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_CLIENT_ID` | Client ID from the existing inventory monitor Big Games DB app. |
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
-| `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
+| `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app, usually `https://luna.c0ld-clan.com/api/inventory/oauth/callback`. |
+| `HATCH_OAUTH_PUBLIC_BASE` | Public base URL used for the short Discord button link, usually `https://luna.c0ld-clan.com`. |
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG always includes `player-data:pet-simulator-99:profile:read` and `player-data:pet-simulator-99:inventory:read`, then defaults to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
 | `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
 | `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5`, the Worker checks one fifth of users per minute and each user lands about every five minutes. |
@@ -1259,8 +1260,8 @@ The user flow is:
   Components V2 setup message with a Big Games DB connect button bound to that
   account. Bare numeric values are treated as possible numeric usernames first;
   use `account:id:<number>` only when intentionally targeting a Roblox user ID.
-  Accountless `/htg setup` only shows instructions because Big Games does not
-  return which linked Roblox account approved a generic OAuth link.
+  The account argument is required so Luna can safely bind the OAuth approval
+  even when Big Games Profile does not expose a parseable Roblox user ID.
 - `/htg accounts` lists every Roblox account connected to the user's Discord
   account.
 - `/htg assign channel:<channel>` sets the only HTG gain-alert destination for the
