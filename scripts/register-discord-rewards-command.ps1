@@ -72,7 +72,7 @@ $query = if ($Global) {
   New-QueryString @{ guild_id = $GuildId }
 }
 
-Write-Host "Registering reward commands: /clan rewards, /league rewards, /lb rewards..." -ForegroundColor Green
+Write-Host "Registering reward commands: /clan rewards and /league rewards..." -ForegroundColor Green
 Invoke-WorkerAdmin -Method POST -Path "/admin/register-rewards-command$query" |
   ConvertTo-Json -Depth 12
 

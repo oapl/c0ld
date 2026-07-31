@@ -72,8 +72,8 @@ const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
 const RAM_LINK_URL = "https://github.com/ic3w0lf22/Roblox-Account-Manager";
 const RDP_LINK_URL = "https://www.youtube.com/watch?v=uaWaIQwzO9U";
 const TOP_COMMAND_LIMIT = 100;
-const TOP_COMMAND_PAGE_SIZE = 25;
-const CLAN_LOOKUP_PAGE_SIZE = 25;
+const TOP_COMMAND_PAGE_SIZE = 20;
+const CLAN_LOOKUP_PAGE_SIZE = 20;
 let chartDuckImagePromise = null;
 const historyRenderMemoryCache = new Map();
 
@@ -130,6 +130,11 @@ export default {
         return await registerClanCommand(url, env);
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/register-cw-command") {
+        requireAdmin(request, env);
+        return await registerCwCommand(url, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/admin/register-league-command") {
         requireAdmin(request, env);
         return await registerLeagueCommand(url, env);
@@ -143,6 +148,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-lg-command") {
         requireAdmin(request, env);
         return await registerLgCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-player-command") {
+        requireAdmin(request, env);
+        return await registerPlayerCommand(url, env);
       }
 
       if (request.method === "POST" && url.pathname === "/admin/register-server-command") {
@@ -576,12 +586,16 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (commandName === "lb") {
-    const subcommand = getSubcommandName(interaction);
-    if (subcommand !== "rewards") {
-      return interactionJson(messageResponse("Use `/lb rewards`.", true));
+    if (!memberHasAllowedRole(interaction, env)) {
+      return interactionJson(messageResponse("You do not have access to use `/lb`.", true));
     }
 
-    ctx.waitUntil(completeRewardsInteraction(interaction, env, "leaderboard"));
+    const player = getCommandOption(interaction, "player") || getCommandOption(interaction, "username");
+    if (!player) {
+      return interactionJson(messageResponse("Use `/lb player:<roblox username>`.", true));
+    }
+
+    ctx.waitUntil(completeSearchInteraction(interaction, env, player));
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
       data: {
@@ -592,8 +606,23 @@ async function handleInteraction(request, env, ctx) {
 
   if (commandName === "league") {
     const subcommand = getSubcommandName(interaction);
+    if (subcommand === "info") {
+      const leagueName = getCommandOption(interaction, "league") || getCommandOption(interaction, "name");
+      if (!leagueName) {
+        return interactionJson(messageResponse("Use `/league info league:<league>`.", true));
+      }
+
+      ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, leagueName));
+      return interactionJson({
+        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+        data: {
+          flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+        }
+      });
+    }
+
     if (subcommand !== "rewards") {
-      return interactionJson(messageResponse("Use `/league rewards`.", true));
+      return interactionJson(messageResponse("Use `/league info league:<league>` or `/league rewards`.", true));
     }
 
     ctx.waitUntil(completeRewardsInteraction(interaction, env, "leagues"));
@@ -665,19 +694,58 @@ async function handleInteraction(request, env, ctx) {
     return interactionJson(messageResponse("Use `/clan info name:<clan>` or `/clan rewards`.", true));
   }
 
-  if (commandName === "lg") {
-    const subcommand = getSubcommandName(interaction);
-    if (subcommand !== "info") {
-      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+  if (commandName === "cw") {
+    const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
+    if (!clanName) {
+      return interactionJson(messageResponse("Use `/cw clan:<clan>`.", true));
     }
 
-    const leagueName = getCommandOption(interaction, "name");
+    ctx.waitUntil(completeClanLookupInteraction(interaction, env, {
+      clanName,
+      page: 0,
+      ownerId: interactionUserId(interaction)
+    }));
+
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "lg") {
+    const leagueName = getCommandOption(interaction, "league") || getCommandOption(interaction, "name");
     if (!leagueName) {
-      return interactionJson(messageResponse("Use `/lg info name:<league>`.", true));
+      return interactionJson(messageResponse("Use `/lg league:<league>`.", true));
     }
 
     ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, leagueName));
 
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
+  if (commandName === "player") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "info") {
+      return interactionJson(messageResponse("Use `/player info player:<roblox username>`.", true));
+    }
+
+    if (!memberHasAllowedRole(interaction, env)) {
+      return interactionJson(messageResponse("You do not have access to use `/player info`.", true));
+    }
+
+    const player = getCommandOption(interaction, "player") || getCommandOption(interaction, "username");
+    if (!player) {
+      return interactionJson(messageResponse("Use `/player info player:<roblox username>`.", true));
+    }
+
+    ctx.waitUntil(completeSearchInteraction(interaction, env, player));
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
       data: {
@@ -2730,12 +2798,20 @@ async function completeOfflinePingInteraction(interaction, env) {
     }
   } catch (err) {
     await editOriginalInteraction(interaction, {
-      content: `Offline ping setup failed: ${err?.message || String(err)}`,
+      content: offlinePingSetupErrorMessage(err),
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
     }).catch(() => null);
   }
+}
+
+function offlinePingSetupErrorMessage(err) {
+  const message = String(err?.message || err || "Unknown offline ping setup error");
+  if (message.includes("discord_offline_ping_leagues") || message.includes("PGRST205")) {
+    return "Offline ping setup failed: the League watch table is missing in Supabase. Apply `supabase/migrations/050_discord_offline_league_pings.sql`, then retry `/offline league`.";
+  }
+  return `Offline ping setup failed: ${truncateText(message, 1500)}`;
 }
 
 async function completeSelfTimeoutInteraction(interaction, env) {
@@ -5104,7 +5180,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
 
   try {
     const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
-    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours });
+    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours, env });
     if (chartBytes?.byteLength) {
       const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
       containerComponents.push(
@@ -5114,7 +5190,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
           items: [
             {
               media: { url: `attachment://${filename}` },
-              description: `${chartHours}-hour member growth chart for League ${displayLeagueName}`
+              description: `${chartHours}-hour member points chart for League ${displayLeagueName}`
             }
           ]
         }
@@ -5159,7 +5235,7 @@ function parseTopCommandCustomId(value) {
   const page = Math.max(0, Math.floor(Number(parts[3]) || 0));
   const action = String(parts[4] || "page").trim().toLowerCase();
   if (!["leagues", "clans", "players"].includes(kind)) return null;
-  if (!["page", "close"].includes(action)) return null;
+  if (!["page", "previous", "indicator", "next", "close"].includes(action)) return null;
   return { ownerId, kind, page, action };
 }
 
@@ -5224,9 +5300,36 @@ async function fetchTopLeaguesCommandData(env) {
 }
 
 async function fetchTopClansCommandData(env) {
+  let payload = await fetchTopClansPayloadForCommand(env);
+  if (!Array.isArray(payload.rows) || !payload.rows.length || payload.waiting_for_first_snapshot) {
+    const latestBattle = await fetchLatestClanBattleForCommand(env);
+    if (latestBattle?.battle) {
+      payload = await fetchTopClansPayloadForCommand(env, latestBattle.battle);
+    }
+  }
+  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .slice(0, TOP_COMMAND_LIMIT)
+    .map(row => ({
+      ...row,
+      battle_key: row.battle_key || payload.battle || null,
+      battle_display_name: row.battle_display_name || payload.display_name || payload.battle || null
+    }));
+  return {
+    title: "Top 100 Clans",
+    kind: "clans",
+    updatedAt: payload.snapshot_at || payload.generated_at,
+    subtitle: payload.display_name || payload.battle || "Current Event",
+    battle: payload.battle || null,
+    displayName: payload.display_name || null,
+    rows
+  };
+}
+
+async function fetchTopClansPayloadForCommand(env, battle = "") {
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/clans/current", apiBase);
   apiUrl.searchParams.set("limit", String(TOP_COMMAND_LIMIT));
+  if (battle) apiUrl.searchParams.set("battle", battle);
   const response = await fetchClanApi(env, apiUrl, {
     headers: { Accept: "application/json", "User-Agent": "Luna-Top-Clans-Command" },
     cf: { cacheTtl: 0, cacheEverything: false }
@@ -5235,19 +5338,27 @@ async function fetchTopClansCommandData(env) {
   if (!response.ok || payload.ok === false) {
     throw httpError(response.status || 502, payload.message || `Clan API failed (${response.status}).`);
   }
-  return {
-    title: "Top 100 Clans",
-    kind: "clans",
-    updatedAt: payload.snapshot_at || payload.generated_at,
-    subtitle: payload.display_name || payload.battle || "Current Event",
-    rows: (Array.isArray(payload.rows) ? payload.rows : []).slice(0, TOP_COMMAND_LIMIT)
-  };
+  return payload;
+}
+
+async function fetchLatestClanBattleForCommand(env) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/clans/battles", apiBase);
+  apiUrl.searchParams.set("limit", "10");
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "Luna-Top-Clans-Battle-Fallback" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) return null;
+  return (Array.isArray(payload.rows) ? payload.rows : []).find(row => row?.has_rows && row?.battle) || null;
 }
 
 async function fetchTopPlayersCommandData(env) {
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/global/leaderboard", apiBase);
   apiUrl.searchParams.set("limit", String(TOP_COMMAND_LIMIT));
+  apiUrl.searchParams.set("source", "clans");
   apiUrl.searchParams.set("avatars", "0");
   apiUrl.searchParams.set("gains", "0");
   const response = await fetchClanApi(env, apiUrl, {
@@ -5299,10 +5410,10 @@ function buildTopCommandMessage(data, options = {}) {
           {
             type: COMPONENT_TYPE_TEXT_DISPLAY,
             content: lines.join("\n").slice(0, 3900)
-          },
-          ...topCommandButtons(options.ownerId, data.kind, page, totalPages)
+          }
         ]
-      }
+      },
+      ...topCommandButtons(options.ownerId, data.kind, page, totalPages)
     ]
   };
 }
@@ -5346,9 +5457,9 @@ function topCommandButtons(ownerId, kind, page, totalPages) {
   return [{
     type: COMPONENT_TYPE_ACTION_ROW,
     components: [
-      historyButton("Previous", topCommandCustomId(ownerId, kind, page - 1), BUTTON_STYLE_SECONDARY, page <= 0),
-      historyButton(`Page ${page + 1}/${totalPages}`, topCommandCustomId(ownerId, kind, page), BUTTON_STYLE_SECONDARY, true),
-      historyButton("Next", topCommandCustomId(ownerId, kind, page + 1), BUTTON_STYLE_SECONDARY, page >= totalPages - 1),
+      historyButton("Previous", topCommandCustomId(ownerId, kind, page - 1, "previous"), BUTTON_STYLE_SECONDARY, page <= 0),
+      historyButton(`Page ${page + 1}/${totalPages}`, topCommandCustomId(ownerId, kind, page, "indicator"), BUTTON_STYLE_SECONDARY, true),
+      historyButton("Next", topCommandCustomId(ownerId, kind, page + 1, "next"), BUTTON_STYLE_SECONDARY, page >= totalPages - 1),
       historyButton("Close", topCommandCustomId(ownerId, kind, page, "close"), BUTTON_STYLE_DANGER, false)
     ]
   }];
@@ -5360,7 +5471,7 @@ function parseClanLookupCustomId(value) {
   const ownerId = String(parts[1] || "").trim();
   const page = Math.max(0, Math.floor(Number(parts[2]) || 0));
   const action = String(parts[3] || "page").trim().toLowerCase();
-  if (!["page", "close"].includes(action)) return null;
+  if (!["page", "previous", "indicator", "next", "close"].includes(action)) return null;
   return {
     ownerId,
     page,
@@ -5406,21 +5517,85 @@ async function fetchClanLookupData(clanName, env) {
   const requested = String(clanName || "").trim();
   if (!requested) throw httpError(400, "Missing clan name.");
   const top = await fetchTopClansCommandData(env).catch(() => ({ rows: [] }));
-  const canonical = top.rows.find(row => normalizeCommandText(row.clan_name) === normalizeCommandText(requested));
-  const payload = await fetchClanCurrentPayloadForCommand(canonical?.clan_name || requested, env);
-  let rows = Array.isArray(payload.rows) ? payload.rows : [];
-  if (!rows.length && canonical?.clan_name && canonical.clan_name !== requested) {
-    const retry = await fetchClanCurrentPayloadForCommand(canonical.clan_name, env);
-    rows = Array.isArray(retry.rows) ? retry.rows : [];
-    return { payload: retry, topRow: canonical, rows };
+  const canonical = top.rows.find(row => normalizeCommandText(row.clan_name) === normalizeCommandText(requested))
+    || top.rows.find(row => normalizeCommandTextLoose(row.clan_name) === normalizeCommandTextLoose(requested));
+  const canonicalBattle = canonical?.battle_key || top.battle || "";
+  const candidates = clanLookupNameCandidates(requested, canonical);
+  let bestPayload = null;
+  let bestRows = [];
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      const payload = await fetchClanCurrentPayloadForCommand(candidate, env, {
+        battle: canonicalBattle
+      });
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      if (!bestPayload || rows.length > bestRows.length) {
+        bestPayload = payload;
+        bestRows = rows;
+      }
+      if (rows.length) break;
+    } catch (err) {
+      lastError = err;
+    }
   }
-  return { payload, topRow: canonical || null, rows };
+
+  if (!bestRows.length) {
+    for (const candidate of candidates) {
+      try {
+        const payload = await fetchClanGlobalCurrentPayloadForCommand(candidate, env);
+        const rows = Array.isArray(payload.rows) ? payload.rows : [];
+        if (rows.length > bestRows.length) {
+          bestPayload = {
+            ...bestPayload,
+            ...payload,
+            clan_name: bestPayload?.clan_name || payload.clan_name,
+            display_name: bestPayload?.display_name || payload.display_name,
+            clan_rank: bestPayload?.clan_rank ?? payload.clan_rank,
+            clan_points: bestPayload?.clan_points ?? payload.clan_points,
+            icon_url: bestPayload?.icon_url || payload.icon_url,
+            icon_id: bestPayload?.icon_id || payload.icon_id,
+            snapshot_at: bestPayload?.snapshot_at || payload.snapshot_at,
+            rows
+          };
+          bestRows = rows;
+        }
+        if (rows.length) break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+  }
+
+  if (!bestPayload && lastError) throw lastError;
+  return { payload: bestPayload || {}, topRow: canonical || null, top, rows: bestRows };
 }
 
-async function fetchClanCurrentPayloadForCommand(clanName, env) {
+function clanLookupNameCandidates(requested, canonical) {
+  const candidates = [];
+  const add = value => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    if (!candidates.some(item => item.toLowerCase() === text.toLowerCase())) candidates.push(text);
+  };
+
+  add(canonical?.clan_name);
+  add(requested);
+
+  for (const value of [...candidates]) {
+    if (/[oO]/.test(value)) add(value.replace(/[oO]/g, "0"));
+    if (/0/.test(value)) add(value.replace(/0/g, "o"));
+  }
+
+  return candidates;
+}
+
+async function fetchClanCurrentPayloadForCommand(clanName, env, options = {}) {
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/current", apiBase);
   apiUrl.searchParams.set("clan", clanName);
+  if (options.battle) apiUrl.searchParams.set("battle", options.battle);
   apiUrl.searchParams.set("avatars", "0");
   apiUrl.searchParams.set("downtime", "0");
   const response = await fetchClanApi(env, apiUrl, {
@@ -5432,6 +5607,39 @@ async function fetchClanCurrentPayloadForCommand(clanName, env) {
     throw httpError(response.status || 502, payload.message || `Clan API failed (${response.status}).`);
   }
   return payload;
+}
+
+async function fetchClanGlobalCurrentPayloadForCommand(clanName, env) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/global/current", apiBase);
+  apiUrl.searchParams.set("clan", clanName);
+  apiUrl.searchParams.set("limit", "1000");
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "Luna-Clan-Lookup-Global-Fallback" },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Clan global API failed (${response.status}).`);
+  }
+
+  const rows = (Array.isArray(payload.rows) ? payload.rows : []).map(row => ({
+    ...row,
+    rank: positiveInteger(row.member_rank ?? row.clan_rank ?? row.rank),
+    username: row.display_name || row.username || `user_${row.user_id}`,
+    total_points: finiteNumber(row.member_points ?? row.clan_points ?? row.total_points ?? row.points) || 0
+  }));
+  const first = rows[0] || {};
+  return {
+    ...payload,
+    clan_name: payload.clan_name || first.source_clan || first.clan_name || clanName,
+    battle: first.battle_key || payload.battle || null,
+    display_name: first.event_name || first.battle_display_name || payload.display_name || payload.battle || null,
+    clan_rank: positiveInteger(first.source_clan_rank ?? first.source_clan_leaderboard_rank ?? payload.clan_rank),
+    clan_points: finiteNumber(first.source_clan_points ?? first.source_clan_leaderboard_points ?? payload.clan_points),
+    snapshot_at: payload.snapshot_at || first.fetched_at || first.updated_at || null,
+    rows
+  };
 }
 
 function buildClanLookupMessage(data, options = {}) {
@@ -5446,27 +5654,29 @@ function buildClanLookupMessage(data, options = {}) {
   const rows = members.slice(start, start + pageSize);
   const displayClan = payload.clan_name || data.topRow?.clan_name || "Unknown";
   const points = finiteNumber(payload.clan_points ?? data.topRow?.points);
+  const iconUrl = payload.icon_url || data.topRow?.icon_url || null;
+  const eventName = payload.display_name || data.topRow?.battle_display_name || data.top?.displayName || data.top?.battle || "Unknown";
   const memberLines = rows.length
     ? rows.map((row, index) => clanLookupMemberLine(row, start + index + 1))
     : ["No current member rows were found for this clan."];
   const endLine = payload.battle_end_iso ? `**Ends:** ${discordTime(payload.battle_end_iso)}` : "";
-  const updated = payload.snapshot_at ? discordTime(payload.snapshot_at) : "Unknown";
+  const updated = payload.snapshot_at || data.topRow?.fetched_at ? discordTime(payload.snapshot_at || data.topRow?.fetched_at) : "Unknown";
   const headerText = [
     `## ${escapeDiscordMarkdown(String(displayClan).toUpperCase())}`,
-    `**Current Event:** ${escapeDiscordMarkdown(payload.display_name || payload.battle || "Unknown")}`,
+    `**Current Event:** ${escapeDiscordMarkdown(eventName)}`,
     `**Current Rank:** ${rank(payload.clan_rank ?? data.topRow?.rank)}`,
     `**Total Stars:** ${points === null ? "-" : shortNumber(points)}`,
     `**Members:** ${fullNumber(members.length)}`,
     endLine,
     `**Updated:** ${updated}`
   ].filter(Boolean).join("\n");
-  const header = payload.icon_url
+  const header = iconUrl
     ? {
         type: COMPONENT_TYPE_SECTION,
         components: [{ type: COMPONENT_TYPE_TEXT_DISPLAY, content: headerText }],
         accessory: {
           type: COMPONENT_TYPE_THUMBNAIL,
-          media: { url: payload.icon_url },
+          media: { url: iconUrl },
           description: `${displayClan} clan icon`
         }
       }
@@ -5485,10 +5695,10 @@ function buildClanLookupMessage(data, options = {}) {
           {
             type: COMPONENT_TYPE_TEXT_DISPLAY,
             content: memberLines.join("\n").slice(0, 3900)
-          },
-          ...clanLookupButtons(options.ownerId, displayClan, page, totalPages)
+          }
         ]
-      }
+      },
+      ...clanLookupButtons(options.ownerId, displayClan, page, totalPages)
     ]
   };
 }
@@ -5513,9 +5723,9 @@ function clanLookupButtons(ownerId, clanName, page, totalPages) {
   return [{
     type: COMPONENT_TYPE_ACTION_ROW,
     components: [
-      historyButton("Previous", clanLookupCustomId(ownerId, clanName, page - 1), BUTTON_STYLE_SECONDARY, page <= 0),
-      historyButton(`Page ${page + 1}/${totalPages}`, clanLookupCustomId(ownerId, clanName, page), BUTTON_STYLE_SECONDARY, true),
-      historyButton("Next", clanLookupCustomId(ownerId, clanName, page + 1), BUTTON_STYLE_SECONDARY, page >= totalPages - 1),
+      historyButton("Previous", clanLookupCustomId(ownerId, clanName, page - 1, "previous"), BUTTON_STYLE_SECONDARY, page <= 0),
+      historyButton(`Page ${page + 1}/${totalPages}`, clanLookupCustomId(ownerId, clanName, page, "indicator"), BUTTON_STYLE_SECONDARY, true),
+      historyButton("Next", clanLookupCustomId(ownerId, clanName, page + 1, "next"), BUTTON_STYLE_SECONDARY, page >= totalPages - 1),
       historyButton("Close", clanLookupCustomId(ownerId, clanName, page, "close"), BUTTON_STYLE_DANGER, false)
     ]
   }];
@@ -5527,6 +5737,10 @@ function clampPage(page, totalPages) {
 
 function normalizeCommandText(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeCommandTextLoose(value) {
+  return normalizeCommandText(value).replace(/[o0]/g, "o");
 }
 
 function commandErrorMessage(title, err, env) {
@@ -5949,7 +6163,7 @@ async function ps99RestartIntelligenceReportRequest(env, candidateId) {
 function handleLeagueChartComponent(interaction, env, ctx) {
   const state = parseLeagueChartCustomId(interaction.data?.custom_id);
   if (!state) {
-    return messageResponse("That league chart control is no longer valid. Run `/lg info` again.", true);
+    return messageResponse("That league chart control is no longer valid. Run `/league info` again.", true);
   }
 
   ctx.waitUntil(completeLeagueInfoInteraction(interaction, env, state.leagueName, {
@@ -6136,54 +6350,36 @@ async function fetchLeagueHistoryPayload(leagueName, env, hours = 24) {
 
 async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const fonts = await loadHistoryFonts();
+  const loadedFonts = await loadHistoryFonts();
+  const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
-  const height = 720;
-  const canvas = new HistoryPixelCanvas(width, height, [15, 20, 27, 255], 2);
-  const color = chartColors();
-  const members = leagueChartMembers(payload).slice(0, 4);
+  const height = 900;
+  const color = searchChartBoardColors();
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
+  const memberLimit = Math.max(1, Math.min(8, Number(options.memberLimit) || 8));
+  const members = leagueChartMembers(payload).slice(0, memberLimit);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
   const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
+  const updatedAt = payload?.snapshot_at || payload?.fetched_at || payload?.updated_at;
 
-  const panel = { x: 20, y: 20, w: width - 40, h: height - 40 };
+  const panel = { x: 32, y: 30, w: width - 64, h: height - 60 };
   canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
-  canvas.fillRect(panel.x, panel.y, panel.w, 1, color.line);
-  canvas.fillRect(panel.x, panel.y + panel.h - 1, panel.w, 1, color.line);
-  canvas.fillRect(panel.x, panel.y, 1, panel.h, color.line);
-  canvas.fillRect(panel.x + panel.w - 1, panel.y, 1, panel.h, color.line);
+  hourlyDrawMysticSmoke(canvas, width, height, color);
+  hourlyDrawPanelFrame(canvas, panel.x, panel.y, panel.w, panel.h, color.line);
+  searchChartDrawRainbowBar(canvas, panel.x + 22, panel.y + 12, panel.w - 44, 5, color);
 
-  const title = `${hours}-Hour Member Growth`;
-  const updated = `Updated ${chartDate(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at)}`;
-  const updatedWidth = canvas.measureFontText(fonts.regular, updated, 14);
-
-  canvas.drawFontText(fonts.bold, title, 42, 31, 34, color.white, 620);
-  canvas.drawFontText(fonts.regular, updated, panel.x + panel.w - updatedWidth - 22, 43, 14, color.muted, updatedWidth + 2);
-
-  const legend = series.slice(0, 4);
-  const legendLabels = legend.map(item => {
-    const gain = Math.max(0, Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0);
-    return `${historyCardText(item.name, 30)} (${shortNumber(gain)} / ${hours}h)`;
-  });
-  const legendGap = 34;
-  const legendWidths = legendLabels.map(label => Math.min(350, canvas.measureFontText(fonts.bold, label, 15) + 42));
-  const legendTotalWidth = legendWidths.reduce((sum, itemWidth) => sum + itemWidth, 0)
-    + legendGap * Math.max(0, legendWidths.length - 1);
-  let legendX = panel.x + Math.max(22, (panel.w - legendTotalWidth) / 2);
-  legend.forEach((item, index) => {
-    const itemWidth = legendWidths[index];
-    const name = canvas.fitFontText(fonts.bold, legendLabels[index], 15, itemWidth - 38);
-    canvas.fillRect(legendX, 91, 24, 4, item.color);
-    canvas.drawFontText(fonts.bold, name, legendX + 34, 79, 15, color.white, itemWidth - 38);
-    legendX += itemWidth + legendGap;
-  });
-
-  const plot = { x: 116, y: 116, w: 1438, h: 516 };
-  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
-  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
-  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
+  const title = `League ${displayLeagueName}`;
+  const subtitle = `${hours}-Hour Member Points`;
+  hourlyDrawFittedText(canvas, fonts.bold, title, panel.x + 30, 62, 34, color.white, 540);
+  hourlyDrawFittedText(canvas, fonts.rowBold, subtitle, panel.x + 31, 105, 19, color.cyan, 320);
+  const updated = `Updated ${chartDate(updatedAt)}`;
+  hourlyDrawRightText(canvas, fonts.regular, updated, panel.x + panel.w - 30, 72, 15, color.muted, 360);
 
   if (!series.some(item => item.points.length >= 1)) {
-    canvas.drawFontText(fonts.regular, "Not enough stored hourly history to chart this league yet.", plot.x + 28, plot.y + 48, 20, color.muted, plot.w - 56);
+    const emptyPlot = { x: panel.x + 44, y: 210, w: panel.w - 88, h: 540 };
+    hourlyBlendRoundedRect(canvas, emptyPlot.x, emptyPlot.y, emptyPlot.w, emptyPlot.h, 10, color.inset, 235);
+    hourlyDrawPanelFrame(canvas, emptyPlot.x, emptyPlot.y, emptyPlot.w, emptyPlot.h, color.line);
+    canvas.drawFontText(fonts.regular, "Not enough stored league history to chart this league yet.", emptyPlot.x + 28, emptyPlot.y + 48, 20, color.muted, emptyPlot.w - 56);
     return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
   }
 
@@ -6192,40 +6388,49 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const maxT = Math.max(...allPoints.map(point => point.t));
   const chartMinT = maxT - hours * 60 * 60 * 1000;
   const chartMaxT = maxT;
-  const maxYValue = Math.max(1, ...allPoints.map(point => point.value));
-  const yMin = 0;
-  const yMax = maxYValue + Math.max(1, maxYValue * 0.14);
-  const xForTime = time => chartMaxT === chartMinT ? plot.x : plot.x + ((time - chartMinT) / (chartMaxT - chartMinT)) * plot.w;
-  const xFor = point => xForTime(point.t);
-  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / (yMax - yMin))) * plot.h;
-  const lineOffsets = [
-    { x: 0, y: -6 },
-    { x: 0, y: -2 },
-    { x: 0, y: 2 },
-    { x: 0, y: 6 }
+  const visibleSeries = series
+    .map(item => ({
+      ...item,
+      points: item.points.filter(point => point.t >= chartMinT && point.t <= chartMaxT)
+    }))
+    .filter(item => item.points.length);
+  const visiblePoints = visibleSeries.flatMap(item => item.points);
+  const activitySamples = leagueAggregateActivitySamples(visibleSeries, chartMinT, chartMaxT);
+  const metrics = searchChartMetrics(activitySamples, chartMinT, chartMaxT);
+  const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, chartMaxT).catch(() => ({ updates: [], restarts: [] }));
+  const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
+  const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
+  const totalCurrentPoints = visibleSeries.reduce((sum, item) => sum + Math.max(0, item.latestPoints || 0), 0);
+  const totalGain = visibleSeries.reduce((sum, item) => sum + Math.max(0, item.totalGain || 0), 0);
+
+  const stats = [
+    ["Players", fullNumber(visibleSeries.length), color.violet],
+    ["Points", shortNumber(totalCurrentPoints), color.cyan],
+    [`Gain ${hours}h`, `+${shortNumber(totalGain)}`, totalGain > 0 ? color.green : color.zeroText],
+    ["Uptime", searchChartDurationLabel(metrics.activeMs), color.green],
+    ["Downtime", searchChartDurationLabel(metrics.downtimeMs), color.red],
+    ["Markers", `${fullNumber(visibleUpdates.length)} / ${fullNumber(visibleRestarts.length)}`, color.orange]
   ];
-  const clampPlotX = value => Math.max(plot.x + 3, Math.min(plot.x + plot.w - 3, value));
-  const clampPlotY = value => Math.max(plot.y + 3, Math.min(plot.y + plot.h - 3, value));
-  const visualXFor = (item, point) => clampPlotX(xFor(point) + (item.visualOffsetX || 0));
-  const visualXAt = (item, time) => clampPlotX(xForTime(time) + (item.visualOffsetX || 0));
-  const visualYFor = (item, point) => clampPlotY(yFor(point) + (item.visualOffsetY || 0));
-  const drawGrowthSegment = (x1, y1, x2, y2, lineColor) => {
-    const ax = Math.round(x1);
-    const ay = Math.round(y1);
-    const bx = Math.round(x2);
-    const by = Math.round(y2);
-    const thickness = 2;
-    const half = Math.floor(thickness / 2);
+  const cardGap = 14;
+  const cardY = 142;
+  const cardW = Math.floor((panel.w - 60 - cardGap * (stats.length - 1)) / stats.length);
+  stats.forEach((stat, index) => {
+    leagueDrawStatCard(canvas, fonts, panel.x + 30 + index * (cardW + cardGap), cardY, cardW, 66, stat[0], stat[1], stat[2], color);
+  });
 
-    if (Math.abs(bx - ax) >= Math.abs(by - ay)) {
-      const left = Math.min(ax, bx);
-      canvas.fillRect(left, ay - half, Math.max(1, Math.abs(bx - ax) + 1), thickness, lineColor);
-      return;
-    }
+  const plot = { x: panel.x + 70, y: 244, w: panel.w - 128, h: 466 };
+  hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 10, color.inset, 235);
+  hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
 
-    const top = Math.min(ay, by);
-    canvas.fillRect(ax - half, top, thickness, Math.max(1, Math.abs(by - ay) + 1), lineColor);
-  };
+  const pointValues = visiblePoints.map(point => point.value).filter(Number.isFinite);
+  const pointsMin = pointValues.length ? Math.min(...pointValues) : 0;
+  const pointsMax = pointValues.length ? Math.max(...pointValues) : 1;
+  const pointRange = pointsMax - pointsMin;
+  const pointPad = Math.max(1, pointRange > 0 ? pointRange * 0.14 : pointsMax * 0.08);
+  const yMin = Math.max(0, pointsMin - pointPad);
+  const yMax = pointsMax + pointPad;
+  const xForTime = time => chartMaxT === chartMinT ? plot.x : plot.x + ((time - chartMinT) / Math.max(1, chartMaxT - chartMinT)) * plot.w;
+  const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / Math.max(1, yMax - yMin))) * plot.h;
 
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
@@ -6251,29 +6456,97 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 23, 12, color.muted, tickLabelWidth + 6);
   }
 
-  series.forEach((item, seriesIndex) => {
-    const offset = lineOffsets[seriesIndex % lineOffsets.length];
-    item.visualOffsetX = offset.x;
-    item.visualOffsetY = offset.y;
-
-    for (let index = 0; index < item.points.length; index += 1) {
-      const current = item.points[index];
-      const previous = item.points[index - 1] || null;
-      const startX = visualXAt(item, current.startT ?? Math.max(chartMinT, current.t - 60 * 60 * 1000));
-      const currentY = visualYFor(item, current);
-      const currentX = visualXFor(item, current);
-
-      drawGrowthSegment(startX, currentY, currentX, currentY, item.color);
-
-      if (previous && !current.breakBefore) {
-        const previousY = visualYFor(item, previous);
-        drawGrowthSegment(startX, previousY, startX, currentY, item.color);
-      }
-    }
-
+  visibleUpdates.forEach((marker, index) => {
+    const x = xForTime(marker.t);
+    searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.cyan, 7, 6);
+    if (index < 8) leagueDrawMarkerLabel(canvas, fonts, marker.label || "Update", x, plot.y + 10 + (index % 2) * 22, color.cyan, color);
+  });
+  visibleRestarts.forEach((marker, index) => {
+    const x = xForTime(marker.t);
+    searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.orange, 10, 5);
+    if (index < 8) leagueDrawMarkerLabel(canvas, fonts, "Restart", x, plot.y + 54 + (index % 2) * 22, color.orange, color);
   });
 
+  visibleSeries.forEach(item => {
+    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), yFor, item.color, 3);
+    const last = item.points[item.points.length - 1];
+    if (last) chartFillCircle(canvas, xForTime(last.t), yFor(last), 4, item.color);
+  });
+
+  searchChartDrawActivityBar(canvas, activitySamples, plot, xForTime, color.green, color.red, color.zero, color, {
+    y: plot.y + plot.h + 34,
+    height: 10,
+    rangeStart: chartMinT,
+    rangeEnd: chartMaxT
+  });
+  const activityY = plot.y + plot.h + 50;
+  hourlyDrawFittedText(canvas, fonts.regular, "activity", plot.x, activityY, 12, color.muted, 76);
+  leagueDrawLegend(canvas, fonts, visibleSeries, hours, panel.x + 54, 790, panel.w - 108, color);
+
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function leagueDrawStatCard(canvas, fonts, x, y, width, height, label, value, tone, color) {
+  hourlyFillRoundedRect(canvas, x, y, width, height, 8, color.inset);
+  canvas.fillRect(x, y, 5, height, tone);
+  canvas.fillRect(x, y + height - 1, width, 1, color.line);
+  hourlyDrawFittedText(canvas, fonts.regular, label, x + 16, y + 10, 13, color.muted, width - 32);
+  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, value, x + 16, y + 31, 20, tone, width - 32);
+}
+
+function leagueDrawMarkerLabel(canvas, fonts, label, x, y, tone, color) {
+  const font = fonts.regular;
+  const text = canvas.fitFontText(font, historyCardText(label, 18), 11, 118);
+  const width = canvas.measureFontText(font, text, 11);
+  const labelX = Math.max(44, Math.min(canvas.width - width - 48, x - width / 2));
+  canvas.fillRect(labelX - 5, y - 3, width + 10, 18, [8, 12, 22, 230]);
+  canvas.fillRect(labelX - 5, y + 15, width + 10, 1, tone);
+  canvas.drawFontText(font, text, labelX, y, 11, color.white, width + 2);
+}
+
+function leagueDrawSegmentedPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
+  let segment = [];
+  const flush = () => {
+    if (segment.length >= 2) searchChartDrawPolyline(canvas, segment, xFor, yFor, rgba, width);
+    segment = [];
+  };
+
+  for (const point of points) {
+    if (point.breakBefore) flush();
+    segment.push(point);
+  }
+  flush();
+}
+
+function leagueDrawLegend(canvas, fonts, series, hours, x, y, width, color) {
+  const columns = Math.min(4, Math.max(1, series.length));
+  const columnGap = 18;
+  const columnWidth = Math.floor((width - columnGap * (columns - 1)) / columns);
+  const rowHeight = 34;
+
+  series.forEach((item, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const itemX = x + column * (columnWidth + columnGap);
+    const itemY = y + row * rowHeight;
+    const label = `${historyCardText(item.name, 22)} - ${shortNumber(item.latestPoints)} (+${shortNumber(item.totalGain)} / ${hours}h)`;
+    canvas.fillRect(itemX, itemY + 13, 28, 5, item.color);
+    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, label, itemX + 40, itemY + 4, 14, color.white, columnWidth - 42);
+  });
+}
+
+function leagueAggregateActivitySamples(series, chartMinT, chartMaxT) {
+  const byTime = new Map();
+  for (const item of series) {
+    for (const point of item.points || []) {
+      if (!Number.isFinite(point?.t) || point.t < chartMinT || point.t > chartMaxT) continue;
+      const key = String(point.t);
+      const existing = byTime.get(key) || { t: point.t, points: 0 };
+      existing.points += Math.max(0, finiteNumber(point.value) || 0);
+      byTime.set(key, existing);
+    }
+  }
+  return [...byTime.values()].sort((a, b) => a.t - b.t);
 }
 
 function drawLeagueMemberGrowthSummary(canvas, fonts, series, hours, area, color) {
@@ -6322,16 +6595,13 @@ function leagueChartMembers(payload) {
 
 function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const bucketMs = 15 * 60 * 1000;
-  const hourlyWindowMs = 60 * 60 * 1000;
   const windowMs = hours * 60 * 60 * 1000;
   const history = Array.isArray(historyRows) ? historyRows : [];
   const currentAt = leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
   const historyTimes = history.map(row => leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at)).filter(Number.isFinite);
-  const latest = Math.max(currentAt, ...historyTimes, Date.now() - bucketMs);
-  const end = Math.ceil(latest / bucketMs) * bucketMs;
+  const latest = Math.max(currentAt, ...historyTimes);
+  const end = latest;
   const start = end - windowMs;
-  const buckets = Array.from({ length: Math.floor(windowMs / bucketMs) + 1 }, (_, index) => start + index * bucketMs);
   const byUser = new Map();
 
   for (const row of history) {
@@ -6343,68 +6613,43 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
     byUser.get(id).push({ time, points });
   }
 
-  const colors = [
-    [255, 123, 114, 255],
-    [88, 166, 255, 255],
-    [126, 231, 135, 255],
-    [242, 204, 96, 255]
-  ];
+  const colors = leagueChartPalette();
 
   return members.map((member, index) => {
-    const samples = [...(byUser.get(member.id) || []), { time: currentAt, points: member.points }]
+    const samples = leagueDedupPointSamples([...(byUser.get(member.id) || []), { time: currentAt, points: member.points }])
       .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
       .sort((a, b) => a.time - b.time);
+    const baseline = [...samples].reverse().find(sample => sample.time < start) || null;
+    const visibleSamples = samples.filter(sample => sample.time >= start && sample.time <= end);
+    if (baseline) visibleSamples.unshift({ time: start, points: baseline.points, synthetic: true });
     const points = [];
-    let currentSampleIndex = 0;
-    let baselineSampleIndex = 0;
-    let lastCurrentSample = null;
-    let lastBaselineSample = null;
-    let previousCurrentValue = null;
-    let lastBucketWasGap = false;
 
-    for (const bucketEnd of buckets) {
-      while (currentSampleIndex < samples.length && samples[currentSampleIndex].time <= bucketEnd) {
-        lastCurrentSample = samples[currentSampleIndex];
-        currentSampleIndex += 1;
-      }
-
-      const baselineTime = bucketEnd - hourlyWindowMs;
-      while (baselineSampleIndex < samples.length && samples[baselineSampleIndex].time <= baselineTime) {
-        lastBaselineSample = samples[baselineSampleIndex];
-        baselineSampleIndex += 1;
-      }
-
-      if (!lastCurrentSample || !lastBaselineSample) {
-        lastBucketWasGap = true;
-        continue;
-      }
-
-      const hourlyGain = Math.max(0, lastCurrentSample.points - lastBaselineSample.points);
-      const intervalGain = previousCurrentValue === null
-        ? 0
-        : Math.max(0, lastCurrentSample.points - previousCurrentValue);
+    for (let sampleIndex = 0; sampleIndex < visibleSamples.length; sampleIndex += 1) {
+      const sample = visibleSamples[sampleIndex];
+      const previous = visibleSamples[sampleIndex - 1] || null;
+      const intervalGain = previous
+        ? Math.max(0, sample.points - previous.points)
+        : 0;
       points.push({
-        t: bucketEnd,
-        startT: Math.max(start, bucketEnd - bucketMs),
-        value: hourlyGain,
+        t: sample.time,
+        value: sample.points,
         intervalGain,
-        breakBefore: lastBucketWasGap
+        breakBefore: Boolean(previous && sample.time - previous.time > SEARCH_CHART_MAX_OBSERVED_GAP_MS)
       });
-      previousCurrentValue = lastCurrentSample.points;
-      lastBucketWasGap = false;
     }
 
     const latestGain = member.gain1h !== null
       ? Math.max(0, member.gain1h || 0)
-      : points[points.length - 1]?.value ?? 0;
-    const totalGain = points.reduce((sum, point) => sum + Math.max(0, point.intervalGain ?? point.value ?? 0), 0);
-    const peakGain = points.reduce((max, point) => Math.max(max, Math.max(0, point.value || 0)), 0);
+      : leagueGainWithinWindow(samples, end - 60 * 60 * 1000, end);
+    const totalGain = leagueGainWithinWindow(samples, start, end);
+    const peakGain = points.reduce((max, point) => Math.max(max, Math.max(0, point.intervalGain || 0)), 0);
 
     return {
       id: member.id,
       name: member.name,
       color: colors[index % colors.length],
       points,
+      latestPoints: member.points,
       latestGain,
       gain: totalGain,
       totalGain,
@@ -6412,6 +6657,42 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       peakGain
     };
   });
+}
+
+function leagueDedupPointSamples(samples) {
+  const byTime = new Map();
+  for (const sample of samples) {
+    if (!Number.isFinite(sample?.time) || sample.points === null) continue;
+    byTime.set(String(sample.time), sample);
+  }
+  return [...byTime.values()];
+}
+
+function leagueGainWithinWindow(samples, start, end) {
+  const ordered = (samples || [])
+    .filter(sample => Number.isFinite(sample?.time) && sample.points !== null && sample.time <= end)
+    .sort((a, b) => a.time - b.time);
+  if (!ordered.length) return 0;
+  const latest = ordered[ordered.length - 1];
+  let baseline = null;
+  for (const sample of ordered) {
+    if (sample.time <= start) baseline = sample;
+  }
+  if (!baseline) baseline = ordered[0];
+  return Math.max(0, latest.points - baseline.points);
+}
+
+function leagueChartPalette() {
+  return [
+    [255, 123, 114, 255],
+    [88, 166, 255, 255],
+    [126, 231, 135, 255],
+    [242, 204, 96, 255],
+    [210, 168, 255, 255],
+    [86, 212, 221, 255],
+    [255, 166, 87, 255],
+    [219, 97, 162, 255]
+  ];
 }
 
 function leagueChartTime(value) {
@@ -6620,7 +6901,18 @@ async function editOriginalInteraction(interaction, data) {
 
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
-    throw httpError(502, payload.message || `Discord history response update failed (${res.status}).`);
+    const err = httpError(
+      502,
+      discordApiErrorMessage(
+        res.status,
+        discordFormErrorMessage(payload) || payload.message || `Discord interaction response update failed (${res.status}).`
+      )
+    );
+    err.details = {
+      discord_status: res.status,
+      discord_response: payload
+    };
+    throw err;
   }
 }
 
@@ -9313,6 +9605,10 @@ async function registerClanCommand(url, env) {
   return registerCommand(url, env, clanCommandPayload());
 }
 
+async function registerCwCommand(url, env) {
+  return registerCommand(url, env, cwCommandPayload());
+}
+
 async function registerLeagueCommand(url, env) {
   return registerCommand(url, env, leagueCommandPayload());
 }
@@ -9323,6 +9619,10 @@ async function registerLbCommand(url, env) {
 
 async function registerLgCommand(url, env) {
   return registerCommand(url, env, lgCommandPayload());
+}
+
+async function registerPlayerCommand(url, env) {
+  return registerCommand(url, env, playerCommandPayload());
 }
 
 async function registerServerCommand(url, env) {
@@ -9408,9 +9708,12 @@ async function registerAllCommands(url, env) {
     ramCommandPayload(),
     rdpCommandPayload(),
     topCommandPayload(),
+    cwCommandPayload(),
     ...rewardCommandPayloads(),
+    lbCommandPayload(),
     historyCommandPayload(),
     lgCommandPayload(),
+    playerCommandPayload(),
     lunaCommandPayload(),
     serverCommandPayload(),
     addCommandPayload(),
@@ -9467,9 +9770,12 @@ async function syncGlobalCommands(url, env) {
     ramCommandPayload(),
     rdpCommandPayload(),
     topCommandPayload(),
+    cwCommandPayload(),
     ...rewardCommandPayloads(),
+    lbCommandPayload(),
     historyCommandPayload(),
     lgCommandPayload(),
+    playerCommandPayload(),
     lunaCommandPayload(),
     serverCommandPayload(),
     addCommandPayload(),
@@ -10864,6 +11170,30 @@ function discordApiErrorMessage(status, message) {
   return message;
 }
 
+function discordFormErrorMessage(payload) {
+  const message = String(payload?.message || "").trim();
+  const detailLines = [];
+  collectDiscordFormErrors(payload?.errors, [], detailLines);
+  if (!detailLines.length) return message;
+  return `${message || "Discord request failed"}: ${detailLines.slice(0, 6).join("; ")}`.slice(0, 1200);
+}
+
+function collectDiscordFormErrors(value, path, out) {
+  if (!value || typeof value !== "object" || out.length >= 12) return;
+  const errors = Array.isArray(value._errors) ? value._errors : [];
+  for (const error of errors) {
+    const code = String(error?.code || "").trim();
+    const message = String(error?.message || "").trim();
+    if (message) out.push(`${path.join(".") || "body"}${code ? ` ${code}` : ""}: ${message}`);
+    if (out.length >= 12) return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "_errors") continue;
+    collectDiscordFormErrors(child, [...path, key], out);
+    if (out.length >= 12) return;
+  }
+}
+
 function discordCommandsEndpoint(applicationId, guildId) {
   return guildId
     ? `${DISCORD_API_BASE}/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`
@@ -10951,8 +11281,7 @@ function topCommandPayload() {
 function rewardCommandPayloads() {
   return [
     clanCommandPayload(),
-    leagueCommandPayload(),
-    lbCommandPayload()
+    leagueCommandPayload()
   ];
 }
 
@@ -11004,6 +11333,25 @@ function clanCommandPayload() {
   };
 }
 
+function cwCommandPayload() {
+  return {
+    name: "cw",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Quick clan lookup.",
+    dm_permission: false,
+    options: [
+      {
+        name: "clan",
+        description: "Clan name, for example COLD or c0ld",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 32
+      }
+    ]
+  };
+}
+
 function leagueCommandPayload() {
   return {
     name: "league",
@@ -11011,6 +11359,21 @@ function leagueCommandPayload() {
     description: "League tools.",
     dm_permission: false,
     options: [
+      {
+        name: "info",
+        description: "Show current league points, rank, and top contributions.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "league",
+            description: "League name, for example dezzz",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 64
+          }
+        ]
+      },
       {
         name: "rewards",
         description: "Show league reward cutoff points from the league leaderboard.",
@@ -11024,13 +11387,16 @@ function lbCommandPayload() {
   return {
     name: "lb",
     type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "Global leaderboard tools.",
+    description: "Quick player lookup.",
     dm_permission: false,
     options: [
       {
-        name: "rewards",
-        description: "Show global leaderboard reward cutoff points.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+        name: "player",
+        description: "Roblox username or user ID",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 64
       }
     ]
   };
@@ -11040,19 +11406,40 @@ function lgCommandPayload() {
   return {
     name: "lg",
     type: APPLICATION_COMMAND_CHAT_INPUT,
-    description: "League lookup tools.",
+    description: "Quick league lookup.",
+    dm_permission: false,
+    options: [
+      {
+        name: "league",
+        description: "League name, for example dezzz",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 64
+      }
+    ]
+  };
+}
+
+function playerCommandPayload() {
+  return {
+    name: "player",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Player lookup tools.",
     dm_permission: false,
     options: [
       {
         name: "info",
-        description: "Show current league points, rank, and top contributions.",
+        description: "Search stored global rank data by Roblox username.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
-            name: "name",
-            description: "League name, for example dezzz",
+            name: "player",
+            description: "Roblox username or user ID",
             type: APPLICATION_COMMAND_OPTION_STRING,
-            required: true
+            required: true,
+            min_length: 1,
+            max_length: 64
           }
         ]
       }

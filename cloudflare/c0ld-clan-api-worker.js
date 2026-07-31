@@ -6032,6 +6032,8 @@ async function handleClansCurrent(request, env) {
     projection_basis: tracked?.projection_basis ?? null,
     rows: rowsWithProjections.map(row => ({
       fetched_at: row.fetched_at,
+      battle_key: row.battle_key || latestWithActiveMeta?.battle_key || null,
+      battle_display_name: row.battle_display_name || latestWithActiveMeta?.battle_display_name || null,
       rank: toNumber(row.rank),
       clan_name: row.clan_name,
       points: toNumber(row.points) || 0,
@@ -8179,7 +8181,8 @@ async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
   const leagueKey = normalizeText(leagueNameText);
   if (!leagueKey) return null;
 
-  const sinceIso = new Date(Date.now() - clamp(Number(lookbackMinutes || 60), 1, 1440 * 14) * 60 * 1000).toISOString();
+  const lookbackMs = clamp(Number(lookbackMinutes || 60), 1, 1440 * 14) * 60 * 1000;
+  let sinceIso = new Date(Date.now() - lookbackMs).toISOString();
   let currentRows = await supabaseSelect(env, LEAGUE_CURRENT_TABLE, {
     select: "league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time,fetched_at,updated_at",
     league_name: `eq.${leagueNameText}`,
@@ -8194,9 +8197,16 @@ async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
       limit: "500"
     }).catch(() => []);
   }
+  if (!currentRows.length) {
+    currentRows = await fetchOfflineLeagueLatestSnapshotRows(env, leagueNameText);
+  }
 
   const normalizedCurrent = mergeOfflineCurrentRows(currentRows.map(row => normalizeOfflineMemberRow(row, "league_current")));
   const runKey = newestOfflineBattleKey(normalizedCurrent);
+  const latestCurrentMs = Math.max(0, ...normalizedCurrent.map(row => isoToMs(row.snapshot_at) || 0));
+  if (latestCurrentMs > 0) {
+    sinceIso = new Date(latestCurrentMs - lookbackMs).toISOString();
+  }
 
   if (!runKey) {
     return {
@@ -8227,6 +8237,34 @@ async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
     battle_display_name: runKey,
     statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === runKey), normalizedHistory)
   };
+}
+
+async function fetchOfflineLeagueLatestSnapshotRows(env, leagueNameText) {
+  const select = "snapshot_id,fetched_at,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time";
+  let metaRows = await supabaseSelect(env, LEAGUE_SNAPSHOT_TABLE, {
+    select: "snapshot_id,fetched_at,league_run_key,league_name",
+    league_name: `eq.${leagueNameText}`,
+    order: "fetched_at.desc",
+    limit: "1"
+  }).catch(() => []);
+  if (!metaRows.length) {
+    metaRows = await supabaseSelect(env, LEAGUE_SNAPSHOT_TABLE, {
+      select: "snapshot_id,fetched_at,league_run_key,league_name",
+      league_name: `ilike.${leagueNameText}`,
+      order: "fetched_at.desc",
+      limit: "1"
+    }).catch(() => []);
+  }
+
+  const snapshotId = String(metaRows[0]?.snapshot_id || "").trim();
+  if (!snapshotId) return [];
+
+  return supabaseSelect(env, LEAGUE_SNAPSHOT_TABLE, {
+    select,
+    snapshot_id: `eq.${snapshotId}`,
+    order: "rank.asc",
+    limit: "500"
+  }).catch(() => []);
 }
 
 async function findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, options = {}) {
@@ -17618,6 +17656,12 @@ async function fetchLatestSnapshotMeta(env, clan, battle) {
   };
   if (battleRun?.battle_ended_at) params.fetched_at = `lte.${battleRun.battle_ended_at}`;
   let rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  if (!rows.length) {
+    rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+      ...params,
+      clan_name: `ilike.${clan}`
+    });
+  }
 
   if (
     rows[0]?.battle_ended_at &&
@@ -17633,12 +17677,20 @@ async function fetchLatestSnapshotMeta(env, clan, battle) {
 }
 
 async function fetchCurrentRows(env, clan) {
-  return supabaseSelect(env, CURRENT_TABLE, {
+  const params = {
     select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at,rank,username,user_id,total_points,last_gain_at,downtime_tracking_started_at,raw_member",
     clan_name: `eq.${clan}`,
     order: "rank.asc",
     limit: "1000"
-  });
+  };
+  let rows = await supabaseSelect(env, CURRENT_TABLE, params);
+  if (!rows.length) {
+    rows = await supabaseSelect(env, CURRENT_TABLE, {
+      ...params,
+      clan_name: `ilike.${clan}`
+    });
+  }
+  return rows;
 }
 
 async function fetchCurrentMemberGainState(env, clan) {
@@ -17729,11 +17781,18 @@ function latestClanMetaFromRows(rows) {
 }
 
 async function fetchTrackedClanCurrent(env, clan) {
-  const rows = await supabaseSelect(env, CLANS_CURRENT_TABLE, {
+  const params = {
     select: "rank,clan_name,points,fetched_at,icon_id,icon_url",
     clan_name: `eq.${clan}`,
     limit: "1"
-  });
+  };
+  let rows = await supabaseSelect(env, CLANS_CURRENT_TABLE, params);
+  if (!rows.length) {
+    rows = await supabaseSelect(env, CLANS_CURRENT_TABLE, {
+      ...params,
+      clan_name: `ilike.${clan}`
+    });
+  }
 
   return rows[0] || null;
 }
@@ -19644,6 +19703,17 @@ async function findLatestGlobalRankSearchRun(env, clan, battleKeyValue = null) {
 
   const usableCompleted = completed.find(isUsableCompletedGlobalRankRun);
   if (usableCompleted) return usableCompleted;
+  if (!requestedBattle) {
+    const fallbackCompleted = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "*",
+      clan_name: `eq.${clan}`,
+      status: "in.(ok,completed)",
+      order: "started_at.desc",
+      limit: "50"
+    });
+    const usableFallback = fallbackCompleted.find(isUsableCompletedGlobalRankRun);
+    if (usableFallback) return usableFallback;
+  }
   return null;
 }
 

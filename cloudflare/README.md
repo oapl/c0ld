@@ -740,10 +740,10 @@ Required Worker variables:
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
 | `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
-| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated `/lb rewards` tiers. Defaults to `3,10,100,250,500,1000,10000`. |
+| `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated `/league rewards` tiers. Defaults to `1,3,15,50,100,250,2000`. |
-| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full `/lb rewards` header, such as `Update 88 Leaderboard`. |
+| `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full legacy player rewards header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
 
@@ -765,7 +765,7 @@ Required Worker secrets:
 | `DISCORD_PUBLIC_KEY` | Public key from Discord Developer Portal > General Information. Used to verify signed Discord interaction requests. |
 | `DISCORD_BOT_TOKEN` | Bot token used to register commands, post Luna's scheduled hourly clan images, and send `/t` messages. |
 | `REGISTER_ADMIN_TOKEN` | Your private bearer token for the command-registration endpoints. |
-| `LEAGUE_INGEST_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the League API Worker. Required when `/lg info` or `/hourly league` needs to refresh stale or missing league snapshots. |
+| `LEAGUE_INGEST_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the League API Worker. Required when `/league info`, `/lg`, or `/hourly league` needs to refresh stale or missing league snapshots. |
 | `CLAN_API_ADMIN_TOKEN` | Must match `INGEST_ADMIN_TOKEN` on the Clan API Worker. Required by `/hourly`. |
 
 In the Discord Developer Portal, open the application's **General Information**
@@ -819,6 +819,11 @@ foreach ($path in @(
   "/admin/register-rdp-command",
   "/admin/register-top-command",
   "/admin/register-clan-command",
+  "/admin/register-cw-command",
+  "/admin/register-league-command",
+  "/admin/register-lb-command",
+  "/admin/register-lg-command",
+  "/admin/register-player-command",
   "/admin/register-rewards-command",
   "/admin/register-history-command"
 )) {
@@ -905,21 +910,14 @@ admin bearer token.
 The reward cutoff commands are:
 
 ```text
-/lb rewards
 /clan rewards
 /league rewards
 ```
 
-They post the current point minimums for reward ranks. `/lb rewards` follows the
-active global leaderboard source, so it uses clan-battle global cutoffs during a
-Clan Battle and League-player cutoffs during a League event. Player defaults are
-`3,10,100,250,500,1000,10000`. Clan categories and labels are taken from the
-active battle's BIG Games `PlacementRewards` metadata; `CLAN_REWARD_CUTOFF_RANKS`
-is only a fallback when that metadata is unavailable. League defaults are
-`1,3,15,50,100,250,2000`. For a player command with no current-event label in
-the API payload, set
-`PLAYER_REWARD_LEADERBOARD_LABEL="Update 88 Leaderboard"` or
-`PS99_UPDATE_LABEL="Update 88"` on the Discord Worker.
+They post the current point minimums for reward ranks. Clan categories and labels
+are taken from the active battle's BIG Games `PlacementRewards` metadata;
+`CLAN_REWARD_CUTOFF_RANKS` is only a fallback when that metadata is unavailable.
+League defaults are `1,3,15,50,100,250,2000`.
 
 ## League API Worker
 
@@ -942,7 +940,7 @@ continues to run every five minutes:
 - Names in `LEAGUE_NAMES`, `COLD_LEAGUE_NAMES`, or `ALT_LEAGUE_NAMES` are the
   configured c0ld league pool. `COLD_LEAGUE_REFRESH_MINUTES=15` refreshes them
   at `:00`, `:15`, `:30`, and `:45`.
-- A successful one-off `/lg info` lookup stores that league in
+- A successful one-off `/league info` or `/lg` lookup stores that league in
   `ps99_league_current`. Non-configured names in that table form the persistent
   general-league pool. `GENERAL_LEAGUE_REFRESH_MINUTES=30` refreshes due names
   at `:00` and `:30`.
@@ -1163,6 +1161,7 @@ supabase/migrations/035_hatch_tracker.sql
 supabase/migrations/036_hatch_tracker_guild_channels.sql
 supabase/migrations/037_hatch_tracker_multi_account.sql
 supabase/migrations/049_htg_inventory_state.sql
+supabase/migrations/051_hatch_alerts_per_item.sql
 ```
 
 Set these on `inventory-detector-worker`. The regular `BIG_GAMES_*` app can
@@ -1175,7 +1174,7 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app. |
-| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG now defaults to `player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read` so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
+| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG always includes `player-data:pet-simulator-99:profile:read` and `player-data:pet-simulator-99:inventory:read`, then defaults to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
 | `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
 | `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5`, the Worker checks one fifth of users per minute and each user lands about every five minutes. |
 | `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries later instead of posting an unverified gain or losing the delta. |
@@ -1212,6 +1211,26 @@ tracker is warming up; after that, detected HTG gains are not dropped just
 because other inventory also changed. If source endpoints cannot be read and
 `HTG_REQUIRE_SOURCE_FILTER=true`, Luna does not post or advance the compact
 state; it retries on a later scheduled scan.
+
+HTG OAuth uses Profile scope to verify that the Big Games token belongs to the
+same Roblox account saved on the tracker. If a saved token is missing Profile
+scope, or Big Games reports a different Roblox account, Luna refuses to scan that
+grant and the user must run `/htg setup` again for the correct linked account.
+Each HTG gain now posts and stores as its own alert row, and alert titles include
+variants such as `Shiny`, `Golden`, or `Rainbow`.
+
+To audit a suspected account mixup, call the diagnostics endpoint or run the SQL
+helper:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "https://inventory-detector-worker.opal-dde.workers.dev/api/hatch/diagnostics?username=DietPizza&item=Carrot%20Crocodile&limit=12" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+```text
+supabase/diagnose_htg_account_mixup.sql
+```
 
 Use an every-minute cron for the inventory Worker when HTG sharding is enabled:
 
@@ -1326,7 +1345,7 @@ Add this secret to `discord-search-interactions-worker.js`:
 
 Keep the existing `CLAN_API_WORKER` service binding when possible. The Luna
 Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
-`/hourly league` reuses the stored league snapshots behind `/lg info`, renders a
+`/hourly league` reuses the stored league snapshots behind `/league info` and `/lg`, renders a
 c0ld-themed member progress image, posts a preview immediately, then refreshes
 hourly with the same scheduler as clan and user boards.
 

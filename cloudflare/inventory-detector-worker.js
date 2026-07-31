@@ -21,6 +21,7 @@ const BIG_GAMES_TRADE_SCOPE = "player-data:pet-simulator-99:trades:read";
 const BIG_GAMES_BOOTH_SCOPE = "player-data:pet-simulator-99:booth:read";
 const BIG_GAMES_MAIL_SCOPE = "player-data:pet-simulator-99:mail:read";
 const BIG_GAMES_HATCH_TRACKER_SCOPES = Object.freeze([
+  BIG_GAMES_PROFILE_SCOPE,
   BIG_GAMES_INVENTORY_SCOPE,
   BIG_GAMES_TRADE_SCOPE,
   BIG_GAMES_BOOTH_SCOPE,
@@ -455,16 +456,31 @@ async function handleOAuthCallback(request, env) {
   const invitedUserId = String(pending.target_roblox_user_id || "").trim();
   let rawProfile = null;
   let profileAccount = { user_id: "", username: "" };
-  if (isHatchTrackerOAuth && scopes.includes(BIG_GAMES_PROFILE_SCOPE)) {
+  if (isHatchTrackerOAuth && !scopes.includes(BIG_GAMES_PROFILE_SCOPE)) {
+    await markOAuthStateUsed(env, stateHash);
+    return oauthCompletion(pending, false, "HTG authorization now requires Profile permission so Luna can verify the approving Roblox account. Start `/htg setup` again and approve the same linked Roblox account.");
+  }
+  if (isHatchTrackerOAuth) {
     try {
       rawProfile = await fetchProfileWithAccessToken(env, token.access_token);
       profileAccount = authorizedInventoryAccount(rawProfile, token);
     } catch (error) {
       console.warn("Big Games profile identity lookup failed", error?.message || error);
+      await markOAuthStateUsed(env, stateHash);
+      return oauthCompletion(pending, false, `HTG authorization could not verify the approving Roblox account: ${error?.message || error}. Start /htg setup again and approve the same linked Roblox account.`);
+    }
+    if (!profileAccount.user_id) {
+      await markOAuthStateUsed(env, stateHash);
+      return oauthCompletion(pending, false, "HTG authorization could not identify the approving Roblox account from Big Games Profile data. Start `/htg setup` again and approve the same linked Roblox account.");
     }
   }
-  let targetUserId = invitedUserId || tokenAccount.user_id || profileAccount.user_id;
-  if (invitedUserId && tokenAccount.user_id && tokenAccount.user_id !== invitedUserId) {
+  let targetUserId = invitedUserId || profileAccount.user_id || tokenAccount.user_id;
+  if (
+    invitedUserId &&
+    tokenAccount.user_id &&
+    tokenAccount.user_id !== invitedUserId &&
+    (!isHatchTrackerOAuth || profileAccount.user_id !== invitedUserId)
+  ) {
     await markOAuthStateUsed(env, stateHash);
     return oauthCompletion(pending, false, `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`);
   }
@@ -479,7 +495,7 @@ async function handleOAuthCallback(request, env) {
   if (targetUserId) {
     await saveOAuthGrant(env, {
       userId: targetUserId,
-      username: tokenAccount.username || profileAccount.username || pending.target_roblox_username || null,
+      username: profileAccount.username || tokenAccount.username || pending.target_roblox_username || null,
       token,
       scopes,
       authorizedAt,
@@ -490,7 +506,7 @@ async function handleOAuthCallback(request, env) {
     });
     await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
       userId: targetUserId,
-      username: tokenAccount.username || profileAccount.username || pending.target_roblox_username || null,
+      username: profileAccount.username || tokenAccount.username || pending.target_roblox_username || null,
       authorizedAt,
       expiresAt
     });
@@ -530,7 +546,9 @@ async function handleOAuthCallback(request, env) {
     }
   }
   const inventoryAccount = authorizedInventoryAccount(rawInventory, token);
-  const account = inventoryAccount.user_id
+  const account = isHatchTrackerOAuth && profileAccount.user_id
+    ? profileAccount
+    : inventoryAccount.user_id
     ? inventoryAccount
     : profileAccount.user_id
       ? profileAccount
@@ -551,7 +569,7 @@ async function handleOAuthCallback(request, env) {
   }
   await saveOAuthGrant(env, {
     userId: targetUserId,
-    username: account.username || tokenAccount.username || pending.target_roblox_username || null,
+    username: account.username || profileAccount.username || tokenAccount.username || pending.target_roblox_username || null,
     token,
     scopes,
     authorizedAt,
@@ -562,7 +580,7 @@ async function handleOAuthCallback(request, env) {
   });
   await maybeUpsertHatchTrackerUserFromOAuth(env, pending, {
     userId: targetUserId,
-    username: account.username || tokenAccount.username || pending.target_roblox_username || null,
+    username: account.username || profileAccount.username || tokenAccount.username || pending.target_roblox_username || null,
     authorizedAt,
     expiresAt
   });
@@ -852,7 +870,7 @@ async function handleHatchTrackerCommand(request, env) {
 async function handleHatchAlertCheck(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
-  const user = requestUser(url);
+  const user = await resolveRequestUser(env, url);
   const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id);
   if (!tracker) return json({ ok: false, message: "HTG gain alerts are not enabled for that Roblox account." }, 404);
   return json({
@@ -867,12 +885,13 @@ async function handleHatchAlertCheck(request, env) {
 async function handleHatchDiagnostics(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
-  const user = requestUser(url);
+  const user = await resolveRequestUser(env, url);
   const itemQuery = String(url.searchParams.get("item") || "Huge Turnip Hamster").trim();
   const snapshotLimit = Math.max(2, Math.min(30, Number(url.searchParams.get("limit") || 12)));
   const includeDiffs = parseBool(url.searchParams.get("include_diffs")) !== false;
   const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id, { includeDisabled: true });
   const trackerStatus = tracker?.discord_user_id ? await hatchTrackerStatus(env, tracker.discord_user_id) : null;
+  const grantIdentity = await htgGrantIdentityDiagnostics(env, user.user_id).catch(error => ({ error: error?.message || String(error) }));
   const snapshots = sortAsc(await getUserSnapshots(env, user.user_id, snapshotLimit));
   const itemTimeline = [];
   const snapshotItems = new Map();
@@ -944,6 +963,7 @@ async function handleHatchDiagnostics(request, env) {
       latest_snapshot_unchecked: uncheckedLatest
     } : null,
     tracker_status: trackerStatus,
+    grant_identity: grantIdentity,
     latest_snapshot: latest ? lightSnapshot(latest) : null,
     snapshot_count: snapshots.length,
     item_timeline: itemTimeline,
@@ -1786,6 +1806,7 @@ function bigGamesOAuthScopes(env, purpose = "inventory") {
       : [BIG_GAMES_INVENTORY_SCOPE];
   const unique = [...new Set(scopes)];
   if (!unique.includes(BIG_GAMES_INVENTORY_SCOPE)) unique.unshift(BIG_GAMES_INVENTORY_SCOPE);
+  if (purpose === "hatch_tracker" && !unique.includes(BIG_GAMES_PROFILE_SCOPE)) unique.unshift(BIG_GAMES_PROFILE_SCOPE);
   return unique;
 }
 
@@ -2397,33 +2418,10 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     };
   }
 
-  const featured = pickFeaturedHatch(gainedHtg);
-  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, period);
-  const discordResponse = await sendHatchAlert(env, payload, tracker);
-
-  await supabaseInsert(env, HATCH_ALERTS_TABLE, [{
-    tracker_id: tracker.id || null,
-    discord_user_id: tracker.discord_user_id,
-    roblox_user_id: Number(userId),
-    roblox_username: firstString(user.username, tracker.roblox_username, userId),
-    snapshot_start_id: null,
-    snapshot_end_id: null,
-    period_start: period.start.captured_at,
-    period_end: period.end.captured_at,
-    tier: featured.tier,
-    item_key: featured.item_key,
-    item_class: featured.item_class,
-    item_id: featured.item_id,
-    display_name: featured.display_name,
-    variant: featured.variant,
-    delta: featured.delta,
-    rap: featured.rap || 0,
-    icon: featured.icon || null,
-    image_url: featured.image_url || null,
-    all_gained: gainedHtg.map(compactHatchCandidate),
-    discord_response: discordResponse || {},
-    created_at: checkedAt
-  }], "minimal");
+  const postedAlerts = await sendAndRecordHatchGainAlerts(env, tracker, user, gainedHtg, period, {
+    userId,
+    createdAt: checkedAt
+  });
 
   await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
     checkedAt,
@@ -2440,13 +2438,55 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
 
   return {
     posted: true,
-    tier: featured.tier,
-    item: featured.display_name,
-    delta: featured.delta,
+    alerts_posted: postedAlerts.length,
+    items: postedAlerts.map(row => ({
+      tier: row.tier,
+      item: row.display_name,
+      variant: row.variant,
+      delta: row.delta
+    })),
     htg_state: compactHtgStateSummary(currentRows, previousRows),
     source_filter: compactHatchSourceFilterSummary(sourceFilter),
     source: sourceMeta
   };
+}
+
+async function sendAndRecordHatchGainAlerts(env, tracker, user, gainedHtg, period, options = {}) {
+  const userId = String(options.userId || user?.user_id || tracker?.roblox_user_id || "").trim();
+  const createdAt = firstString(options.createdAt, new Date().toISOString());
+  const posted = [];
+
+  for (const gain of gainedHtg || []) {
+    const payload = buildHatchAlertDiscordPayload(tracker, user, gain, [gain], period);
+    const discordResponse = await sendHatchAlert(env, payload, tracker);
+    const row = {
+      tracker_id: tracker.id || null,
+      discord_user_id: tracker.discord_user_id,
+      roblox_user_id: Number(userId),
+      roblox_username: firstString(user.username, tracker.roblox_username, gain.roblox_username, userId),
+      snapshot_start_id: options.snapshotStartId || null,
+      snapshot_end_id: options.snapshotEndId || null,
+      period_start: period.start.captured_at,
+      period_end: period.end.captured_at,
+      tier: gain.tier,
+      item_key: gain.item_key,
+      item_class: gain.item_class,
+      item_id: gain.item_id,
+      display_name: gain.display_name,
+      variant: gain.variant,
+      delta: gain.delta,
+      rap: gain.rap || 0,
+      icon: gain.icon || null,
+      image_url: gain.image_url || null,
+      all_gained: [compactHatchCandidate(gain)],
+      discord_response: discordResponse || {},
+      created_at: createdAt
+    };
+    await supabaseInsert(env, HATCH_ALERTS_TABLE, [row], "minimal");
+    posted.push(row);
+  }
+
+  return posted;
 }
 
 async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
@@ -2515,34 +2555,16 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
     };
   }
 
-  const featured = pickFeaturedHatch(gainedHtg);
-  const payload = buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, { start, end });
-  const discordResponse = await sendHatchAlert(env, payload, tracker);
   const now = new Date().toISOString();
-
-  await supabaseInsert(env, HATCH_ALERTS_TABLE, [{
-    tracker_id: tracker.id || null,
-    discord_user_id: tracker.discord_user_id,
-    roblox_user_id: Number(userId),
-    roblox_username: firstString(user.username, tracker.roblox_username, latestSnapshot.roblox_username, userId),
-    snapshot_start_id: start.id,
-    snapshot_end_id: end.id,
-    period_start: start.captured_at,
-    period_end: end.captured_at,
-    tier: featured.tier,
-    item_key: featured.item_key,
-    item_class: featured.item_class,
-    item_id: featured.item_id,
-    display_name: featured.display_name,
-    variant: featured.variant,
-    delta: featured.delta,
-    rap: featured.rap || 0,
-    icon: featured.icon || null,
-    image_url: featured.image_url || null,
-    all_gained: gainedHtg.map(compactHatchCandidate),
-    discord_response: discordResponse || {},
-    created_at: now
-  }], "minimal");
+  const postedAlerts = await sendAndRecordHatchGainAlerts(env, tracker, {
+    ...user,
+    username: firstString(user.username, tracker.roblox_username, latestSnapshot.roblox_username, userId)
+  }, gainedHtg, { start, end }, {
+    userId,
+    snapshotStartId: start.id,
+    snapshotEndId: end.id,
+    createdAt: now
+  });
 
   await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
     last_checked_snapshot_id: latestSnapshot.id,
@@ -2554,9 +2576,13 @@ async function postHatchAlertIfNeeded(env, user, latestSnapshot, options = {}) {
 
   return {
     posted: true,
-    tier: featured.tier,
-    item: featured.display_name,
-    delta: featured.delta,
+    alerts_posted: postedAlerts.length,
+    items: postedAlerts.map(row => ({
+      tier: row.tier,
+      item: row.display_name,
+      variant: row.variant,
+      delta: row.delta
+    })),
     snapshot_id: latestSnapshot.id,
     history_filter: compactHatchHistoryFilterSummary(historyFilter),
     source_filter: compactHatchSourceFilterSummary(sourceFilter)
@@ -2749,6 +2775,7 @@ function normalizeHtgInventoryStateRows(rawItems, tracker, user, checkedAt, cont
 
 function normalizeHtgInventoryStateItem(item, userId, username, checkedAt, context = {}) {
   if (!item || typeof item !== "object") return null;
+  if (!htgUniqueOwnershipAllowsUser(item, userId)) return null;
   const rawData = item.rawData && typeof item.rawData === "object" ? item.rawData : {};
   const itemClass = item.class || item.category || item.collection || item.type || "Pet";
   const itemId = item.id || item.itemId || item.configName || item.name || rawData.id || null;
@@ -2789,6 +2816,61 @@ function normalizeHtgInventoryStateItem(item, userId, username, checkedAt, conte
       inventory_items_path: context.inventory_items_path || null
     }
   };
+}
+
+function htgUniqueOwnershipAllowsUser(item, userId) {
+  const expected = String(userId || "").trim();
+  if (!expected) return true;
+  const ownership = htgUniqueOwnership(item);
+  if (!ownership.hasOwnerLog || !ownership.userIds.length) return true;
+  return ownership.userIds.includes(expected);
+}
+
+function htgUniqueOwnership(item) {
+  const uniqueObjects = htgUniqueObjects(item);
+  const userIds = new Set();
+  let hasOwnerLog = false;
+
+  for (const unique of uniqueObjects) {
+    const log = Array.isArray(unique?._ol)
+      ? unique._ol
+      : Array.isArray(unique?.ol)
+        ? unique.ol
+        : null;
+    if (!log?.length) continue;
+    hasOwnerLog = true;
+    for (const entry of log) {
+      const userId = Array.isArray(entry)
+        ? entry[0]
+        : entry && typeof entry === "object"
+          ? firstString(entry.user_id, entry.userId, entry.uid, entry.id)
+          : null;
+      const text = String(userId || "").trim();
+      if (/^\d+$/.test(text)) userIds.add(text);
+    }
+  }
+
+  return { hasOwnerLog, userIds: [...userIds] };
+}
+
+function htgUniqueObjects(item) {
+  const rawData = item?.rawData && typeof item.rawData === "object" ? item.rawData : {};
+  const stack = parseJsonObject(firstString(item?.stackKey, item?.stack_key));
+  const candidates = [
+    item?._uq,
+    rawData?._uq,
+    stack?._uq
+  ];
+  return candidates.filter(value => value && typeof value === "object");
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 async function buildHtgGainCandidates(env, currentRows, previousRows, tracker) {
@@ -3209,6 +3291,12 @@ async function filterHatchSourceGains(env, userId, rows, period) {
     return { ...unchanged, reason: `Could not open Big Games access token: ${error?.message || error}` };
   }
 
+  try {
+    await verifyHtgGrantIdentity(env, grant, userId, accessToken);
+  } catch (error) {
+    return { ...unchanged, reason: error?.message || String(error) };
+  }
+
   const fetched = await Promise.all(HATCH_SOURCE_ENDPOINTS.map(async endpoint => {
     try {
       const payload = await fetchAccountSourceWithAccessToken(env, accessToken, endpoint);
@@ -3604,10 +3692,23 @@ function hatchDisplayItemName(row) {
 
 function hatchFullDisplayItemName(row) {
   const raw = String(firstString(row?.display_name, row?.item_id, row?.item_key, "pet")).trim();
-  if (/^(Huge|Titanic|Gargantuan|Garg)\s+/i.test(raw)) return raw.replace(/^Garg\s+/i, "Gargantuan ");
-  const tier = hatchTierTitle(row?.tier);
-  const name = hatchDisplayItemName(row);
-  return tier ? `${tier} ${name}` : name;
+  const baseName = /^(Huge|Titanic|Gargantuan|Garg)\s+/i.test(raw)
+    ? raw.replace(/^Garg\s+/i, "Gargantuan ")
+    : (() => {
+        const tier = hatchTierTitle(row?.tier);
+        const name = hatchDisplayItemName(row);
+        return tier ? `${tier} ${name}` : name;
+      })();
+  const variant = hatchVariantDisplayPrefix(row);
+  if (!variant || baseName.toLowerCase().startsWith(`${variant.toLowerCase()} `)) return baseName;
+  return `${variant} ${baseName}`;
+}
+
+function hatchVariantDisplayPrefix(row) {
+  const rawVariant = firstString(row?.variant, row?.raw ? getVariant(row.raw) : "");
+  const variant = normalizeVariantName(rawVariant);
+  if (!variant || variant === "Normal") return "";
+  return variant.replace(/\s*Normal$/i, "").trim();
 }
 
 function hatchTierTitle(tier) {
@@ -3829,7 +3930,11 @@ async function fetchHtgInventory(env, user, options = {}) {
   if (missing.includes(BIG_GAMES_INVENTORY_SCOPE)) {
     throw httpError(403, `HTG Big Games authorization is missing inventory scope for Roblox user ${userId}. Run /htg setup again.`);
   }
+  if (missing.includes(BIG_GAMES_PROFILE_SCOPE)) {
+    throw httpError(403, `HTG Big Games authorization is missing profile scope for Roblox user ${userId}. Run /htg setup again so Luna can verify the linked Roblox account.`);
+  }
   const accessToken = await openOAuthAccessToken(env, grant, "hatch_tracker");
+  await verifyHtgGrantIdentity(env, grant, userId, accessToken);
   let payload;
   try {
     payload = await fetchInventoryWithAccessToken(env, accessToken, options);
@@ -3843,6 +3948,65 @@ async function fetchHtgInventory(env, user, options = {}) {
     await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
   } catch {}
   return payload;
+}
+
+async function verifyHtgGrantIdentity(env, grant, expectedUserId, accessToken) {
+  const normalizedExpected = String(expectedUserId || "").trim();
+  if (!normalizedExpected) throw httpError(400, "Cannot verify HTG grant identity without a Roblox user_id.");
+  const profile = await fetchProfileWithAccessToken(env, accessToken);
+  const account = authorizedInventoryAccount(profile);
+  if (!account.user_id) {
+    throw httpError(403, `HTG Big Games authorization for Roblox user ${normalizedExpected} could not be verified from Profile data. Run /htg setup again.`);
+  }
+  if (String(account.user_id) !== normalizedExpected) {
+    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    throw httpError(403, `HTG Big Games authorization mismatch: saved for Roblox user ${normalizedExpected}, but Big Games says the token belongs to Roblox user ${account.user_id}${account.username ? ` (${account.username})` : ""}. Run /htg setup again for the correct account.`);
+  }
+  return account;
+}
+
+async function htgGrantIdentityDiagnostics(env, userId) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) return { connected: false, reason: "No Roblox user_id was provided." };
+  const grant = await getUsableOAuthGrant(env, normalizedUserId, "hatch_tracker");
+  if (!grant) return { connected: false, reason: "No usable HTG Big Games authorization grant was found." };
+
+  const missingScopes = missingOAuthScopes(env, "hatch_tracker", grant.scope || "");
+  const result = {
+    connected: true,
+    grant_key: grant.grant_key || null,
+    roblox_user_id: grant.roblox_user_id || null,
+    scope: grant.scope || null,
+    missing_scopes: missingScopes,
+    authorized_at: grant.authorized_at || null,
+    expires_at: grant.expires_at || null,
+    identity_verified: grant.metadata?.identity_verified ?? null,
+    metadata_username: grant.metadata?.username || null,
+    profile: null
+  };
+
+  if (missingScopes.includes(BIG_GAMES_PROFILE_SCOPE)) {
+    return {
+      ...result,
+      profile: {
+        available: false,
+        reason: "Grant is missing Profile scope; live account identity cannot be verified."
+      }
+    };
+  }
+
+  const accessToken = await openOAuthAccessToken(env, grant, "hatch_tracker");
+  const profile = await fetchProfileWithAccessToken(env, accessToken);
+  const account = authorizedInventoryAccount(profile);
+  return {
+    ...result,
+    profile: {
+      available: true,
+      roblox_user_id: account.user_id || null,
+      roblox_username: account.username || null,
+      matches_expected_user: String(account.user_id || "") === normalizedUserId
+    }
+  };
 }
 
 function pickPreviousSnapshots(snapshots) {
@@ -4714,6 +4878,26 @@ async function isCurrentLeagueMember(env, userId, leagueName, runKey) {
   }
 }
 function requestUser(url) { return { user_id: String(url.searchParams.get("user_id") || DEFAULT_USER_ID).trim(), username: String(url.searchParams.get("username") || DEFAULT_USERNAME).trim() }; }
+async function resolveRequestUser(env, url) {
+  const userId = String(url.searchParams.get("user_id") || "").trim();
+  const username = String(url.searchParams.get("username") || url.searchParams.get("account") || url.searchParams.get("user") || "").trim();
+  if (userId) {
+    return {
+      user_id: userId,
+      username: username || await fetchRobloxUsernameById(userId).catch(() => "") || userId
+    };
+  }
+  if (username) {
+    const account = await resolveHatchOAuthTargetAccount(username, env);
+    if (account?.user_id) {
+      return {
+        user_id: String(account.user_id),
+        username: account.username || username
+      };
+    }
+  }
+  return requestUser(url);
+}
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
 function htgScanIntervalMinutes(env) {

@@ -182,9 +182,9 @@ if (-not $SkipDelete) {
 
 if (-not $SkipRegister) {
   if ((-not $RegisterGlobal) -and $GuildId -eq $TGuildId) {
-    Write-Host "Registering /search, /version, /ram, /rdp, /top, /clan, /lg, /htg, /offline, /kms, and guild-only /t..." -ForegroundColor Cyan
+    Write-Host "Registering /search, /version, /ram, /rdp, /top, /clan, /cw, /league, /lb, /lg, /player, /htg, /offline, /kms, and guild-only /t..." -ForegroundColor Cyan
   } else {
-    Write-Host "Registering /search, /version, /ram, /rdp, /top, /clan, /lg, /htg, /offline, and /kms..." -ForegroundColor Cyan
+    Write-Host "Registering /search, /version, /ram, /rdp, /top, /clan, /cw, /league, /lb, /lg, /player, /htg, /offline, and /kms..." -ForegroundColor Cyan
   }
   $registerPaths = @(
     "/admin/register-search-command",
@@ -193,7 +193,11 @@ if (-not $SkipRegister) {
     "/admin/register-rdp-command",
     "/admin/register-top-command",
     "/admin/register-clan-command",
+    "/admin/register-cw-command",
+    "/admin/register-league-command",
+    "/admin/register-lb-command",
     "/admin/register-lg-command",
+    "/admin/register-player-command",
     "/admin/register-htg-command",
     "/admin/register-offline-command",
     "/admin/register-kms-command"
