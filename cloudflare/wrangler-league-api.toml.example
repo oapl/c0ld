@@ -12,8 +12,8 @@ LEAGUE_RUN_KEY = "tap-heroes-part-2"
 LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
 # Optional current League start. If set, scheduled collection waits until this ISO time.
 LEAGUE_RUN_START_AT = ""
-# Current League end. Exposed by /api/health and /api/leagues/milestones.
-LEAGUE_RUN_END_AT = "2026-07-24T16:00:00Z"
+# Current League end. Leave blank while the current League run is active.
+LEAGUE_RUN_END_AT = ""
 # Optional minutes after LEAGUE_RUN_END_AT during which scheduled final pulls may still run.
 LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES = "0"
 # The previous run is used only as a subtraction baseline. Its totals are never
