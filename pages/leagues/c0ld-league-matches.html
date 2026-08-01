@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>c0ld Leagues</title>
+<title>c0ld / WMSY League Matches</title>
 <style>
 *,*::before,*::after{box-sizing:border-box}
 :root{--bg:#0d1117;--panel:#161b22;--panel-2:#0d1117;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--link:#ff9b96;--hover:#1f2630;--good:#3fb950;--warn:#d29922;--danger:#f85149;--danger-bg:rgba(248,81,73,.12)}
@@ -21,9 +21,9 @@ main{max-width:1360px;margin:0 auto;padding:22px 24px 28px}
 .hero h1{margin:0 0 4px;font-size:28px}
 .subtle{color:var(--muted);font-size:13px}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-input,select,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+input,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
 button{cursor:pointer}
-button:hover,input:focus,select:focus{border-color:var(--link);background:var(--hover)}
+button:hover,input:focus{border-color:var(--link);background:var(--hover)}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
 .card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
 .label{color:var(--muted);font-size:13px;margin-bottom:6px}
@@ -44,6 +44,8 @@ th{color:var(--muted);font-size:13px;text-align:left;cursor:pointer;font-weight:
 .members{display:flex;flex-wrap:wrap;gap:6px;max-width:520px;white-space:normal}
 .member-pill{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--border);border-radius:999px;background:#0f141b;padding:4px 8px;font-size:12px;color:#c9d1d9}
 .member-pill strong{color:var(--text)}
+.source-tag{display:inline-block;margin-left:6px;vertical-align:super;font-size:10px;font-weight:700;letter-spacing:.02em;color:#8be9fd;border:1px solid rgba(139,233,253,.35);border-radius:999px;padding:1px 5px;background:rgba(139,233,253,.08)}
+.source-tag.wmsy{color:#ffd761;border-color:rgba(255,215,97,.4);background:rgba(255,215,97,.08)}
 .positive{color:var(--good);font-weight:700}
 .negative{color:var(--danger);font-weight:700}
 .zero,.unknown{color:var(--muted)}
@@ -67,15 +69,16 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     <a href="index.html">c0ld Leaderboard</a>
     <a href="clans.html">Clans Leaderboard</a>
     <a href="global-leaderboard.html">Global Leaderboard</a>
+    <a class="active" href="c0ld-league-matches.html">League Matches</a>
 <details class="lookup-menu">
       <summary class="menu-btn lookup-summary">Tools</summary>
       <div class="lookup-menu-list">
         <a class="menu-btn" href="top-clan-filter.html">Top Clan Filter</a>
         <a class="menu-btn" href="clans-activity.html">Clans Activity</a>
         <a class="menu-btn" href="activity-feed.html">Activity Feed</a>
-          <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
-          <a class="menu-btn" href="roblox-version-history.html">Roblox Versions</a>
-          <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
+        <a class="menu-btn" href="ps99-version-history.html">PS99 Versions</a>
+        <a class="menu-btn" href="roblox-version-history.html">Roblox Versions</a>
+        <a class="menu-btn" href="ps99-restart-tracker.html">PS99 Restarts</a>
         <a class="menu-btn" href="live-clan.html">Clan Lookup</a>
         <a class="menu-btn" href="player-lookup.html">Player Lookup</a>
       </div>
@@ -84,19 +87,10 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <main>
   <section class="hero">
     <div>
-      <h1>c0ld Leagues</h1>
-      <div id="status" class="subtle">Slow-scanning top leagues for current c0ld members...</div>
+      <h1>c0ld / WMSY League Matches</h1>
+      <div id="status" class="subtle">Loading stored hourly league matches...</div>
     </div>
     <div class="controls">
-      <select id="scan-limit" aria-label="Scan limit">
-        <option value="all" selected>Find c0ld members, max Top 10000</option>
-        <option value="10000">Scan Top 10000</option>
-        <option value="5000">Scan Top 5000</option>
-        <option value="2500">Scan Top 2500</option>
-        <option value="500">Scan Top 500</option>
-        <option value="250">Scan Top 250</option>
-        <option value="100">Scan Top 100</option>
-      </select>
       <input id="search-input" placeholder="Search leagues or members...">
       <button id="copy-league-names-btn" type="button">Copy League Names</button>
       <button id="refresh-btn" type="button">Refresh</button>
@@ -114,7 +108,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
   <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
   <section class="section">
     <div class="section-header">
-      <h2 class="section-title">c0ld League Matches</h2>
+      <h2 class="section-title">Stored League Matches</h2>
       <div class="subtle" id="table-meta">Loading...</div>
     </div>
     <div class="table-wrap">
@@ -124,27 +118,22 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
             <th data-sort="rank">Rank</th>
             <th data-sort="league_name">League</th>
             <th data-sort="total_points" class="numeric">League Points</th>
-            <th data-sort="c0ld_member_count" class="numeric">c0ld Members</th>
-            <th data-sort="c0ld_league_points" class="numeric">c0ld League Points</th>
+            <th data-sort="c0ld_member_count" class="numeric">Matched Members</th>
+            <th data-sort="c0ld_league_points" class="numeric">Matched League Points</th>
             <th data-sort="gain_1h" class="numeric">1 Hour</th>
             <th data-sort="gain_6h" class="numeric">6 Hours</th>
             <th>Matched Members</th>
           </tr>
         </thead>
-        <tbody id="tbody"><tr><td colspan="8" class="empty">Loading c0ld league matches...</td></tr></tbody>
+        <tbody id="tbody"><tr><td colspan="8" class="empty">Loading stored league matches...</td></tr></tbody>
       </table>
     </div>
   </section>
 </main>
 <script>
 const API="https://yamo-league-api-worker.opal-dde.workers.dev";
-const BATCH_SIZE=10;
-const SCAN_CONCURRENCY=2;
-const SCAN_DELAY_MS=2500;
-const RANK_BASELINE_BATCH_SIZE=100;
-const MAX_BATCH_ATTEMPTS=6;
-const FIND_ALL_LIMIT=10000;
-let rows=[],sortKey="rank",sortAsc=true,loading=false,lastPayload=null,scanErrors=[],rankBaselineOffsets=new Set();
+const RUN_KEY="tap-heroes-part-2";
+let rows=[],sortKey="rank",sortAsc=true,loading=false,lastPayload=null,health=null;
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function shortNum(v){const n=Number(v);if(!Number.isFinite(n))return"-";const a=Math.abs(n);if(a>=1e12)return(n/1e12).toFixed(2).replace(/\.00$/,"")+"T";if(a>=1e9)return(n/1e9).toFixed(2).replace(/\.00$/,"")+"B";if(a>=1e6)return(n/1e6).toFixed(2).replace(/\.00$/,"")+"M";if(a>=1e3)return(n/1e3).toFixed(2).replace(/\.00$/,"")+"K";return n.toLocaleString("en-US")}
 function fullNum(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString("en-US"):"-"}
@@ -156,25 +145,25 @@ function delta(v){if(v==null)return'<span class="unknown">-</span>';const n=Numb
 function compare(a,b,k,asc){const an=Number(a[k]),bn=Number(b[k]);let r=Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a[k]||"").localeCompare(String(b[k]||""));return asc?r:-r}
 function setStatus(text){document.getElementById("status").textContent=text}
 function setProgress(scanned,total){document.getElementById("progress-bar").style.width=(total?Math.min(100,scanned/total*100):0)+"%"}
-function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="Clan rank #'+esc(m.clan_rank||"-")+'"><strong>'+esc(m.username||m.user_id)+'</strong> '+esc(shortNum(m.league_points))+'</span>').join("")}
-function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=rows.slice();if(q)list=list.filter(r=>String(r.league_name||"").toLowerCase().includes(q)||String(r.matches||[]).toLowerCase().includes(q)||(r.matches||[]).some(m=>String(m.username||m.user_id).toLowerCase().includes(q)));list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
+function sourceClanTag(value){const text=String(value||"").trim();const normalized=text.toLowerCase();if(normalized==="wmsy")return"WMSY";if(normalized==="cold"||normalized==="c0ld")return"c0ld";return text||"c0ld"}
+function sourceClans(row){const values=[...(Array.isArray(row?.matched_clans)?row.matched_clans:[]),...(row?.matches||[]).map(m=>m.source_clan||m.clan_name)].map(sourceClanTag).filter(Boolean);const seen=new Map();values.forEach(value=>{const id=value.toLowerCase();if(!seen.has(id))seen.set(id,value)});return[...seen.values()]}
+function sourceTags(row){return sourceClans(row).map(clan=>'<span class="source-tag '+esc(clan.toLowerCase())+'">['+esc(clan)+']</span>').join("")}
+function leagueNameHtml(row){return '<a href="league.html?league='+encodeURIComponent(row.league_name||"")+'">'+esc(row.league_name||"-")+'</a>'+sourceTags(row)}
+function memberPills(matches){return (matches||[]).map(m=>'<span class="member-pill" title="'+esc(sourceClanTag(m.source_clan))+' member - League rank #'+esc(m.rank||m.league_rank||"-")+'"><strong>'+esc(m.username||m.display_name||m.user_id)+'</strong> '+esc(shortNum(m.league_points??m.points))+'</span>').join("")}
+function visible(){const q=document.getElementById("search-input").value.trim().toLowerCase();let list=rows.slice();if(q)list=list.filter(r=>String(r.league_name||"").toLowerCase().includes(q)||(r.matches||[]).some(m=>String(m.username||m.display_name||m.user_id).toLowerCase().includes(q)));list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
 function countRankRange(min,max){return rows.filter(r=>{const rank=Number(r.rank);return Number.isFinite(rank)&&rank>=min&&rank<=max}).length}
-function foundMemberIds(){const ids=new Set();rows.forEach(r=>(r.matches||[]).forEach(m=>{if(m.user_id)ids.add(String(m.user_id))}));return ids}
+function foundMemberIds(){const ids=new Set();rows.forEach(r=>(r.matches||[]).forEach(m=>{if(m.user_id)ids.add(sourceClanTag(m.source_clan)+":"+m.user_id)}));return ids}
 function foundMemberCount(){return foundMemberIds().size}
-function renderCards(totalScanned,totalTarget){document.getElementById("top3-count").textContent=countRankRange(1,3).toLocaleString("en-US");document.getElementById("top10-count").textContent=countRankRange(4,10).toLocaleString("en-US");document.getElementById("top100-count").textContent=countRankRange(11,100).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(101,250).toLocaleString("en-US");document.getElementById("top500-count").textContent=countRankRange(251,500).toLocaleString("en-US");document.getElementById("top1000-count").textContent=countRankRange(501,1000).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(1001,10000).toLocaleString("en-US");const updated=lastPayload?.top_leagues_snapshot_at?" · Top list checked "+dt(lastPayload.top_leagues_snapshot_at):"";const source=lastPayload?.clan_source?" · clan source "+lastPayload.clan_source:"";const memberTotal=Number(lastPayload?.clan_member_count)||0;const found=foundMemberCount();const foundText=memberTotal?" · found "+found.toLocaleString("en-US")+" / "+memberTotal.toLocaleString("en-US")+" current c0ld members":"";document.getElementById("table-meta").textContent=(scanErrors.length?scanErrors.length+" scan errors; ":"")+rows.length+" matched leagues · scanned "+totalScanned.toLocaleString("en-US")+" / "+totalTarget.toLocaleString("en-US")+foundText+source+updated;setProgress(totalScanned,totalTarget)}
-function render(){const tbody=document.getElementById("tbody");const list=visible();if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No c0ld members found in the scanned league range yet.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span><a href="league.html?league='+encodeURIComponent(r.league_name||"")+'">'+esc(r.league_name||"-")+'</a><div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+esc(r.c0ld_member_count)+'</td><td class="numeric" title="'+esc(fullNum(r.c0ld_league_points))+'">'+esc(shortNum(r.c0ld_league_points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
+function renderCards(){document.getElementById("top3-count").textContent=countRankRange(1,3).toLocaleString("en-US");document.getElementById("top10-count").textContent=countRankRange(4,10).toLocaleString("en-US");document.getElementById("top100-count").textContent=countRankRange(11,100).toLocaleString("en-US");document.getElementById("top250-count").textContent=countRankRange(101,250).toLocaleString("en-US");document.getElementById("top500-count").textContent=countRankRange(251,500).toLocaleString("en-US");document.getElementById("top1000-count").textContent=countRankRange(501,1000).toLocaleString("en-US");document.getElementById("top10000-count").textContent=countRankRange(1001,10000).toLocaleString("en-US");const updated=lastPayload?.snapshot_at?" - Stored matches updated "+dt(lastPayload.snapshot_at):"";const scan=health?.league_overlap_scan;const shard=scan?" - hourly shard "+(Number(scan.current_shard_index)+1).toLocaleString("en-US")+" / "+Number(scan.shard_count||0).toLocaleString("en-US"):"";document.getElementById("table-meta").textContent=rows.length+" matched leagues - "+foundMemberCount().toLocaleString("en-US")+" matched players"+updated+shard;setProgress(scan?.current_offset||0,scan?.top_limit||0)}
+function render(){renderCards();const tbody=document.getElementById("tbody");const list=visible();if(!list.length){tbody.innerHTML='<tr><td colspan="8" class="empty">No stored c0ld/WMSY matches found yet. The hourly shard scanner will fill this in as it sweeps through the Top 10,000.</td></tr>';return}tbody.innerHTML=list.map(r=>'<tr><td class="rank">#'+esc(r.rank||"-")+'</td><td><div class="league-cell">'+leagueIcon(r)+'<span>'+leagueNameHtml(r)+'<div class="subtle">'+esc(r.league_id||"no league id")+'</div></span></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+esc(r.c0ld_member_count||0)+'</td><td class="numeric" title="'+esc(fullNum(r.c0ld_league_points))+'">'+esc(shortNum(r.c0ld_league_points))+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td><div class="members">'+memberPills(r.matches)+'</div></td></tr>').join("")}
 function discoveredLeagueNames(){const seen=new Set();return rows.map(row=>String(row.league_name||"").trim()).filter(name=>{const id=name.toLowerCase();if(!id||seen.has(id))return false;seen.add(id);return true})}
 async function copyLeagueNames(){const button=document.getElementById("copy-league-names-btn"),names=discoveredLeagueNames();if(!names.length){button.textContent="No Names Found";setTimeout(()=>button.textContent="Copy League Names",1800);return}const text=names.join(",");try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);else{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();if(!document.execCommand("copy"))throw new Error("Copy failed");area.remove()}button.textContent="Copied "+names.length+" Names";setTimeout(()=>button.textContent="Copy League Names",1800)}catch(err){console.error(err);button.textContent="Copy Failed";setTimeout(()=>button.textContent="Copy League Names",1800)}}
-function mergeRows(newRows){const byKey=new Map(rows.map(r=>[String(r.league_id||r.league_name),r]));newRows.forEach(r=>byKey.set(String(r.league_id||r.league_name),r));rows=[...byKey.values()]}
-function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
-function scanConfig(){const value=document.getElementById("scan-limit").value;if(value==="all")return{total:FIND_ALL_LIMIT,stopWhenAllFound:true,label:"top "+FIND_ALL_LIMIT.toLocaleString("en-US")};return{total:Number(value)||1000,stopWhenAllFound:false,label:"top "+(Number(value)||1000).toLocaleString("en-US")}}
-async function requestJsonWithRetry(url,label,maxAttempts=MAX_BATCH_ATTEMPTS){let lastError=null;for(let attempt=1;attempt<=maxAttempts;attempt++){try{url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const text=await res.text();let data={};try{data=text?JSON.parse(text):{}}catch{data={message:text||"Invalid JSON response"}}if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}catch(err){lastError=err;if(attempt>=maxAttempts)break;const wait=Math.min(120000,attempt*attempt*15000);setStatus(label+" failed. Retrying in "+Math.round(wait/1000)+"s...");await sleep(wait)}}throw lastError}
-async function ensureRankBaseline(offset,total){const baseOffset=Math.floor(offset/RANK_BASELINE_BATCH_SIZE)*RANK_BASELINE_BATCH_SIZE;if(rankBaselineOffsets.has(baseOffset))return;const url=new URL(API+"/api/leagues/top-leagues/window");url.searchParams.set("run","tap-heroes-part-2");url.searchParams.set("top_limit",String(total));url.searchParams.set("offset",String(baseOffset));url.searchParams.set("limit",String(Math.min(RANK_BASELINE_BATCH_SIZE,total-baseOffset)));setStatus("Updating baseline ranks "+(baseOffset+1).toLocaleString("en-US")+"-"+Math.min(total,baseOffset+RANK_BASELINE_BATCH_SIZE).toLocaleString("en-US")+"...");await requestJsonWithRetry(url,"Rank baseline around rank "+(baseOffset+1).toLocaleString("en-US"),MAX_BATCH_ATTEMPTS+2);rankBaselineOffsets.add(baseOffset)}
-async function fetchBatch(offset,total){const url=new URL(API+"/api/leagues/c0ld-overlap");url.searchParams.set("clan","c0ld");url.searchParams.set("run","tap-heroes-part-2");url.searchParams.set("top_limit",String(total));url.searchParams.set("offset",String(offset));url.searchParams.set("limit",String(BATCH_SIZE));url.searchParams.set("concurrency",String(SCAN_CONCURRENCY));url.searchParams.set("live","1");try{return await requestJsonWithRetry(url,"c0ld scan around rank "+(offset+1).toLocaleString("en-US"))}catch(err){const message=err?.message||String(err);scanErrors.push({league_name:"Ranks "+(offset+1)+"-"+Math.min(total,offset+BATCH_SIZE),rank:offset+1,message});setStatus("Skipping ranks "+(offset+1).toLocaleString("en-US")+"-"+Math.min(total,offset+BATCH_SIZE).toLocaleString("en-US")+" after repeated fetch failures. Continuing...");return{ok:true,rows:[],scan_errors:[],scanned_count:BATCH_SIZE,next_offset:offset+BATCH_SIZE<total?offset+BATCH_SIZE:null,failed_batch:true,message}}}
-async function loadData(){if(loading)return;loading=true;rows=[];scanErrors=[];rankBaselineOffsets=new Set();lastPayload=null;render();const config=scanConfig();const total=config.total;document.getElementById("refresh-btn").disabled=true;document.getElementById("scan-limit").disabled=true;try{let offset=0,scanned=0,foundAll=false;setStatus("Slow-scanning "+config.label+" leagues for c0ld members...");setProgress(0,total);while(offset!==null&&scanned<total){await ensureRankBaseline(offset,total);const data=await fetchBatch(offset,total);lastPayload=data;mergeRows(data.rows||[]);scanErrors=scanErrors.concat(data.scan_errors||[]);scanned=Math.min(total,offset+(data.scanned_count||BATCH_SIZE));renderCards(scanned,total);render();const memberTotal=Number(data.clan_member_count)||0;if(config.stopWhenAllFound&&memberTotal&&foundMemberCount()>=memberTotal){foundAll=true;setStatus("Scan complete. Found all "+memberTotal.toLocaleString("en-US")+" current c0ld members by rank "+scanned.toLocaleString("en-US")+".");offset=null;break}offset=data.next_offset;if(offset!==null&&scanned<total){setStatus("Scanned "+scanned.toLocaleString("en-US")+" of "+total.toLocaleString("en-US")+" top leagues. Waiting before next batch...");await sleep(SCAN_DELAY_MS)}}if(!foundAll){setStatus("Scan complete. Found "+rows.length.toLocaleString("en-US")+" leagues containing "+foundMemberCount().toLocaleString("en-US")+" current c0ld members"+(scanErrors.length?" with "+scanErrors.length.toLocaleString("en-US")+" recorded scan errors.":"."))}}catch(err){console.error(err);setStatus("Could not load c0ld league overlap: "+(err.message||String(err)));document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(err.message||String(err))+'</td></tr>'}finally{loading=false;document.getElementById("refresh-btn").disabled=false;document.getElementById("scan-limit").disabled=false}}
+async function getJson(url){url.searchParams.set("v",Date.now());const res=await fetch(url,{cache:"no-store"});const data=await res.json();if(!res.ok||data.ok===false)throw new Error(data.message||"HTTP "+res.status);return data}
+function addRun(url){url.searchParams.set("run",RUN_KEY);return url}
+function normalizeRow(row){const matches=(row.matches||[]).map(member=>({...member,source_clan:sourceClanTag(member.source_clan),rank:member.rank??member.league_rank,points:member.points??member.league_points}));return {...row,total_points:row.total_points??row.points??0,c0ld_member_count:matches.length,c0ld_league_points:matches.reduce((sum,member)=>sum+(Number(member.league_points??member.points)||0),0),matched_clans:sourceClans({...row,matches}),matches}}
+async function loadData(){if(loading)return;loading=true;rows=[];lastPayload=null;render();document.getElementById("refresh-btn").disabled=true;try{setStatus("Loading stored hourly league matches...");const healthPromise=getJson(new URL(API+"/api/health")).catch(()=>null);const url=addRun(new URL(API+"/api/leagues/c0ld-discovered"));url.searchParams.set("limit","5000");const data=await getJson(url);health=await healthPromise;lastPayload=data;rows=(data.rows||[]).map(normalizeRow).sort((a,b)=>(Number(a.rank)||999999)-(Number(b.rank)||999999));setStatus("Showing stored c0ld/WMSY matches from the hourly shard scanner.");render()}catch(err){console.error(err);setStatus("Could not load stored league matches: "+(err.message||String(err)));document.getElementById("tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(err.message||String(err))+'</td></tr>'}finally{loading=false;document.getElementById("refresh-btn").disabled=false}}
 document.getElementById("refresh-btn").addEventListener("click",loadData);
 document.getElementById("copy-league-names-btn").addEventListener("click",copyLeagueNames);
-document.getElementById("scan-limit").addEventListener("change",loadData);
 document.getElementById("search-input").addEventListener("input",render);
 document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const k=th.dataset.sort;if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=k==="rank"||k==="league_name"}render()}));
 loadData();

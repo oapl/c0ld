@@ -80,6 +80,13 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "10000"
 COLD_LEAGUES_CONCURRENCY = "8"
+# Hourly background matcher. The */5 cron checks this cadence and scans one deterministic shard.
+LEAGUE_OVERLAP_SCAN_ENABLED = "true"
+LEAGUE_OVERLAP_SCAN_MINUTES = "60"
+LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY"
+LEAGUE_OVERLAP_SCAN_TOP_LIMIT = "10000"
+LEAGUE_OVERLAP_SCAN_SHARD_SIZE = "40"
+LEAGUE_OVERLAP_SCAN_CONCURRENCY = "8"
 # Optional JSON map/list for known c0ld members if the upstream live clan endpoint misses someone.
 # COLD_MEMBER_OVERRIDES_JSON = "{\"1462748729\":\"dragonballx1412\"}"
 # Preferred if the league Worker uses the same Supabase project as the clan Worker.

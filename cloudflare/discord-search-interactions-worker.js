@@ -3752,11 +3752,12 @@ async function buildHourlyLeagueReport(env, leagueNameValue) {
   };
 }
 
-async function renderHourlyLeagueBoardPng(payload, historyRows) {
+async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
   const [fonts, leagueIcon] = await Promise.all([
     loadHistoryFonts(),
     hourlyLoadLeagueIcon(payload).catch(() => null)
   ]);
+  const chartHours = leagueChartHours(options.hours || 24);
   const width = 1600;
   const height = 900;
   const color = {
@@ -3817,7 +3818,8 @@ async function renderHourlyLeagueBoardPng(payload, historyRows) {
     x: 54,
     y: 206,
     w: 1492,
-    h: 310
+    h: 310,
+    hours: chartHours
   }, color);
 
   hourlyDrawLeagueRosterTable(canvas, fonts, rows, {
@@ -3863,10 +3865,10 @@ function hourlyDrawLeagueStatCard(canvas, fonts, label, value, x, y, width, heig
 
 function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, color) {
   hourlyDrawPanel(canvas, area.x, area.y, area.w, area.h, color.panelDeep, color.line);
-  canvas.drawFontText(fonts.bold, "24-Hour Member Growth", area.x + 22, area.y + 18, 23, color.white, 420);
+  const hours = leagueChartHours(area.hours || 24);
+  canvas.drawFontText(fonts.bold, `${hours}-Hour Member Growth`, area.x + 22, area.y + 18, 23, color.white, 420);
   canvas.drawFontText(fonts.regular, "Hourly gain rate from stored 15-minute league snapshots", area.x + 22, area.y + 52, 14, color.muted, 520);
 
-  const hours = 24;
   const members = leagueChartMembers(payload).slice(0, 4);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
   const legendY = area.y + 28;
@@ -5199,7 +5201,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
 
   try {
     const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
-    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours, env });
+    const chartBytes = await renderHourlyLeagueBoardPng(payload, historyPayload.rows || [], { hours: chartHours });
     if (chartBytes?.byteLength) {
       const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
       containerComponents.push(
@@ -5216,7 +5218,8 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
       );
       message._file = { filename, contentType: "image/png", bytes: chartBytes };
     }
-  } catch {
+  } catch (err) {
+    console.warn("league info chart render failed", displayLeagueName, err?.message || String(err));
     // The command should still answer if the history chart cannot be rendered.
   }
 
