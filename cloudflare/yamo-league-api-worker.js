@@ -1,13 +1,13 @@
 const SNAPSHOT_TABLE = "ps99_league_snapshots";
 const CURRENT_TABLE = "ps99_league_current";
 const DEFAULT_LEAGUE_NAME = "YAMO";
-const DEFAULT_LEAGUE_RUN_KEY = "tap-heroes-part-2";
-const DEFAULT_LEAGUE_RUN_LABEL = "Tap Heroes Part 2";
+const DEFAULT_LEAGUE_RUN_KEY = "plants-vs-coins-part-2";
+const DEFAULT_LEAGUE_RUN_LABEL = "Plants VS Coins Part 2";
 const DEFAULT_LEAGUE_RUN_END_AT = "";
 const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TRACKED_LEAGUE_REFRESH_MINUTES = 15;
-const DEFAULT_GENERAL_LEAGUE_REFRESH_MINUTES = 30;
+const DEFAULT_GENERAL_LEAGUE_REFRESH_MINUTES = 15;
 const DEFAULT_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 100;
 const DEFAULT_GENERAL_LEAGUE_REFRESH_CONCURRENCY = 4;
 const MAX_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 500;
@@ -28,10 +28,10 @@ const DEFAULT_LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT = 100;
 const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 10;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 100;
 const DEFAULT_LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY";
-const DEFAULT_LEAGUE_OVERLAP_SCAN_MINUTES = 60;
+const DEFAULT_LEAGUE_OVERLAP_SCAN_MINUTES = 15;
 const DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_SIZE = 100;
 const DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS = 500;
-const DEFAULT_TOP_LEAGUES_REFRESH_MINUTES = 60;
+const DEFAULT_TOP_LEAGUES_REFRESH_MINUTES = 15;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
 const DEFAULT_TOP_LEAGUES_PAGE_SIZE = 100;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
@@ -606,7 +606,8 @@ async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
   const syntheticIds = [...new Set(rows
     .map(row => stableLeagueUserId(row.league_id || row.league_name))
     .filter(Boolean))];
-  const existingRows = syntheticIds.length
+  const mergeExisting = options.mergeExisting !== false;
+  const existingRows = mergeExisting && syntheticIds.length
     ? await selectLeagueCurrentRows(env, {
         select: "user_id,raw_league",
         league_run_key: `eq.${runKey}`,
@@ -629,9 +630,30 @@ async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
   }));
 
   await supabaseUpsert(env, SNAPSHOT_TABLE, dbRows, "league_run_key,snapshot_id,user_id");
-  if (isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) {
+  if (options.publishCurrent !== false && isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) {
     await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
   }
+  return dbRows.length;
+}
+
+async function replaceCurrentDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
+  const fetchedAt = options.fetchedAt || new Date().toISOString();
+  if (!isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) return 0;
+  const snapshotId = `c0ld_discovered:${runKey}:${fetchedAt}`;
+  const source = `${options.source || "overlap-matches"}:c0ld-discovered`;
+  const sourceClan = leagueOverlapClanTag(options.sourceClan || options.clan || "mixed");
+  const dbRows = (rows || []).map(row => discoveredC0ldLeagueDbRow(row, {
+    snapshotId,
+    fetchedAt,
+    source,
+    runKey,
+    sourceClan,
+    existingRawLeague: null
+  }));
+  await replaceCurrentRows(env, CURRENT_TABLE, {
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${COLD_DISCOVERED_LEAGUES_NAME}`
+  }, dbRows.map(row => ({ ...row, updated_at: fetchedAt })));
   return dbRows.length;
 }
 
@@ -1739,10 +1761,14 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
   ]);
   const clanMembers = mergeClanMemberMapsForOverlap(clanContexts);
   const topRows = (topContext.rows || []).slice(0, config.top_limit);
+  const discoveredRows = [];
   const matchedRows = [];
   const scanErrors = [];
   let scannedCount = 0;
   let discoveredUpserted = 0;
+  let discoveredCurrentRows = 0;
+  let discoveredCurrentReplaced = false;
+  let discoveredCurrentSkippedReason = null;
 
   for (let offset = 0; offset < topRows.length; offset += config.batch_size) {
     const batch = topRows.slice(offset, offset + config.batch_size);
@@ -1751,6 +1777,7 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
       .filter(row => row.matches.length)
       .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
     const visibleMatched = filterPublicOverlapRows(env, matched);
+    discoveredRows.push(...matched);
     matchedRows.push(...visibleMatched);
     scanErrors.push(...scanned
       .filter(row => row.error && !isLeaguePubliclyHidden(env, row.league_name))
@@ -1761,7 +1788,9 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
       discoveredUpserted += await persistDiscoveredC0ldLeagues(env, runKey, matched, {
         fetchedAt: topContext.snapshot_at || startedAt,
         source: `${source}:full-scan-overlap-matches`,
-        sourceClan: "mixed"
+        sourceClan: "mixed",
+        publishCurrent: false,
+        mergeExisting: false
       }).catch(err => {
         console.warn("persist scheduled discovered c0ld/WMSY leagues failed", err?.message || String(err));
         return 0;
@@ -1771,6 +1800,24 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
     if (config.batch_delay_ms > 0 && offset + batch.length < topRows.length) {
       await sleep(config.batch_delay_ms);
     }
+  }
+
+  const maxSafeErrors = Math.max(10, Math.floor(scannedCount * 0.1));
+  if (!topRows.length) {
+    discoveredCurrentSkippedReason = "no_top_league_rows";
+  } else if (scanErrors.length > maxSafeErrors) {
+    discoveredCurrentSkippedReason = "too_many_scan_errors";
+  } else {
+    discoveredCurrentRows = await replaceCurrentDiscoveredC0ldLeagues(env, runKey, discoveredRows, {
+      fetchedAt: topContext.snapshot_at || startedAt,
+      source: `${source}:full-scan-overlap-matches`,
+      sourceClan: "mixed"
+    }).catch(err => {
+      discoveredCurrentSkippedReason = err?.message || String(err);
+      console.warn("replace current discovered c0ld/WMSY leagues failed", discoveredCurrentSkippedReason);
+      return 0;
+    });
+    discoveredCurrentReplaced = !discoveredCurrentSkippedReason;
   }
 
   const output = {
@@ -1785,6 +1832,9 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
     scanned_count: scannedCount,
     matched_count: matchedRows.length,
     discovered_upserted: discoveredUpserted,
+    discovered_current_replaced: discoveredCurrentReplaced,
+    discovered_current_rows: discoveredCurrentRows,
+    discovered_current_skipped_reason: discoveredCurrentSkippedReason,
     scan_errors: scanErrors.slice(0, 50),
     clans: clanContexts.map(context => ({
       clan_name: context.clanCurrent?.clan_name || context.clan || null,

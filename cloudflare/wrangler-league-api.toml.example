@@ -8,8 +8,8 @@ LEAGUE_NAME = "YAMO"
 # When true/auto, scheduled collection still obeys LEAGUE_RUN_START_AT and LEAGUE_RUN_END_AT.
 LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
-LEAGUE_RUN_KEY = "tap-heroes-part-2"
-LEAGUE_RUN_LABEL = "Tap Heroes Part 2"
+LEAGUE_RUN_KEY = "plants-vs-coins-part-2"
+LEAGUE_RUN_LABEL = "Plants VS Coins Part 2"
 # Optional current League start. If set, scheduled collection waits until this ISO time.
 LEAGUE_RUN_START_AT = ""
 # Current League end. Leave blank while the current League run is active.
@@ -17,7 +17,7 @@ LEAGUE_RUN_END_AT = ""
 # Optional minutes after LEAGUE_RUN_END_AT during which scheduled final pulls may still run.
 LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES = "0"
 # The previous run is used only as a subtraction baseline. Its totals are never
-# counted or stored as Tap Heroes Part 2 points.
+# counted or stored as current-run points.
 LEAGUE_BASELINE_RUN_KEY = "active"
 LEAGUE_NORMALIZE_POINTS_FROM_BASELINE = "true"
 # Optional per-run labels. Keys are LEAGUE_RUN_KEY values.
@@ -42,9 +42,9 @@ LEAGUE_INGEST_CONCURRENCY = "4"
 # Configured c0ld league names refresh at :00, :15, :30, and :45.
 COLD_LEAGUE_REFRESH_MINUTES = "15"
 # Successful one-off /lg info lookups become a persistent general-league pool.
-# Those leagues refresh at :00 and :30 without being added to LEAGUE_NAMES.
+# Those leagues refresh every 15 minutes without being added to LEAGUE_NAMES.
 GENERAL_LEAGUE_REFRESH_ENABLED = "true"
-GENERAL_LEAGUE_REFRESH_MINUTES = "30"
+GENERAL_LEAGUE_REFRESH_MINUTES = "15"
 GENERAL_LEAGUE_REFRESH_BATCH_SIZE = "100"
 GENERAL_LEAGUE_REFRESH_CONCURRENCY = "4"
 # Exact-league pulls retry temporary Big Games throttling/server failures.
@@ -58,10 +58,10 @@ LEAGUE_API_RETRY_BASE_MS = "1500"
 # around tracked leagues that are outside the Top 1000.
 TOP_LEAGUES_LIMIT = "1000"
 SCHEDULED_TOP_LEAGUES_LIMIT = "10000"
-TOP_LEAGUES_REFRESH_MINUTES = "60"
+TOP_LEAGUES_REFRESH_MINUTES = "15"
 ALL_TOP_LEAGUES_LIMIT = "10000"
 TOP_LEAGUES_PAGE_DELAY_MS = "2500"
-# Hourly Top 10000 scan pulls 100 leagues every 2.5 seconds.
+# Top 10000 scan pulls 100 leagues every 2.5 seconds on the 15-minute cadence.
 ALL_TOP_LEAGUES_PAGE_SIZE = "100"
 ALL_TOP_LEAGUES_PAGE_DELAY_MS = "2500"
 # Extended League-player reward cutoffs are simulated by collecting every
@@ -82,9 +82,9 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "10000"
 COLD_LEAGUES_CONCURRENCY = "8"
-# Hourly background matcher. The */5 cron checks this cadence and scans the full Top 10000.
+# Background matcher. The */5 cron checks this cadence and scans the full Top 10000.
 LEAGUE_OVERLAP_SCAN_ENABLED = "true"
-LEAGUE_OVERLAP_SCAN_MINUTES = "60"
+LEAGUE_OVERLAP_SCAN_MINUTES = "15"
 LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY"
 LEAGUE_OVERLAP_SCAN_TOP_LIMIT = "10000"
 LEAGUE_OVERLAP_SCAN_BATCH_SIZE = "100"
