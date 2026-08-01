@@ -3863,7 +3863,12 @@ function leagueCollectionSource(source, collectionState) {
   return clean.endsWith(":grace_period") ? clean : `${clean}:grace_period`;
 }
 function leagueName(env) { return String(env.LEAGUE_NAME || DEFAULT_LEAGUE_NAME).trim() || DEFAULT_LEAGUE_NAME; }
-function csvLeagueNames(value) { return String(value || "").split(",").map(item => item.trim()).filter(Boolean); }
+function csvLeagueNames(value) {
+  return String(value || "")
+    .split(",")
+    .map(item => item.trim().replace(/^["']+|["']+$/g, "").trim())
+    .filter(Boolean);
+}
 function c0ldLeagueNames(env) { return [...new Set(csvLeagueNames(env.COLD_LEAGUE_NAMES))]; }
 function altLeagueNames(env) { return [...new Set(csvLeagueNames(env.ALT_LEAGUE_NAMES))]; }
 function leagueNames(env) {

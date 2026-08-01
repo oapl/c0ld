@@ -33,7 +33,8 @@
 (function(){
   "use strict";
   const API="https://yamo-league-api-worker.opal-dde.workers.dev";
-  const RUN_KEY="tap-heroes-part-2";
+  const params=new URLSearchParams(location.search);
+  const RUN_KEY=String(params.get("run")||"").trim();
   const TOP_LIMIT=500;
   const REFRESH_INTERVAL_MS=5*60*1000;
   const tbody=document.getElementById("tbody"),search=document.getElementById("search-input"),meta=document.getElementById("table-meta"),refresh=document.getElementById("refresh-btn");
@@ -62,7 +63,7 @@
     const version=++requestId,q=search.value.trim();
     refresh.disabled=true;meta.textContent=q?"Searching the expanded league-player list...":"Loading the top 500 league players...";
     try{
-      const url=new URL(API+"/api/leagues/solo-leaderboard");url.searchParams.set("limit",String(TOP_LIMIT));url.searchParams.set("run",RUN_KEY);if(q)url.searchParams.set("q",q);url.searchParams.set("v",Date.now());
+      const url=new URL(API+"/api/leagues/solo-leaderboard");url.searchParams.set("limit",String(TOP_LIMIT));if(RUN_KEY)url.searchParams.set("run",RUN_KEY);if(q)url.searchParams.set("q",q);url.searchParams.set("v",Date.now());
       const response=await fetch(url,{cache:"no-store"}),data=await response.json();
       if(!response.ok||data.ok===false)throw new Error(data.message||"League player request failed");
       if(version!==requestId)return;render(data);

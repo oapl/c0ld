@@ -34,7 +34,7 @@
   <div class="card"><div class="label">Projected Rank</div><div class="value" id="projected-rank">-</div></div>
   <div class="card">
     <div class="label">League Ends In</div>
-    <time class="value countdown-value" id="league-countdown" datetime="2026-07-24T16:00:00Z" title="Derived from league_end_at in /api/health">-</time>
+    <time class="value countdown-value" id="league-countdown" title="Derived from league_end_at in /api/health">-</time>
   </div>
 </section>
 <section class="section">
@@ -69,7 +69,7 @@
 (function(){
   const params=new URLSearchParams(location.search);
   const league=String(params.get("league")||params.get("name")||"YAMO").trim()||"YAMO";
-  const run=String(params.get("run")||"tap-heroes-part-2").trim()||"tap-heroes-part-2";
+  const run=String(params.get("run")||"").trim();
   document.title=league+" League Tracker";
   document.getElementById("page-title").textContent=league+" League Tracker";
   document.getElementById("members-title").textContent=league+" Member Progress";
