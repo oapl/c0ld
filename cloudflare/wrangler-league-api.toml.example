@@ -58,9 +58,11 @@ LEAGUE_API_RETRY_BASE_MS = "1500"
 # around tracked leagues that are outside the Top 1000.
 TOP_LEAGUES_LIMIT = "1000"
 SCHEDULED_TOP_LEAGUES_LIMIT = "10000"
+TOP_LEAGUES_REFRESH_MINUTES = "60"
 ALL_TOP_LEAGUES_LIMIT = "10000"
 TOP_LEAGUES_PAGE_DELAY_MS = "2500"
-# Manual Top 10000 seed scan pulls 25 leagues every 2.5 seconds.
+# Hourly Top 10000 scan pulls 100 leagues every 2.5 seconds.
+ALL_TOP_LEAGUES_PAGE_SIZE = "100"
 ALL_TOP_LEAGUES_PAGE_DELAY_MS = "2500"
 # Extended League-player reward cutoffs are simulated by collecting every
 # member from the stored Top-X League list. BIG Games' direct player endpoint
@@ -80,12 +82,13 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "10000"
 COLD_LEAGUES_CONCURRENCY = "8"
-# Hourly background matcher. The */5 cron checks this cadence and scans one deterministic shard.
+# Hourly background matcher. The */5 cron checks this cadence and scans the full Top 10000.
 LEAGUE_OVERLAP_SCAN_ENABLED = "true"
 LEAGUE_OVERLAP_SCAN_MINUTES = "60"
 LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY"
 LEAGUE_OVERLAP_SCAN_TOP_LIMIT = "10000"
-LEAGUE_OVERLAP_SCAN_SHARD_SIZE = "40"
+LEAGUE_OVERLAP_SCAN_BATCH_SIZE = "100"
+LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS = "500"
 LEAGUE_OVERLAP_SCAN_CONCURRENCY = "8"
 # Optional JSON map/list for known c0ld members if the upstream live clan endpoint misses someone.
 # COLD_MEMBER_OVERRIDES_JSON = "{\"1462748729\":\"dragonballx1412\"}"

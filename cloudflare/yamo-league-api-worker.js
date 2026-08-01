@@ -29,11 +29,13 @@ const DEFAULT_COLD_LEAGUES_BATCH_SIZE = 10;
 const MAX_COLD_LEAGUES_BATCH_SIZE = 100;
 const DEFAULT_LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY";
 const DEFAULT_LEAGUE_OVERLAP_SCAN_MINUTES = 60;
-const DEFAULT_LEAGUE_OVERLAP_SCAN_SHARD_SIZE = 40;
+const DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_SIZE = 100;
+const DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS = 500;
+const DEFAULT_TOP_LEAGUES_REFRESH_MINUTES = 60;
 const DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
 const DEFAULT_TOP_LEAGUES_PAGE_SIZE = 100;
 const DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS = 2500;
-const DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE = 10;
+const DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE = 100;
 const DEFAULT_TRACKED_RANK_WINDOW_SIZE = 50;
 const DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS = 2500;
 const DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS = 2500;
@@ -88,6 +90,7 @@ export default {
           scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env),
           top_leagues: TOP_LEAGUES_NAME,
           top_leagues_limit: topLeaguesLimit(env),
+          top_leagues_refresh_minutes: topLeaguesRefreshMinutes(env),
           top_leagues_page_size: topLeaguesPageSize(env),
           top_leagues_page_delay_ms: topLeaguesPageDelayMs(env),
           all_top_leagues: ALL_TOP_LEAGUES_NAME,
@@ -156,7 +159,7 @@ export default {
         requireAdmin(request, env);
         requireLeagueCollectionEnabled(env);
         response = await handleTrackedLeagueRankWindowRefresh(env, "manual:rank-window", runKeyParam(url));
-      } else if (request.method === "POST" && url.pathname === "/api/leagues/c0ld-overlap/shard") {
+      } else if (request.method === "POST" && (url.pathname === "/api/leagues/c0ld-overlap/scan" || url.pathname === "/api/leagues/c0ld-overlap/shard")) {
         requireAdmin(request, env);
         requireLeagueCollectionEnabled(env);
         response = json(await runScheduledLeagueOverlapScans(env, "manual:overlap", runKeyParam(url), Date.now()), 202);
@@ -207,7 +210,7 @@ export default {
         }
       }
 
-      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false") {
+      if (String(env.INGEST_TOP_LEAGUES || "true").toLowerCase() !== "false" && isScheduledCadenceDue(scheduledAt, topLeaguesRefreshMinutes(env))) {
         const scheduledTopLeaguesScheduledLimit = scheduledTopLeaguesLimit(env);
         const scheduledTopLeaguesListName = scheduledTopLeaguesScheduledLimit > DEFAULT_TOP_LEAGUES_LIMIT
           ? ALL_TOP_LEAGUES_NAME
@@ -226,7 +229,7 @@ export default {
       }
       if (leagueOverlapScanEnabled(env) && isScheduledCadenceDue(scheduledAt, leagueOverlapScanMinutes(env))) {
         await runScheduledLeagueOverlapScans(env, scheduledSource("schedule:overlap"), topLeaguesRunKey(env), scheduledAt)
-          .catch(err => console.error("scheduled league overlap shard scan failed", err?.message || String(err)));
+          .catch(err => console.error("scheduled league overlap full scan failed", err?.message || String(err)));
       }
     })().catch(err => console.error("scheduled tracked league ingest failed", err?.message || String(err))));
   }
@@ -672,7 +675,7 @@ function discoveredC0ldLeagueDbRow(row, context) {
     user_id: toNumber(member.user_id),
     username: member.username || null,
     display_name: member.display_name || member.username || null,
-    source_clan: sourceClan,
+    source_clan: leagueOverlapClanTag(member.source_clan || sourceClan),
     clan_rank: toNumber(member.clan_rank),
     clan_points: toNumber(member.clan_points) || 0,
     league_rank: toNumber(member.league_rank),
@@ -712,7 +715,7 @@ function discoveredC0ldLeagueDbRow(row, context) {
     points: rawLeague.Points,
     last_contribution_at: null,
     permission_level: null,
-    role: "Discovered c0ld League",
+    role: "Discovered c0ld/WMSY League",
     join_time: null,
     raw_member: { league_name: row.league_name, league_id: row.league_id, league_rank: toNumber(row.rank), synthetic_user_id: synthetic },
     raw_contribution: {},
@@ -1608,41 +1611,13 @@ async function handleC0ldLeagueOverlap(request, env) {
   const liveScan = boolParam(url.searchParams.get("live"), boolEnv(env.COLD_LEAGUES_LIVE_SCAN, false));
 
   const preferLiveClan = boolParam(url.searchParams.get("live_clan"), liveScan || boolEnv(env.COLD_LEAGUES_LIVE_CLAN_CURRENT, false));
-  const [clanCurrent, topContext] = await Promise.all([
-    fetchClanCurrentForOverlap(env, clan, preferLiveClan),
+  const [clanContext, topContext] = await Promise.all([
+    fetchClanMemberMapForOverlap(env, clan, preferLiveClan),
     liveScan
       ? fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, batchLimit, topLimit)
       : fetchTopLeagueRowsForOverlap(env, runKey, topLimit)
   ]);
-
-  const clanMembers = new Map();
-  for (const member of clanCurrent.rows || []) {
-    const userId = toNumber(member.user_id);
-    if (!userId) continue;
-    clanMembers.set(String(userId), {
-      user_id: userId,
-      username: String(firstDefined(member.username, member.display_name, `user_${userId}`) || `user_${userId}`),
-      avatar_url: stringOrNull(member.avatar_url),
-      source_clan: leagueOverlapClanTag(clan),
-      clan_rank: toNumber(member.rank),
-      clan_points: toNumber(firstDefined(member.total_points, member.points)) || 0
-    });
-  }
-  const allowC0ldOverrides = ["c0ld", "cold"].includes(key(clan));
-  for (const member of (allowC0ldOverrides ? c0ldMemberOverrides(env) : [])) {
-    const userId = toNumber(firstDefined(member.user_id, member.userId, member.UserID, member.id));
-    if (!userId) continue;
-    const existing = clanMembers.get(String(userId)) || {};
-    clanMembers.set(String(userId), {
-      ...existing,
-      user_id: userId,
-      username: bestUsernameForOverlap(userId, member.username, member.display_name, existing.username),
-      avatar_url: existing.avatar_url || stringOrNull(member.avatar_url),
-      source_clan: leagueOverlapClanTag(clan),
-      clan_rank: toNumber(firstDefined(existing.clan_rank, member.clan_rank, member.rank)),
-      clan_points: toNumber(firstDefined(existing.clan_points, member.clan_points, member.total_points, member.points)) || 0
-    });
-  }
+  const { clanCurrent, clanMembers } = clanContext;
 
   const rawBatch = liveScan ? topContext.rows : topContext.rows.slice(offset, offset + batchLimit);
   const topListName = topContext.list_name || topLeagueListNameForLimit(topLimit, env);
@@ -1696,6 +1671,53 @@ async function handleC0ldLeagueOverlap(request, env) {
   }, env);
 }
 
+async function fetchClanMemberMapForOverlap(env, clan, preferLiveClan = false) {
+  const clanCurrent = await fetchClanCurrentForOverlap(env, clan, preferLiveClan);
+  const clanTag = leagueOverlapClanTag(clan);
+  const clanMembers = new Map();
+
+  for (const member of clanCurrent.rows || []) {
+    const userId = toNumber(member.user_id);
+    if (!userId) continue;
+    clanMembers.set(String(userId), {
+      user_id: userId,
+      username: String(firstDefined(member.username, member.display_name, `user_${userId}`) || `user_${userId}`),
+      avatar_url: stringOrNull(member.avatar_url),
+      source_clan: clanTag,
+      clan_rank: toNumber(member.rank),
+      clan_points: toNumber(firstDefined(member.total_points, member.points)) || 0
+    });
+  }
+
+  const allowC0ldOverrides = ["c0ld", "cold"].includes(key(clan));
+  for (const member of (allowC0ldOverrides ? c0ldMemberOverrides(env) : [])) {
+    const userId = toNumber(firstDefined(member.user_id, member.userId, member.UserID, member.id));
+    if (!userId) continue;
+    const existing = clanMembers.get(String(userId)) || {};
+    clanMembers.set(String(userId), {
+      ...existing,
+      user_id: userId,
+      username: bestUsernameForOverlap(userId, member.username, member.display_name, existing.username),
+      avatar_url: existing.avatar_url || stringOrNull(member.avatar_url),
+      source_clan: clanTag,
+      clan_rank: toNumber(firstDefined(existing.clan_rank, member.clan_rank, member.rank)),
+      clan_points: toNumber(firstDefined(existing.clan_points, member.clan_points, member.total_points, member.points)) || 0
+    });
+  }
+
+  return { clanCurrent, clanMembers };
+}
+
+function mergeClanMemberMapsForOverlap(contexts) {
+  const combined = new Map();
+  for (const context of contexts || []) {
+    for (const [userId, member] of context.clanMembers || []) {
+      combined.set(String(userId), member);
+    }
+  }
+  return combined;
+}
+
 async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, scheduledAt) {
   requireSupabase(env);
   const runKey = normalizeRunKey(requestedRunKey || topLeaguesRunKey(env));
@@ -1709,54 +1731,75 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
     };
   }
 
-  const shard = leagueOverlapShardForTime(env, scheduledAt, config.top_limit, config.shard_size);
-  const results = [];
-  for (const clan of config.clans) {
-    const url = new URL("https://yamo-league-api-worker.local/api/leagues/c0ld-overlap");
-    url.searchParams.set("clan", clan);
-    url.searchParams.set("run", runKey);
-    url.searchParams.set("top_limit", String(config.top_limit));
-    url.searchParams.set("offset", String(shard.offset));
-    url.searchParams.set("limit", String(shard.limit));
-    url.searchParams.set("concurrency", String(config.concurrency));
-    url.searchParams.set("live", config.live_scan ? "1" : "0");
-    if (config.live_clan) url.searchParams.set("live_clan", "1");
+  const startedAt = new Date().toISOString();
+  const [clanContexts, topContext] = await Promise.all([
+    Promise.all(config.clans.map(clan => fetchClanMemberMapForOverlap(env, clan, config.live_clan)
+      .catch(err => ({ clan, error: err?.message || String(err), clanCurrent: { rows: [] }, clanMembers: new Map() })))),
+    fetchTopLeagueRowsForOverlap(env, runKey, config.top_limit)
+  ]);
+  const clanMembers = mergeClanMemberMapsForOverlap(clanContexts);
+  const topRows = (topContext.rows || []).slice(0, config.top_limit);
+  const matchedRows = [];
+  const scanErrors = [];
+  let scannedCount = 0;
+  let discoveredUpserted = 0;
 
-    try {
-      const response = await handleC0ldLeagueOverlap(new Request(url.toString()), env);
-      const payload = await response.clone().json().catch(() => ({}));
-      if (!response.ok || payload.ok === false) throw httpError(response.status || 502, payload.message || "League overlap shard failed.");
-      results.push({
-        ok: true,
-        clan_name: clan,
-        offset: shard.offset,
-        limit: shard.limit,
-        scanned_count: payload.scanned_count || 0,
-        matched_count: payload.matched_count || 0,
-        discovered_upserted: payload.discovered_upserted || 0,
-        next_offset: payload.next_offset
+  for (let offset = 0; offset < topRows.length; offset += config.batch_size) {
+    const batch = topRows.slice(offset, offset + config.batch_size);
+    const scanned = await mapLimit(batch, config.concurrency, row => scanLeagueForClanMembers(env, runKey, row, clanMembers));
+    const matched = scanned
+      .filter(row => row.matches.length)
+      .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
+    const visibleMatched = filterPublicOverlapRows(env, matched);
+    matchedRows.push(...visibleMatched);
+    scanErrors.push(...scanned
+      .filter(row => row.error && !isLeaguePubliclyHidden(env, row.league_name))
+      .map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })));
+    scannedCount += batch.length;
+
+    if (matched.length) {
+      discoveredUpserted += await persistDiscoveredC0ldLeagues(env, runKey, matched, {
+        fetchedAt: topContext.snapshot_at || startedAt,
+        source: `${source}:full-scan-overlap-matches`,
+        sourceClan: "mixed"
+      }).catch(err => {
+        console.warn("persist scheduled discovered c0ld/WMSY leagues failed", err?.message || String(err));
+        return 0;
       });
-    } catch (err) {
-      results.push({
-        ok: false,
-        clan_name: clan,
-        offset: shard.offset,
-        limit: shard.limit,
-        message: err?.message || String(err)
-      });
+    }
+
+    if (config.batch_delay_ms > 0 && offset + batch.length < topRows.length) {
+      await sleep(config.batch_delay_ms);
     }
   }
 
   const output = {
-    ok: results.every(result => result.ok),
+    ok: !scanErrors.length || matchedRows.length > 0,
     source,
     generated_at: new Date().toISOString(),
+    started_at: startedAt,
     league_run_key: runKey,
-    shard,
+    top_leagues_snapshot_at: topContext.snapshot_at || null,
+    top_leagues_source: topContext.source || null,
+    top_leagues_requested: config.top_limit,
+    scanned_count: scannedCount,
+    matched_count: matchedRows.length,
+    discovered_upserted: discoveredUpserted,
+    scan_errors: scanErrors.slice(0, 50),
+    clans: clanContexts.map(context => ({
+      clan_name: context.clanCurrent?.clan_name || context.clan || null,
+      source: context.clanCurrent?.source || null,
+      snapshot_at: context.clanCurrent?.snapshot_at || null,
+      member_count: context.clanMembers?.size || 0,
+      error: context.error || null
+    })),
     config,
-    results
+    rows: matchedRows.sort((a, b) => (a.rank || 999999) - (b.rank || 999999)).slice(0, 250)
   };
-  console.log("league overlap shard scan complete", JSON.stringify(output));
+  console.log("league overlap full scan complete", JSON.stringify({
+    ...output,
+    rows: undefined
+  }));
   return output;
 }
 
@@ -3966,6 +4009,7 @@ function topLeaguesRunKey(env) {
   return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
 }
 function topLeaguesLimit(env) { return clamp(Number(env.TOP_LEAGUES_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT); }
+function topLeaguesRefreshMinutes(env) { return clamp(Number(env.TOP_LEAGUES_REFRESH_MINUTES || env.SCHEDULED_TOP_LEAGUES_REFRESH_MINUTES || DEFAULT_TOP_LEAGUES_REFRESH_MINUTES), 5, 1440); }
 function scheduledTopLeaguesLimit(env) {
   const configured = Number(
     env.SCHEDULED_TOP_LEAGUES_LIMIT ||
@@ -3979,41 +4023,25 @@ function leagueOverlapScanEnabled(env) { return boolEnv(env.LEAGUE_OVERLAP_SCAN_
 function leagueOverlapScanMinutes(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_MINUTES || env.COLD_LEAGUES_SCAN_MINUTES || DEFAULT_LEAGUE_OVERLAP_SCAN_MINUTES), 5, 1440); }
 function leagueOverlapScanClans(env) { return uniqueLeagueNames(csvLeagueNames(env.LEAGUE_OVERLAP_SCAN_CLANS || env.COLD_LEAGUES_SCAN_CLANS || DEFAULT_LEAGUE_OVERLAP_SCAN_CLANS)); }
 function leagueOverlapTopLimit(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_TOP_LIMIT || env.COLD_LEAGUES_TOP_LIMIT || allTopLeaguesLimit(env)), 1, MAX_TOP_LEAGUES_LIMIT); }
-function leagueOverlapShardSize(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_SHARD_SIZE || env.COLD_LEAGUES_SHARD_SIZE || DEFAULT_LEAGUE_OVERLAP_SCAN_SHARD_SIZE), 1, MAX_COLD_LEAGUES_BATCH_SIZE); }
+function leagueOverlapBatchSize(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_BATCH_SIZE || env.LEAGUE_OVERLAP_SCAN_SHARD_SIZE || env.COLD_LEAGUES_BATCH_SIZE || DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_SIZE), 1, MAX_COLD_LEAGUES_BATCH_SIZE); }
+function leagueOverlapBatchDelayMs(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS || env.COLD_LEAGUES_SCAN_DELAY_MS || DEFAULT_LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS), 0, 10000); }
 function leagueOverlapScanConcurrency(env) { return clamp(Number(env.LEAGUE_OVERLAP_SCAN_CONCURRENCY || env.COLD_LEAGUES_CONCURRENCY || 8), 1, 12); }
-function leagueOverlapLiveScan(env) { return boolEnv(env.LEAGUE_OVERLAP_SCAN_LIVE || env.COLD_LEAGUES_LIVE_SCAN, true); }
 function leagueOverlapLiveClan(env) { return boolEnv(env.LEAGUE_OVERLAP_SCAN_LIVE_CLAN || env.COLD_LEAGUES_LIVE_CLAN_CURRENT, false); }
 function leagueOverlapScanConfig(env, scheduledAt = Date.now()) {
   const topLimit = leagueOverlapTopLimit(env);
-  const shardSize = leagueOverlapShardSize(env);
-  const shardCount = Math.max(1, Math.ceil(topLimit / shardSize));
-  const shard = leagueOverlapShardForTime(env, scheduledAt, topLimit, shardSize);
+  const batchSize = leagueOverlapBatchSize(env);
+  const batchCount = Math.max(1, Math.ceil(topLimit / batchSize));
   return {
     enabled: leagueOverlapScanEnabled(env),
     minutes: leagueOverlapScanMinutes(env),
     clans: leagueOverlapScanClans(env),
     top_limit: topLimit,
-    shard_size: shardSize,
-    shard_count: shardCount,
-    current_shard_index: shard.index,
-    current_offset: shard.offset,
-    current_limit: shard.limit,
+    mode: "full_top_limit",
+    batch_size: batchSize,
+    batch_count: batchCount,
+    batch_delay_ms: leagueOverlapBatchDelayMs(env),
     concurrency: leagueOverlapScanConcurrency(env),
-    live_scan: leagueOverlapLiveScan(env),
     live_clan: leagueOverlapLiveClan(env)
-  };
-}
-function leagueOverlapShardForTime(env, scheduledAt, topLimit = leagueOverlapTopLimit(env), shardSize = leagueOverlapShardSize(env)) {
-  const shardCount = Math.max(1, Math.ceil(topLimit / shardSize));
-  const cadenceMs = leagueOverlapScanMinutes(env) * 60 * 1000;
-  const tick = Math.floor(Number(scheduledAt || Date.now()) / cadenceMs);
-  const index = Number.isFinite(tick) ? tick % shardCount : 0;
-  const offset = index * shardSize;
-  return {
-    index,
-    offset,
-    limit: Math.max(0, Math.min(shardSize, topLimit - offset)),
-    top_limit: topLimit
   };
 }
 function leaguePlayerPoolTopLeagues(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_TOP_LEAGUES || DEFAULT_LEAGUE_PLAYER_POOL_TOP_LEAGUES), 1, MAX_TOP_LEAGUES_LIMIT); }
@@ -4034,7 +4062,7 @@ function requestedTopLeagueListName(url, limit, env) {
 function topLeaguesPageSize(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_SIZE || DEFAULT_TOP_LEAGUES_PAGE_SIZE), 1, 100); }
 function topLeaguesPageDelayMs(env) { return clamp(Number(env.TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
 function allTopLeaguesPageDelayMs(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_DELAY_MS || DEFAULT_ALL_TOP_LEAGUES_PAGE_DELAY_MS), 0, 5000); }
-function allTopLeaguesPageSize(env) { return DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE; }
+function allTopLeaguesPageSize(env) { return clamp(Number(env.ALL_TOP_LEAGUES_PAGE_SIZE || DEFAULT_ALL_TOP_LEAGUES_PAGE_SIZE), 1, 100); }
 function trackedRankWindowSize(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_SIZE || DEFAULT_TRACKED_RANK_WINDOW_SIZE), 1, MAX_TOP_LEAGUES_LIMIT); }
 function trackedRankWindowPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_PAGE_DELAY_MS), 0, 10000); }
 function trackedRankWindowExpansionPageDelayMs(env) { return clamp(Number(env.TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS || env.TRACKED_RANK_WINDOW_PAGE_DELAY_MS || DEFAULT_TRACKED_RANK_WINDOW_EXPANSION_PAGE_DELAY_MS), 0, 10000); }
