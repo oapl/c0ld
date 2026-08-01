@@ -240,7 +240,7 @@ async function loadData(){
   if(loading)return;loading=true;errors=[];document.getElementById("refresh-btn").disabled=true;
   try{
     if(!leagueRows.length)renderCached();
-    setStatus("Refreshing stored c0ld/WMSY league matches from the 15-minute Top 10k scanner.");
+    setStatus("Refreshing stored c0ld/WMSY league matches from the 15-minute rolling Top 10k scanner.");
     const configPromise=fetchLeagueConfig();
     const topRowsPromise=fetchTopLeagueContext();
     const discoveredPromise=fetchDiscoveredLeagues().catch(err=>{errors.push({league:"discovered matches",message:err.message||String(err)});return[]});

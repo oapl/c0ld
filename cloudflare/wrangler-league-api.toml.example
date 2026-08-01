@@ -82,12 +82,16 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "10000"
 COLD_LEAGUES_CONCURRENCY = "8"
-# Background matcher. The */5 cron checks this cadence and scans the full Top 10000.
+# Background matcher. The */5 cron checks this cadence and scans the Top 10000 in rolling windows.
+# Cloudflare limits subrequests per Worker invocation, so use scripts/backfill-league-overlap.js
+# for a forced full sweep and let the Worker keep discoveries fresh afterward.
 LEAGUE_OVERLAP_SCAN_ENABLED = "true"
 LEAGUE_OVERLAP_SCAN_MINUTES = "15"
 LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY"
 LEAGUE_OVERLAP_SCAN_TOP_LIMIT = "10000"
-LEAGUE_OVERLAP_SCAN_BATCH_SIZE = "100"
+LEAGUE_OVERLAP_SCAN_WINDOW_SIZE = "30"
+LEAGUE_OVERLAP_SCAN_WINDOWS_PER_RUN = "1"
+LEAGUE_OVERLAP_CURRENT_TTL_MINUTES = "360"
 LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS = "500"
 LEAGUE_OVERLAP_SCAN_CONCURRENCY = "8"
 # Optional JSON map/list for known c0ld members if the upstream live clan endpoint misses someone.
