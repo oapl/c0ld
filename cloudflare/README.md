@@ -1173,8 +1173,8 @@ so `/htg setup` opens the Luna Bot app instead.
 | `BIG_GAMES_CLIENT_ID` | Client ID from the existing inventory monitor Big Games DB app. |
 | `BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the inventory monitor Big Games DB app. |
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
-| `HATCH_BIG_GAMES_REDIRECT_URI` | Exact `/api/inventory/oauth/callback` URL registered in the Luna Bot HTG Big Games DB app, usually `https://luna.c0ld-clan.com/api/inventory/oauth/callback`. |
-| `HATCH_OAUTH_PUBLIC_BASE` | Public base URL used for the short Discord button link, usually `https://luna.c0ld-clan.com`. |
+| `HATCH_BIG_GAMES_REDIRECT_URI` | Exact redirect URL registered in the Luna Bot HTG Big Games DB app. Use the short stable Workers callback, for example `https://inventory-detector-worker.opal-dde.workers.dev/cb`, until any custom domain opens with a clean trusted HTTPS certificate from normal browsers and networks. |
+| `HATCH_OAUTH_PUBLIC_BASE` | Public base URL used only for the fallback short OAuth link, usually `https://inventory-detector-worker.opal-dde.workers.dev`. Do not point this at a custom domain that can produce browser certificate warnings. |
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG always includes `player-data:pet-simulator-99:profile:read` and `player-data:pet-simulator-99:inventory:read`, then defaults to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Register those scopes on the Luna HTG Big Games developer app. Existing grants must reauthorize after changing the app or scopes. |
 | `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
 | `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5`, the Worker checks one fifth of users per minute and each user lands about every five minutes. |
@@ -1190,6 +1190,22 @@ so `/htg setup` opens the Luna Bot app instead.
 | `INVENTORY_SNAPSHOT_ITEM_READ_LIMIT` | Optional. Defaults to `50000`; maximum snapshot item rows read when comparing full inventories for HTG and inventory diffs. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored HTG gain alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
+
+For the live Luna HTG app, register this exact Big Games DB redirect URL and set
+the Worker variable to the same value:
+
+```text
+https://inventory-detector-worker.opal-dde.workers.dev/cb
+```
+
+Do not register only `https://inventory-detector-worker.opal-dde.workers.dev`.
+Big Games compares the callback URL exactly; the `/cb` callback path must be
+present. The Worker also accepts `/api/inventory/oauth/callback`, but `/cb` keeps
+the Big Games authorization URL short enough for Discord link buttons.
+
+Avoid `https://luna.c0ld-clan.com/api/inventory/oauth/callback` while that
+hostname can show `NET::ERR_CERT_AUTHORITY_INVALID`. The callback happens after
+Big Games approval, so any certificate warning there is user-facing.
 
 Required/optional secrets on `inventory-detector-worker`:
 

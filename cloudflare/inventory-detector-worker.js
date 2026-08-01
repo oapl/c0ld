@@ -8,6 +8,8 @@ const HATCH_ALERTS_TABLE = "ps99_hatch_alerts";
 const HATCH_GUILD_CONFIG_TABLE = "ps99_hatch_tracker_guilds";
 const HTG_INVENTORY_STATE_TABLE = "ps99_htg_inventory_state";
 const BIG_GAMES_AUTHORIZE_URL = "https://db.biggames.io/oauth/authorize";
+const BIG_GAMES_OAUTH_CALLBACK_PATH = "/api/inventory/oauth/callback";
+const BIG_GAMES_SHORT_OAUTH_CALLBACK_PATH = "/cb";
 const BIG_GAMES_TOKEN_URL = "https://db.biggames.io/oauth/token";
 const BIG_GAMES_INVENTORY_URL = "https://ps99.biggamesapi.io/v1/account/inventory";
 const BIG_GAMES_PROFILE_URL = "https://ps99.biggamesapi.io/v1/account/profile";
@@ -58,7 +60,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-direct-bg-link-2026-07-31a";
+const INVENTORY_BUILD_ID = "inventory-htg-short-callback-2026-07-31a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -133,6 +135,7 @@ export default {
           big_games_oauth_expires_at: oauth.expires_at,
           hatch_tracker: {
             big_games_oauth_configured: hatchBigGamesOAuthConfigured(env),
+            big_games_redirect_uri: bigGamesOAuthApp(env, "hatch_tracker", { allowMissing: true }).redirectUri || null,
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
             scan_interval_minutes: htgScanIntervalMinutes(env),
             shard_count: htgShardCount(env),
@@ -153,7 +156,7 @@ export default {
         });
       } else if (request.method === "POST" && url.pathname === "/api/inventory/oauth/start") {
         response = await handleOAuthStart(request, env);
-      } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/callback") {
+      } else if (request.method === "GET" && (url.pathname === BIG_GAMES_OAUTH_CALLBACK_PATH || url.pathname === BIG_GAMES_SHORT_OAUTH_CALLBACK_PATH)) {
         response = await handleOAuthCallback(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/inventory/oauth/status") {
         response = await handleOAuthStatus(request, env);
@@ -1793,11 +1796,12 @@ function bigGamesOAuthAppForPendingState(env, pending) {
 
 function bigGamesOAuthApp(env, purpose = "inventory", options = {}) {
   const names = bigGamesOAuthEnvNames(purpose);
+  const rawRedirectUri = String(env[names.redirectUri] || "").trim();
   const app = {
     purpose,
     clientId: String(env[names.clientId] || "").trim(),
     clientSecret: String(env[names.clientSecret] || "").trim(),
-    redirectUri: String(env[names.redirectUri] || "").trim()
+    redirectUri: normalizeBigGamesRedirectUri(rawRedirectUri, purpose)
   };
   if (!options.allowMissing) {
     const missing = [];
@@ -1807,6 +1811,24 @@ function bigGamesOAuthApp(env, purpose = "inventory", options = {}) {
     if (missing.length) throw httpError(500, `Missing ${missing.join(", ")}.`);
   }
   return app;
+}
+
+function normalizeBigGamesRedirectUri(value, purpose = "inventory") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return text;
+  }
+  if (parsed.pathname === "" || parsed.pathname === "/") {
+    parsed.pathname = purpose === "hatch_tracker"
+      ? BIG_GAMES_SHORT_OAUTH_CALLBACK_PATH
+      : BIG_GAMES_OAUTH_CALLBACK_PATH;
+  }
+  parsed.hash = "";
+  return parsed.toString();
 }
 
 function bigGamesOAuthScopeString(env, purpose = "inventory") {
@@ -1957,7 +1979,7 @@ function oauthSnapshotPendingMessage(isHatchTrackerOAuth) {
 
 function oauthConnectedReadyMessage(isHatchTrackerOAuth, expiresAt) {
   return isHatchTrackerOAuth
-    ? `HTG access is connected through ${formatDateTime(expiresAt)} and the baseline snapshot was saved. Luna will compare future snapshots and alert only on enabled Huge, Titanic, or Gargantuan gains that do not match trade, booth, or mail activity.`
+    ? `Luna is connected through ${formatDateTime(expiresAt)}. You can close this tab and return to Discord.`
     : `Inventory access is connected through ${formatDateTime(expiresAt)} and the first snapshot was pulled. Hourly gains will appear after two scheduled scans.`;
 }
 
@@ -2134,9 +2156,9 @@ function decodeJwtPayload(accessToken) {
 
 function oauthHtml(success, message) {
   const color = success ? "#55d98a" : "#ff6b72";
-  const title = success ? "Inventory tracker connected" : "Connection failed";
+  const title = success ? "Luna connected" : "Connection failed";
   const safeMessage = escapeHtml(message);
-  return new Response(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{margin:0;background:#0b1118;color:#edf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 48px));background:#151e29;border:1px solid #314052;border-left:5px solid ${color};border-radius:12px;padding:28px}h1{font-size:24px;margin:0 0 12px}p{color:#b8c5d6;line-height:1.5;margin:0}</style></head><body><main class="card"><h1>${title}</h1><p>${safeMessage}</p></main></body></html>`, { status: success ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  return new Response(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><style>body{margin:0;background:#0b1118;color:#edf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100vh}.card{width:min(560px,calc(100% - 48px));background:#151e29;border:1px solid #314052;border-left:5px solid ${color};border-radius:12px;padding:28px}h1{font-size:24px;margin:0 0 12px}p{color:#b8c5d6;line-height:1.5;margin:0}.hint{margin-top:14px;color:#7f8da3;font-size:14px}</style></head><body><main class="card"><h1>${title}</h1><p>${safeMessage}</p>${success ? '<p class="hint">Return to Discord to manage HTG alerts.</p>' : ""}</main></body></html>`, { status: success ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
 function escapeHtml(value) {
