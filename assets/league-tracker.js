@@ -4,7 +4,7 @@
   const config = window.LEAGUE_CONFIG || {};
   const LEAGUE = String(config.league || "YAMO");
   const API_LEAGUE = String(config.apiLeague || config.league || "YAMO");
-  const RUN_KEY = String(config.run || config.runKey || "tap-heroes-part-2").trim();
+  const RUN_KEY = String(config.run || config.runKey || "").trim();
   const SHOW_RACE_SUMMARY = config.showRaceSummary === true || String(config.showRaceSummary || "").toLowerCase() === "true";
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   let LEAGUE_END_AT = null;
@@ -20,7 +20,7 @@
   let loading = false;
   const GROWTH_BUCKET_MS = 15 * 60 * 1000;
   const GROWTH_WINDOW_MS = 24 * 60 * 60 * 1000;
-  const GROWTH_COLORS = ["#ff8b86", "#58a6ff", "#7ee787", "#f2cc60", "#bc8cff", "#79c0ff"];
+  const GROWTH_COLORS = ["#34e5ef", "#f7d353", "#4cd384", "#ff5db2", "#8d7dff", "#ff8f3f"];
   const REWARD_TIERS = [
     { start:1,end:1,reward:"Rainbow Shiny Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/123380410310415",variant:"rainbow shiny" },
     { start:2,end:3,reward:"Golden Shiny Titanic Warrior Jaguar",image:"https://ps99.biggamesapi.io/image/132193905783959",variant:"golden shiny" },
@@ -175,6 +175,21 @@
   }
 
   function numOrNull(v){if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null}
+  function projectedMemberGain1h(row){
+    if(row?.points_redacted===true)return null;
+    const g1=numOrNull(row?.gain_1h);if(g1!=null)return g1;
+    const g5=numOrNull(row?.gain_5m);if(g5!=null)return g5*12;
+    const g6=numOrNull(row?.gain_6h);if(g6!=null)return g6/6;
+    const g12=numOrNull(row?.gain_12h);if(g12!=null)return g12/12;
+    const g24=numOrNull(row?.gain_24h);if(g24!=null)return g24/24;
+    return 0;
+  }
+  function withMemberProjection(row){
+    if(!row)return row;
+    const points=numOrNull(row.total_points??row.points);
+    const gain=projectedMemberGain1h(row);
+    return {...row,projected_gain_1h:gain,projected_points_1h:row.points_redacted===true||points==null||gain==null?null:points+gain};
+  }
   function teamPoints(){return numOrNull(currentData?.league_points) ?? numOrNull(topLeagueRow?.total_points)}
   function renderRewardMilestones(){
     const box=document.getElementById("race-summary");
@@ -205,8 +220,11 @@
     const historyTimes=memberHistoryRows.map(row=>new Date(row.fetched_at||0).getTime()).filter(Number.isFinite);
     const latest=Math.max(new Date(currentData?.snapshot_at||0).getTime()||0,...historyTimes,Date.now()-GROWTH_BUCKET_MS);
     const end=Math.ceil(latest/GROWTH_BUCKET_MS)*GROWTH_BUCKET_MS;
-    const start=end-GROWTH_WINDOW_MS;
-    const buckets=Array.from({length:97},(_,index)=>start+index*GROWTH_BUCKET_MS);
+    const oldest=historyTimes.length?Math.min(...historyTimes):end-GROWTH_BUCKET_MS;
+    const rawStart=Math.max(end-GROWTH_WINDOW_MS,Math.floor(oldest/GROWTH_BUCKET_MS)*GROWTH_BUCKET_MS);
+    const start=Math.min(rawStart,end-GROWTH_BUCKET_MS);
+    const bucketCount=Math.max(2,Math.floor((end-start)/GROWTH_BUCKET_MS)+1);
+    const buckets=Array.from({length:bucketCount},(_,index)=>start+index*GROWTH_BUCKET_MS);
     const byUser=new Map();
     for(const row of memberHistoryRows){
       const id=String(row.user_id??"");
@@ -267,15 +285,20 @@
     const dpr=devicePixelRatio||1;
     canvas.width=Math.floor(rect.width*dpr);canvas.height=Math.floor(rect.height*dpr);
     const ctx=canvas.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);
+    const bg=ctx.createLinearGradient(0,0,rect.width,rect.height);
+    bg.addColorStop(0,"rgba(20,26,44,.96)");
+    bg.addColorStop(.45,"rgba(12,18,31,.98)");
+    bg.addColorStop(1,"rgba(18,16,34,.96)");
+    ctx.fillStyle=bg;ctx.fillRect(0,0,rect.width,rect.height);
     const visible=chart.series.filter(series=>!series.hidden&&series.values.some(value=>value!=null));
     const all=visible.flatMap(series=>series.values.filter(value=>value!=null));
-    if(!all.length){ctx.fillStyle="#8b949e";ctx.font="13px Arial";ctx.fillText("Not enough stored history to chart yet.",16,28);canvas._memberGrowth=null;return}
-    const padL=70,padR=22,padT=18,padB=34,w=Math.max(1,rect.width-padL-padR),h=Math.max(1,rect.height-padT-padB);
+    if(!all.length){ctx.fillStyle="#9aa8c7";ctx.font="700 14px Arial, Helvetica, sans-serif";ctx.fillText("Not enough stored history to chart yet.",18,30);canvas._memberGrowth=null;return}
+    const padL=82,padR=28,padT=28,padB=42,w=Math.max(1,rect.width-padL-padR),h=Math.max(1,rect.height-padT-padB);
     const minRaw=Math.min(...all),maxRaw=Math.max(...all),range=Math.max(1,maxRaw-minRaw),padding=Math.max(1,range*.08);
     const minP=Math.max(0,minRaw-padding),maxP=maxRaw+padding;
     const xIndex=index=>padL+(index/(chart.buckets.length-1))*w;
     const yValue=value=>padT+(1-(value-minP)/Math.max(1,maxP-minP))*h;
-    ctx.font="11px Arial";ctx.lineWidth=1;ctx.strokeStyle="#30363d";ctx.fillStyle="#8b949e";
+    ctx.font="700 12px Arial, Helvetica, sans-serif";ctx.lineWidth=1;ctx.strokeStyle="rgba(84,101,145,.35)";ctx.fillStyle="#9aa8c7";
     for(let i=0;i<=4;i++){
       const y=padT+i*h/4,value=maxP-i*(maxP-minP)/4;
       ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(rect.width-padR,y);ctx.stroke();ctx.fillText(shortNum(value),8,y+4);
@@ -285,21 +308,23 @@
       ctx.beginPath();ctx.moveTo(x,padT);ctx.lineTo(x,rect.height-padB);ctx.stroke();
       const width=ctx.measureText(label).width;ctx.fillText(label,Math.max(padL,Math.min(rect.width-padR-width,x-width/2)),rect.height-11);
     }
+    const axis=ctx.createLinearGradient(padL,0,rect.width-padR,0);
+    axis.addColorStop(0,"rgba(52,229,239,.65)");
+    axis.addColorStop(.5,"rgba(247,211,83,.65)");
+    axis.addColorStop(1,"rgba(255,93,178,.65)");
+    ctx.strokeStyle=axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(padL,rect.height-padB);ctx.lineTo(rect.width-padR,rect.height-padB);ctx.stroke();
     for(const series of visible){
-      ctx.strokeStyle=series.color;ctx.lineWidth=2;ctx.beginPath();let started=false,lastIndex=-1,lastValue=null;
+      ctx.strokeStyle=series.color;ctx.lineWidth=2.6;ctx.lineCap="round";ctx.lineJoin="round";ctx.beginPath();let started=false,lastIndex=-1;
       series.values.forEach((value,index)=>{
-        if(value==null){started=false;lastValue=null;return}
+        if(value==null){started=false;return}
         const x=xIndex(index),y=yValue(value);
         if(!started){ctx.moveTo(x,y);started=true}
-        else{
-          ctx.lineTo(x,yValue(lastValue));
-          if(value!==lastValue)ctx.lineTo(x,y);
-        }
-        lastValue=value;lastIndex=index;
+        else ctx.lineTo(x,y);
+        lastIndex=index;
       });ctx.stroke();
-      if(lastIndex>=0){ctx.fillStyle=series.color;ctx.beginPath();ctx.arc(xIndex(lastIndex),yValue(series.values[lastIndex]),3,0,Math.PI*2);ctx.fill()}
+      if(lastIndex>=0){ctx.fillStyle=series.color;ctx.beginPath();ctx.arc(xIndex(lastIndex),yValue(series.values[lastIndex]),4,0,Math.PI*2);ctx.fill()}
     }
-    canvas._memberGrowth={...chart,visible,xIndex,yValue,padT,padB,rect};
+    canvas._memberGrowth={...chart,visible,xIndex,yValue,padL,padR,padT,padB,rect};
     bindMemberGrowthTooltip(canvas,tooltip);
   }
 
@@ -311,7 +336,7 @@
       const chart=canvas._memberGrowth;if(!chart)return;
       const rect=canvas.getBoundingClientRect();
       const localX=event.clientX-rect.left;
-      const index=Math.max(0,Math.min(chart.buckets.length-1,Math.round(((localX-70)/Math.max(1,rect.width-92))*(chart.buckets.length-1))));
+      const index=Math.max(0,Math.min(chart.buckets.length-1,Math.round(((localX-chart.padL)/Math.max(1,rect.width-chart.padL-chart.padR))*(chart.buckets.length-1))));
       drawMemberGrowthChart();const fresh=canvas._memberGrowth;if(!fresh)return;
       const ctx=canvas.getContext("2d"),x=fresh.xIndex(index);ctx.strokeStyle="#8b949e";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,fresh.padT);ctx.lineTo(x,rect.height-fresh.padB);ctx.stroke();
       const rowsHtml=fresh.series.map(series=>{
@@ -341,14 +366,22 @@
     const roster=list.slice();
     while(roster.length<capacity)roster.push(null);
     tbody.innerHTML=roster.map((r,index)=>{
-      if(!r)return '<tr class="empty-roster-slot"><td class="rank">#'+(index+1)+'</td><td><span>Open member slot</span></td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td></tr>';
+      if(!r)return '<tr class="empty-roster-slot"><td class="rank">#'+(index+1)+'</td><td><span>Open member slot</span></td><td class="numeric">-</td><td class="numeric">-</td><td class="numeric">-</td><td class="numeric">-</td><td class="numeric">-</td><td class="numeric">-</td><td class="numeric">-</td></tr>';
       const name=memberName(r);
-      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
+      return '<tr><td class="rank">#'+esc(r.rank)+'</td><td><div class="player-cell"><a class="player-link" href="'+profileHref(r)+'">'+avatar(r)+'<span><span>'+esc(name)+'</span><div class="meta">'+esc(r.user_id)+'</div></span></a></div></td><td class="numeric" title="'+esc(fullNum(r.total_points))+'">'+esc(shortNum(r.total_points))+'</td><td class="numeric projected" title="'+esc(r.projected_points_1h==null?"":fullNum(r.projected_points_1h))+'">'+esc(r.projected_points_1h==null?"-":shortNum(r.projected_points_1h))+'</td><td class="numeric">'+delta(r.gain_5m)+'</td><td class="numeric">'+delta(r.gain_1h)+'</td><td class="numeric">'+delta(r.gain_6h)+'</td><td class="numeric">'+delta(r.gain_12h)+'</td><td class="numeric">'+delta(r.gain_24h)+'</td></tr>'
     }).join("");
+    tbody.querySelectorAll(".empty-roster-slot").forEach(tr=>{
+      while(tr.children.length<9){
+        const td=document.createElement("td");
+        td.className="numeric";
+        td.textContent="-";
+        tr.appendChild(td);
+      }
+    });
     renderLeagueRankLog();
   }
 
-  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="8" class="error">'+esc(msg)+'</td></tr>'}
+  function showError(msg){document.getElementById("members-tbody").innerHTML='<tr><td colspan="9" class="error">'+esc(msg)+'</td></tr>'}
 
   async function fetchLeagueRankHistory(){
     const stable=currentData?.league_id||topLeagueRow?.league_id||currentData?.league_name||LEAGUE;
@@ -412,8 +445,8 @@
       currentUrl.searchParams.set("league",API_LEAGUE);
       addRunParam(currentUrl);
       const current=await getJson(currentUrl);
-      rows=current.rows||[];
-      currentData=current;
+      rows=(current.rows||[]).map(withMemberProjection);
+      currentData={...current,rows};
       if(current.public_visibility==="hidden"){
         topLeagueRow=null;
         milestoneRows=[];

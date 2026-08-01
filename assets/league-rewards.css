@@ -141,47 +141,52 @@
   align-items: stretch;
 }
 .member-growth {
-  padding: 13px 16px 15px;
+  padding: 16px 18px 17px;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(52, 229, 239, .10), transparent 34%),
+    radial-gradient(circle at 82% 6%, rgba(255, 93, 178, .09), transparent 34%);
 }
-.member-growth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 7px; }
+.member-growth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
 .member-growth-head > div { display: flex; flex-direction: column; gap: 3px; }
-.member-growth-head strong { font-size: 16px; }
-.member-growth-head span, #member-growth-meta { color: #8b949e; font-size: 12px; }
-.member-growth-legend { display: flex; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 7px; color: #c9d1d9; font-size: 11px; }
+.member-growth-head strong { font-size: 18px; letter-spacing: .01em; }
+.member-growth-head span, #member-growth-meta { color: #9aa8c7; font-size: 12px; }
+.member-growth-legend { display: flex; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; color: #c9d1d9; font-size: 12px; }
 .growth-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.growth-legend-item strong { color: var(--series-color); font-size: 11px; }
+.growth-legend-item strong { color: var(--series-color); font-size: 12px; }
 .growth-legend-item.hidden { color: #8b949e; }
 .growth-legend-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--series-color); }
 .growth-legend-item.hidden .growth-legend-dot { background: transparent; border: 1px solid #6e7681; }
 .member-growth-chart-shell { position: relative; }
-#member-growth-chart { display: block; width: 100%; height: 280px; border: 1px solid #30363d; border-radius: 8px; background: #0f141b; cursor: crosshair; }
-.member-growth-tooltip { display: none; position: absolute; z-index: 5; min-width: 210px; padding: 9px 11px; border: 1px solid #30363d; border-radius: 7px; background: rgba(11, 15, 20, .96); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); color: #c9d1d9; font-size: 12px; line-height: 1.5; pointer-events: none; }
+#member-growth-chart { display: block; width: 100%; height: 315px; border: 1px solid rgba(88, 166, 255, .28); border-radius: 10px; background: #0f141b; box-shadow: inset 0 0 24px rgba(52, 229, 239, .05); cursor: crosshair; }
+.member-growth-tooltip { display: none; position: absolute; z-index: 5; min-width: 230px; padding: 10px 12px; border: 1px solid rgba(88, 166, 255, .32); border-radius: 8px; background: rgba(11, 15, 24, .97); box-shadow: 0 12px 30px rgba(0, 0, 0, .50); color: #dbe7ff; font-size: 12px; line-height: 1.5; pointer-events: none; }
 .growth-tip-time { margin-bottom: 4px; color: #e6edf3; font-weight: 700; }
 .growth-tip-row { display: flex; justify-content: space-between; gap: 16px; }
 .growth-tip-name { color: var(--series-color); }
 .member-roster {
-  margin: 12px -16px -15px;
-  border-top: 1px solid #30363d;
+  margin: 14px -18px -17px;
+  border-top: 1px solid rgba(88, 166, 255, .24);
 }
 .member-roster-table {
-  min-width: 680px;
+  min-width: 780px;
   table-layout: fixed;
 }
 .member-roster-table th,
 .member-roster-table td {
-  padding: 8px 7px;
+  padding: 9px 8px;
 }
 .member-roster-table th:not([data-sort]) { cursor: default; }
-.member-roster-table th { font-size: 11px; }
-.member-roster-table th:nth-child(1) { width: 44px; }
-.member-roster-table th:nth-child(3) { width: 70px; }
-.member-roster-table th:nth-child(n+4):nth-child(-n+8) { width: 50px; }
+.member-roster-table th { font-size: 12px; color: #9aa8c7; }
+.member-roster-table td { font-size: 13px; font-weight: 700; }
+.member-roster-table th:nth-child(1) { width: 48px; }
+.member-roster-table th:nth-child(3) { width: 78px; }
+.member-roster-table th:nth-child(4) { width: 78px; }
+.member-roster-table th:nth-child(n+5):nth-child(-n+9) { width: 54px; }
 .member-roster-table .avatar { width: 30px; height: 30px; border-radius: 7px; }
 .member-roster-table .player-cell,
 .member-roster-table .player-link { gap: 8px; }
+.member-roster-table .projected { color: #34e5ef; }
 .member-roster-table tbody tr:last-child td { border-bottom: 0; }
 .empty-roster-slot td { color: #6e7681; }
 .empty-roster-slot td:nth-child(2) { font-style: italic; }

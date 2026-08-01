@@ -638,6 +638,66 @@ async function persistDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
   return dbRows.length;
 }
 
+function leagueRosterDbRows(runKey, summary, memberRows, context = {}) {
+  const fetchedAt = context.fetchedAt || new Date().toISOString();
+  const source = context.source || "overlap-matches:league-roster";
+  const leagueNameValue = String(summary?.league_name || "").trim();
+  if (!leagueNameValue || !Array.isArray(memberRows) || !memberRows.length) return [];
+  const snapshotId = context.snapshotId || `league:${runKey}:${leagueNameValue}:${fetchedAt}`;
+
+  return memberRows
+    .map((row, index) => ({
+      snapshot_id: snapshotId,
+      fetched_at: fetchedAt,
+      source,
+      league_run_key: runKey,
+      league_name: leagueNameValue,
+      league_id: summary.league_id || null,
+      league_level: toNumber(summary.league_level),
+      league_points: toNumber(summary.league_points) || 0,
+      league_icon: summary.league_icon || null,
+      member_capacity: toNumber(summary.member_capacity),
+      rank: toNumber(row.rank) || index + 1,
+      user_id: toNumber(row.user_id),
+      display_name: row.display_name,
+      points: toNumber(row.points) || 0,
+      last_contribution_at: row.last_contribution_at,
+      permission_level: row.permission_level,
+      role: row.role,
+      join_time: row.join_time,
+      raw_member: row.raw_member,
+      raw_contribution: row.raw_contribution,
+      raw_league: summary.raw_league
+    }))
+    .filter(row => row.user_id && row.rank);
+}
+
+async function persistDiscoveredLeagueRosters(env, runKey, rows, options = {}) {
+  if (!rows?.length) return 0;
+  const fetchedAt = options.fetchedAt || new Date().toISOString();
+  if (!isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) return 0;
+
+  const leagueNamesWritten = [];
+  const dbRows = [];
+  for (const row of rows) {
+    const summary = row?.league_summary;
+    const members = Array.isArray(row?.league_members) ? row.league_members : [];
+    const leagueNameValue = String(summary?.league_name || row?.league_name || "").trim();
+    if (!summary || !leagueNameValue || !members.length) continue;
+    leagueNamesWritten.push(leagueNameValue);
+    dbRows.push(...leagueRosterDbRows(runKey, { ...summary, league_name: leagueNameValue }, members, {
+      fetchedAt,
+      source: `${options.source || "overlap-matches"}:league-roster`
+    }));
+  }
+
+  if (!dbRows.length) return 0;
+  await supabaseUpsert(env, SNAPSHOT_TABLE, dbRows, "league_run_key,snapshot_id,user_id");
+  await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
+  await deleteStaleCurrentLeagueRows(env, runKey, leagueNamesWritten, fetchedAt);
+  return dbRows.length;
+}
+
 async function replaceCurrentDiscoveredC0ldLeagues(env, runKey, rows, options = {}) {
   const fetchedAt = options.fetchedAt || new Date().toISOString();
   if (!isLeagueSnapshotAtOrBeforeEnd(env, runKey, fetchedAt)) return 0;
@@ -756,6 +816,101 @@ function discoveredC0ldLeagueDbRow(row, context) {
   };
 }
 
+async function discoveredLeagueCurrentFallback(env, runKey, requested) {
+  const discoveredRows = await selectLeagueCurrentRows(env, {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${COLD_DISCOVERED_LEAGUES_NAME}`,
+    order: "rank.asc",
+    limit: "5000"
+  }).catch(err => {
+    console.warn("discovered league current fallback lookup failed", err?.message || String(err));
+    return [];
+  });
+  if (!discoveredRows.length) return null;
+
+  const latest = latestMeta(discoveredRows);
+  const rowsWithGains = latest
+    ? await addGainFields(env, discoveredRows, { ...latest, league_run_key: runKey, league_name: COLD_DISCOVERED_LEAGUES_NAME })
+    : discoveredRows.map(addNullGains);
+  const discovered = await enrichDiscoveredLeaguesWithTopRows(env, runKey, rowsWithGains.map(publicDiscoveredLeagueRow)).catch(err => {
+    console.warn("discovered league current fallback enrichment failed", err?.message || String(err));
+    return rowsWithGains.map(publicDiscoveredLeagueRow);
+  });
+
+  const requestedText = String(requested || "").trim();
+  const requestedKey = key(requestedText);
+  const target = discovered.find(row => {
+    if (isLeaguePubliclyHidden(env, row?.league_name || row?.display_name)) return false;
+    return key(row.league_name) === requestedKey ||
+      key(row.display_name) === requestedKey ||
+      String(row.league_id || "").trim() === requestedText;
+  });
+  if (!target) return null;
+
+  const matches = (target.matches || []).slice().sort((a, b) =>
+    (toNumber(a.league_rank ?? a.rank) || 999999) - (toNumber(b.league_rank ?? b.rank) || 999999) ||
+    (toNumber(b.league_points ?? b.points) || 0) - (toNumber(a.league_points ?? a.points) || 0) ||
+    String(a.username || a.display_name || a.user_id).localeCompare(String(b.username || b.display_name || b.user_id))
+  );
+  if (!matches.length) return null;
+
+  const ids = [...new Set(matches.map(member => toNumber(member.user_id)).filter(Boolean))];
+  const [usernameMap, avatarMap] = await Promise.all([
+    resolveRobloxUsernames(ids, env).catch(() => new Map()),
+    resolveRobloxAvatarHeadshots(ids, env).catch(() => new Map())
+  ]);
+  const snapshotAt = target.fetched_at || latest?.fetched_at || null;
+  const publicRows = matches.map((member, index) => {
+    const id = toNumber(member.user_id);
+    const name = bestUsernameForOverlap(id, usernameMap.get(id), member.username, member.display_name, id ? `user_${id}` : `member_${index + 1}`);
+    const points = toNumber(member.league_points ?? member.points) || 0;
+    return redactPublicMemberPoints(env, {
+      fetched_at: snapshotAt,
+      league_run_key: runKey,
+      rank: toNumber(member.league_rank ?? member.rank) || index + 1,
+      previous_rank_5m: null,
+      rank_move_5m: null,
+      user_id: id,
+      username: name,
+      display_name: name,
+      avatar_url: avatarMap.get(id) || avatarMap.get(String(id)) || null,
+      total_points: points,
+      points,
+      last_contribution_at: member.last_contribution_at || null,
+      permission_level: null,
+      role: member.league_role || "Member",
+      join_time: null,
+      gain_5m: toNumber(member.gain_5m),
+      gain_1h: toNumber(member.gain_1h),
+      gain_6h: toNumber(member.gain_6h),
+      gain_12h: toNumber(member.gain_12h),
+      gain_24h: toNumber(member.gain_24h)
+    }, [name, member.username, member.display_name]);
+  });
+
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    snapshot_at: snapshotAt,
+    league_run_key: runKey,
+    league_run_label: leagueRunLabel(env, runKey),
+    baseline_run_key: leagueBaselineRunKey(env, runKey) || null,
+    points_are_run_only: shouldNormalizeLeagueRunPoints(env, runKey),
+    league_name: target.league_name || requested,
+    league_id: target.league_id || null,
+    league_level: null,
+    league_points: toNumber(target.total_points ?? target.points) || publicRows.reduce((sum, row) => sum + (toNumber(row.total_points ?? row.points) || 0), 0),
+    league_icon: target.league_icon || null,
+    member_capacity: Math.max(4, matches.length),
+    league_rank: target.rank ?? null,
+    source: "ps99-league-api-worker:discovered-roster-fallback",
+    snapshot_retention: "permanent",
+    discovered_roster_fallback: true,
+    rows: publicRows
+  };
+}
+
 async function handleCurrent(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -782,7 +937,11 @@ async function handleCurrent(request, env) {
   }
 
   const latest = latestMeta(rows);
-  if (!latest) return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: requested, rows: [] }, env);
+  if (!latest) {
+    const fallback = await discoveredLeagueCurrentFallback(env, runKey, requested);
+    if (fallback) return cacheJson(fallback, env);
+    return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: requested, rows: [] }, env);
+  }
 
   const [rowsWithGains, storedLeagueRank, liveLeagueRank] = await Promise.all([
     addGainFields(env, rows, latest),
@@ -1637,6 +1796,7 @@ async function handleC0ldLeagueOverlap(request, env) {
   const url = new URL(request.url);
   const clan = String(url.searchParams.get("clan") || "c0ld").trim() || "c0ld";
   const runKey = requestedTopLeaguesRunKey(url, env);
+  const scanAt = new Date().toISOString();
   const topLimit = clamp(Number(url.searchParams.get("top_limit") || env.COLD_LEAGUES_TOP_LIMIT || DEFAULT_TOP_LEAGUES_LIMIT), 1, MAX_TOP_LEAGUES_LIMIT);
   const offset = clamp(Number(url.searchParams.get("offset") || 0), 0, Math.max(0, topLimit - 1));
   const batchLimit = clamp(Number(url.searchParams.get("limit") || env.COLD_LEAGUES_BATCH_SIZE || DEFAULT_COLD_LEAGUES_BATCH_SIZE), 1, MAX_COLD_LEAGUES_BATCH_SIZE);
@@ -1669,7 +1829,7 @@ async function handleC0ldLeagueOverlap(request, env) {
     .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
   const discoveredUpserted = matchedRows.length
     ? await persistDiscoveredC0ldLeagues(env, runKey, matchedRows, {
-      fetchedAt: topContext.snapshot_at || new Date().toISOString(),
+      fetchedAt: scanAt,
       source: liveScan ? "live:overlap-matches" : "stored:overlap-matches",
       sourceClan: clan
     }).catch(err => {
@@ -1677,7 +1837,16 @@ async function handleC0ldLeagueOverlap(request, env) {
       return 0;
     })
     : 0;
-  const visibleMatchedRows = filterPublicOverlapRows(env, matchedRows);
+  const rosterRowsUpserted = matchedRows.length
+    ? await persistDiscoveredLeagueRosters(env, runKey, matchedRows, {
+      fetchedAt: scanAt,
+      source: liveScan ? "live:overlap-matches" : "stored:overlap-matches"
+    }).catch(err => {
+      console.warn("persist discovered league rosters failed", err?.message || String(err));
+      return 0;
+    })
+    : 0;
+  const visibleMatchedRows = filterPublicOverlapRows(env, matchedRows.map(publicOverlapScanRow));
 
   return cacheJson({
     ok: true,
@@ -1699,6 +1868,7 @@ async function handleC0ldLeagueOverlap(request, env) {
     scanned_count: batch.length,
     matched_count: visibleMatchedRows.length,
     discovered_upserted: discoveredUpserted,
+    roster_rows_upserted: rosterRowsUpserted,
     scan_errors: scanned.filter(row => row.error && !isLeaguePubliclyHidden(env, row.league_name)).map(row => ({ league_name: row.league_name, rank: row.rank, message: row.error })).slice(0, 25),
     rows: visibleMatchedRows
   }, env);
@@ -1786,6 +1956,7 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
   const scanErrors = [];
   let scannedCount = 0;
   let discoveredUpserted = 0;
+  let rosterRowsUpserted = 0;
   let staleCurrentDeleted = 0;
   let staleCurrentDeleteError = null;
 
@@ -1796,7 +1967,7 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
     const matched = scanned
       .filter(row => row.matches.length)
       .sort((a, b) => (a.rank || 999999) - (b.rank || 999999) || b.c0ld_member_count - a.c0ld_member_count);
-    const visibleMatched = filterPublicOverlapRows(env, matched);
+    const visibleMatched = filterPublicOverlapRows(env, matched.map(publicOverlapScanRow));
     discoveredRows.push(...matched);
     matchedRows.push(...visibleMatched);
     scanErrors.push(...scanned
@@ -1813,6 +1984,13 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
         mergeExisting: true
       }).catch(err => {
         console.warn("persist scheduled discovered c0ld/WMSY leagues failed", err?.message || String(err));
+        return 0;
+      });
+      rosterRowsUpserted += await persistDiscoveredLeagueRosters(env, runKey, matched, {
+        fetchedAt: startedAt,
+        source: `${source}:rolling-overlap-matches`
+      }).catch(err => {
+        console.warn("persist scheduled discovered league rosters failed", err?.message || String(err));
         return 0;
       });
     }
@@ -1844,6 +2022,7 @@ async function runScheduledLeagueOverlapScans(env, source, requestedRunKey, sche
     scanned_count: scannedCount,
     matched_count: matchedRows.length,
     discovered_upserted: discoveredUpserted,
+    roster_rows_upserted: rosterRowsUpserted,
     stale_current_deleted: staleCurrentDeleted,
     stale_current_delete_error: staleCurrentDeleteError,
     batch_indexes: batchIndexes,
@@ -2581,6 +2760,8 @@ async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
     c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points) || 0), 0),
     roster_source: rosterSource,
     scanned_member_count: leagueMembers.length,
+    league_summary: leagueSummary,
+    league_members: leagueMembers,
     matches,
     error
   };
@@ -4235,6 +4416,10 @@ function filterPublicOverlapRows(env, rows) {
       c0ld_league_points: matches.reduce((sum, member) => sum + (toNumber(member.league_points ?? member.points) || 0), 0)
     };
   }).filter(Boolean);
+}
+function publicOverlapScanRow(row) {
+  const { league_summary, league_members, ...publicRow } = row || {};
+  return publicRow;
 }
 function hiddenLeaguePayload(env, runKey, leagueNameValue) {
   return {
