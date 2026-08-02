@@ -60,7 +60,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-short-callback-2026-07-31a";
+const INVENTORY_BUILD_ID = "inventory-htg-scheduler-hold-2026-08-01a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -141,6 +141,7 @@ export default {
             shard_count: htgShardCount(env),
             current_shard: htgCurrentShard(env, new Date()),
             require_source_filter: htgRequireSourceFilter(env),
+            source_filter_hold_minutes: htgSourceFilterHoldMinutes(env),
             baseline_protection_enabled: envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true),
             baseline_stable_comparisons: hatchBaselineStableComparisons(env),
             backfill_min_item_growth: hatchBackfillMinItemGrowth(env),
@@ -225,7 +226,7 @@ export default {
         });
 
         if (tracker) {
-          const schedule = htgScheduleDecision(env, tracker, user.user_id, now);
+          const schedule = htgScheduleDecision(env, tracker, user.user_id, now, { cron: event?.cron });
           if (schedule.due) {
             result.htg_alert = await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule })
               .catch(error => {
@@ -2460,11 +2461,35 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   const period = htgGainSourceWindow(env, tracker, previousRows, checkedAt);
   const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
   if (!sourceFilter.available && htgRequireSourceFilter(env)) {
+    const hold = htgSourceFilterHoldDecision(env, period, checkedAt);
+    if (hold.expired) {
+      await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+        checkedAt,
+        source: sourceMeta,
+        inventorySelection
+      });
+      await markHtgGainStateChecked(env, tracker, {
+        checkedAt,
+        rawItemCount: rawItems.length,
+        htgItemCount: sumHtgStateCounts(currentRows),
+        reason: "HTG source filter was unavailable past the hold window; compact state advanced without posting stale alerts."
+      });
+      return {
+        posted: false,
+        skipped: true,
+        reason: "HTG source filter was unavailable past the hold window; compact state advanced without posting stale alerts.",
+        htg_state: compactHtgStateSummary(currentRows, previousRows),
+        source_filter: compactHatchSourceFilterSummary(sourceFilter),
+        source_filter_hold: hold,
+        source: sourceMeta
+      };
+    }
     return {
       posted: false,
       reason: "HTG source filter was unavailable, so compact HTG state was not advanced.",
       htg_state: compactHtgStateSummary(currentRows, previousRows),
       source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      source_filter_hold: hold,
       source: sourceMeta
     };
   }
@@ -3065,6 +3090,23 @@ function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
     fallbackStart
   );
   return { start: { captured_at: startAt }, end };
+}
+
+function htgSourceFilterHoldMinutes(env) {
+  const value = Number(env.HTG_SOURCE_FILTER_HOLD_MINUTES || env.HATCH_SOURCE_FILTER_HOLD_MINUTES || 20);
+  return Number.isFinite(value) ? Math.max(5, Math.min(240, Math.floor(value))) : 20;
+}
+
+function htgSourceFilterHoldDecision(env, period, checkedAt) {
+  const holdMinutes = htgSourceFilterHoldMinutes(env);
+  const startMs = new Date(period?.start?.captured_at || period?.start || 0).getTime();
+  const endMs = new Date(checkedAt || period?.end?.captured_at || period?.end || Date.now()).getTime();
+  const elapsedMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+  return {
+    expired: elapsedMs >= holdMinutes * 60000,
+    hold_minutes: holdMinutes,
+    elapsed_seconds: Math.floor(elapsedMs / 1000)
+  };
 }
 
 function compactHtgStateRow(row) {
@@ -5004,25 +5046,32 @@ function htgUserShard(userId, shardCount) {
   }
   return (hash >>> 0) % count;
 }
+function htgCronSupportsMinuteSharding(cron) {
+  const text = String(cron || "").trim().replace(/\s+/g, " ");
+  if (!text) return true;
+  const minute = text.split(" ")[0] || "";
+  return minute === "*" || minute === "*/1" || minute === "0/1";
+}
 function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {}) {
   const shardCount = htgShardCount(env);
   const currentShard = htgCurrentShard(env, now);
   const userShard = htgUserShard(userId, shardCount);
-  if (!options.ignoreShard && userShard !== currentShard) {
-    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard };
+  const shardCompatible = htgCronSupportsMinuteSharding(options.cron);
+  if (!options.ignoreShard && shardCompatible && userShard !== currentShard) {
+    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null };
   }
 
   const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
   if (!Number.isFinite(lastChecked) || lastChecked <= 0) {
-    return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard };
+    return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
   }
 
   const intervalMs = htgScanIntervalMinutes(env) * 60000;
   const elapsedMs = now.getTime() - lastChecked;
   if (elapsedMs < Math.max(0, intervalMs - 30000)) {
-    return { due: false, reason: "HTG scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000) };
+    return { due: false, reason: "HTG scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
   }
-  return { due: true, reason: "HTG scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000) };
+  return { due: true, reason: "HTG scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
 }
 function htgRequireSourceFilter(env) {
   return envBool(firstString(env.HTG_REQUIRE_SOURCE_FILTER, env.HATCH_REQUIRE_SOURCE_FILTER), DEFAULT_HTG_REQUIRE_SOURCE_FILTER);

@@ -26,6 +26,10 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 HTG_SCAN_INTERVAL_MINUTES = "5"
 HTG_SHARD_COUNT = "5"
 HTG_REQUIRE_SOURCE_FILTER = "true"
+# If trade/booth/mail source filtering is unavailable for longer than this,
+# HTG advances its compact baseline without posting stale alerts instead of
+# dumping delayed alerts hours later.
+HTG_SOURCE_FILTER_HOLD_MINUTES = "20"
 HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"
