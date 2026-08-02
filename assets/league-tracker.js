@@ -90,6 +90,74 @@
   function visible(){const list=rows.slice();list.sort((a,b)=>compare(a,b,sortKey,sortAsc));return list}
   function norm(v){return String(v||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"")}
 
+  function requestedLeagueMatches(row){
+    const requestedRaw=String(API_LEAGUE||LEAGUE||"").trim();
+    const requestedNorm=norm(requestedRaw);
+    const values=[row?.league_name,row?.display_name,row?.name,row?.league_id,row?.id].map(value=>String(value||"").trim()).filter(Boolean);
+    return values.some(value=>value===requestedRaw||norm(value)===requestedNorm);
+  }
+
+  function discoveredMemberToCurrentRow(member,index,snapshotAt){
+    const total=member?.points_redacted===true?null:(numOrNull(member?.points)??numOrNull(member?.league_points)??numOrNull(member?.total_points)??0);
+    const rank=numOrNull(member?.rank??member?.league_rank??member?.leaderboard_rank)??index+1;
+    const fallbackName=String(member?.user_id||"").trim()?("User "+member.user_id):("Player "+rank);
+    return {
+      fetched_at:snapshotAt,
+      snapshot_at:snapshotAt,
+      league_run_key:member?.league_run_key||RUN_KEY,
+      rank,
+      user_id:member?.user_id??member?.id??"",
+      username:member?.username||member?.display_name||fallbackName,
+      display_name:member?.display_name||member?.username||fallbackName,
+      avatar_url:member?.avatar_url||member?.thumbnail_url||null,
+      source_clan:member?.source_clan||member?.clan_name||null,
+      total_points:total,
+      points:total,
+      gain_5m:numOrNull(member?.gain_5m),
+      gain_1h:numOrNull(member?.gain_1h),
+      gain_6h:numOrNull(member?.gain_6h),
+      gain_12h:numOrNull(member?.gain_12h),
+      gain_24h:numOrNull(member?.gain_24h),
+      points_redacted:member?.points_redacted===true
+    };
+  }
+
+  function discoveredLeagueToCurrentPayload(row,data){
+    const snapshotAt=row?.fetched_at||row?.snapshot_at||data?.snapshot_at||data?.generated_at||new Date().toISOString();
+    const roster=(Array.isArray(row?.matches)?row.matches:[])
+      .map((member,index)=>discoveredMemberToCurrentRow(member,index,snapshotAt))
+      .sort((a,b)=>(Number(a.rank)||9999)-(Number(b.rank)||9999));
+    const rosterPoints=roster.reduce((sum,member)=>sum+(numOrNull(member.total_points)??0),0);
+    const leaguePoints=numOrNull(row?.league_points)??numOrNull(row?.total_points)??numOrNull(row?.points)??rosterPoints;
+    const capacity=Math.max(4,roster.length,numOrNull(row?.member_capacity)??0);
+    return {
+      ok:true,
+      generated_at:data?.generated_at||new Date().toISOString(),
+      snapshot_at:snapshotAt,
+      league_run_key:row?.league_run_key||data?.league_run_key||RUN_KEY,
+      league_run_label:data?.league_run_label||currentData?.league_run_label||RUN_KEY,
+      league_name:row?.league_name||row?.display_name||API_LEAGUE||LEAGUE,
+      league_id:row?.league_id||row?.id||null,
+      league_icon:row?.league_icon||row?.icon||null,
+      league_points:leaguePoints,
+      league_rank:row?.rank??null,
+      member_capacity:capacity,
+      public_visibility:"visible",
+      discovered_roster_fallback:true,
+      source:"client:c0ld-discovered",
+      rows:roster
+    };
+  }
+
+  async function fetchDiscoveredLeagueFallback(){
+    const url=new URL(API+"/api/leagues/c0ld-discovered");
+    url.searchParams.set("limit","5000");
+    addRunParam(url);
+    const data=await getJson(url);
+    const match=(data.rows||[]).find(requestedLeagueMatches);
+    return match?discoveredLeagueToCurrentPayload(match,data):null;
+  }
+
   function stableLeagueUserId(value){
     let h=2166136261;
     const text=String(value||"unknown");
@@ -444,7 +512,11 @@
       const currentUrl=new URL(API+"/api/leagues/current");
       currentUrl.searchParams.set("league",API_LEAGUE);
       addRunParam(currentUrl);
-      const current=await getJson(currentUrl);
+      let current=await getJson(currentUrl);
+      if(!(current.rows||[]).length){
+        const fallback=await fetchDiscoveredLeagueFallback().catch(err=>{console.warn("Discovered roster fallback unavailable",err);return null});
+        if(fallback?.rows?.length)current={...current,...fallback,league_run_label:current.league_run_label||fallback.league_run_label};
+      }
       rows=(current.rows||[]).map(withMemberProjection);
       currentData={...current,rows};
       if(current.public_visibility==="hidden"){
