@@ -60,7 +60,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-stale-window-2026-08-02a";
+const INVENTORY_BUILD_ID = "inventory-htg-durable-scheduler-2026-08-02b";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -119,7 +119,9 @@ export default {
       if (request.method === "GET" && url.pathname === "/api/inventory/health") {
         const oauth = await oauthStatus(env);
         const assignedHatchConfigs = await fetchEnabledHatchGuildConfigs(env).catch(() => []);
+        const enabledHatchTrackers = await fetchEnabledHatchTrackers(env).catch(() => []);
         const assignedHatchChannelCount = assignedHatchConfigs.filter(config => String(config.channel_id || "").trim()).length;
+        const hatchTrackerHealth = compactHatchTrackerHealth(enabledHatchTrackers, env);
         response = json({
           ok: true,
           service: "ps99-inventory-detector",
@@ -152,6 +154,10 @@ export default {
             snapshot_item_read_limit: inventorySnapshotItemReadLimit(env),
             channel_configured: Boolean(assignedHatchChannelCount || hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
             assigned_channel_count: assignedHatchChannelCount,
+            enabled_tracker_count: hatchTrackerHealth.enabled_tracker_count,
+            pending_gain_count: hatchTrackerHealth.pending_gain_count,
+            overdue_tracker_count: hatchTrackerHealth.overdue_tracker_count,
+            oldest_last_checked_at: hatchTrackerHealth.oldest_last_checked_at,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
             webhook_configured: Boolean(hatchAlertWebhookUrl(env))
           }
@@ -217,28 +223,27 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const now = new Date();
-      const users = await trackedInventoryUsers(env);
+      const [users, trackers] = await Promise.all([
+        trackedInventoryUsers(env),
+        fetchEnabledHatchTrackers(env)
+      ]);
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
-      const results = await Promise.allSettled(users.map(async user => {
+      const hatchResults = await Promise.allSettled(trackers.map(async tracker => {
+        const user = hatchTrackerUser(tracker);
+        const schedule = htgScheduleDecision(env, tracker, user.user_id, now, { cron: event?.cron });
+        if (!schedule.due) return { user, tracker_id: tracker.id || null, posted: false, skipped: true, ...schedule };
+        return {
+          user,
+          tracker_id: tracker.id || null,
+          ...(await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule }))
+        };
+      }));
+      for (const result of hatchResults) {
+        if (result.status === "rejected") console.warn("Scheduled HTG gain alert check failed", result.reason?.message || result.reason);
+      }
+
+      const inventoryResults = await Promise.allSettled(users.map(async user => {
         const result = { user };
-        const tracker = await fetchHatchTrackerByRobloxUser(env, user.user_id).catch(error => {
-          console.warn("Scheduled hatch tracker lookup failed", error?.message || error);
-          return null;
-        });
-
-        if (tracker) {
-          const schedule = htgScheduleDecision(env, tracker, user.user_id, now, { cron: event?.cron });
-          if (schedule.due) {
-            result.htg_alert = await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule })
-              .catch(error => {
-                console.warn("Scheduled HTG gain alert check failed", error?.message || error);
-                return { posted: false, error: error?.message || String(error) };
-              });
-          } else {
-            result.htg_alert = { posted: false, skipped: true, ...schedule };
-          }
-        }
-
         if (user.inventory_enabled !== false && await inventoryScanIsDue(env, user, now, { synchronized: true })) {
           result.inventory = await ingestInventory(env, user, "schedule", isMountainMidnight(now, env), { force: false });
           if (!result.inventory.skipped && shouldPostHourly(now, env) && discordUsers.has(String(user.user_id))) {
@@ -250,7 +255,7 @@ export default {
 
         return result;
       }));
-      for (const result of results) if (result.status === "rejected") console.warn("Scheduled inventory scan failed", result.reason?.message || result.reason);
+      for (const result of inventoryResults) if (result.status === "rejected") console.warn("Scheduled inventory scan failed", result.reason?.message || result.reason);
     })());
   }
 };
@@ -983,7 +988,9 @@ async function handleHatchDiagnostics(request, env) {
       last_checked_at: tracker.last_checked_at || null,
       last_alert_snapshot_id: tracker.last_alert_snapshot_id || null,
       last_alert_at: tracker.last_alert_at || null,
-      latest_snapshot_unchecked: uncheckedLatest
+      latest_snapshot_unchecked: uncheckedLatest,
+      scheduler: htgScheduleDecision(env, tracker, user.user_id, new Date(), { ignoreShard: true }),
+      pending_gain: htgPendingGainState(tracker)
     } : null,
     tracker_status: trackerStatus,
     grant_identity: grantIdentity,
@@ -992,6 +999,12 @@ async function handleHatchDiagnostics(request, env) {
     item_timeline: itemTimeline,
     recent_diffs: recentDiffs,
     htg_state_rows: htgStateRows.map(row => row.error ? row : compactHtgStateRow(row)),
+    source_filter_config: {
+      enabled: envBool(env.HATCH_SOURCE_FILTER_ENABLED, true),
+      required: htgRequireSourceFilter(env),
+      hold_minutes: htgSourceFilterHoldMinutes(env),
+      durable_pending: true
+    },
     alert_rows: alertRows,
     enabled_guild_configs: guildConfigs.map(config => ({
       guild_id: config.guild_id || null,
@@ -1149,6 +1162,43 @@ async function fetchHatchTrackerByRobloxUser(env, userId, options = {}) {
     limit: "1"
   });
   return rows[0] || null;
+}
+
+async function fetchEnabledHatchTrackers(env) {
+  requireSupabase(env);
+  return supabaseSelectAll(env, HATCH_TRACKER_USERS_TABLE, {
+    select: "*",
+    enabled: "eq.true",
+    roblox_user_id: "not.is.null",
+    order: "last_checked_at.asc.nullsfirst,updated_at.asc"
+  }, 10000);
+}
+
+function hatchTrackerUser(tracker) {
+  const userId = String(tracker?.roblox_user_id || "").trim();
+  return {
+    user_id: userId,
+    username: firstString(tracker?.roblox_username, userId),
+    inventory_enabled: false,
+    htg_oauth: true
+  };
+}
+
+function compactHatchTrackerHealth(trackers, env, now = new Date()) {
+  const rows = Array.isArray(trackers) ? trackers : [];
+  const overdueMs = Math.max(5, htgScanIntervalMinutes(env) * 2) * 60000;
+  const checkedTimes = rows
+    .map(row => new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime())
+    .filter(value => Number.isFinite(value) && value > 0);
+  return {
+    enabled_tracker_count: rows.length,
+    pending_gain_count: rows.filter(row => htgPendingGainState(row).active).length,
+    overdue_tracker_count: rows.filter(row => {
+      const checkedAt = new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime();
+      return !Number.isFinite(checkedAt) || checkedAt <= 0 || now.getTime() - checkedAt > overdueMs;
+    }).length,
+    oldest_last_checked_at: checkedTimes.length ? new Date(Math.min(...checkedTimes)).toISOString() : null
+  };
 }
 
 async function savePendingHatchTracker(env, { existing, discordUserId, discordUsername, enabled, tiers, alertGuildId }) {
@@ -2460,8 +2510,9 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   }
 
   const period = htgGainSourceWindow(env, tracker, previousRows, checkedAt);
+  const pendingBeforeScan = htgPendingGainState(tracker);
   const staleWindow = htgStaleAlertWindowDecision(env, period, checkedAt);
-  if (!options.force && staleWindow.stale) {
+  if (!options.force && staleWindow.stale && !pendingBeforeScan.active) {
     await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
       checkedAt,
       source: sourceMeta,
@@ -2486,34 +2537,15 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
   if (!sourceFilter.available && htgRequireSourceFilter(env)) {
     const hold = htgSourceFilterHoldDecision(env, period, checkedAt);
-    if (hold.expired) {
-      await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
-        checkedAt,
-        source: sourceMeta,
-        inventorySelection
-      });
-      await markHtgGainStateChecked(env, tracker, {
-        checkedAt,
-        rawItemCount: rawItems.length,
-        htgItemCount: sumHtgStateCounts(currentRows),
-        reason: "HTG source filter was unavailable past the hold window; compact state advanced without posting stale alerts."
-      });
-      return {
-        posted: false,
-        skipped: true,
-        reason: "HTG source filter was unavailable past the hold window; compact state advanced without posting stale alerts.",
-        htg_state: compactHtgStateSummary(currentRows, previousRows),
-        source_filter: compactHatchSourceFilterSummary(sourceFilter),
-        source_filter_hold: hold,
-        source: sourceMeta
-      };
-    }
+    const pending = await saveHtgPendingGain(env, tracker, candidates, checkedAt, sourceFilter);
     return {
       posted: false,
-      reason: "HTG source filter was unavailable, so compact HTG state was not advanced.",
+      pending: true,
+      reason: "HTG gain remains pending because trade, booth, or mail verification is unavailable; the baseline was preserved and the gain will be retried.",
       htg_state: compactHtgStateSummary(currentRows, previousRows),
       source_filter: compactHatchSourceFilterSummary(sourceFilter),
       source_filter_hold: hold,
+      pending_gain: pending,
       source: sourceMeta
     };
   }
@@ -3074,7 +3106,8 @@ async function markHtgGainStateChecked(env, tracker, scan = {}) {
       last_checked_at: checkedAt,
       htg_item_count: Number(scan.htgItemCount || 0),
       raw_item_count: Number(scan.rawItemCount || 0),
-      reason: firstString(scan.reason)
+      reason: firstString(scan.reason),
+      pending_gain: null
     }
   );
   const patch = {
@@ -3098,6 +3131,64 @@ function hatchTrackerMetadataWithHtgState(metadata, statePatch) {
       updated_at: new Date().toISOString()
     }
   };
+}
+
+function htgPendingGainState(tracker) {
+  const pending = plainObject(tracker?.metadata?.htg_state?.pending_gain);
+  const candidates = Array.isArray(pending.candidates) ? pending.candidates : [];
+  return {
+    active: pending.active === true && candidates.length > 0,
+    signature: firstString(pending.signature),
+    first_seen_at: firstString(pending.first_seen_at),
+    last_seen_at: firstString(pending.last_seen_at),
+    observations: Math.max(0, Number(pending.observations || 0)),
+    candidates,
+    source_filter: plainObject(pending.source_filter)
+  };
+}
+
+function htgPendingGainSignature(candidates) {
+  const rows = (candidates || [])
+    .map(row => [
+      firstString(row.item_match_key, hatchSourceMatchKey(row)),
+      Math.max(0, Number(row.after || 0)),
+      Math.max(0, Number(row.delta || 0))
+    ])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return JSON.stringify(rows);
+}
+
+function compactHtgPendingCandidate(row) {
+  return {
+    item_match_key: firstString(row.item_match_key, hatchSourceMatchKey(row)),
+    tier: row.tier || null,
+    display_name: row.display_name || null,
+    variant: row.variant || null,
+    before: Math.max(0, Number(row.before || 0)),
+    after: Math.max(0, Number(row.after || 0)),
+    delta: Math.max(0, Number(row.delta || 0))
+  };
+}
+
+async function saveHtgPendingGain(env, tracker, candidates, checkedAt, sourceFilter) {
+  const existing = htgPendingGainState(tracker);
+  const signature = htgPendingGainSignature(candidates);
+  const sameObservation = existing.active && existing.signature === signature;
+  const pending = {
+    active: true,
+    signature,
+    first_seen_at: sameObservation ? existing.first_seen_at : checkedAt,
+    last_seen_at: checkedAt,
+    observations: sameObservation ? existing.observations + 1 : 1,
+    candidates: (candidates || []).map(compactHtgPendingCandidate),
+    source_filter: compactHatchSourceFilterSummary(sourceFilter)
+  };
+  const metadata = hatchTrackerMetadataWithHtgState(tracker?.metadata, { pending_gain: pending });
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
+    metadata,
+    updated_at: checkedAt
+  });
+  return pending;
 }
 
 function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
@@ -3412,15 +3503,18 @@ function hatchHistoricalEchoLookbackHours(env) {
 
 async function filterHatchSourceGains(env, userId, rows, period) {
   const candidates = Array.isArray(rows) ? rows : [];
+  const ownership = partitionHatchCandidatesByOwnership(candidates, userId);
   const unchanged = {
-    rows: candidates,
-    suppressed: [],
+    rows: ownership.firstOwner,
+    suppressed: ownership.transferred,
+    unresolved: ownership.unknown,
     available: false,
     reason: null,
     source_item_count: 0,
-    sources: []
+    sources: [],
+    ownership: ownership.summary
   };
-  if (!candidates.length) return { ...unchanged, available: true };
+  if (!candidates.length || !ownership.unknown.length) return { ...unchanged, available: true };
   if (!envBool(env.HATCH_SOURCE_FILTER_ENABLED, true)) {
     return { ...unchanged, reason: "HATCH_SOURCE_FILTER_ENABLED is false." };
   }
@@ -3480,14 +3574,50 @@ async function filterHatchSourceGains(env, userId, rows, period) {
   }
 
   const sourceItems = fetched.flatMap(result => result.items);
-  const filtered = suppressHatchSourceMatches(candidates, sourceItems);
+  const filtered = suppressHatchSourceMatches(ownership.unknown, sourceItems);
   return {
-    rows: filtered.rows,
-    suppressed: filtered.suppressed,
+    rows: [...ownership.firstOwner, ...filtered.rows],
+    suppressed: [...ownership.transferred, ...filtered.suppressed],
+    unresolved: [],
     available: true,
     reason: null,
     source_item_count: sourceItems.length,
-    sources
+    sources,
+    ownership: ownership.summary
+  };
+}
+
+function partitionHatchCandidatesByOwnership(rows, userId) {
+  const expectedUserId = String(userId || "").trim();
+  const firstOwner = [];
+  const transferred = [];
+  const unknown = [];
+  for (const row of rows || []) {
+    const ownership = htgUniqueOwnership(row?.raw || row);
+    const owners = ownership.userIds.map(value => String(value || "").trim()).filter(Boolean);
+    if (!ownership.hasOwnerLog || !owners.length || !owners.includes(expectedUserId)) {
+      unknown.push(row);
+      continue;
+    }
+    if (owners.length === 1) {
+      firstOwner.push({ ...row, hatch_verification: "first_owner_log" });
+      continue;
+    }
+    transferred.push({
+      ...row,
+      hatch_verification: "prior_owner_log",
+      source_matches: [{ source: "ownership_log", prior_owner_count: owners.length - 1 }]
+    });
+  }
+  return {
+    firstOwner,
+    transferred,
+    unknown,
+    summary: {
+      first_owner_count: firstOwner.length,
+      prior_owner_count: transferred.length,
+      unknown_count: unknown.length
+    }
   };
 }
 
@@ -3662,6 +3792,8 @@ function compactHatchSourceFilterSummary(filter) {
     reason: filter.reason || null,
     source_item_count: filter.source_item_count || 0,
     suppressed_count: (filter.suppressed || []).length,
+    unresolved_count: (filter.unresolved || []).length,
+    ownership: filter.ownership || null,
     sources: filter.sources || []
   };
 }

@@ -1179,7 +1179,7 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `5`; enabled HTG accounts bypass the normal hourly inventory cohort and can scan every five minutes when the Worker cron is at least that frequent. |
 | `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with an every-minute cron, `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5` checks one fifth of users per minute and each user lands about every five minutes. If the scheduled event is not every-minute, Luna ignores the minute shard gate so accounts are not stranded on shards that never run. |
 | `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries briefly instead of posting an unverified gain. |
-| `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; if trade/booth/mail source checks stay unavailable longer than this window, Luna advances compact HTG state without posting stale alerts so old inventory deltas are not dumped hours later. |
+| `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; exposes how long a source-verification outage has lasted in HTG diagnostics. Gains are retained as pending after this window rather than silently discarded. |
 | `HTG_STALE_ALERT_WINDOW_MINUTES` | Optional. Defaults to four HTG scan intervals, with a 30-minute minimum; if a tracker has not been checked inside this window, Luna re-baselines instead of posting delayed HTG gains all at once. |
 | `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new HTG gains are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
@@ -1220,19 +1220,26 @@ Required/optional secrets on `inventory-detector-worker`:
 | `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
 | `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
 
-The HTG detector uses a compact state table rather than full snapshot
+The HTG detector owns its scheduler roster directly from enabled
+`ps99_hatch_tracker_users` rows; it does not depend on the general inventory or
+League inventory user list. It uses a compact state table rather than full snapshot
 comparisons for frequent checks. Each scan fetches the current Big Games
 inventory, extracts only Huge, Titanic, and Gargantuan pet stacks, compares them
 against `ps99_htg_inventory_state`, then removes matching gains when those same
 pets appear as received trade items, booth purchases, or incoming mail within
-the scan window. It also suppresses unstable baseline/backfill data while a
+the scan window. A unique pet whose ownership log names the tracked account as
+its only owner can be accepted as a first-owner hatch without waiting for the
+other source endpoints; a pet with prior owners is suppressed as a transfer.
+It also suppresses unstable baseline/backfill data while a
 tracker is warming up; after that, detected HTG gains are not dropped just
 because other inventory also changed. If source endpoints cannot be read and
-`HTG_REQUIRE_SOURCE_FILTER=true`, Luna retries briefly. Once
-`HTG_SOURCE_FILTER_HOLD_MINUTES` has elapsed, it advances the compact state
-without posting so an old unverified delta is not dumped later. Likewise, if
+`HTG_REQUIRE_SOURCE_FILTER=true`, Luna stores the exact candidate as a durable
+pending gain, preserves the previous compact baseline, and retries on later
+scans. It never absorbs that unverified increase merely because the source
+outage lasted too long. Likewise, if
 the tracker has not been checked inside `HTG_STALE_ALERT_WINDOW_MINUTES`, Luna
-re-baselines instead of posting delayed HTG gains all at once.
+re-baselines instead of posting delayed HTG gains all at once, unless that gain
+was already observed and retained as pending.
 
 HTG OAuth uses Profile scope to verify that the Big Games token belongs to the
 same Roblox account saved on the tracker. If a saved token is missing Profile
