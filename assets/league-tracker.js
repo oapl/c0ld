@@ -178,9 +178,48 @@
     return Number.isFinite(ms)?ms:0;
   }
 
+  function rowSnapshotTime(row,data){
+    const ms=new Date(row?.fetched_at||row?.snapshot_at||data?.snapshot_at||0).getTime();
+    return Number.isFinite(ms)?ms:0;
+  }
+
+  function topLeagueKeys(row){
+    return [
+      norm(row?.league_name),
+      norm(row?.display_name),
+      String(row?.league_id||"").trim()
+    ].filter(Boolean);
+  }
+
+  function preferTopLeagueRow(existing,candidate){
+    if(!existing)return candidate;
+    if((candidate.__fresh_at||0)!==(existing.__fresh_at||0))return (candidate.__fresh_at||0)>(existing.__fresh_at||0)?candidate:existing;
+    const candidateRank=numOrNull(candidate.rank),existingRank=numOrNull(existing.rank);
+    if(candidateRank!=null&&existingRank!=null&&candidateRank!==existingRank)return candidateRank<existingRank?candidate:existing;
+    return candidate;
+  }
+
+  function combinedTopLeagueRows(...datasets){
+    const byKey=new Map();
+    for(const data of datasets.filter(Boolean)){
+      for(const row of data.rows||[]){
+        const candidate={...row,__fresh_at:rowSnapshotTime(row,data),__top_list_name:data.league_name};
+        for(const key of topLeagueKeys(candidate))byKey.set(key,preferTopLeagueRow(byKey.get(key),candidate));
+      }
+    }
+    const seen=new Set(),rows=[];
+    for(const row of byKey.values()){
+      const id=String(row.league_id||norm(row.league_name||row.display_name));
+      if(seen.has(id))continue;
+      seen.add(id);
+      rows.push(row);
+    }
+    return rows;
+  }
+
   async function fetchTopLeagueSnapshot(list){
     const url=new URL(API+"/api/leagues/top-leagues");
-    url.searchParams.set("limit","1000");
+    url.searchParams.set("limit",list==="all"?"10000":"1000");
     if(list)url.searchParams.set("list",list);
     addRunParam(url);
     return getJson(url);
@@ -192,15 +231,16 @@
       fetchTopLeagueSnapshot("all").catch(()=>null)
     ]);
     if(!topData&&!allData)throw new Error("No stored top league snapshots are available.");
-    const data=allData&&snapshotTime(allData)>snapshotTime(topData)?allData:topData;
-    topLeagueHistoryName=data?.league_name||TOP_LEAGUES_NAME;
+    topLeagueHistoryName=(topData&&snapshotTime(topData)>=snapshotTime(allData)?topData:allData)?.league_name||TOP_LEAGUES_NAME;
     const targetName=norm(currentData?.league_name||LEAGUE);
     const targetId=String(currentData?.league_id||"").trim();
-    const topRows=data.rows||[];
-    return topRows.find(r =>
+    const topRows=combinedTopLeagueRows(allData,topData);
+    const match=topRows.find(r =>
       (targetId && String(r.league_id||"").trim()===targetId) ||
       norm(r.league_name||r.display_name)===targetName
     ) || null;
+    if(match?.__top_list_name)topLeagueHistoryName=match.__top_list_name;
+    return match;
   }
 
   async function fetchRewardMilestones(){
@@ -226,7 +266,7 @@
     const leagueName=data.league_name||LEAGUE;
     currentData=data;
     document.title=leagueName+" League Tracker";
-    const leaguePoints=data.league_points ?? topLeagueRow?.total_points ?? topLeagueRow?.points;
+    const leaguePoints=topLeagueRow?.total_points ?? topLeagueRow?.points ?? data.league_points;
     document.getElementById("league-points").textContent=shortNum(leaguePoints);
     document.getElementById("league-points").title=fullNum(leaguePoints);
     if(!LEAGUE_END_AT && data.league_end_at) LEAGUE_END_AT=data.league_end_at;
