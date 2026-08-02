@@ -1180,6 +1180,7 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with an every-minute cron, `HTG_SCAN_INTERVAL_MINUTES=5` and `HTG_SHARD_COUNT=5` checks one fifth of users per minute and each user lands about every five minutes. If the scheduled event is not every-minute, Luna ignores the minute shard gate so accounts are not stranded on shards that never run. |
 | `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries briefly instead of posting an unverified gain. |
 | `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; if trade/booth/mail source checks stay unavailable longer than this window, Luna advances compact HTG state without posting stale alerts so old inventory deltas are not dumped hours later. |
+| `HTG_STALE_ALERT_WINDOW_MINUTES` | Optional. Defaults to four HTG scan intervals, with a 30-minute minimum; if a tracker has not been checked inside this window, Luna re-baselines instead of posting delayed HTG gains all at once. |
 | `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new HTG gains are not missed because of cached Big Games inventory data. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
 | `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. Once a tracker is armed, broad backfill/bulk-gain guards no longer suppress new HTG deltas; source filtering still applies. |
@@ -1227,8 +1228,11 @@ pets appear as received trade items, booth purchases, or incoming mail within
 the scan window. It also suppresses unstable baseline/backfill data while a
 tracker is warming up; after that, detected HTG gains are not dropped just
 because other inventory also changed. If source endpoints cannot be read and
-`HTG_REQUIRE_SOURCE_FILTER=true`, Luna does not post or advance the compact
-state; it retries on a later scheduled scan.
+`HTG_REQUIRE_SOURCE_FILTER=true`, Luna retries briefly. Once
+`HTG_SOURCE_FILTER_HOLD_MINUTES` has elapsed, it advances the compact state
+without posting so an old unverified delta is not dumped later. Likewise, if
+the tracker has not been checked inside `HTG_STALE_ALERT_WINDOW_MINUTES`, Luna
+re-baselines instead of posting delayed HTG gains all at once.
 
 HTG OAuth uses Profile scope to verify that the Big Games token belongs to the
 same Roblox account saved on the tracker. If a saved token is missing Profile

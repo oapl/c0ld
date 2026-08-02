@@ -30,6 +30,9 @@ HTG_REQUIRE_SOURCE_FILTER = "true"
 # HTG advances its compact baseline without posting stale alerts instead of
 # dumping delayed alerts hours later.
 HTG_SOURCE_FILTER_HOLD_MINUTES = "20"
+# If a tracker was not checked within this window, HTG advances the compact
+# baseline without posting delayed gains all at once.
+HTG_STALE_ALERT_WINDOW_MINUTES = "30"
 HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"

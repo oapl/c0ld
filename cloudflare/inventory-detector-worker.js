@@ -60,7 +60,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-scheduler-hold-2026-08-01a";
+const INVENTORY_BUILD_ID = "inventory-htg-stale-window-2026-08-02a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -142,6 +142,7 @@ export default {
             current_shard: htgCurrentShard(env, new Date()),
             require_source_filter: htgRequireSourceFilter(env),
             source_filter_hold_minutes: htgSourceFilterHoldMinutes(env),
+            stale_alert_window_minutes: htgStaleAlertWindowMinutes(env),
             baseline_protection_enabled: envBool(env.HATCH_BASELINE_PROTECTION_ENABLED, true),
             baseline_stable_comparisons: hatchBaselineStableComparisons(env),
             backfill_min_item_growth: hatchBackfillMinItemGrowth(env),
@@ -2459,6 +2460,29 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   }
 
   const period = htgGainSourceWindow(env, tracker, previousRows, checkedAt);
+  const staleWindow = htgStaleAlertWindowDecision(env, period, checkedAt);
+  if (!options.force && staleWindow.stale) {
+    await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
+      checkedAt,
+      source: sourceMeta,
+      inventorySelection
+    });
+    await markHtgGainStateChecked(env, tracker, {
+      checkedAt,
+      rawItemCount: rawItems.length,
+      htgItemCount: sumHtgStateCounts(currentRows),
+      reason: "HTG alert window was stale; compact state advanced without posting delayed alerts."
+    });
+    return {
+      posted: false,
+      skipped: true,
+      reason: "HTG alert window was stale; compact state advanced without posting delayed alerts.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      stale_window: staleWindow,
+      source: sourceMeta
+    };
+  }
+
   const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
   if (!sourceFilter.available && htgRequireSourceFilter(env)) {
     const hold = htgSourceFilterHoldDecision(env, period, checkedAt);
@@ -3090,6 +3114,24 @@ function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
     fallbackStart
   );
   return { start: { captured_at: startAt }, end };
+}
+
+function htgStaleAlertWindowMinutes(env) {
+  const fallback = Math.max(30, htgScanIntervalMinutes(env) * 4);
+  const value = Number(firstString(env.HTG_STALE_ALERT_WINDOW_MINUTES, env.HATCH_STALE_ALERT_WINDOW_MINUTES, fallback));
+  return Number.isFinite(value) ? Math.max(htgScanIntervalMinutes(env), Math.min(1440, Math.floor(value))) : fallback;
+}
+
+function htgStaleAlertWindowDecision(env, period, checkedAt) {
+  const windowMinutes = htgStaleAlertWindowMinutes(env);
+  const startMs = new Date(period?.start?.captured_at || period?.start || 0).getTime();
+  const endMs = new Date(checkedAt || period?.end?.captured_at || period?.end || Date.now()).getTime();
+  const elapsedMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+  return {
+    stale: elapsedMs > windowMinutes * 60000,
+    window_minutes: windowMinutes,
+    elapsed_seconds: Math.floor(elapsedMs / 1000)
+  };
 }
 
 function htgSourceFilterHoldMinutes(env) {
