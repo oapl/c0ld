@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>League Tracker</title>
 <link rel="stylesheet" href="assets/league-page.css">
-<link rel="stylesheet" href="assets/league-rewards.css">
+<link rel="stylesheet" href="assets/league-rewards.css?v=20260802a">
 </head>
 <body>
 <header><div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div><div class="menu">
@@ -41,13 +41,13 @@
   <div class="section-header"><h2 class="section-title" id="members-title">Member Progress</h2><button id="refresh-btn" type="button">Refresh</button></div>
   <div class="league-insights-grid">
     <div id="member-growth" class="member-growth">
-      <div class="member-growth-head"><div><strong>24-Hour Member Growth</strong><span>Updates every 15 minutes</span></div><span id="member-growth-meta">Loading history...</span></div>
+      <div class="member-growth-head"><div><strong>24-Hour Member Growth</strong><span>Points at 15-minute intervals</span></div><span id="member-growth-meta">Loading history...</span></div>
       <div id="member-growth-legend" class="member-growth-legend"></div>
       <div class="member-growth-chart-shell"><canvas id="member-growth-chart" aria-label="League member point growth over the last 24 hours"></canvas><div id="member-growth-tooltip" class="member-growth-tooltip" role="status"></div></div>
       <div class="table-wrap member-roster">
         <table class="member-roster-table">
-          <thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Points</th><th data-sort="projected_points_1h" class="numeric">Proj 1h</th><th data-sort="gain_5m" class="numeric">5m</th><th data-sort="gain_1h" class="numeric">1h</th><th data-sort="gain_6h" class="numeric">6h</th><th data-sort="gain_12h" class="numeric">12h</th><th data-sort="gain_24h" class="numeric">24h</th></tr></thead>
-          <tbody id="members-tbody"><tr><td colspan="9" class="empty">Loading league data...</td></tr></tbody>
+          <thead><tr><th data-sort="rank">Rank</th><th data-sort="display_name">Player</th><th data-sort="total_points" class="numeric">Points</th><th data-sort="gain_5m" class="numeric">5m</th><th data-sort="gain_1h" class="numeric">1h</th><th data-sort="gain_6h" class="numeric">6h</th><th data-sort="gain_12h" class="numeric">12h</th><th data-sort="gain_24h" class="numeric">24h</th></tr></thead>
+          <tbody id="members-tbody"><tr><td colspan="8" class="empty">Loading league data...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -76,7 +76,7 @@
   window.LEAGUE_CONFIG={league,apiLeague:String(params.get("apiLeague")||league),run,title:league+" League Tracker",showRaceSummary:true};
 })();
 </script>
-<script src="assets/league-tracker.js?v=20260801c"></script>
+<script src="assets/league-tracker.js?v=20260802a"></script>
 <script src="assets/league-hourly-pet-gains.js?v=20260722c"></script>
 <script src="assets/site-announcement.js"></script>
 </body>

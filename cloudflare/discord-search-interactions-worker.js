@@ -3762,29 +3762,9 @@ async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
   const width = 1600;
   const height = 900;
   const color = {
-    background: [9, 8, 17, 255],
-    panel: [22, 19, 33, 255],
-    panelDeep: [15, 14, 25, 255],
-    inset: [17, 15, 25, 255],
-    row: [30, 26, 40, 255],
-    rowAlt: [23, 21, 33, 255],
-    line: [78, 61, 92, 255],
-    grid: [47, 39, 58, 255],
-    white: [242, 245, 252, 255],
-    muted: [178, 166, 196, 255],
-    quiet: [128, 116, 151, 255],
-    cyan: [70, 221, 210, 255],
-    blue: [145, 134, 255, 255],
-    violet: [154, 105, 255, 255],
-    pink: [255, 104, 190, 255],
-    green: [76, 211, 132, 255],
-    yellow: [247, 211, 83, 255],
-    orange: [255, 166, 87, 255],
-    red: [231, 79, 84, 255],
-    zero: [118, 127, 146, 255],
-    smokeCyan: [64, 210, 201, 255],
-    smokeViolet: [139, 83, 255, 255],
-    smokePink: [255, 105, 194, 255]
+    ...searchChartBoardColors(),
+    grid: [42, 50, 70, 255],
+    blue: [88, 166, 255, 255]
   };
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const rows = hourlyLeagueCurrentRows(payload);
@@ -3799,40 +3779,43 @@ async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
   canvas.fillRect(32, 30, width - 64, height - 60, color.panel);
   hourlyDrawMysticSmoke(canvas, width, height, color);
   hourlyDrawPanelFrame(canvas, 32, 30, width - 64, height - 60, color.line);
+  searchChartDrawRainbowBar(canvas, 54, 42, width - 108, 5, color);
+  hourlyDrawHeaderOrnaments(canvas, width / 2, 109, color);
 
-  const header = { x: 54, y: 54, w: 1492, h: 132 };
+  const header = { x: 54, y: 58, w: 1492, h: 116 };
   hourlyDrawPanel(canvas, header.x, header.y, header.w, header.h, color.panelDeep, color.line);
-  hourlyDrawLeagueIcon(canvas, fonts, displayLeagueName, leagueIcon, header.x + 24, header.y + 24, 84, color);
-  canvas.drawFontText(fonts.bold, `${historyCardText(displayLeagueName, 28)} Member Progress`, header.x + 128, header.y + 26, 36, color.white, 520);
-  canvas.drawFontText(fonts.regular, `${historyCardText(runLabel, 48)} - Updates every 15 minutes`, header.x + 130, header.y + 78, 18, color.yellow, 620);
-  canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(snapshotAt)}`, header.x + 130, header.y + 106, 16, color.quiet, 620);
+  hourlyDrawColumnAura(canvas, header.x, header.y, header.w, header.h, 2, color);
+  hourlyDrawLeagueIcon(canvas, fonts, displayLeagueName, leagueIcon, header.x + 22, header.y + 18, 80, color);
+  canvas.drawFontText(fonts.bold, `${historyCardText(displayLeagueName, 28)} Member Progress`, header.x + 124, header.y + 20, 34, color.white, 520);
+  canvas.drawFontText(fonts.regular, historyCardText(runLabel, 48), header.x + 126, header.y + 66, 17, color.cyan, 560);
+  canvas.drawFontText(fonts.regular, `Updated ${chartDate(snapshotAt)} - 15-minute snapshots`, header.x + 126, header.y + 90, 14, color.quiet, 620);
 
-  const cardY = header.y + 24;
-  const cardW = 178;
-  const cardGap = 14;
+  const cardY = header.y + 16;
+  const cardW = 184;
+  const cardGap = 12;
   const cardStart = header.x + header.w - (cardW * 4 + cardGap * 3) - 24;
-  hourlyDrawLeagueStatCard(canvas, fonts, "League Points", shortNumber(leaguePoints), cardStart, cardY, cardW, 84, color, color.yellow);
-  hourlyDrawLeagueStatCard(canvas, fonts, "Current Rank", rank(payload?.league_rank), cardStart + (cardW + cardGap), cardY, cardW, 84, color, color.pink);
-  hourlyDrawLeagueStatCard(canvas, fonts, "1h Gain", `+${shortNumber(hourlyGain)}`, cardStart + (cardW + cardGap) * 2, cardY, cardW, 84, color, color.green);
-  hourlyDrawLeagueStatCard(canvas, fonts, "Members", memberText, cardStart + (cardW + cardGap) * 3, cardY, cardW, 84, color, color.pink);
+  hourlyDrawLeagueStatCard(canvas, fonts, "League Points", shortNumber(leaguePoints), cardStart, cardY, cardW, 82, color, color.yellow);
+  hourlyDrawLeagueStatCard(canvas, fonts, "Current Rank", rank(payload?.league_rank), cardStart + (cardW + cardGap), cardY, cardW, 82, color, color.violet);
+  hourlyDrawLeagueStatCard(canvas, fonts, "1 Hour", `+${shortNumber(hourlyGain)}`, cardStart + (cardW + cardGap) * 2, cardY, cardW, 82, color, color.green);
+  hourlyDrawLeagueStatCard(canvas, fonts, "Members", memberText, cardStart + (cardW + cardGap) * 3, cardY, cardW, 82, color, color.cyan);
 
   hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, {
     x: 54,
-    y: 206,
+    y: 190,
     w: 1492,
-    h: 310,
+    h: 350,
     hours: chartHours
   }, color);
 
   hourlyDrawLeagueRosterTable(canvas, fonts, rows, {
     x: 54,
-    y: 540,
+    y: 554,
     w: 1492,
-    h: 306
+    h: 282
   }, color);
 
-  canvas.drawFontText(fonts.regular, "c0ld League hourly board", 58, 858, 14, color.quiet, 420);
-  const site = "c0ld-clan.com/league.html";
+  canvas.drawFontText(fonts.regular, "Luna League report", 58, 858, 14, color.quiet, 420);
+  const site = "c0ld-clan.com/leagues";
   const siteWidth = canvas.measureFontText(fonts.regular, site, 14);
   canvas.drawFontText(fonts.regular, site, width - 58 - siteWidth, 858, 14, color.quiet, siteWidth + 4);
 
@@ -3868,9 +3851,10 @@ function hourlyDrawLeagueStatCard(canvas, fonts, label, value, x, y, width, heig
 
 function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, color) {
   hourlyDrawPanel(canvas, area.x, area.y, area.w, area.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, area.x, area.y, area.w, area.h, 1, color);
   const hours = leagueChartHours(area.hours || 24);
   canvas.drawFontText(fonts.bold, `${hours}-Hour Member Growth`, area.x + 22, area.y + 18, 23, color.white, 420);
-  canvas.drawFontText(fonts.regular, "Hourly gain rate from stored 15-minute league snapshots", area.x + 22, area.y + 52, 14, color.muted, 520);
+  canvas.drawFontText(fonts.regular, "Points at 15-minute intervals", area.x + 22, area.y + 52, 14, color.muted, 520);
 
   const members = leagueChartMembers(payload).slice(0, 4);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
@@ -3884,10 +3868,9 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
     canvas.drawFontText(fonts.bold, label, x + 30, legendY + 3, 14, color.white, legendW - 32);
   });
 
-  const plot = { x: area.x + 42, y: area.y + 84, w: area.w - 84, h: area.h - 126 };
-  canvas.fillRect(plot.x, plot.y, plot.w, plot.h, color.inset);
-  canvas.fillRect(plot.x, plot.y, 1, plot.h, color.line);
-  canvas.fillRect(plot.x, plot.y + plot.h, plot.w, 1, color.line);
+  const plot = { x: area.x + 58, y: area.y + 84, w: area.w - 92, h: area.h - 126 };
+  hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 8, color.inset, 238);
+  hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
 
   const allPoints = series.flatMap(item => item.points || []);
   if (!allPoints.length) {
@@ -3897,23 +3880,28 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
 
   const maxT = Math.max(...allPoints.map(point => point.t));
   const minT = maxT - hours * 60 * 60 * 1000;
-  const maxYValue = Math.max(1, ...allPoints.map(point => Math.max(0, Number(point.value) || 0)));
-  const yMax = maxYValue + Math.max(1, maxYValue * 0.16);
+  const pointValues = allPoints.map(point => Math.max(0, Number(point.value) || 0));
+  const minYValue = Math.min(...pointValues);
+  const maxYValue = Math.max(...pointValues);
+  const yRange = Math.max(1, maxYValue - minYValue);
+  const yPad = Math.max(1, yRange * 0.08);
+  const yMin = Math.max(0, minYValue - yPad);
+  const yMax = maxYValue + yPad;
   const xForTime = time => plot.x + ((time - minT) / Math.max(1, maxT - minT)) * plot.w;
-  const yForValue = value => plot.y + (1 - Math.max(0, Math.min(1, (Number(value) || 0) / yMax))) * plot.h;
+  const yForValue = value => plot.y + (1 - Math.max(0, Math.min(1, ((Number(value) || 0) - yMin) / Math.max(1, yMax - yMin)))) * plot.h;
 
   for (let index = 0; index <= 4; index += 1) {
     const y = plot.y + (index / 4) * plot.h;
-    const value = yMax - (index / 4) * yMax;
+    const value = yMax - (index / 4) * (yMax - yMin);
     const label = shortNumber(value);
     const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
     canvas.fillRect(plot.x, y, plot.w, 1, color.grid);
     canvas.drawFontText(fonts.regular, label, Math.max(10, plot.x - labelWidth - 12), y - 8, 12, color.muted, labelWidth + 4);
   }
 
-  for (let index = 0; index <= 4; index += 1) {
-    const time = minT + (index / 4) * (maxT - minT);
-    const x = plot.x + (index / 4) * plot.w;
+  for (let index = 0; index <= 6; index += 1) {
+    const time = minT + (index / 6) * (maxT - minT);
+    const x = plot.x + (index / 6) * plot.w;
     const label = chartHourAxisLabel(time);
     const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
     canvas.fillRect(x, plot.y, 1, plot.h, [25, 34, 45, 255]);
@@ -3929,7 +3917,8 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
       const x = Math.max(plot.x + 2, Math.min(plot.x + plot.w - 2, xForTime(point.t)));
       const y = Math.max(plot.y + 2, Math.min(plot.y + plot.h - 2, yForValue(point.value)));
       if (previous && !point.breakBefore) {
-        chartDrawLine(canvas, previous.x, previous.y, x, y, item.color, 3);
+        chartDrawLine(canvas, previous.x, previous.y, x, previous.y, item.color, 3);
+        if (Math.abs(y - previous.y) > 0.5) chartDrawLine(canvas, x, previous.y, x, y, item.color, 3);
       }
       previous = { x, y };
     }
@@ -3939,8 +3928,9 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
 
 function hourlyDrawLeagueRosterTable(canvas, fonts, rows, area, color) {
   hourlyDrawPanel(canvas, area.x, area.y, area.w, area.h, color.panelDeep, color.line);
-  canvas.drawFontText(fonts.bold, "Member Snapshot", area.x + 22, area.y + 18, 22, color.white, 360);
-  canvas.drawFontText(fonts.regular, `Showing top ${Math.min(9, rows.length)} of ${rows.length}`, area.x + 230, area.y + 24, 13, color.muted, 240);
+  hourlyDrawColumnAura(canvas, area.x, area.y, area.w, area.h, 0, color);
+  canvas.drawFontText(fonts.bold, "Member Progress", area.x + 22, area.y + 18, 22, color.white, 360);
+  canvas.drawFontText(fonts.regular, `Showing ${Math.min(6, rows.length)} of ${rows.length}`, area.x + 220, area.y + 24, 13, color.muted, 240);
 
   const headerY = area.y + 58;
   const rowStartY = area.y + 86;
@@ -3957,7 +3947,7 @@ function hourlyDrawLeagueRosterTable(canvas, fonts, rows, area, color) {
   };
   hourlyDrawLeagueTableHeader(canvas, fonts, cols, headerY, color);
 
-  rows.slice(0, 9).forEach((row, index) => {
+  rows.slice(0, 6).forEach((row, index) => {
     const y = rowStartY + index * rowHeight;
     hourlyFillRoundedRect(canvas, area.x + 14, y, area.w - 28, rowHeight - 3, 5, index % 2 ? color.rowAlt : color.row);
     const rankText = row._rank ? `#${fullNumber(row._rank)}` : `#${index + 1}`;
