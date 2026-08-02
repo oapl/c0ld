@@ -60,7 +60,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-durable-scheduler-2026-08-02b";
+const INVENTORY_BUILD_ID = "inventory-htg-scan-recovery-2026-08-02c";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -140,6 +140,7 @@ export default {
             big_games_redirect_uri: bigGamesOAuthApp(env, "hatch_tracker", { allowMissing: true }).redirectUri || null,
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
             scan_interval_minutes: htgScanIntervalMinutes(env),
+            max_concurrent_scans: htgMaxConcurrentScans(env),
             shard_count: htgShardCount(env),
             current_shard: htgCurrentShard(env, new Date()),
             require_source_filter: htgRequireSourceFilter(env),
@@ -157,6 +158,7 @@ export default {
             enabled_tracker_count: hatchTrackerHealth.enabled_tracker_count,
             pending_gain_count: hatchTrackerHealth.pending_gain_count,
             overdue_tracker_count: hatchTrackerHealth.overdue_tracker_count,
+            failed_tracker_count: hatchTrackerHealth.failed_tracker_count,
             oldest_last_checked_at: hatchTrackerHealth.oldest_last_checked_at,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
             webhook_configured: Boolean(hatchAlertWebhookUrl(env))
@@ -228,16 +230,26 @@ export default {
         fetchEnabledHatchTrackers(env)
       ]);
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
-      const hatchResults = await Promise.allSettled(trackers.map(async tracker => {
+      const hatchResults = await mapSettledWithConcurrency(trackers, htgMaxConcurrentScans(env), async tracker => {
         const user = hatchTrackerUser(tracker);
-        const schedule = htgScheduleDecision(env, tracker, user.user_id, now, { cron: event?.cron });
+        const overdue = htgTrackerIsOverdue(env, tracker, now);
+        const schedule = htgScheduleDecision(env, tracker, user.user_id, now, {
+          cron: event?.cron,
+          // A missed shard must never strand an account indefinitely. Once an
+          // account is overdue, the next cron invocation owns its recovery.
+          ignoreShard: overdue
+        });
         if (!schedule.due) return { user, tracker_id: tracker.id || null, posted: false, skipped: true, ...schedule };
-        return {
-          user,
-          tracker_id: tracker.id || null,
-          ...(await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule }))
-        };
-      }));
+        try {
+          const result = await postHtgGainAlertIfNeeded(env, user, tracker, { source: "schedule", schedule });
+          return { user, tracker_id: tracker.id || null, ...result };
+        } catch (error) {
+          await markHtgScanFailed(env, tracker, error, now).catch(markError => {
+            console.warn("Could not persist scheduled HTG scan failure", markError?.message || markError);
+          });
+          throw error;
+        }
+      });
       for (const result of hatchResults) {
         if (result.status === "rejected") console.warn("Scheduled HTG gain alert check failed", result.reason?.message || result.reason);
       }
@@ -988,6 +1000,10 @@ async function handleHatchDiagnostics(request, env) {
       last_checked_at: tracker.last_checked_at || null,
       last_alert_snapshot_id: tracker.last_alert_snapshot_id || null,
       last_alert_at: tracker.last_alert_at || null,
+      last_scan_attempt_at: tracker?.metadata?.htg_state?.last_scan_attempt_at || null,
+      last_scan_error_at: tracker?.metadata?.htg_state?.last_scan_error_at || null,
+      last_scan_error: tracker?.metadata?.htg_state?.last_scan_error || null,
+      consecutive_scan_failures: Number(tracker?.metadata?.htg_state?.consecutive_scan_failures || 0),
       latest_snapshot_unchecked: uncheckedLatest,
       scheduler: htgScheduleDecision(env, tracker, user.user_id, new Date(), { ignoreShard: true }),
       pending_gain: htgPendingGainState(tracker)
@@ -1098,7 +1114,11 @@ async function hatchTrackerStatus(env, discordUserId) {
       authorized_at: row.authorized_at || access.authorized_at || null,
       authorization_expires_at: row.authorization_expires_at || access.expires_at || null,
       last_checked_at: row.last_checked_at || null,
-      last_alert_at: row.last_alert_at || null
+      last_alert_at: row.last_alert_at || null,
+      last_scan_attempt_at: row?.metadata?.htg_state?.last_scan_attempt_at || null,
+      last_scan_error_at: row?.metadata?.htg_state?.last_scan_error_at || null,
+      last_scan_error: row?.metadata?.htg_state?.last_scan_error || null,
+      consecutive_scan_failures: Number(row?.metadata?.htg_state?.consecutive_scan_failures || 0)
     };
   }));
   const primary = accounts.find(account => account.enabled && account.connected)
@@ -1127,6 +1147,10 @@ async function hatchTrackerStatus(env, discordUserId) {
     authorization_expires_at: primary?.authorization_expires_at || null,
     last_checked_at: primary?.last_checked_at || null,
     last_alert_at: primary?.last_alert_at || null,
+    last_scan_attempt_at: primary?.last_scan_attempt_at || null,
+    last_scan_error_at: primary?.last_scan_error_at || null,
+    last_scan_error: primary?.last_scan_error || null,
+    consecutive_scan_failures: primary?.consecutive_scan_failures || 0,
     account_count: accounts.length,
     connected_account_count: accounts.filter(account => account.connected).length,
     enabled_account_count: accounts.filter(account => account.enabled).length,
@@ -1193,12 +1217,48 @@ function compactHatchTrackerHealth(trackers, env, now = new Date()) {
   return {
     enabled_tracker_count: rows.length,
     pending_gain_count: rows.filter(row => htgPendingGainState(row).active).length,
+    failed_tracker_count: rows.filter(row => firstString(row?.metadata?.htg_state?.last_scan_error)).length,
     overdue_tracker_count: rows.filter(row => {
       const checkedAt = new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime();
       return !Number.isFinite(checkedAt) || checkedAt <= 0 || now.getTime() - checkedAt > overdueMs;
     }).length,
     oldest_last_checked_at: checkedTimes.length ? new Date(Math.min(...checkedTimes)).toISOString() : null
   };
+}
+
+async function mapSettledWithConcurrency(values, concurrency, worker) {
+  const rows = Array.isArray(values) ? values : [];
+  const results = new Array(rows.length);
+  const limit = Math.max(1, Math.min(rows.length || 1, Math.floor(Number(concurrency || 1))));
+  let nextIndex = 0;
+
+  await Promise.all(Array.from({ length: limit }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= rows.length) return;
+      try {
+        results[index] = { status: "fulfilled", value: await worker(rows[index], index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }));
+  return results;
+}
+
+async function markHtgScanFailed(env, tracker, error, attemptedAt = new Date()) {
+  const attemptedIso = attemptedAt instanceof Date ? attemptedAt.toISOString() : new Date(attemptedAt).toISOString();
+  const previousState = plainObject(tracker?.metadata?.htg_state);
+  const metadata = hatchTrackerMetadataWithHtgState(tracker?.metadata, {
+    last_scan_attempt_at: attemptedIso,
+    last_scan_error_at: attemptedIso,
+    last_scan_error: String(error?.message || error || "Unknown HTG scan error").slice(0, 1000),
+    consecutive_scan_failures: Math.max(0, Number(previousState.consecutive_scan_failures || 0)) + 1
+  });
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
+    metadata,
+    updated_at: attemptedIso
+  });
 }
 
 async function savePendingHatchTracker(env, { existing, discordUserId, discordUsername, enabled, tiers, alertGuildId }) {
@@ -2935,7 +2995,7 @@ function normalizeHtgInventoryStateItem(item, userId, username, checkedAt, conte
   const itemId = item.id || item.itemId || item.configName || item.name || rawData.id || null;
   const displayName = item.displayName || item.display_name || item.name || itemId || item.stackKey || "Unknown item";
   const variant = getVariant(item);
-  const count = Math.max(0, Number(itemCount(item) || 0));
+  const count = Math.max(0, Number(htgItemCount(item) || 0));
   if (count <= 0) return null;
   const row = {
     roblox_user_id: Number(userId),
@@ -3015,7 +3075,43 @@ function htgUniqueObjects(item) {
     rawData?._uq,
     stack?._uq
   ];
-  return candidates.filter(value => value && typeof value === "object");
+  const output = [];
+  const seen = new Set();
+  for (const candidate of candidates) collect(candidate, "");
+  return output;
+
+  function collect(value, keyHint) {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => collect(entry, `${keyHint}[${index}]`));
+      return;
+    }
+
+    const hasOwnerLog = Array.isArray(value._ol) || Array.isArray(value.ol);
+    const explicitId = firstString(value.uid, value._uid, value.id, value._id, value.uuid, value.serial);
+    const children = Object.entries(value).filter(([, child]) => child && typeof child === "object");
+    const looksLikeUniqueRecord = hasOwnerLog || explicitId || !children.length;
+    if (!looksLikeUniqueRecord) {
+      for (const [key, child] of children) collect(child, key);
+      return;
+    }
+
+    const signature = explicitId
+      ? `id:${explicitId}`
+      : keyHint
+        ? `key:${keyHint}:${stableJson(value)}`
+        : `value:${stableJson(value)}`;
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    output.push(value);
+  }
+}
+
+function htgItemCount(item) {
+  const stackCount = ownedQuantityValue(item);
+  const uniqueCount = htgUniqueObjects(item).length;
+  if (stackCount === null && uniqueCount === 0) return 1;
+  return Math.max(Number(stackCount || 0), uniqueCount);
 }
 
 function parseJsonObject(value) {
@@ -3104,6 +3200,10 @@ async function markHtgGainStateChecked(env, tracker, scan = {}) {
     }),
     {
       last_checked_at: checkedAt,
+      last_scan_attempt_at: checkedAt,
+      last_scan_error_at: null,
+      last_scan_error: null,
+      consecutive_scan_failures: 0,
       htg_item_count: Number(scan.htgItemCount || 0),
       raw_item_count: Number(scan.rawItemCount || 0),
       reason: firstString(scan.reason),
@@ -3541,11 +3641,8 @@ async function filterHatchSourceGains(env, userId, rows, period) {
   } catch (error) {
     return { ...unchanged, reason: `Could not open Big Games access token: ${error?.message || error}` };
   }
-
-  try {
-    await verifyHtgGrantIdentity(env, grant, userId, accessToken);
-  } catch (error) {
-    return { ...unchanged, reason: error?.message || String(error) };
+  if (String(grant.roblox_user_id || "").trim() !== String(userId || "").trim()) {
+    return { ...unchanged, reason: "The saved Big Games grant does not match the tracked Roblox account." };
   }
 
   const fetched = await Promise.all(HATCH_SOURCE_ENDPOINTS.map(async endpoint => {
@@ -4219,11 +4316,19 @@ async function fetchHtgInventory(env, user, options = {}) {
   if (missing.includes(BIG_GAMES_INVENTORY_SCOPE)) {
     throw httpError(403, `HTG Big Games authorization is missing inventory scope for Roblox user ${userId}. Run /htg setup again.`);
   }
-  if (missing.includes(BIG_GAMES_PROFILE_SCOPE)) {
-    throw httpError(403, `HTG Big Games authorization is missing profile scope for Roblox user ${userId}. Run /htg setup again so Luna can verify the linked Roblox account.`);
+  const savedUserId = String(grant?.roblox_user_id || "").trim();
+  if (savedUserId !== userId) {
+    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    throw httpError(403, `HTG authorization mismatch: the saved grant belongs to Roblox user ${savedUserId || "unknown"}, not ${userId}.`);
   }
   const accessToken = await openOAuthAccessToken(env, grant, "hatch_tracker");
-  await verifyHtgGrantIdentity(env, grant, userId, accessToken);
+  // OAuth setup already binds and verifies the grant. Re-fetching Profile for
+  // every five-minute inventory scan doubles API traffic and caused otherwise
+  // valid legacy grants (inventory scope only) to remain permanently overdue.
+  // A live verification remains available through the diagnostics endpoint.
+  if (options.verifyIdentity === true && !missing.includes(BIG_GAMES_PROFILE_SCOPE)) {
+    await verifyHtgGrantIdentity(env, grant, userId, accessToken);
+  }
   let payload;
   try {
     payload = await fetchInventoryWithAccessToken(env, accessToken, options);
@@ -5200,6 +5305,15 @@ function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENT
 function htgScanIntervalMinutes(env) {
   const value = Number(env.HTG_SCAN_INTERVAL_MINUTES || env.HATCH_SCAN_INTERVAL_MINUTES || DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
   return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_HTG_SCAN_INTERVAL_MINUTES;
+}
+function htgMaxConcurrentScans(env) {
+  const value = Number(env.HTG_MAX_CONCURRENT_SCANS || 3);
+  return Number.isFinite(value) ? Math.max(1, Math.min(10, Math.floor(value))) : 3;
+}
+function htgTrackerIsOverdue(env, tracker, now = new Date()) {
+  const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
+  if (!Number.isFinite(lastChecked) || lastChecked <= 0) return true;
+  return now.getTime() - lastChecked > htgScanIntervalMinutes(env) * 2 * 60000;
 }
 function htgShardCount(env) {
   const fallback = htgScanIntervalMinutes(env);

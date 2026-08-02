@@ -26,7 +26,6 @@ const COMPONENT_TYPE_SEPARATOR = 14;
 const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
-const BUTTON_STYLE_SUCCESS = 3;
 const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
@@ -5140,8 +5139,8 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     .filter(value => value !== null)
     .reduce((sum, value) => sum + value, 0);
 
-  const contributionLines = members.length
-    ? members.map((item, index) => `#${String(index + 1).padStart(2, "0")} **${escapeDiscordMarkdown(item.name)}** - ${shortNumber(item.points)} pts - +${shortNumber(item.gain1h ?? 0)}/h`)
+  const contributions = members.length
+    ? members.map((item, index) => `#${index + 1} ${escapeDiscordMarkdown(item.name)} · ${shortNumber(item.points)} points · ${shortNumber(item.gain1h ?? 0)}/h`)
     : ["No member contributions found."];
 
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
@@ -5149,14 +5148,13 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
   const eventState = await hourlyLeagueDeliveryEventState(env).catch(() => null);
   const freshnessLine = eventState?.reason === "event_ended"
     ? "-# League has ended"
-    : `-# **Updated:** ${discordTime(snapshotAt)} - Updates every 15 minutes`;
-  const leagueSummaryLine = `**Rank:** ${rank(payload.league_rank)} - **Points:** ${shortNumber(leaguePoints)} - **Hourly:** +${shortNumber(hourlyGain)}`;
-  const contributionText = contributionLines.join("\n");
+    : `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`;
   const leagueDetails = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
     content: [
-      `## ${escapeDiscordMarkdown(displayLeagueName)}`,
-      leagueSummaryLine,
+      `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
+      `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
+      `**Global Rank**: ${rank(payload.league_rank)}`,
       freshnessLine
     ].join("\n")
   };
@@ -5179,7 +5177,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     { type: COMPONENT_TYPE_SEPARATOR },
     {
       type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: `### Team Snapshot\n${contributionText}`
+      content: `### Contributions\n${contributions.join("\n")}`
     }
   ];
 
@@ -5187,7 +5185,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     components: [
       {
         type: COMPONENT_TYPE_CONTAINER,
-        accent_color: 0xf2cc60,
+        accent_color: 0x58a6ff,
         components: containerComponents
       }
     ],
@@ -5197,7 +5195,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
 
   try {
     const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
-    const chartBytes = await renderHourlyLeagueBoardPng(payload, historyPayload.rows || [], { hours: chartHours });
+    const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours, env });
     if (chartBytes?.byteLength) {
       const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
       containerComponents.push(
@@ -5214,19 +5212,11 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
       );
       message._file = { filename, contentType: "image/png", bytes: chartBytes };
     }
-  } catch (err) {
-    console.warn("league info chart render failed", displayLeagueName, err?.message || String(err));
+  } catch {
     // The command should still answer if the history chart cannot be rendered.
   }
 
-  containerComponents.push(
-    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
-    {
-      type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: lunaCreditLine()
-    },
-    ...leagueChartComponents(displayLeagueName, chartHours)
-  );
+  containerComponents.push(...leagueChartComponents(displayLeagueName, chartHours));
 
   return message;
 }
@@ -6538,7 +6528,7 @@ function leagueChartComponents(leagueName, selectedHours) {
       type: COMPONENT_TYPE_ACTION_ROW,
       components: LEAGUE_CHART_HOURS.map(hours => ({
         type: COMPONENT_TYPE_BUTTON,
-        style: hours === selectedHours ? BUTTON_STYLE_SUCCESS : BUTTON_STYLE_SECONDARY,
+        style: hours === selectedHours ? BUTTON_STYLE_PRIMARY : BUTTON_STYLE_SECONDARY,
         label: `${hours}h`,
         custom_id: `lgchart:${hours}:${safeLeague}`
       }))
@@ -6576,33 +6566,35 @@ async function fetchLeagueHistoryPayload(leagueName, env, hours = 24) {
 
 async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const loadedFonts = await loadHistoryFonts();
+  const [loadedFonts, leagueIcon] = await Promise.all([
+    loadHistoryFonts(),
+    hourlyLoadLeagueIcon(payload).catch(() => null)
+  ]);
   const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
   const height = 900;
   const color = searchChartBoardColors();
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
-  const memberLimit = Math.max(1, Math.min(8, Number(options.memberLimit) || 8));
-  const members = leagueChartMembers(payload).slice(0, memberLimit);
+  const members = leagueChartMembers(payload).slice(0, 4);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
   const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
-  const updatedAt = payload?.snapshot_at || payload?.fetched_at || payload?.updated_at;
 
   const panel = { x: 32, y: 30, w: width - 64, h: height - 60 };
   canvas.fillRect(panel.x, panel.y, panel.w, panel.h, color.panel);
   hourlyDrawMysticSmoke(canvas, width, height, color);
   hourlyDrawPanelFrame(canvas, panel.x, panel.y, panel.w, panel.h, color.line);
   searchChartDrawRainbowBar(canvas, panel.x + 22, panel.y + 12, panel.w - 44, 5, color);
+  hourlyDrawHeaderOrnaments(canvas, width / 2, 116, color);
+  searchChartDrawAvatarBadge(canvas, fonts, displayLeagueName, leagueIcon, width / 2 - 47, 70, 94, color);
+  searchChartDrawPlayerHeader(canvas, fonts, displayLeagueName, rank(payload?.league_rank), width / 2, 91, color);
 
-  const title = `League ${displayLeagueName}`;
-  const subtitle = `${hours}-Hour Member Points`;
-  hourlyDrawFittedText(canvas, fonts.bold, title, panel.x + 30, 62, 34, color.white, 540);
-  hourlyDrawFittedText(canvas, fonts.rowBold, subtitle, panel.x + 31, 105, 19, color.cyan, 320);
-  const updated = `Updated ${chartDate(updatedAt)}`;
-  hourlyDrawRightText(canvas, fonts.regular, updated, panel.x + panel.w - 30, 72, 15, color.muted, 360);
+  const chartPanel = { x: 54, y: 206, w: 1492, h: 614 };
+  hourlyDrawPanel(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, 1, color);
+  hourlyDrawColumnHeader(canvas, fonts, chartPanel.x, chartPanel.y, chartPanel.w, 50, ["Member Points", `Last ${hours} Hour${hours === 1 ? "" : "s"}`], 1, color);
 
   if (!series.some(item => item.points.length >= 1)) {
-    const emptyPlot = { x: panel.x + 44, y: 210, w: panel.w - 88, h: 540 };
+    const emptyPlot = { x: chartPanel.x + 56, y: chartPanel.y + 84, w: chartPanel.w - 104, h: 430 };
     hourlyBlendRoundedRect(canvas, emptyPlot.x, emptyPlot.y, emptyPlot.w, emptyPlot.h, 10, color.inset, 235);
     hourlyDrawPanelFrame(canvas, emptyPlot.x, emptyPlot.y, emptyPlot.w, emptyPlot.h, color.line);
     canvas.drawFontText(fonts.regular, "Not enough stored league history to chart this league yet.", emptyPlot.x + 28, emptyPlot.y + 48, 20, color.muted, emptyPlot.w - 56);
@@ -6610,7 +6602,6 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   }
 
   const allPoints = series.flatMap(item => item.points);
-  const minT = Math.min(...allPoints.map(point => point.t));
   const maxT = Math.max(...allPoints.map(point => point.t));
   const chartMinT = maxT - hours * 60 * 60 * 1000;
   const chartMaxT = maxT;
@@ -6621,30 +6612,11 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     }))
     .filter(item => item.points.length);
   const visiblePoints = visibleSeries.flatMap(item => item.points);
-  const activitySamples = leagueAggregateActivitySamples(visibleSeries, chartMinT, chartMaxT);
-  const metrics = searchChartMetrics(activitySamples, chartMinT, chartMaxT);
   const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, chartMaxT).catch(() => ({ updates: [], restarts: [] }));
   const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
   const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
-  const totalCurrentPoints = visibleSeries.reduce((sum, item) => sum + Math.max(0, item.latestPoints || 0), 0);
-  const totalGain = visibleSeries.reduce((sum, item) => sum + Math.max(0, item.totalGain || 0), 0);
 
-  const stats = [
-    ["Players", fullNumber(visibleSeries.length), color.violet],
-    ["Points", shortNumber(totalCurrentPoints), color.cyan],
-    [`Gain ${hours}h`, `+${shortNumber(totalGain)}`, totalGain > 0 ? color.green : color.zeroText],
-    ["Uptime", searchChartDurationLabel(metrics.activeMs), color.green],
-    ["Downtime", searchChartDurationLabel(metrics.downtimeMs), color.red],
-    ["Markers", `${fullNumber(visibleUpdates.length)} / ${fullNumber(visibleRestarts.length)}`, color.orange]
-  ];
-  const cardGap = 14;
-  const cardY = 142;
-  const cardW = Math.floor((panel.w - 60 - cardGap * (stats.length - 1)) / stats.length);
-  stats.forEach((stat, index) => {
-    leagueDrawStatCard(canvas, fonts, panel.x + 30 + index * (cardW + cardGap), cardY, cardW, 66, stat[0], stat[1], stat[2], color);
-  });
-
-  const plot = { x: panel.x + 70, y: 244, w: panel.w - 128, h: 466 };
+  const plot = { x: chartPanel.x + 56, y: chartPanel.y + 84, w: chartPanel.w - 104, h: 380 };
   hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 10, color.inset, 235);
   hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
 
@@ -6663,7 +6635,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const value = yMax - (i / 4) * (yMax - yMin);
     const label = shortNumber(value);
     const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
-    canvas.fillRect(plot.x, yy, plot.w, 1, color.grid);
+    canvas.fillRect(plot.x, yy, plot.w, 1, [39, 49, 68, 255]);
     canvas.drawFontText(fonts.regular, label, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
   }
 
@@ -6682,15 +6654,13 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 23, 12, color.muted, tickLabelWidth + 6);
   }
 
-  visibleUpdates.forEach((marker, index) => {
+  visibleUpdates.forEach(marker => {
     const x = xForTime(marker.t);
     searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.cyan, 7, 6);
-    if (index < 8) leagueDrawMarkerLabel(canvas, fonts, marker.label || "Update", x, plot.y + 10 + (index % 2) * 22, color.cyan, color);
   });
-  visibleRestarts.forEach((marker, index) => {
+  visibleRestarts.forEach(marker => {
     const x = xForTime(marker.t);
     searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.orange, 10, 5);
-    if (index < 8) leagueDrawMarkerLabel(canvas, fonts, "Restart", x, plot.y + 54 + (index % 2) * 22, color.orange, color);
   });
 
   visibleSeries.forEach(item => {
@@ -6699,35 +6669,27 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     if (last) chartFillCircle(canvas, xForTime(last.t), yFor(last), 4, item.color);
   });
 
-  searchChartDrawActivityBar(canvas, activitySamples, plot, xForTime, color.green, color.red, color.zero, color, {
-    y: plot.y + plot.h + 34,
-    height: 10,
-    rangeStart: chartMinT,
-    rangeEnd: chartMaxT
-  });
-  const activityY = plot.y + plot.h + 50;
-  hourlyDrawFittedText(canvas, fonts.regular, "activity", plot.x, activityY, 12, color.muted, 76);
-  leagueDrawLegend(canvas, fonts, visibleSeries, hours, panel.x + 54, 790, panel.w - 108, color);
+  leagueDrawColoredMemberLegend(canvas, fonts, visibleSeries, chartPanel.x + 34, chartPanel.y + chartPanel.h - 82, chartPanel.w - 68, color);
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
-function leagueDrawStatCard(canvas, fonts, x, y, width, height, label, value, tone, color) {
-  hourlyFillRoundedRect(canvas, x, y, width, height, 8, color.inset);
-  canvas.fillRect(x, y, 5, height, tone);
-  canvas.fillRect(x, y + height - 1, width, 1, color.line);
-  hourlyDrawFittedText(canvas, fonts.regular, label, x + 16, y + 10, 13, color.muted, width - 32);
-  hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, value, x + 16, y + 31, 20, tone, width - 32);
-}
-
-function leagueDrawMarkerLabel(canvas, fonts, label, x, y, tone, color) {
-  const font = fonts.regular;
-  const text = canvas.fitFontText(font, historyCardText(label, 18), 11, 118);
-  const width = canvas.measureFontText(font, text, 11);
-  const labelX = Math.max(44, Math.min(canvas.width - width - 48, x - width / 2));
-  canvas.fillRect(labelX - 5, y - 3, width + 10, 18, [8, 12, 22, 230]);
-  canvas.fillRect(labelX - 5, y + 15, width + 10, 1, tone);
-  canvas.drawFontText(font, text, labelX, y, 11, color.white, width + 2);
+function leagueDrawColoredMemberLegend(canvas, fonts, series, x, y, width, color) {
+  const visible = (series || []).slice(0, 4);
+  const gap = 12;
+  const columnWidth = Math.floor((width - gap * 3) / 4);
+  visible.forEach((item, index) => {
+    const itemX = x + index * (columnWidth + gap);
+    const cardHeight = 48;
+    hourlyBlendRoundedRect(canvas, itemX, y, columnWidth, cardHeight, 7, color.inset, 220);
+    canvas.fillRect(itemX, y, 4, cardHeight, item.color);
+    canvas.fillRect(itemX, y + cardHeight - 1, columnWidth, 1, color.line);
+    hourlyDrawFittedText(canvas, fonts.regular, String(index + 1).padStart(2, "0"), itemX + 16, y + 9, 12, color.quiet, 24);
+    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(item.name, 28), itemX + 48, y + 8, 16, item.color, columnWidth - 158);
+    hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, `${shortNumber(item.latestPoints)} pts`, itemX + columnWidth - 14, y + 8, 16, color.white, 96);
+    canvas.fillRect(itemX + 48, y + 34, columnWidth - 62, 3, color.bar);
+    canvas.fillRect(itemX + 48, y + 34, Math.max(22, Math.min(columnWidth - 62, Math.round((columnWidth - 62) * 0.34))), 3, item.color);
+  });
 }
 
 function leagueDrawSegmentedPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
@@ -6742,68 +6704,6 @@ function leagueDrawSegmentedPolyline(canvas, points, xFor, yFor, rgba, width = 2
     segment.push(point);
   }
   flush();
-}
-
-function leagueDrawLegend(canvas, fonts, series, hours, x, y, width, color) {
-  const columns = Math.min(4, Math.max(1, series.length));
-  const columnGap = 18;
-  const columnWidth = Math.floor((width - columnGap * (columns - 1)) / columns);
-  const rowHeight = 34;
-
-  series.forEach((item, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const itemX = x + column * (columnWidth + columnGap);
-    const itemY = y + row * rowHeight;
-    const label = `${historyCardText(item.name, 22)} - ${shortNumber(item.latestPoints)} (+${shortNumber(item.totalGain)} / ${hours}h)`;
-    canvas.fillRect(itemX, itemY + 13, 28, 5, item.color);
-    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, label, itemX + 40, itemY + 4, 14, color.white, columnWidth - 42);
-  });
-}
-
-function leagueAggregateActivitySamples(series, chartMinT, chartMaxT) {
-  const byTime = new Map();
-  for (const item of series) {
-    for (const point of item.points || []) {
-      if (!Number.isFinite(point?.t) || point.t < chartMinT || point.t > chartMaxT) continue;
-      const key = String(point.t);
-      const existing = byTime.get(key) || { t: point.t, points: 0 };
-      existing.points += Math.max(0, finiteNumber(point.value) || 0);
-      byTime.set(key, existing);
-    }
-  }
-  return [...byTime.values()].sort((a, b) => a.t - b.t);
-}
-
-function drawLeagueMemberGrowthSummary(canvas, fonts, series, hours, area, color) {
-  canvas.fillRect(area.x, area.y, area.w, area.h, [13, 19, 27, 245]);
-  canvas.fillRect(area.x, area.y, area.w, 1, color.line);
-  canvas.fillRect(area.x, area.y + area.h - 1, area.w, 1, color.line);
-  canvas.fillRect(area.x, area.y, 1, area.h, color.line);
-  canvas.fillRect(area.x + area.w - 1, area.y, 1, area.h, color.line);
-  canvas.drawFontText(fonts.bold, `Growth summary - last ${hours}h`, area.x + 18, area.y + 12, 16, color.white, 260);
-  canvas.drawFontText(fonts.regular, "Total change, current hourly rate, average hourly rate, and peak hour.", area.x + 18, area.y + 39, 12, color.muted, 520);
-
-  const cardGap = 14;
-  const cardY = area.y + 64;
-  const cardW = Math.floor((area.w - 36 - cardGap * 3) / 4);
-  const cardH = 38;
-
-  series.slice(0, 4).forEach((item, index) => {
-    const x = area.x + 18 + index * (cardW + cardGap);
-    const latest = item.latestGain || 0;
-    const total = Number.isFinite(item.totalGain) ? item.totalGain : item.gain || 0;
-    const avg = Number.isFinite(item.avgGain) ? item.avgGain : total / Math.max(1, hours);
-    const peak = Number.isFinite(item.peakGain) ? item.peakGain : 0;
-    canvas.fillRect(x, cardY, cardW, cardH, [9, 13, 19, 255]);
-    canvas.fillRect(x, cardY, 5, cardH, item.color);
-    canvas.fillRect(x, cardY + cardH - 1, cardW, 1, color.line);
-    canvas.drawFontText(fonts.bold, historyCardText(item.name, 18), x + 14, cardY + 5, 13, item.color, 118);
-    canvas.drawFontText(fonts.regular, `+${shortNumber(total)} total`, x + 142, cardY + 5, 12, color.white, 104);
-    canvas.drawFontText(fonts.regular, `${shortNumber(latest)}/h now`, x + 258, cardY + 5, 12, color.muted, 92);
-    canvas.drawFontText(fonts.regular, `${shortNumber(avg)}/h avg`, x + 14, cardY + 23, 11, color.muted, 92);
-    canvas.drawFontText(fonts.regular, `${shortNumber(peak)}/h peak`, x + 116, cardY + 23, 11, color.muted, 92);
-  });
 }
 
 function leagueChartMembers(payload) {
@@ -6911,14 +6811,14 @@ function leagueGainWithinWindow(samples, start, end) {
 
 function leagueChartPalette() {
   return [
-    [242, 204, 96, 255],
-    [126, 231, 135, 255],
     [255, 123, 114, 255],
-    [255, 104, 190, 255],
+    [88, 166, 255, 255],
+    [126, 231, 135, 255],
+    [242, 204, 96, 255],
     [210, 168, 255, 255],
     [86, 212, 221, 255],
     [255, 166, 87, 255],
-    [174, 223, 118, 255]
+    [219, 97, 162, 255]
   ];
 }
 

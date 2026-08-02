@@ -25,6 +25,7 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
 HTG_SCAN_INTERVAL_MINUTES = "5"
 HTG_SHARD_COUNT = "5"
+HTG_MAX_CONCURRENT_SCANS = "3"
 HTG_REQUIRE_SOURCE_FILTER = "true"
 # Diagnostic age threshold for a pending gain whose trade/booth/mail source
 # verification is unavailable. The gain remains pending and is retried; it is
