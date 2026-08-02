@@ -26,6 +26,7 @@ const COMPONENT_TYPE_SEPARATOR = 14;
 const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
+const BUTTON_STYLE_SUCCESS = 3;
 const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
@@ -3761,28 +3762,29 @@ async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
   const width = 1600;
   const height = 900;
   const color = {
-    background: [8, 9, 18, 255],
-    panel: [20, 23, 36, 255],
-    panelDeep: [13, 17, 27, 255],
-    inset: [15, 20, 27, 255],
-    row: [25, 29, 43, 255],
-    rowAlt: [18, 22, 34, 255],
-    line: [54, 64, 100, 255],
-    grid: [35, 45, 58, 255],
+    background: [9, 8, 17, 255],
+    panel: [22, 19, 33, 255],
+    panelDeep: [15, 14, 25, 255],
+    inset: [17, 15, 25, 255],
+    row: [30, 26, 40, 255],
+    rowAlt: [23, 21, 33, 255],
+    line: [78, 61, 92, 255],
+    grid: [47, 39, 58, 255],
     white: [242, 245, 252, 255],
-    muted: [160, 172, 195, 255],
-    quiet: [105, 119, 148, 255],
-    cyan: [52, 225, 239, 255],
-    blue: [88, 166, 255, 255],
-    violet: [112, 106, 255, 255],
-    pink: [255, 93, 178, 255],
+    muted: [178, 166, 196, 255],
+    quiet: [128, 116, 151, 255],
+    cyan: [70, 221, 210, 255],
+    blue: [145, 134, 255, 255],
+    violet: [154, 105, 255, 255],
+    pink: [255, 104, 190, 255],
     green: [76, 211, 132, 255],
     yellow: [247, 211, 83, 255],
+    orange: [255, 166, 87, 255],
     red: [231, 79, 84, 255],
     zero: [118, 127, 146, 255],
-    smokeCyan: [51, 230, 241, 255],
-    smokeViolet: [118, 72, 255, 255],
-    smokePink: [255, 92, 183, 255]
+    smokeCyan: [64, 210, 201, 255],
+    smokeViolet: [139, 83, 255, 255],
+    smokePink: [255, 105, 194, 255]
   };
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const rows = hourlyLeagueCurrentRows(payload);
@@ -3802,15 +3804,15 @@ async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
   hourlyDrawPanel(canvas, header.x, header.y, header.w, header.h, color.panelDeep, color.line);
   hourlyDrawLeagueIcon(canvas, fonts, displayLeagueName, leagueIcon, header.x + 24, header.y + 24, 84, color);
   canvas.drawFontText(fonts.bold, `${historyCardText(displayLeagueName, 28)} Member Progress`, header.x + 128, header.y + 26, 36, color.white, 520);
-  canvas.drawFontText(fonts.regular, `${historyCardText(runLabel, 48)} - Updates every 15 minutes`, header.x + 130, header.y + 78, 18, color.muted, 620);
+  canvas.drawFontText(fonts.regular, `${historyCardText(runLabel, 48)} - Updates every 15 minutes`, header.x + 130, header.y + 78, 18, color.yellow, 620);
   canvas.drawFontText(fonts.regular, `Snapshot ${chartDate(snapshotAt)}`, header.x + 130, header.y + 106, 16, color.quiet, 620);
 
   const cardY = header.y + 24;
   const cardW = 178;
   const cardGap = 14;
   const cardStart = header.x + header.w - (cardW * 4 + cardGap * 3) - 24;
-  hourlyDrawLeagueStatCard(canvas, fonts, "League Points", shortNumber(leaguePoints), cardStart, cardY, cardW, 84, color, color.cyan);
-  hourlyDrawLeagueStatCard(canvas, fonts, "Current Rank", rank(payload?.league_rank), cardStart + (cardW + cardGap), cardY, cardW, 84, color, color.yellow);
+  hourlyDrawLeagueStatCard(canvas, fonts, "League Points", shortNumber(leaguePoints), cardStart, cardY, cardW, 84, color, color.yellow);
+  hourlyDrawLeagueStatCard(canvas, fonts, "Current Rank", rank(payload?.league_rank), cardStart + (cardW + cardGap), cardY, cardW, 84, color, color.pink);
   hourlyDrawLeagueStatCard(canvas, fonts, "1h Gain", `+${shortNumber(hourlyGain)}`, cardStart + (cardW + cardGap) * 2, cardY, cardW, 84, color, color.green);
   hourlyDrawLeagueStatCard(canvas, fonts, "Members", memberText, cardStart + (cardW + cardGap) * 3, cardY, cardW, 84, color, color.pink);
 
@@ -3843,7 +3845,8 @@ async function hourlyLoadLeagueIcon(payload) {
 }
 
 function hourlyDrawLeagueIcon(canvas, fonts, leagueName, icon, x, y, size, color) {
-  hourlyBlendCircle(canvas, x + size / 2, y + size / 2, size / 2 + 12, color.cyan, 34);
+  hourlyBlendCircle(canvas, x + size / 2, y + size / 2, size / 2 + 13, color.yellow, 28);
+  hourlyBlendCircle(canvas, x + size / 2, y + size / 2, size / 2 + 8, color.pink, 18);
   hourlyFillRoundedRect(canvas, x, y, size, size, 16, color.line);
   hourlyFillRoundedRect(canvas, x + 2, y + 2, size - 4, size - 4, 14, color.inset);
   if (icon) {
@@ -3960,8 +3963,7 @@ function hourlyDrawLeagueRosterTable(canvas, fonts, rows, area, color) {
     const rankText = row._rank ? `#${fullNumber(row._rank)}` : `#${index + 1}`;
     canvas.drawFontText(fonts.bold, rankText, cols.rank, y + 6, 16, color.white, 70);
     hourlyDrawLeagueMemberAvatar(canvas, fonts, row._name, cols.player, y + 3, 24, color);
-    canvas.drawFontText(fonts.bold, historyCardText(row._name, 30), cols.player + 34, y + 3, 15, color.white, 290);
-    canvas.drawFontText(fonts.regular, String(row.user_id || row.id || "").slice(0, 20), cols.player + 34, y + 18, 10, color.muted, 210);
+    canvas.drawFontText(fonts.bold, historyCardText(row._name, 34), cols.player + 34, y + 5, 17, color.white, 360);
     hourlyDrawRightText(canvas, fonts.bold, row.points_redacted === true ? "Hidden" : shortNumber(row._points), cols.points, y + 6, 16, color.white, 120);
     hourlyDrawLeagueGain(canvas, fonts, row, "gain_5m", cols.gain5m, y + 6, color);
     hourlyDrawLeagueGain(canvas, fonts, row, "gain_1h", cols.gain1h, y + 6, color);
@@ -4001,11 +4003,12 @@ function hourlyDrawLeagueGain(canvas, fonts, row, key, rightX, y, color) {
 
 function hourlyLeagueCurrentRows(payload) {
   return (Array.isArray(payload?.rows) ? payload.rows : [])
+    .filter(row => !isLeagueAggregateMemberRow(row))
     .map((row, index) => ({
       ...row,
       _index: index,
       _rank: positiveInteger(row.rank) || index + 1,
-      _name: leagueMemberName(row),
+      _name: leagueMemberName(row, index + 1),
       _points: finiteNumber(row.total_points ?? row.points) || 0
     }))
     .sort((a, b) => (a._rank || 999999) - (b._rank || 999999) || b._points - a._points || String(a._name).localeCompare(String(b._name)));
@@ -5129,9 +5132,10 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
   const payload = await fetchLeagueCurrentPayload(leagueName, env);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const members = rows
-    .map(row => ({
+    .filter(row => !isLeagueAggregateMemberRow(row))
+    .map((row, index) => ({
       row,
-      name: leagueMemberName(row),
+      name: leagueMemberName(row, index + 1),
       points: finiteNumber(row.total_points ?? row.points),
       gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
     }))
@@ -5146,8 +5150,8 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     .filter(value => value !== null)
     .reduce((sum, value) => sum + value, 0);
 
-  const contributions = members.length
-    ? members.map((item, index) => `#${index + 1} ${escapeDiscordMarkdown(item.name)} · ${shortNumber(item.points)} points · ${shortNumber(item.gain1h ?? 0)}/h`)
+  const contributionLines = members.length
+    ? members.map((item, index) => `#${String(index + 1).padStart(2, "0")} **${escapeDiscordMarkdown(item.name)}** - ${shortNumber(item.points)} pts - +${shortNumber(item.gain1h ?? 0)}/h`)
     : ["No member contributions found."];
 
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
@@ -5155,16 +5159,18 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
   const eventState = await hourlyLeagueDeliveryEventState(env).catch(() => null);
   const freshnessLine = eventState?.reason === "event_ended"
     ? "-# League has ended"
-    : `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`;
+    : `-# **Updated:** ${discordTime(snapshotAt)} - Updates every 15 minutes`;
+  const leagueSummaryLine = `**Rank:** ${rank(payload.league_rank)} - **Points:** ${shortNumber(leaguePoints)} - **Hourly:** +${shortNumber(hourlyGain)}`;
+  const contributionText = contributionLines.join("\n");
   const leagueDetails = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
     content: [
-      `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
-      `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
-      `**Global Rank**: ${rank(payload.league_rank)}`,
+      `## ${escapeDiscordMarkdown(displayLeagueName)}`,
+      leagueSummaryLine,
       freshnessLine
     ].join("\n")
   };
+
   const thumbnailUrl = leagueIconUrl(payload.league_icon);
   const header = thumbnailUrl
     ? {
@@ -5183,7 +5189,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     { type: COMPONENT_TYPE_SEPARATOR },
     {
       type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: `### Contributions\n${contributions.join("\n")}`
+      content: `### Team Snapshot\n${contributionText}`
     }
   ];
 
@@ -5191,7 +5197,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     components: [
       {
         type: COMPONENT_TYPE_CONTAINER,
-        accent_color: 0x58a6ff,
+        accent_color: 0xf2cc60,
         components: containerComponents
       }
     ],
@@ -5223,7 +5229,14 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     // The command should still answer if the history chart cannot be rendered.
   }
 
-  containerComponents.push(...leagueChartComponents(displayLeagueName, chartHours));
+  containerComponents.push(
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: lunaCreditLine()
+    },
+    ...leagueChartComponents(displayLeagueName, chartHours)
+  );
 
   return message;
 }
@@ -6535,7 +6548,7 @@ function leagueChartComponents(leagueName, selectedHours) {
       type: COMPONENT_TYPE_ACTION_ROW,
       components: LEAGUE_CHART_HOURS.map(hours => ({
         type: COMPONENT_TYPE_BUTTON,
-        style: hours === selectedHours ? BUTTON_STYLE_PRIMARY : BUTTON_STYLE_SECONDARY,
+        style: hours === selectedHours ? BUTTON_STYLE_SUCCESS : BUTTON_STYLE_SECONDARY,
         label: `${hours}h`,
         custom_id: `lgchart:${hours}:${safeLeague}`
       }))
@@ -6805,10 +6818,11 @@ function drawLeagueMemberGrowthSummary(canvas, fonts, series, hours, area, color
 
 function leagueChartMembers(payload) {
   return (Array.isArray(payload?.rows) ? payload.rows : [])
-    .map(row => ({
+    .filter(row => !isLeagueAggregateMemberRow(row))
+    .map((row, index) => ({
       row,
       id: String(row.user_id || row.UserID || "").trim(),
-      name: leagueMemberName(row),
+      name: leagueMemberName(row, index + 1),
       points: finiteNumber(row.total_points ?? row.points),
       gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
     }))
@@ -6907,14 +6921,14 @@ function leagueGainWithinWindow(samples, start, end) {
 
 function leagueChartPalette() {
   return [
-    [255, 123, 114, 255],
-    [88, 166, 255, 255],
-    [126, 231, 135, 255],
     [242, 204, 96, 255],
+    [126, 231, 135, 255],
+    [255, 123, 114, 255],
+    [255, 104, 190, 255],
     [210, 168, 255, 255],
     [86, 212, 221, 255],
     [255, 166, 87, 255],
-    [219, 97, 162, 255]
+    [174, 223, 118, 255]
   ];
 }
 
@@ -7007,8 +7021,33 @@ function leagueAttemptSummary(attempt) {
   };
 }
 
-function leagueMemberName(row) {
-  return row.display_name || row.username || `user_${row.user_id}`;
+function leagueMemberName(row, fallbackIndex = null) {
+  const userId = String(row?.user_id || row?.UserID || "").trim();
+  const candidates = [row?.display_name, row?.username, row?.name]
+    .map(value => String(value || "").trim())
+    .filter(Boolean);
+  const resolved = candidates.find(value => !isLeagueFallbackMemberName(value, userId));
+  if (resolved) return resolved;
+
+  const fallbackRank = positiveInteger(row?.rank) || positiveInteger(row?._rank) || positiveInteger(fallbackIndex);
+  return fallbackRank ? `Member #${String(fallbackRank).padStart(2, "0")}` : "League Member";
+}
+
+function isLeagueFallbackMemberName(value, userId) {
+  const text = String(value || "").trim();
+  const id = String(userId || "").trim();
+  if (!text) return true;
+  if (id && text === id) return true;
+  if (id && text.toLowerCase() === `user_${id}`.toLowerCase()) return true;
+  return /^user[\s_-]?\d+$/i.test(text);
+}
+
+function isLeagueAggregateMemberRow(row) {
+  const role = String(row?.role || "").trim().toLowerCase();
+  const rawMember = row?.raw_member && typeof row.raw_member === "object" ? row.raw_member : {};
+  return role === "top league" ||
+    role === "discovered c0ld/wmsy league" ||
+    Boolean(rawMember.synthetic_user_id);
 }
 
 function leagueIconUrl(icon) {
