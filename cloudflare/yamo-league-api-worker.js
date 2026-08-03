@@ -192,7 +192,7 @@ export default {
       const scheduledSource = source => leagueCollectionSource(source, collectionState);
 
       // Advance the bounded overlap shards first. The Top-10k list refresh can
-      // take several minutes and must not delay a 13-tick overlap sweep.
+      // take several minutes and must not delay the roughly 15-tick pool sweep.
       if (leagueOverlapScanEnabled(env)) {
         const overlapRunKey = topLeaguesRunKey(env);
         const overlapDue = isScheduledCadenceDue(scheduledAt, leagueOverlapScanMinutes(env));
@@ -1080,6 +1080,39 @@ async function handleSoloLeaderboard(request, env) {
         rowsByUser.set(String(directRow.user_id), { ...directRow, rank: null, source: "big-games-direct-player" });
       }
     }
+
+    // Roblox username resolution can fail transiently even when the player is
+    // already present in a stored League roster. Recover the known user ID
+    // from that roster and retry the completed 10K-League player pool by ID so
+    // /lb does not lose an otherwise available estimated global rank.
+    if (!publishedPool.rows.length) {
+      const queryKey = normalizeSoloSearchKey(query);
+      const knownPlayer = [...rowsByUser.values()].find(row => (
+        String(row.user_id || "") === query ||
+        normalizeSoloSearchKey(row.username) === queryKey ||
+        normalizeSoloSearchKey(row.display_name) === queryKey
+      ));
+      const knownUserId = toNumber(knownPlayer?.user_id);
+      if (knownUserId) {
+        const retryPool = await fetchPublishedLeaguePlayerPoolSearchRows(env, runKey, String(knownUserId)).catch(() => null);
+        if (retryPool?.rows?.length) {
+          publishedPool = retryPool;
+          for (const row of retryPool.rows) {
+            const id = String(row.user_id || "");
+            if (!id || isLeaguePubliclyHidden(env, row.league_name)) continue;
+            const existing = rowsByUser.get(id);
+            if (!existing || toNumber(existing.rank) === null) {
+              rowsByUser.set(id, {
+                ...existing,
+                ...row,
+                username: row.username || existing?.username,
+                display_name: row.display_name || existing?.display_name
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   const allRows = [...rowsByUser.values()];
@@ -1124,6 +1157,10 @@ async function handleSoloLeaderboard(request, env) {
       : "top-500",
     rows: visibleRows
   }, env);
+}
+
+function normalizeSoloSearchKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
 }
 
 async function fetchPublishedLeaguePlayerPoolSearchRows(env, runKey, query) {
@@ -1496,7 +1533,6 @@ async function scanLeagueForPlayerPool(env, topRow) {
 }
 
 function leaguePlayerPoolStagingRows(result, context) {
-  if (result.error) return [];
   const markerId = 9100000000000 + (toNumber(result.league_rank) || 0);
   const commonRawLeague = {
     Name: result.league_name,
@@ -1506,7 +1542,8 @@ function leaguePlayerPoolStagingRows(result, context) {
     league_rank: result.league_rank,
     pool_scan_id: context.scanId,
     pool_top_leagues_requested: context.topLimit,
-    pool_roster_source: result.roster_source
+    pool_roster_source: result.roster_source,
+    pool_roster_error: result.error || null
   };
   const marker = {
     snapshot_id: `league_player_pool_stage:${context.scanId}:${result.league_rank}`,
@@ -1531,7 +1568,7 @@ function leaguePlayerPoolStagingRows(result, context) {
     raw_contribution: {},
     raw_league: commonRawLeague
   };
-  const members = result.members.map(member => ({
+  const members = (result.error ? [] : result.members).map(member => ({
     ...marker,
     rank: (result.league_rank || 0) * 100 + (toNumber(member.rank) || 0),
     user_id: member.user_id,
@@ -2277,6 +2314,14 @@ async function processLeagueOverlapShard(env, context) {
     topContext = await fetchTopLeagueRowsWindowForOverlap(env, runKey, offset, expected, config.top_limit);
     const listName = topContext.list_name || topLeagueListNameForLimit(config.top_limit, env);
     rows = await normalizeTopLeagueRowsForRun(env, runKey, listName, topContext.rows || [], { recomputeRanks: false });
+    // BIG Games uses competition ranking, so tied Leagues can share the same
+    // displayed rank. The player-pool manifest still needs one durable marker
+    // for each of the Top-10,000 roster positions. Keep the public rank intact
+    // and carry a separate ordinal position solely for pool completeness.
+    rows = rows.slice(0, expected).map((row, index) => ({
+      ...row,
+      _pool_rank: offset + index + 1
+    }));
     if (topContext.persist_rows?.length) {
       await persistTopLeagueWindowRows(env, runKey, topContext.persist_rows, {
         listName,
@@ -2338,7 +2383,11 @@ async function processLeagueOverlapShard(env, context) {
     matches,
     errors,
     topContext,
-    status: rows.length >= expected && !errors.length ? "ok" : "retry"
+    // Individual League-detail failures are recorded and evaluated by the
+    // whole-scan error threshold at finalization. Retrying all 100 League
+    // lookups until every one succeeds made a single unavailable roster pin a
+    // shard forever and kept the published global-rank pool hours out of date.
+    status: rows.length >= expected && !fatalError ? "ok" : "retry"
   });
   await supabaseUpsert(env, CURRENT_TABLE, [stageRow], "league_run_key,league_name,user_id");
 
@@ -3318,6 +3367,7 @@ async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
   return {
     ...publicRow,
     rank: toNumber(topRow.rank) || publicRow.rank,
+    pool_rank: toNumber(topRow._pool_rank),
     total_points: leagueSummary.league_points,
     points: leagueSummary.league_points,
     c0ld_member_count: matches.length,
@@ -3334,7 +3384,7 @@ async function scanLeagueForClanMembers(env, runKey, topRow, clanMembers) {
 function leagueOverlapResultForPlayerPool(result) {
   const summary = result?.league_summary || {};
   return {
-    league_rank: toNumber(result?.rank),
+    league_rank: toNumber(result?.pool_rank ?? result?.rank),
     league_name: summary.league_name || result?.league_name,
     league_id: summary.league_id || result?.league_id,
     league_icon: summary.league_icon || result?.league_icon,
@@ -4889,7 +4939,14 @@ function leagueOverlapScanConfig(env, scheduledAt = Date.now()) {
     live_clan: leagueOverlapLiveClan(env)
   };
 }
-function leaguePlayerPoolTopLeagues(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_TOP_LEAGUES || DEFAULT_LEAGUE_PLAYER_POOL_TOP_LEAGUES), 1, MAX_TOP_LEAGUES_LIMIT); }
+function leaguePlayerPoolTopLeagues(env) {
+  return clamp(Number(
+    env.LEAGUE_PLAYER_POOL_TOP_LEAGUES ||
+    env.LEAGUE_OVERLAP_SCAN_TOP_LIMIT ||
+    env.COLD_LEAGUES_TOP_LIMIT ||
+    DEFAULT_LEAGUE_PLAYER_POOL_TOP_LEAGUES
+  ), 1, MAX_TOP_LEAGUES_LIMIT);
+}
 function leaguePlayerPoolBatchSize(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_BATCH_SIZE || DEFAULT_LEAGUE_PLAYER_POOL_BATCH_SIZE), 1, MAX_LEAGUE_PLAYER_POOL_BATCH_SIZE); }
 function leaguePlayerPoolConcurrency(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_CONCURRENCY || DEFAULT_LEAGUE_PLAYER_POOL_CONCURRENCY), 1, 12); }
 function leaguePlayerDirectAuthoritativeLimit(env) { return clamp(Number(env.LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT || DEFAULT_LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT), 1, 500); }

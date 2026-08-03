@@ -910,10 +910,13 @@ async function buildSearchResponse(query, env) {
   const row = payload.row;
   const avatarUrl = await searchAvatarUrl(row, env);
   const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
-  const sourceMode = String(payload.source_mode || "clans").trim().toLowerCase();
+  const sourceMode = searchResponseSourceMode(payload, row);
   const isLeagueMode = sourceMode === "leagues";
   const leaguePayload = isLeagueMode && resultClan
     ? await fetchLeagueCurrentPayload(resultClan, env).catch(() => null)
+    : null;
+  const leagueRankPayload = isLeagueMode && !positiveInteger(row.global_rank)
+    ? await fetchLeaguePlayerPoolRank(query, row.user_id, env).catch(() => null)
     : null;
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
@@ -925,7 +928,7 @@ async function buildSearchResponse(query, env) {
       : null;
   const eventState = isLeagueMode ? null : await hourlyClanDeliveryEventState(env).catch(() => null);
   const freshnessLines = isLeagueMode
-    ? [`Last Update: ${discordTime(row.fetched_at || leaguePayload?.snapshot_at)}`, "Updates every 5 minutes"]
+    ? leagueSearchFreshnessLines(row, leaguePayload)
     : eventState?.reason === "event_ended"
       ? ["Clan battle has ended"]
       : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
@@ -947,10 +950,22 @@ async function buildSearchResponse(query, env) {
   };
 
   if (isLeagueMode) {
-    const exactGlobalRank = positiveInteger(row.global_rank);
-    const globalRankText = exactGlobalRank
-      ? `${row.global_rank_estimated ? "Estimated " : ""}${rank(exactGlobalRank)}${payload.total_global_players ? ` of ${shortNumber(payload.total_global_players)}` : ""}`
-      : "Outside the exact Top 500";
+    const exactGlobalRank = positiveInteger(row.global_rank) || positiveInteger(leagueRankPayload?.rank);
+    const totalGlobalPlayers = positiveInteger(
+      leagueRankPayload?.total_global_players ??
+      row.total_global_players ??
+      payload.total_global_players ??
+      payload.run?.total_global_players ??
+      payload.run?.candidate_player_count
+    );
+    const globalRankLine = exactGlobalRank
+      ? [
+          `\u{1F30D} Global Rank: **${rank(exactGlobalRank)}${totalGlobalPlayers ? ` of ${shortNumber(totalGlobalPlayers)}` : ""}**`,
+          totalGlobalPlayers
+            ? betterThanLine({ ...row, global_rank: exactGlobalRank, total_global_players: totalGlobalPlayers })
+            : null
+        ].filter(Boolean).join(", ")
+      : "\u{1F30D} Global Rank: **Outside the tracked League-player pool**";
     const leagueEventLabel = String(
       leaguePayload?.league_run_label ||
       leaguePayload?.league_run_key ||
@@ -969,7 +984,7 @@ async function buildSearchResponse(query, env) {
       leaguePayload?.league_points !== undefined && leaguePayload?.league_points !== null
         ? `\u{1F465} League Points: **${shortNumber(leaguePayload.league_points)}**`
         : null,
-      `\u{1F30D} Global League-Player Rank: **${globalRankText}**`,
+      globalRankLine,
       "",
       ...freshnessLines
     ].filter(line => line !== null).join("\n");
@@ -1003,6 +1018,54 @@ async function buildSearchResponse(query, env) {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
     data
   };
+}
+
+function leagueSearchFreshnessLines(row, leaguePayload) {
+  const leagueSnapshotAt = leaguePayload?.snapshot_at || null;
+  const globalPoolSnapshotAt = row?.fetched_at || null;
+  const lines = [
+    `Last Update: ${discordTime(leagueSnapshotAt || globalPoolSnapshotAt)}`,
+    "Updates every 15 minutes"
+  ];
+
+  // Exact League points/rank and the expanded global-player rank come from
+  // different collections. Keep the main freshness label tied to the exact
+  // League snapshot, but disclose an older pool instead of making the entire
+  // card appear stale (or making a stale estimated rank look current).
+  const leagueMs = new Date(leagueSnapshotAt || 0).getTime();
+  const poolMs = new Date(globalPoolSnapshotAt || 0).getTime();
+  if (
+    Number.isFinite(leagueMs) && leagueMs > 0 &&
+    Number.isFinite(poolMs) && poolMs > 0 &&
+    leagueMs - poolMs > 20 * 60 * 1000
+  ) {
+    lines.splice(1, 0, `Global Rank Pool: ${discordTime(globalPoolSnapshotAt)}`);
+  }
+  return lines;
+}
+
+function searchResponseSourceMode(payload, row) {
+  const explicit = String(
+    payload?.source_mode ||
+    row?.source_mode ||
+    payload?.run?.source_mode ||
+    ""
+  ).trim().toLowerCase();
+  if (["league", "leagues"].includes(explicit)) return "leagues";
+  if (["clan", "clans", "battle", "clan-battle"].includes(explicit)) return "clans";
+
+  const sourceLabel = String(payload?.source_label || "").trim().toLowerCase();
+  const searchScope = String(payload?.search_scope || "").trim().toLowerCase();
+  if (
+    sourceLabel.includes("league") ||
+    searchScope.includes("league") ||
+    payload?.rank_is_estimated !== undefined ||
+    row?.global_rank_estimated !== undefined
+  ) {
+    return "leagues";
+  }
+
+  return "clans";
 }
 
 async function completeSearchInteraction(interaction, env, query) {
@@ -6716,6 +6779,45 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
 
+async function fetchLeaguePlayerPoolRank(query, userId, env) {
+  const candidates = [...new Set(
+    [String(userId || "").trim(), String(query || "").trim()].filter(Boolean)
+  )];
+
+  for (const candidate of candidates) {
+    for (const target of leagueApiTargets(env)) {
+      const apiUrl = new URL("/api/leagues/solo-leaderboard", target.base);
+      apiUrl.searchParams.set("limit", "500");
+      apiUrl.searchParams.set("q", candidate);
+      const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+      if (!result.response_ok || result.payload?.ok === false) continue;
+
+      const rows = Array.isArray(result.payload?.rows) ? result.payload.rows : [];
+      const matched = rows.find(item => {
+        const itemId = String(item?.user_id || "").trim();
+        const wantedId = String(userId || "").trim();
+        if (wantedId && itemId === wantedId) return true;
+        const wantedName = String(query || "").trim().toLowerCase();
+        return wantedName && [item?.username, item?.display_name]
+          .some(value => String(value || "").trim().toLowerCase() === wantedName);
+      });
+      if (!matched) continue;
+
+      return {
+        rank: positiveInteger(matched.rank),
+        total_global_players: positiveInteger(
+          result.payload?.pool_total_players ??
+          result.payload?.top_available ??
+          result.payload?.total_players
+        ),
+        fetched_at: matched.fetched_at || result.payload?.snapshot_at || null
+      };
+    }
+  }
+
+  return null;
+}
+
 function leagueDrawColoredMemberLegend(canvas, fonts, series, x, y, width, color) {
   const visible = (series || []).slice(0, 4);
   const gap = 12;
@@ -7039,7 +7141,10 @@ function handleHistoryComponent(interaction, env, ctx) {
 
 async function completeHistoryInteraction(interaction, env, state) {
   try {
-    const imageEnabled = historyImageResponses(env);
+    // /history is an image-card command. Keeping an environment switch here
+    // allowed an old production variable to silently restore the retired text
+    // response after otherwise-correct deployments.
+    const imageEnabled = true;
     if (imageEnabled && state.cacheId) {
       const cached = await buildCachedHistoryMessage(state, env);
       if (cached) {
@@ -7263,15 +7368,23 @@ async function loadHistoryCommandData(query, env) {
   const clanMap = new Map();
   for (const row of liveClanRows) mergeClanHistoryRecord(clanMap, row);
   for (const row of staticClanHistoryRows(staticProfile, scanClan)) mergeClanHistoryRecord(clanMap, row);
-  for (const row of leaderboardRows) {
-    mergeClanHistoryRecord(clanMap, {
-      ...row,
-      source: "site",
-      rank: finiteHistoryNumber(globalPayload?.row?.member_rank ?? globalPayload?.row?.clan_rank)
-    });
-  }
   for (const row of externalClanHistoryRows(bigHistory?.rows, "big_bot")) mergeClanHistoryRecord(clanMap, row);
   for (const row of externalClanHistoryRows(cwHistory?.rows, "cw_bot")) mergeClanHistoryRecord(clanMap, row);
+  for (const row of leaderboardRows) {
+    const key = canonicalClanHistoryKey(row?.key || row?.battle_key || row?.name);
+    // A leaderboard observation may add the global placement/field size to a
+    // real clan-battle record, but it is not itself a Clan Battle History row.
+    // This keeps the removed Leaderboard History view from leaking back into
+    // the clan card as a standalone "Global Leaderboard" entry.
+    if (!key || !clanMap.has(key)) continue;
+    mergeClanHistoryRecord(clanMap, {
+      ...row,
+      key,
+      source: "site",
+      rank: null,
+      points: null
+    });
+  }
 
   const leagueRows = mergeHistorySummaryRows(
     normalizeLeagueHistoryRows(leagueHistory?.rows),
@@ -8676,10 +8789,6 @@ function historyButton(label, customId, style, disabled) {
 function historyPageSize(env) {
   const value = Math.round(Number(env.HISTORY_PAGE_SIZE || DEFAULT_HISTORY_PAGE_SIZE));
   return Number.isFinite(value) ? Math.min(15, Math.max(5, value)) : DEFAULT_HISTORY_PAGE_SIZE;
-}
-
-function historyImageResponses(env) {
-  return !["0", "false", "no", "off"].includes(String(env.HISTORY_IMAGE_RESPONSES || "true").toLowerCase());
 }
 
 const HISTORY_FONT_5X7 = {

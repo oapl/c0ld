@@ -739,7 +739,6 @@ Required Worker variables:
 | `LEAGUE_API_BASE` | Optional base URL for League History. Defaults to `https://yamo-league-api-worker.opal-dde.workers.dev`. |
 | `PROFILE_DATA_BASE` | Optional base URL for first-party static player history. Defaults to `https://c0ld-clan.com/Data/players`. |
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
-| `HISTORY_IMAGE_RESPONSES` | Optional. Defaults to `true`; renders the selected `/history` category as a c0ld-styled PNG. Set to `false` for the text-only response. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated `/league rewards` tiers. Defaults to `1,3,15,50,100,250,2000`. |
@@ -885,14 +884,15 @@ Player history is available with:
 /history username:Cinnamowopal
 ```
 
-The response includes Clan History, League History, and Leaderboard History
-buttons. Each button generates one complete category image with every available
-record and no pagination. Clan History uses a two-column clan-battle record,
+The response includes Clan Battle History and League History buttons. Each
+button generates one complete category image with every available record and
+no pagination. Clan Battle History uses a two-column clan-battle record,
 including top performance by lowest global rank, the average of the five most
 recent completed ranked clan-battle results, total clans, current-clan tenure
 calculated from the API join date, and a segmented field-outranked tape for each
 ranked result. First-party site data always takes priority over bot imports.
-Set `HISTORY_IMAGE_RESPONSES=false` to use the text-only fallback.
+`/history` always returns image cards; the retired text response cannot be
+restored by a stale Worker variable.
 
 The plain-text PS99 version command is:
 

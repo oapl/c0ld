@@ -1528,7 +1528,9 @@ async function handleLeagueGlobalLeaderboard(url, env) {
     payload.league_run_key ||
     "Current League"
   ).trim();
+  const topAvailable = Math.max(toNumber(payload.top_available) || 0, sourceRows.length);
   const rows = sourceRows.map((row, index) => ({
+    source_mode: "leagues",
     global_rank: toNumber(row.rank) || index + 1,
     projected_rank: null,
     projected_rank_1h: null,
@@ -1545,9 +1547,9 @@ async function handleLeagueGlobalLeaderboard(url, env) {
     gain_1h: null,
     gain_12h: null,
     gain_24h: null,
+    total_global_players: topAvailable,
     fetched_at: safeIso(row.fetched_at) || snapshotAt
   }));
-  const topAvailable = Math.max(toNumber(payload.top_available) || 0, rows.length);
   const run = {
     run_key: `league:${payload.league_run_key || "current"}:${snapshotAt}`,
     event_name: leagueLabel,
@@ -3762,11 +3764,13 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
   if (sourceMode === "leagues") {
     const payload = await fetchLeagueSoloLeaderboard(env, 500, query);
     const sourceRows = Array.isArray(payload.rows) ? payload.rows : [];
+    const totalGlobalPlayers = Math.max(toNumber(payload.top_available) || 0, sourceRows.length) || null;
     const avatarMap = await resolveRobloxAvatarHeadshots(
       sourceRows.map(row => row.user_id),
       env
     ).catch(() => new Map());
     const rows = sourceRows.map((row, index) => ({
+      source_mode: "leagues",
       global_rank: toNumber(row.rank),
       global_rank_estimated: row.rank_is_estimated === true,
       projected_rank: null,
@@ -3784,6 +3788,7 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
       gain_1h: null,
       gain_12h: null,
       gain_24h: null,
+      total_global_players: totalGlobalPlayers,
       fetched_at: safeIso(row.fetched_at || payload.snapshot_at || payload.generated_at)
     }));
 
@@ -3796,7 +3801,7 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
       source_mode: "leagues",
       source_label: "Leagues",
       search_scope: payload.search_scope || "top-500-plus-direct-player-plus-stored-league-rosters",
-      total_global_players: toNumber(payload.top_available) || null,
+      total_global_players: totalGlobalPlayers,
       pool_completed: payload.pool_completed === true,
       rank_is_exact: rows.every(row => toNumber(row.global_rank) !== null && row.global_rank_estimated !== true),
       rank_is_estimated: rows.some(row => toNumber(row.global_rank) !== null && row.global_rank_estimated === true),
