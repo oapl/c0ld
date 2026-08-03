@@ -55,12 +55,15 @@ const DEFAULT_HATCH_BACKFILL_ITEM_GROWTH_RATIO = 0.05;
 const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
 const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
 const DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS = 48;
-const DEFAULT_HTG_SCAN_INTERVAL_MINUTES = 5;
+// BIG Games currently grants 96 forced inventory refreshes per account/day.
+// Fifteen minutes is the fastest sustainable 24-hour cadence (96 * 15m).
+const DEFAULT_HTG_SCAN_INTERVAL_MINUTES = 15;
+const MIN_HTG_FORCE_REFRESH_INTERVAL_MINUTES = 15;
 const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-scan-recovery-2026-08-02c";
+const INVENTORY_BUILD_ID = "inventory-htg-quota-safe-freshness-2026-08-02d";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -1003,6 +1006,10 @@ async function handleHatchDiagnostics(request, env) {
       last_scan_attempt_at: tracker?.metadata?.htg_state?.last_scan_attempt_at || null,
       last_scan_error_at: tracker?.metadata?.htg_state?.last_scan_error_at || null,
       last_scan_error: tracker?.metadata?.htg_state?.last_scan_error || null,
+      last_scan_reason: tracker?.metadata?.htg_state?.reason || null,
+      last_source_fetched_at: tracker?.metadata?.htg_state?.source_fetched_at || null,
+      last_source_is_stale: tracker?.metadata?.htg_state?.source_is_stale ?? null,
+      refresh_quota: tracker?.metadata?.htg_state?.refresh_quota || null,
       consecutive_scan_failures: Number(tracker?.metadata?.htg_state?.consecutive_scan_failures || 0),
       latest_snapshot_unchecked: uncheckedLatest,
       scheduler: htgScheduleDecision(env, tracker, user.user_id, new Date(), { ignoreShard: true }),
@@ -2526,6 +2533,28 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     inventory_selection_method: inventorySelection.method,
     inventory_items_path: inventorySelection.path
   });
+  const sourceFreshness = htgInventorySourceFreshnessDecision(previousRows, sourceMeta);
+  if (previousRows.length && !sourceFreshness.fresh) {
+    const reason = sourceFreshness.quota_exhausted
+      ? "Big Games refresh quota is exhausted; the cached HTG inventory was ignored and the comparison baseline was preserved."
+      : "Big Games returned an unchanged or stale HTG inventory; the comparison baseline was preserved.";
+    await markHtgSourceDeferred(env, tracker, {
+      checkedAt,
+      reason,
+      source: sourceMeta,
+      freshness: sourceFreshness,
+      rawItemCount: rawItems.length,
+      htgItemCount: sumHtgStateCounts(previousRows)
+    });
+    return {
+      posted: false,
+      skipped: true,
+      reason,
+      source_freshness: sourceFreshness,
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source: sourceMeta
+    };
+  }
   const state = hatchTrackerBaselineState(tracker);
   const hasCompactBaseline = !!firstString(tracker?.metadata?.htg_state?.last_checked_at);
   if (!state.armed || !hasCompactBaseline) {
@@ -2536,6 +2565,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     });
     await markHtgGainStateChecked(env, tracker, {
       checkedAt,
+      source: sourceMeta,
       rawItemCount: rawItems.length,
       htgItemCount: sumHtgStateCounts(currentRows),
       reason: "HTG compact inventory baseline was saved."
@@ -2557,6 +2587,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     });
     await markHtgGainStateChecked(env, tracker, {
       checkedAt,
+      source: sourceMeta,
       rawItemCount: rawItems.length,
       htgItemCount: sumHtgStateCounts(currentRows),
       reason: "No enabled Huge, Titanic, or Gargantuan gains were detected."
@@ -2572,7 +2603,10 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   const period = htgGainSourceWindow(env, tracker, previousRows, checkedAt);
   const pendingBeforeScan = htgPendingGainState(tracker);
   const staleWindow = htgStaleAlertWindowDecision(env, period, checkedAt);
-  if (!options.force && staleWindow.stale && !pendingBeforeScan.active) {
+  // A long refresh gap is not proof that a real gain should be discarded. The
+  // source filter can inspect the entire fresh-to-fresh window and distinguish
+  // trades/mail/booth activity. Keep the legacy re-baseline behavior opt-in.
+  if (!options.force && staleWindow.stale && !pendingBeforeScan.active && envBool(env.HTG_DROP_STALE_GAINS, false)) {
     await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
       checkedAt,
       source: sourceMeta,
@@ -2580,6 +2614,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     });
     await markHtgGainStateChecked(env, tracker, {
       checkedAt,
+      source: sourceMeta,
       rawItemCount: rawItems.length,
       htgItemCount: sumHtgStateCounts(currentRows),
       reason: "HTG alert window was stale; compact state advanced without posting delayed alerts."
@@ -2619,6 +2654,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     });
     await markHtgGainStateChecked(env, tracker, {
       checkedAt,
+      source: sourceMeta,
       rawItemCount: rawItems.length,
       htgItemCount: sumHtgStateCounts(currentRows),
       reason: "All enabled Huge, Titanic, or Gargantuan gains matched trade, booth, or mail activity."
@@ -2644,6 +2680,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   });
   await markHtgGainStateChecked(env, tracker, {
     checkedAt,
+    source: sourceMeta,
     rawItemCount: rawItems.length,
     htgItemCount: sumHtgStateCounts(currentRows),
     reason: "HTG gain alert posted.",
@@ -3188,6 +3225,7 @@ async function saveHtgInventoryState(env, tracker, user, currentRows, previousRo
 
 async function markHtgGainStateChecked(env, tracker, scan = {}) {
   const checkedAt = firstString(scan.checkedAt, new Date().toISOString());
+  const refresh = plainObject(scan.source?.refresh);
   const metadata = hatchTrackerMetadataWithHtgState(
     hatchTrackerMetadataWithBaseline(tracker?.metadata, {
       armed: true,
@@ -3207,6 +3245,15 @@ async function markHtgGainStateChecked(env, tracker, scan = {}) {
       htg_item_count: Number(scan.htgItemCount || 0),
       raw_item_count: Number(scan.rawItemCount || 0),
       reason: firstString(scan.reason),
+      source_fetched_at: scan.source?.fetched_at || null,
+      source_is_stale: scan.source?.is_stale ?? null,
+      refresh_quota: {
+        used: Number(refresh.used || 0),
+        limit: Number(refresh.limit || 0),
+        quota_exhausted: refresh.quotaExhausted === true,
+        resets_at: refresh.resetsAt || null,
+        next_refresh_eligible_at: refresh.nextRefreshEligibleAt || null
+      },
       pending_gain: null
     }
   );
@@ -3219,6 +3266,37 @@ async function markHtgGainStateChecked(env, tracker, scan = {}) {
     patch.last_alert_at = checkedAt;
   }
   await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), patch);
+}
+
+async function markHtgSourceDeferred(env, tracker, scan = {}) {
+  const checkedAt = firstString(scan.checkedAt, new Date().toISOString());
+  const refresh = plainObject(scan.source?.refresh);
+  const metadata = hatchTrackerMetadataWithHtgState(tracker?.metadata, {
+    last_checked_at: checkedAt,
+    last_scan_attempt_at: checkedAt,
+    last_scan_error_at: null,
+    last_scan_error: null,
+    consecutive_scan_failures: 0,
+    htg_item_count: Number(scan.htgItemCount || 0),
+    raw_item_count: Number(scan.rawItemCount || 0),
+    reason: firstString(scan.reason),
+    source_fetched_at: scan.source?.fetched_at || null,
+    source_is_stale: scan.source?.is_stale ?? null,
+    source_freshness: plainObject(scan.freshness),
+    refresh_quota: {
+      used: Number(refresh.used || 0),
+      limit: Number(refresh.limit || 0),
+      quota_exhausted: refresh.quotaExhausted === true,
+      resets_at: refresh.resetsAt || null,
+      next_refresh_eligible_at: refresh.nextRefreshEligibleAt || null
+    }
+    // Deliberately preserve pending_gain and the compact comparison rows.
+  });
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
+    metadata,
+    last_checked_at: checkedAt,
+    updated_at: checkedAt
+  });
 }
 
 function hatchTrackerMetadataWithHtgState(metadata, statePatch) {
@@ -3298,13 +3376,64 @@ function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
     .filter(time => Number.isFinite(time) && time > 0)
     .sort((a, b) => b - a)[0];
   const fallbackStart = new Date(new Date(checkedAt).getTime() - htgScanIntervalMinutes(env) * 60000).toISOString();
+  const latestFreshSource = latestHtgStateSourceFetchedAt(previousRows);
   const startAt = firstString(
-    tracker?.last_checked_at,
+    latestFreshSource,
     latestPreviousCheck ? new Date(latestPreviousCheck).toISOString() : "",
+    tracker?.last_checked_at,
     tracker?.metadata?.hatch_baseline?.captured_at,
     fallbackStart
   );
   return { start: { captured_at: startAt }, end };
+}
+
+function latestHtgStateSourceFetchedAt(rows) {
+  const times = (rows || [])
+    .map(row => firstString(row?.metadata?.source_fetched_at))
+    .map(value => ({ value, time: new Date(value || 0).getTime() }))
+    .filter(row => row.value && Number.isFinite(row.time) && row.time > 0)
+    .sort((a, b) => b.time - a.time);
+  return times[0]?.value || "";
+}
+
+function htgInventorySourceFreshnessDecision(previousRows, source) {
+  const currentFetchedAt = firstString(source?.fetched_at);
+  const previousFetchedAt = latestHtgStateSourceFetchedAt(previousRows);
+  const currentTime = new Date(currentFetchedAt || 0).getTime();
+  const previousTime = new Date(previousFetchedAt || 0).getTime();
+  const refresh = plainObject(source?.refresh);
+  const quotaExhausted = refresh.quotaExhausted === true;
+
+  if (!previousFetchedAt) {
+    return {
+      fresh: true,
+      reason: "No prior source timestamp exists; this payload can establish the compact baseline.",
+      current_fetched_at: currentFetchedAt || null,
+      previous_fetched_at: null,
+      source_is_stale: source?.is_stale ?? null,
+      quota_exhausted: quotaExhausted
+    };
+  }
+
+  const advanced = Number.isFinite(currentTime) && currentTime > 0
+    && Number.isFinite(previousTime) && previousTime > 0
+    && currentTime > previousTime;
+  return {
+    fresh: advanced,
+    reason: advanced
+      ? "Big Games returned a newer owned-inventory revision."
+      : quotaExhausted
+        ? "Big Games returned the previous cached revision because the daily refresh quota is exhausted."
+        : "Big Games did not return a newer owned-inventory revision.",
+    current_fetched_at: currentFetchedAt || null,
+    previous_fetched_at: previousFetchedAt || null,
+    source_is_stale: source?.is_stale ?? null,
+    quota_exhausted: quotaExhausted,
+    refresh_used: Number(refresh.used || 0),
+    refresh_limit: Number(refresh.limit || 0),
+    refresh_resets_at: refresh.resetsAt || null,
+    next_refresh_eligible_at: refresh.nextRefreshEligibleAt || null
+  };
 }
 
 function htgStaleAlertWindowMinutes(env) {
@@ -3352,7 +3481,9 @@ function compactHtgStateRow(row) {
     rap: Number(row.rap || 0),
     last_seen_at: row.last_seen_at || null,
     last_checked_at: row.last_checked_at || null,
-    updated_at: row.updated_at || null
+    updated_at: row.updated_at || null,
+    source_fetched_at: row?.metadata?.source_fetched_at || null,
+    source_is_stale: row?.metadata?.source_is_stale ?? null
   };
 }
 
@@ -5304,7 +5435,12 @@ function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
 function htgScanIntervalMinutes(env) {
   const value = Number(env.HTG_SCAN_INTERVAL_MINUTES || env.HATCH_SCAN_INTERVAL_MINUTES || DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
-  return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_HTG_SCAN_INTERVAL_MINUTES;
+  const minimum = envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true)
+    ? MIN_HTG_FORCE_REFRESH_INTERVAL_MINUTES
+    : 5;
+  return Number.isFinite(value)
+    ? Math.max(minimum, Math.min(1440, value))
+    : Math.max(minimum, DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
 }
 function htgMaxConcurrentScans(env) {
   const value = Number(env.HTG_MAX_CONCURRENT_SCANS || 3);

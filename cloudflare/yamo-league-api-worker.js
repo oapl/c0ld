@@ -1133,19 +1133,30 @@ async function handleLeaguePlayerMilestones(request, env) {
     .sort((a, b) => b.points - a.points || a.user_id - b.user_id);
   const generatedAt = new Date().toISOString();
   const storedRanks = [...new Set([1, ...ranks.filter(rank => rank > directLimit)])];
-  const storedRows = await selectLeagueCurrentRows(env, {
-    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_icon,rank,user_id,display_name,points,raw_member,raw_league",
-    league_run_key: `eq.${runKey}`,
-    league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
-    rank: `in.(${storedRanks.join(",")})`,
-    order: "rank.asc",
-    limit: String(storedRanks.length + 5)
-  });
+  const [storedRows, trackedTopLeagueRows] = await Promise.all([
+    selectLeagueCurrentRows(env, {
+      select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_icon,rank,user_id,display_name,points,raw_member,raw_league",
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+      rank: `in.(${storedRanks.join(",")})`,
+      order: "rank.asc",
+      limit: String(storedRanks.length + 5)
+    }),
+    selectLeagueCurrentRows(env, {
+      select: "snapshot_id,fetched_at,league_run_key,league_name,rank",
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${ALL_TOP_LEAGUES_NAME}`,
+      order: "rank.desc",
+      limit: "1"
+    }).catch(() => [])
+  ]);
   const storedByRank = new Map(storedRows.map(row => [toNumber(row.rank), row]));
   const poolMetadataRow = storedByRank.get(1) || storedRows[0] || null;
   const poolMetadata = normalizeRawLeague(poolMetadataRow?.raw_league);
   const poolTotalPlayers = toNumber(poolMetadata.pool_total_players);
   const topLeaguesScanned = toNumber(poolMetadata.pool_top_leagues_scanned);
+  const trackedTopLeagueRankMax = toNumber(trackedTopLeagueRows[0]?.rank);
+  const trackedTopLeagueSnapshotAt = trackedTopLeagueRows[0]?.fetched_at || null;
   const poolSnapshotAt = poolMetadataRow?.fetched_at || null;
   const directAvailable = Math.min(directLimit, livePlayers.length);
 
@@ -1164,6 +1175,8 @@ async function handleLeaguePlayerMilestones(request, env) {
     pool_scan_id: stringOrNull(poolMetadata.pool_scan_id),
     top_leagues_requested: toNumber(poolMetadata.pool_top_leagues_requested),
     top_leagues_scanned: topLeaguesScanned,
+    tracked_top_league_rank_max: trackedTopLeagueRankMax,
+    tracked_top_league_snapshot_at: trackedTopLeagueSnapshotAt,
     simulated_player_count: toNumber(poolMetadata.pool_simulated_player_count),
     total_players: poolTotalPlayers || livePlayers.length,
     top_available: poolTotalPlayers || livePlayers.length,

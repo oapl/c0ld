@@ -2508,7 +2508,7 @@ function robloxStatusDisplayLabel(value) {
 }
 
 async function buildVersionsPersistentPost(env) {
-  const [places, releaseStates] = await Promise.all([
+  const [places, releaseStates, devBlogEvents, versionEvents] = await Promise.all([
     supabaseSelect(env, PS99_PLACES_TABLE, {
       select: "place_id,place_name,root_place,latest_version,latest_published_at,latest_checked_at,updated_at",
       is_active: "eq.true",
@@ -2520,9 +2520,20 @@ async function buildVersionsPersistentPost(env) {
       channel: `eq.${robloxReleaseChannel(env)}`,
       binary_type: `eq.${robloxReleaseBinaryType(env)}`,
       limit: "1"
-    })
+    }),
+    supabaseSelect(env, PS99_DEV_BLOG_EVENTS_TABLE, {
+      select: "event_id,post_id,title,url,published_at,detected_at,created_at",
+      order: "detected_at.desc,id.desc",
+      limit: "1"
+    }).catch(() => []),
+    supabaseSelect(env, PS99_VERSION_EVENTS_TABLE, {
+      select: "place_id,place_name,previous_version,current_version,current_published_at,detected_at,created_at",
+      order: "detected_at.desc",
+      limit: "5000"
+    }).catch(() => [])
   ]);
   const release = releaseStates[0] || null;
+  const latestDevBlog = devBlogEvents[0] || null;
   const normalizedPlaces = places
     .map(place => ({
       place_id: toNumber(place.place_id),
@@ -2533,6 +2544,10 @@ async function buildVersionsPersistentPost(env) {
       checked_at: safeIso(place.latest_checked_at || place.updated_at)
     }))
     .filter(place => !isHiddenPersistentVersionPlace(place))
+    .map(place => ({
+      ...place,
+      update_reference: persistentVersionUpdateReference(place, versionEvents, latestDevBlog)
+    }))
     .sort(comparePersistentVersionPlaces);
   const checkedAt = [
     safeIso(release?.last_checked_at || release?.updated_at),
@@ -2549,7 +2564,10 @@ async function buildVersionsPersistentPost(env) {
         : [];
       return [
         ...gap,
-        `**${escapeDiscordMarkdown(persistentVersionPlaceName(place))}:** ${place.version ?? "Unknown"}${published}`
+        `**${escapeDiscordMarkdown(persistentVersionPlaceName(place))}:** ${place.version ?? "Unknown"}${published}`,
+        ...(place.update_reference
+          ? [`-# *Updated ${place.update_reference.count.toLocaleString("en-US")} ${place.update_reference.count === 1 ? "time" : "times"} since launch version ${place.update_reference.launch_version.toLocaleString("en-US")}*`]
+          : [])
       ];
     })
     : ["No tracked PS99 place versions are stored yet."];
@@ -2573,6 +2591,12 @@ async function buildVersionsPersistentPost(env) {
     digestSource: {
       checked_at: checkedAt,
       places: normalizedPlaces,
+      latest_dev_blog: latestDevBlog ? {
+        post_id: latestDevBlog.post_id,
+        title: latestDevBlog.title,
+        url: latestDevBlog.url,
+        published_at: safeIso(latestDevBlog.published_at || latestDevBlog.detected_at)
+      } : null,
       roblox_release: release ? {
         channel: release.channel,
         binary_type: release.binary_type,
@@ -2583,6 +2607,34 @@ async function buildVersionsPersistentPost(env) {
       } : null
     },
     snapshotAt: checkedAt
+  };
+}
+
+function persistentVersionUpdateReference(place, versionEvents, latestDevBlog) {
+  const currentVersion = toNumber(place?.version);
+  const placeId = toNumber(place?.place_id);
+  // BIG Games exposes many blog dates at midnight rather than at the actual
+  // launch time. The alert detection timestamp is the reliable launch anchor.
+  const blogTime = isoToMs(latestDevBlog?.detected_at || latestDevBlog?.published_at || latestDevBlog?.created_at);
+  if (!currentVersion || !placeId || blogTime === null) return null;
+
+  const candidates = (Array.isArray(versionEvents) ? versionEvents : [])
+    .filter(event => toNumber(event?.place_id) === placeId)
+    .map(event => ({
+      version: toNumber(event?.current_version),
+      time: isoToMs(event?.current_published_at || event?.detected_at || event?.created_at)
+    }))
+    .filter(event => event.version && event.time !== null && Math.abs(event.time - blogTime) <= 24 * 60 * 60 * 1000)
+    .sort((a, b) => Math.abs(a.time - blogTime) - Math.abs(b.time - blogTime) || a.time - b.time);
+  const launchVersion = candidates[0]?.version || null;
+  if (!launchVersion || launchVersion > currentVersion) return null;
+  return {
+    launch_version: launchVersion,
+    count: Math.max(0, Math.round(currentVersion - launchVersion)),
+    dev_blog_post_id: latestDevBlog?.post_id || null,
+    dev_blog_title: latestDevBlog?.title || null,
+    dev_blog_url: latestDevBlog?.url || null,
+    dev_blog_published_at: safeIso(latestDevBlog?.published_at || latestDevBlog?.detected_at)
   };
 }
 
@@ -2742,6 +2794,8 @@ async function buildLeaguePlayerRewardCutoffs(env, ranks) {
     pool_scan_id: payload.pool_scan_id || null,
     top_leagues_requested: toNumber(payload.top_leagues_requested) || null,
     top_leagues_scanned: toNumber(payload.top_leagues_scanned) || null,
+    tracked_top_league_rank_max: toNumber(payload.tracked_top_league_rank_max) || null,
+    tracked_top_league_snapshot_at: safeIso(payload.tracked_top_league_snapshot_at),
     simulated_player_count: toNumber(payload.simulated_player_count) || null,
     total_global_players: toNumber(payload.total_players) || toNumber(payload.top_available) || null,
     ranks,
@@ -2852,6 +2906,7 @@ function rewardCutoffDiscordPayload(dashboard) {
   const globalLines = rewardCutoffLines(globalSource.cutoffs, playerRewardRangeLabel);
   const totalPlayers = toNumber(leaguePlayers.total_global_players);
   const topLeaguesScanned = toNumber(leaguePlayers.top_leagues_scanned);
+  const trackedTopLeagueRankMax = toNumber(leaguePlayers.tracked_top_league_rank_max);
   const directLimit = toNumber(leaguePlayers.direct_authoritative_limit);
   if (eventMode === "leagues" && leaguePlayers.pool_completed && topLeaguesScanned && directLimit) {
     globalLines.push(
@@ -2860,7 +2915,13 @@ function rewardCutoffDiscordPayload(dashboard) {
       + `${Math.round(topLeaguesScanned).toLocaleString("en-US")} League rosters.`
     );
   } else if (eventMode === "leagues" && directLimit) {
-    globalLines.push(`-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; the extended League roster pool has not been built yet.`);
+    const trackedStandingText = trackedTopLeagueRankMax
+      ? `The Top ${Math.round(trackedTopLeagueRankMax).toLocaleString("en-US")} League standings are tracked`
+      : "League standings are tracked separately";
+    globalLines.push(
+      `-# Top ${Math.round(directLimit).toLocaleString("en-US")} players are direct. ${trackedStandingText}; `
+      + "individual-player cutoffs beyond that require the separate League-roster scan."
+    );
   } else if (eventMode === "leagues" && leaguePlayers.pool_is_partial) {
     globalLines.push(totalPlayers
       ? `-# Based on the latest ${Math.round(totalPlayers).toLocaleString("en-US")} League players currently available.`
@@ -7779,7 +7840,9 @@ async function handleOfflinePingTestPost(request, env) {
 async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
   const thresholdMinutes = clamp(Number(config.minutes_threshold || offlineDefaultMinutes(env)), 1, 1440);
   const postRateMinutes = clamp(Number(config.post_rate_minutes || offlineDefaultPostRateMinutes(env)), 1, 1440);
-  const lookbackMinutes = thresholdMinutes + offlineLookbackBufferMinutes(env);
+  // Keep enough history to calculate a real one-hour delta even when the
+  // newest League snapshot arrives several minutes behind the cron check.
+  const lookbackMinutes = Math.max(90, thresholdMinutes + offlineLookbackBufferMinutes(env));
   const guildId = String(config.guild_id || "");
   const requestedSourceMode = normalizeOfflineWatchSourceMode(options.sourceMode);
   const includeClanWatches = requestedSourceMode !== "league" && options.skipClanWatches !== true;
@@ -8199,6 +8262,21 @@ async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
   }
   if (!currentRows.length) {
     currentRows = await fetchOfflineLeagueLatestSnapshotRows(env, leagueNameText);
+  }
+
+  const fallbackUserIds = currentRows
+    .map(row => ({ id: toNumber(row.user_id), name: String(row.display_name || "").trim() }))
+    .filter(row => row.id && isFallbackUsername(row.name, row.id))
+    .map(row => row.id);
+  if (fallbackUserIds.length) {
+    const resolvedUsernames = await resolveRobloxUsernames(fallbackUserIds, env).catch(() => new Map());
+    currentRows = currentRows.map(row => {
+      const userId = toNumber(row.user_id);
+      const resolved = userId ? String(resolvedUsernames.get(userId) || "").trim() : "";
+      return resolved && !isFallbackUsername(resolved, userId)
+        ? { ...row, display_name: resolved }
+        : row;
+    });
   }
 
   const normalizedCurrent = mergeOfflineCurrentRows(currentRows.map(row => normalizeOfflineMemberRow(row, "league_current")));

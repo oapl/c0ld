@@ -23,8 +23,8 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 # HTG Big Games app.
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
-HTG_SCAN_INTERVAL_MINUTES = "5"
-HTG_SHARD_COUNT = "5"
+HTG_SCAN_INTERVAL_MINUTES = "15"
+HTG_SHARD_COUNT = "15"
 HTG_MAX_CONCURRENT_SCANS = "3"
 HTG_REQUIRE_SOURCE_FILTER = "true"
 # Diagnostic age threshold for a pending gain whose trade/booth/mail source
@@ -34,6 +34,9 @@ HTG_SOURCE_FILTER_HOLD_MINUTES = "20"
 # If a tracker was not checked within this window, HTG advances the compact
 # baseline without posting delayed gains all at once.
 HTG_STALE_ALERT_WINDOW_MINUTES = "30"
+# Default false. Leave false so a fresh inventory received after an outage is
+# source-filtered and alerted instead of silently absorbed into the baseline.
+HTG_DROP_STALE_GAINS = "false"
 HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"

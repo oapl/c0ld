@@ -5373,7 +5373,7 @@ async function fetchTopPlayersCommandData(env) {
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/global/leaderboard", apiBase);
   apiUrl.searchParams.set("limit", String(TOP_COMMAND_LIMIT));
-  apiUrl.searchParams.set("source", "clans");
+  apiUrl.searchParams.set("source", "auto");
   apiUrl.searchParams.set("avatars", "0");
   apiUrl.searchParams.set("gains", "0");
   const response = await fetchClanApi(env, apiUrl, {
@@ -10416,14 +10416,11 @@ async function fetchGlobalLeaderboardRewardCutoffsPayload(env) {
 }
 
 async function fetchGlobalLeaderboardRewardMode(env) {
-  const configured = String(env.GLOBAL_LEADERBOARD_SOURCE || "").trim().toLowerCase();
-  if (["league", "leagues"].includes(configured)) return "leagues";
-  if (["clan", "clans", "battle", "clan-battle"].includes(configured)) return "clans";
-
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/global/leaderboard", apiBase);
   apiUrl.searchParams.set("limit", "1");
   apiUrl.searchParams.set("gains", "false");
+  apiUrl.searchParams.set("source", "auto");
 
   const response = await fetchClanApi(env, apiUrl, {
     headers: {
@@ -10503,6 +10500,10 @@ function normalizeLeagueRewardPayload(payload, ranks, type) {
     league_run_label: payload.league_run_label || payload.league_run_key || null,
     league_end_at: payload.league_end_at || payload.league_run_end_at || null,
     source: payload.source || null,
+    direct_authoritative_limit: finiteNumber(payload.direct_authoritative_limit),
+    pool_completed: payload.pool_completed === true,
+    top_leagues_scanned: finiteNumber(payload.top_leagues_scanned),
+    tracked_top_league_rank_max: finiteNumber(payload.tracked_top_league_rank_max),
     top_available: finiteNumber(payload.top_available),
     total_ranked: finiteNumber(payload.total_players ?? payload.top_available),
     available_rank_max: finiteNumber(payload.top_available) || rows.reduce((max, row) => Math.max(max, Number(row.rank) || 0), 0),
@@ -10720,6 +10721,14 @@ function rewardPoolSourceLabel(payload, type) {
 function rewardCutoffNote(payload) {
   const unavailable = (payload.cutoffs || []).some(cutoff => cutoff.points === null || cutoff.points === undefined);
   if (payload.pool_is_partial) {
+    const directLimit = positiveInteger(payload.direct_authoritative_limit);
+    const trackedLeagueRank = positiveInteger(payload.tracked_top_league_rank_max);
+    if (directLimit) {
+      const trackedText = trackedLeagueRank
+        ? `The Top ${fullNumber(trackedLeagueRank)} League standings are tracked separately`
+        : "League standings are tracked separately";
+      return `Top ${fullNumber(directLimit)} players are direct. ${trackedText}; individual-player cutoffs beyond that require the separate League-roster scan.`;
+    }
     return "The League player leaderboard source is partial; deeper reward ranks may not be available yet.";
   }
   if ((payload.reward_kind || payload.type) === "clans" && unavailable) {
@@ -10992,6 +11001,8 @@ async function fetchGlobalSearchPayload(query, env) {
   const apiUrl = clanApiUrl(env, "/api/global/search", apiBase);
   apiUrl.searchParams.set("clan", scanClan);
   apiUrl.searchParams.set("q", query);
+  apiUrl.searchParams.set("scope", "pool");
+  apiUrl.searchParams.set("source", "auto");
   apiUrl.searchParams.set("avatars", "1");
   apiUrl.searchParams.set("history_hours", String(searchChartHistoryHours(env)));
   apiUrl.searchParams.set("history_limit", String(searchChartHistoryLimit(env)));
@@ -11057,10 +11068,11 @@ async function fetchGlobalSearchPayload(query, env) {
 }
 
 async function fetchGlobalCurrentFallback(env, apiBase, scanClan, query) {
-  const currentUrl = clanApiUrl(env, "/api/global/current", apiBase);
-  currentUrl.searchParams.set("clan", scanClan);
+  const currentUrl = clanApiUrl(env, "/api/global/leaderboard", apiBase);
   currentUrl.searchParams.set("limit", "1000");
   currentUrl.searchParams.set("avatars", "1");
+  currentUrl.searchParams.set("source", "auto");
+  currentUrl.searchParams.set("gains", "false");
 
   const res = await fetchClanApi(env, currentUrl, {
     headers: {
@@ -11077,7 +11089,7 @@ async function fetchGlobalCurrentFallback(env, apiBase, scanClan, query) {
       status: res.status,
       payload: {
         ok: false,
-        message: `Global search endpoint failed and current fallback failed (${res.status}).`
+        message: `Global search endpoint failed and automatic leaderboard fallback failed (${res.status}).`
       }
     };
   }
@@ -11099,13 +11111,15 @@ async function fetchGlobalCurrentFallback(env, apiBase, scanClan, query) {
       ok: true,
       query,
       clan_name: scanClan,
+      source_mode: payload.source_mode || null,
+      source_label: payload.source_label || null,
       row,
       history: []
     } : {
       ok: false,
       query,
       clan_name: scanClan,
-      message: `No current global-rank row matched "${query}".`
+      message: `No current automatic leaderboard row matched "${query}".`
     }
   };
 }

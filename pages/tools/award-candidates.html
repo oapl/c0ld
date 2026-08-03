@@ -27,9 +27,9 @@ main{max-width:1440px;margin:0 auto;padding:22px 24px 32px}
 h1{margin:0 0 5px;font-size:30px}
 .subtle{color:var(--muted);font-size:13px}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-select,button{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
+select,button,input{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);padding:9px 11px;font-size:14px;outline:none}
 button{cursor:pointer}
-button:hover,select:focus{border-color:var(--link);background:var(--hover)}
+button:hover,select:focus,input:focus{border-color:var(--link);background:var(--hover)}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
 .card{padding:16px;text-align:center;min-height:92px;display:flex;flex-direction:column;justify-content:center}
 .label{color:var(--muted);font-size:13px;margin-bottom:6px}
@@ -74,6 +74,9 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
 .milestone-member{color:var(--text);white-space:nowrap}
 .milestone-member+.milestone-member::before{content:" · ";color:var(--muted)}
 .downtime-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.downtime-range{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.downtime-range label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:11px;font-weight:700}
+.downtime-range input{min-width:190px;padding:7px 9px;color-scheme:dark}
 .downtime-scroll{width:100%;overflow-x:auto}
 .downtime-head,.downtime-row{display:grid;grid-template-columns:52px minmax(210px,1fr) 84px 128px 84px 128px;gap:14px;align-items:center;min-width:760px;padding:10px 16px}
 .downtime-head{background:var(--panel-2);color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
@@ -158,6 +161,12 @@ button:hover,select:focus{border-color:var(--link);background:var(--hover)}
         <div class="subtle">Final roster ordered by highest downtime percentage.</div>
       </div>
       <div class="downtime-actions">
+        <div class="downtime-range" aria-label="Downtime date range">
+          <label>From<input id="downtime-from" type="datetime-local"></label>
+          <label>To<input id="downtime-to" type="datetime-local"></label>
+          <button id="apply-downtime-range-btn" type="button">Apply Range</button>
+          <button id="reset-downtime-range-btn" type="button">Reset</button>
+        </div>
         <div id="downtime-meta" class="subtle copy-status"></div>
         <button id="copy-downtime-only-btn" type="button" disabled>Copy Downtime only</button>
         <button id="copy-downtime-btn" type="button" disabled>Copy for Discord</button>
@@ -199,6 +208,7 @@ let battleSelectionPinned=new URLSearchParams(location.search).has("battle");
 let downtimeDiscordChunks=[];
 let downtimeDiscordChunkIndex=0;
 let downtimeOnlyText="";
+let downtimeRangeLoading=false;
 const BATTLE_DISCOVERY_INTERVAL_MS=5*60*1000;
 
 document.title=CLAN_LABEL+" Superlative Candidates";
@@ -223,6 +233,10 @@ const els={
   customMeta:document.getElementById("custom-meta"),
   downtimeMeta:document.getElementById("downtime-meta"),
   downtimeList:document.getElementById("downtime-list"),
+  downtimeFrom:document.getElementById("downtime-from"),
+  downtimeTo:document.getElementById("downtime-to"),
+  applyDowntimeRangeBtn:document.getElementById("apply-downtime-range-btn"),
+  resetDowntimeRangeBtn:document.getElementById("reset-downtime-range-btn"),
   copyDowntimeOnlyBtn:document.getElementById("copy-downtime-only-btn"),
   copyDowntimeBtn:document.getElementById("copy-downtime-btn"),
   milestonesMeta:document.getElementById("milestones-meta"),
@@ -545,6 +559,46 @@ function buildSnapshots(rows){
     const rows=[...byPlayer.values()].sort((a,b)=>(rankFor(a)??999999)-(rankFor(b)??999999)||pointsFor(b)-pointsFor(a));
     return {time:Number(time),rows};
   }).filter(snapshot=>snapshot.rows.length).sort((a,b)=>a.time-b.time);
+}
+
+function downtimeRange(){
+  const from=els.downtimeFrom.value?new Date(els.downtimeFrom.value).getTime():null;
+  const to=els.downtimeTo.value?new Date(els.downtimeTo.value).getTime():null;
+  return {
+    from:Number.isFinite(from)?from:null,
+    to:Number.isFinite(to)?to:null
+  };
+}
+
+function snapshotsForDowntimeRange(snapshots,range=downtimeRange()){
+  const source=Array.isArray(snapshots)?snapshots:[];
+  if(!source.length)return[];
+  const sourceStart=source[0].time;
+  const sourceEnd=source[source.length-1].time;
+  const start=clamp(range.from??sourceStart,sourceStart,sourceEnd);
+  const end=clamp(range.to??sourceEnd,sourceStart,sourceEnd);
+  if(end<=start)return[];
+  let baseline=source[0];
+  for(const snapshot of source){if(snapshot.time<=start)baseline=snapshot;else break}
+  const selected=[{time:start,rows:baseline.rows}];
+  for(const snapshot of source){
+    if(snapshot.time>start&&snapshot.time<end)selected.push(snapshot);
+    if(snapshot.time===end)selected.push(snapshot);
+  }
+  const last=selected[selected.length-1];
+  if(last.time<end){
+    let endState=baseline;
+    for(const snapshot of source){if(snapshot.time<=end)endState=snapshot;else break}
+    selected.push({time:end,rows:endState.rows});
+  }
+  return selected.filter((snapshot,index)=>index===0||snapshot.time!==selected[index-1].time);
+}
+
+function downtimeRangeLabel(range=downtimeRange()){
+  if(range.from&&range.to)return "From "+fmtDate(range.from)+" to "+fmtDate(range.to);
+  if(range.from)return "From "+fmtDate(range.from);
+  if(range.to)return "Through "+fmtDate(range.to);
+  return "Entire battle";
 }
 
 function rememberStat(stats,row){
@@ -1369,6 +1423,44 @@ function renderDowntimeLeaderboard(inputRows,battleLabel){
   resetDowntimeCopy(rows,battleLabel);
 }
 
+function renderRangedDowntime(snapshots,battleLabel){
+  const range=downtimeRange();
+  const rangedSnapshots=snapshotsForDowntimeRange(snapshots,range);
+  const rangedStats=computeStats(rangedSnapshots);
+  renderDowntimeLeaderboard(latestRosterDowntimeRows(rangedStats),battleLabel);
+  els.downtimeMeta.textContent=(els.downtimeMeta.textContent?els.downtimeMeta.textContent+" · ":"")+downtimeRangeLabel(range);
+  return rangedSnapshots;
+}
+
+async function loadDowntimeRange(){
+  if(loading||downtimeRangeLoading)return;
+  const range=downtimeRange();
+  if(range.from!==null&&range.to!==null&&range.from>=range.to){
+    els.downtimeMeta.textContent="The From time must be earlier than the To time.";
+    return;
+  }
+  downtimeRangeLoading=true;
+  els.applyDowntimeRangeBtn.disabled=true;
+  els.resetDowntimeRangeBtn.disabled=true;
+  els.downtimeMeta.textContent="Loading snapshots for the selected range...";
+  try{
+    const selected=els.battleSelect.value||"current";
+    const current=await fetchCurrent(selected);
+    const effectiveBattle=selected==="current"?(current.battle||battles[0]?.battle||"current"):selected;
+    const historyRows=await fetchHistory(effectiveBattle);
+    const snapshots=buildSnapshots(mergeCurrentRows(historyRows,current,effectiveBattle));
+    if(!snapshots.length)throw new Error("No battle snapshots were found for "+effectiveBattle+".");
+    const rangedSnapshots=renderRangedDowntime(snapshots,effectiveBattle);
+    if(!rangedSnapshots.length)throw new Error("No snapshots fall inside that date range.");
+  }catch(error){
+    els.downtimeMeta.textContent=error.message||String(error);
+  }finally{
+    els.applyDowntimeRangeBtn.disabled=false;
+    els.resetDowntimeRangeBtn.disabled=false;
+    downtimeRangeLoading=false;
+  }
+}
+
 async function copyText(text){
   if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(text);
   const area=document.createElement("textarea");
@@ -1547,7 +1639,8 @@ async function loadFullCandidates(){
     renderSummary(effectiveBattle,current,snapshots,stats);
     renderAwards(awardDefinitions(stats));
     renderCustom(stats);
-    renderDowntimeLeaderboard(latestRosterDowntimeRows(stats),effectiveBattle);
+    if(els.downtimeFrom.value||els.downtimeTo.value)renderRangedDowntime(snapshots,effectiveBattle);
+    else renderDowntimeLeaderboard(latestRosterDowntimeRows(stats),effectiveBattle);
     await loadMilestones();
     setStatus("Loaded "+stats.length.toLocaleString("en-US")+" players from "+snapshots.length.toLocaleString("en-US")+" snapshots.");
     syncBattleUrl(selected);
@@ -1570,9 +1663,17 @@ async function loadFullCandidates(){
 els.loadBtn.addEventListener("click",loadCandidates);
 els.battleSelect.addEventListener("change",()=>{
   battleSelectionPinned=els.battleSelect.value!==latestBattleKey();
+  els.downtimeFrom.value="";
+  els.downtimeTo.value="";
   loadCandidates();
 });
 els.fullBtn.addEventListener("click",loadFullCandidates);
+els.applyDowntimeRangeBtn.addEventListener("click",loadDowntimeRange);
+els.resetDowntimeRangeBtn.addEventListener("click",()=>{
+  els.downtimeFrom.value="";
+  els.downtimeTo.value="";
+  loadCandidates();
+});
 els.copyDowntimeOnlyBtn.addEventListener("click",copyDowntimeOnly);
 els.copyDowntimeBtn.addEventListener("click",copyNextDowntimePart);
 
