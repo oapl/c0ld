@@ -5225,6 +5225,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     .filter(row => !isLeagueAggregateMemberRow(row))
     .map((row, index) => ({
       row,
+      id: String(row.user_id || row.UserID || "").trim(),
       name: leagueMemberName(row, index + 1),
       points: finiteNumber(row.total_points ?? row.points),
       gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
@@ -5233,16 +5234,17 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)))
     .slice(0, 4);
 
+  await Promise.all(members.map(async item => {
+    const result = await fetchLeaguePlayerPoolRank(item.name, item.id, env).catch(() => null);
+    item.globalRank = positiveInteger(result?.rank);
+  }));
+
   const leaguePoints = finiteNumber(payload.league_points)
     ?? members.reduce((sum, item) => sum + Math.max(0, item.points || 0), 0);
   const hourlyGain = rows
     .map(row => finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain))
     .filter(value => value !== null)
     .reduce((sum, value) => sum + value, 0);
-
-  const contributions = members.length
-    ? members.map((item, index) => `#${index + 1} ${escapeDiscordMarkdown(item.name)} · ${shortNumber(item.points)} points · ${shortNumber(item.gain1h ?? 0)}/h`)
-    : ["No member contributions found."];
 
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
   const snapshotAt = payload.snapshot_at || payload.fetched_at || payload.updated_at;
@@ -5253,7 +5255,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
   const leagueDetails = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
     content: [
-      `## League ${escapeDiscordMarkdown(displayLeagueName)}`,
+      `## ${escapeDiscordMarkdown(displayLeagueName)}`,
       `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
       `**Global Rank**: ${rank(payload.league_rank)}`,
       freshnessLine
@@ -5278,8 +5280,9 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     { type: COMPONENT_TYPE_SEPARATOR },
     {
       type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: `### Contributions\n${contributions.join("\n")}`
-    }
+      content: "### League Members"
+    },
+    ...leagueMemberComponents(members, env)
   ];
 
   const message = {
@@ -5317,9 +5320,47 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     // The command should still answer if the history chart cannot be rendered.
   }
 
-  containerComponents.push(...leagueChartComponents(displayLeagueName, chartHours));
-
   return message;
+}
+
+function leagueMemberComponents(members, env) {
+  if (!members.length) {
+    return [{
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: "No League members found."
+    }];
+  }
+
+  const components = [];
+  members.forEach((item, index) => {
+    if (index > 0) components.push({ type: COMPONENT_TYPE_SEPARATOR });
+
+    const globalRank = positiveInteger(item.globalRank) ? rank(item.globalRank) : "-";
+    const content = [
+      `### #${index + 1}  ${escapeDiscordMarkdown(item.name || "Unknown")}`,
+      `**${shortNumber(item.points)} points**  ·  **${shortNumber(item.gain1h ?? 0)}/h**  ·  🌍 Global **${globalRank}**`
+    ].join("\n");
+    const avatarUrl = absoluteProfileAssetUrl(
+      item.row?.avatar_url || item.row?.avatarUrl || item.row?.thumbnail_url || item.row?.thumbnailUrl,
+      env
+    );
+
+    if (avatarUrl) {
+      components.push({
+        type: COMPONENT_TYPE_SECTION,
+        components: [{ type: COMPONENT_TYPE_TEXT_DISPLAY, content }],
+        accessory: {
+          type: COMPONENT_TYPE_THUMBNAIL,
+          media: { url: avatarUrl },
+          description: `${item.name || "League member"} avatar`
+        }
+      });
+    } else {
+      components.push({ type: COMPONENT_TYPE_TEXT_DISPLAY, content });
+    }
+  });
+
+  return components;
 }
 
 function leagueInfoErrorMessage(err, env) {
@@ -6677,7 +6718,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   ]);
   const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
-  const height = 900;
+  const height = 1040;
   const color = searchChartBoardColors();
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const members = leagueChartMembers(payload).slice(0, 4);
@@ -6693,10 +6734,10 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   searchChartDrawAvatarBadge(canvas, fonts, displayLeagueName, leagueIcon, width / 2 - 47, 70, 94, color);
   searchChartDrawPlayerHeader(canvas, fonts, displayLeagueName, rank(payload?.league_rank), width / 2, 91, color);
 
-  const chartPanel = { x: 54, y: 206, w: 1492, h: 614 };
+  const chartPanel = { x: 54, y: 206, w: 1492, h: 760 };
   hourlyDrawPanel(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, color.panelDeep, color.line);
   hourlyDrawColumnAura(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, 1, color);
-  hourlyDrawColumnHeader(canvas, fonts, chartPanel.x, chartPanel.y, chartPanel.w, 50, ["Member Points", `Last ${hours} Hour${hours === 1 ? "" : "s"}`], 1, color);
+  hourlyDrawColumnHeader(canvas, fonts, chartPanel.x, chartPanel.y, chartPanel.w, 50, ["Member Growth", `Last ${hours} Hour${hours === 1 ? "" : "s"}`], 1, color);
 
   if (!series.some(item => item.points.length >= 1)) {
     const emptyPlot = { x: chartPanel.x + 56, y: chartPanel.y + 84, w: chartPanel.w - 104, h: 430 };
@@ -6716,7 +6757,18 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
       points: item.points.filter(point => point.t >= chartMinT && point.t <= chartMaxT)
     }))
     .filter(item => item.points.length);
-  const visiblePoints = visibleSeries.flatMap(item => item.points);
+  const performanceSeries = visibleSeries.map(item => {
+    const baseline = item.points[0]?.value ?? 0;
+    return {
+      ...item,
+      points: item.points.map(point => ({
+        ...point,
+        rawValue: point.value,
+        value: Math.max(0, point.value - baseline)
+      }))
+    };
+  });
+  const visiblePoints = performanceSeries.flatMap(item => item.points);
   const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, chartMaxT).catch(() => ({ updates: [], restarts: [] }));
   const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
   const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
@@ -6768,13 +6820,25 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.orange, 10, 5);
   });
 
-  visibleSeries.forEach(item => {
-    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), yFor, item.color, 3);
+  performanceSeries.forEach((item, index) => {
+    const lineOffset = (index - (performanceSeries.length - 1) / 2) * 2;
+    const lineY = point => yFor(point) + lineOffset;
+    const glow = [item.color[0], item.color[1], item.color[2], 72];
+    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), lineY, glow, 7);
+    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), lineY, item.color, 4);
     const last = item.points[item.points.length - 1];
-    if (last) chartFillCircle(canvas, xForTime(last.t), yFor(last), 4, item.color);
+    if (last) chartFillCircle(canvas, xForTime(last.t), lineY(last), 5, item.color);
   });
 
-  leagueDrawColoredMemberLegend(canvas, fonts, visibleSeries, chartPanel.x + 34, chartPanel.y + chartPanel.h - 82, chartPanel.w - 68, color);
+  leagueDrawMemberPerformanceTable(
+    canvas,
+    fonts,
+    performanceSeries,
+    chartPanel.x + 34,
+    chartPanel.y + 514,
+    chartPanel.w - 68,
+    color
+  );
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
@@ -6818,22 +6882,67 @@ async function fetchLeaguePlayerPoolRank(query, userId, env) {
   return null;
 }
 
-function leagueDrawColoredMemberLegend(canvas, fonts, series, x, y, width, color) {
+function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, color) {
   const visible = (series || []).slice(0, 4);
-  const gap = 12;
-  const columnWidth = Math.floor((width - gap * 3) / 4);
-  visible.forEach((item, index) => {
-    const itemX = x + index * (columnWidth + gap);
-    const cardHeight = 48;
-    hourlyBlendRoundedRect(canvas, itemX, y, columnWidth, cardHeight, 7, color.inset, 220);
-    canvas.fillRect(itemX, y, 4, cardHeight, item.color);
-    canvas.fillRect(itemX, y + cardHeight - 1, columnWidth, 1, color.line);
-    hourlyDrawFittedText(canvas, fonts.regular, String(index + 1).padStart(2, "0"), itemX + 16, y + 9, 12, color.quiet, 24);
-    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(item.name, 28), itemX + 48, y + 8, 16, item.color, columnWidth - 158);
-    hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, `${shortNumber(item.latestPoints)} pts`, itemX + columnWidth - 14, y + 8, 16, color.white, 96);
-    canvas.fillRect(itemX + 48, y + 34, columnWidth - 62, 3, color.bar);
-    canvas.fillRect(itemX + 48, y + 34, Math.max(22, Math.min(columnWidth - 62, Math.round((columnWidth - 62) * 0.34))), 3, item.color);
-  });
+  const headerHeight = 30;
+  const rowHeight = 43;
+  const columns = [
+    { label: "Rank", x: 18, width: 72, align: "left" },
+    { label: "Player", x: 92, width: 410, align: "left" },
+    { label: "Total Points", x: 690, width: 150, align: "right" },
+    { label: "1 Hour", x: 850, width: 120, align: "right" },
+    { label: "6 Hours", x: 990, width: 120, align: "right" },
+    { label: "12 Hours", x: 1130, width: 120, align: "right" },
+    { label: "24 Hours", x: 1270, width: 120, align: "right" }
+  ];
+  const totalHeight = headerHeight + rowHeight * Math.max(4, visible.length);
+
+  hourlyBlendRoundedRect(canvas, x, y, width, totalHeight, 8, color.inset, 225);
+  hourlyDrawPanelFrame(canvas, x, y, width, totalHeight, color.line);
+  canvas.fillRect(x, y + headerHeight, width, 1, color.line);
+
+  for (const column of columns) {
+    if (column.align === "right") {
+      hourlyDrawRightText(canvas, fonts.regular, column.label, x + column.x + column.width, y + 7, 13, color.muted, column.width);
+    } else {
+      canvas.drawFontText(fonts.regular, column.label, x + column.x, y + 7, 13, color.muted, column.width);
+    }
+  }
+
+  for (let index = 0; index < 4; index += 1) {
+    const item = visible[index] || null;
+    const rowY = y + headerHeight + index * rowHeight;
+    if (index % 2 === 0) canvas.fillRect(x + 1, rowY + 1, width - 2, rowHeight - 1, [18, 25, 37, 190]);
+    if (index > 0) canvas.fillRect(x + 1, rowY, width - 2, 1, color.line);
+    if (!item) continue;
+
+    canvas.fillRect(x + 1, rowY, 4, rowHeight, item.color);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, `#${index + 1}`, x + 18, rowY + 11, 16, color.white, 58);
+    chartFillCircle(canvas, x + 103, rowY + 21, 5, item.color);
+    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(item.name, 34), x + 119, rowY + 9, 17, item.color, 380);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestPoints, x + 840, rowY + 10, 16, color, false, 140);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestGain, x + 970, rowY + 10, 16, color, true, 110);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain6h, x + 1110, rowY + 10, 16, color, true, 110);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain12h, x + 1250, rowY + 10, 16, color, true, 110);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain24h, x + 1390, rowY + 10, 16, color, true, 110);
+  }
+}
+
+function leagueDrawPerformanceValue(canvas, fonts, value, rightX, y, size, color, signed, maxWidth) {
+  const number = finiteNumber(value);
+  const text = number === null
+    ? "—"
+    : signed && number > 0
+      ? `+${shortNumber(number)}`
+      : shortNumber(number);
+  const textColor = number === null
+    ? color.muted
+    : signed && number > 0
+      ? color.green
+      : number < 0
+        ? color.red
+        : color.white;
+  hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, text, rightX, y, size, textColor, maxWidth);
 }
 
 function leagueDrawSegmentedPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
@@ -6858,7 +6967,10 @@ function leagueChartMembers(payload) {
       id: String(row.user_id || row.UserID || "").trim(),
       name: leagueMemberName(row, index + 1),
       points: finiteNumber(row.total_points ?? row.points),
-      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
+      gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain),
+      gain6h: finiteNumber(row.gain_6h ?? row.six_hour_gain),
+      gain12h: finiteNumber(row.gain_12h ?? row.twelve_hour_gain),
+      gain24h: finiteNumber(row.gain_24h ?? row.daily_gain ?? row.twenty_four_hour_gain)
     }))
     .filter(item => item.id && item.points !== null)
     .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)));
@@ -6887,7 +6999,9 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const colors = leagueChartPalette();
 
   return members.map((member, index) => {
-    const samples = leagueDedupPointSamples([...(byUser.get(member.id) || []), { time: currentAt, points: member.points }])
+    const samples = leagueQuarterHourPointSamples(
+      leagueDedupPointSamples([...(byUser.get(member.id) || []), { time: currentAt, points: member.points }])
+    )
       .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
       .sort((a, b) => a.time - b.time);
     const baseline = [...samples].reverse().find(sample => sample.time < start) || null;
@@ -6922,6 +7036,9 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       points,
       latestPoints: member.points,
       latestGain,
+      gain6h: member.gain6h,
+      gain12h: member.gain12h,
+      gain24h: member.gain24h,
       gain: totalGain,
       totalGain,
       avgGain: totalGain / Math.max(1, hours),
@@ -6964,6 +7081,28 @@ function leagueChartPalette() {
     [255, 166, 87, 255],
     [219, 97, 162, 255]
   ];
+}
+
+function leagueQuarterHourPointSamples(samples) {
+  const intervalMs = 15 * 60 * 1000;
+  const buckets = new Map();
+
+  for (const sample of samples || []) {
+    if (!Number.isFinite(sample?.time) || sample.points === null) continue;
+    const bucketTime = Math.floor(sample.time / intervalMs) * intervalMs;
+    const existing = buckets.get(bucketTime);
+    if (!existing || sample.time >= existing.sourceTime) {
+      buckets.set(bucketTime, {
+        ...sample,
+        time: bucketTime,
+        sourceTime: sample.time
+      });
+    }
+  }
+
+  return [...buckets.values()]
+    .sort((a, b) => a.time - b.time)
+    .map(({ sourceTime, ...sample }) => sample);
 }
 
 function leagueChartTime(value) {
