@@ -1176,9 +1176,13 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact redirect URL registered in the Luna Bot HTG Big Games DB app. Use the short stable Workers callback, for example `https://inventory-detector-worker.opal-dde.workers.dev/cb`, until any custom domain opens with a clean trusted HTTPS certificate from normal browsers and networks. |
 | `HATCH_OAUTH_PUBLIC_BASE` | Public base URL used only for the fallback short OAuth link, usually `https://inventory-detector-worker.opal-dde.workers.dev`. Do not point this at a custom domain that can produce browser certificate warnings. |
 | `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. New HTG approvals always include Profile and Inventory, then default to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Existing account-bound Inventory grants remain usable for scheduled reads; they are not blocked merely because an older approval lacks Profile. |
-| `HTG_SCAN_INTERVAL_MINUTES` | Optional. Defaults to `15`. BIG Games allows 96 forced inventory refreshes per account/day, so Luna enforces a 15-minute minimum while `HATCH_FORCE_REFRESH_ON_SCHEDULE=true`; this is the fastest cadence that remains live for all 24 hours instead of exhausting the allowance after roughly eight hours. |
-| `HTG_SHARD_COUNT` | Optional. Defaults to the HTG scan interval; with an every-minute cron, `HTG_SCAN_INTERVAL_MINUTES=15` and `HTG_SHARD_COUNT=15` spreads accounts across 15 minute shards. Overdue accounts can still recover on the next cron. |
-| `HTG_MAX_CONCURRENT_SCANS` | Optional. Defaults to `3`. Limits simultaneous BIG Games reads so one cron run does not burst every connected HTG account at the API. Overdue accounts automatically bypass their normal minute shard until they recover. |
+| `HTG_SCAN_INTERVAL_MINUTES` | Optional. Set to `16`. BIG Games allows 96 forced inventory refreshes per account/day. Luna reserves six refreshes for OAuth/setup and deliberate diagnostics, leaving a hard scheduled budget of 90; a 16-minute cadence uses at most 90 scheduled refreshes in 24 hours. The Worker enforces this minimum even if the variable is still `15`. |
+| `HTG_SHARD_COUNT` | Optional. Set to `16`. With an every-minute cron, enabled accounts are spread across 16 minute shards. Accounts recovering from an outage or quota reset remain on their assigned shards instead of all refreshing in one burst. The Worker enforces at least the quota-safe interval. |
+| `HTG_MAX_CONCURRENT_SCANS` | Optional. Defaults to `3`. Limits simultaneous BIG Games reads so one cron run cannot burst every connected HTG account at the API. |
+| `HTG_REFRESH_QUOTA_LIMIT` | Optional. Defaults to `96`, matching the current BIG Games forced-refresh allowance per account/day. |
+| `HTG_REFRESH_QUOTA_RESERVE` | Optional. Defaults to `6`. Scheduled scans stop after 90 provider-reported refreshes and remain paused until reset, preserving six emergency/setup pulls. |
+| `HTG_FAILURE_RETRY_MINUTES` | Optional. Defaults to `15`. First failed HTG refresh retry delay. |
+| `HTG_FAILURE_RETRY_MAX_MINUTES` | Optional. Defaults to `120`. Caps exponential failure retry delays (`15`, `30`, `60`, then `120` minutes). |
 | `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries briefly instead of posting an unverified gain. |
 | `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; exposes how long a source-verification outage has lasted in HTG diagnostics. Gains are retained as pending after this window rather than silently discarded. |
 | `HTG_STALE_ALERT_WINDOW_MINUTES` | Optional. Classifies long gaps for diagnostics. Fresh inventory received after a gap is still compared and source-filtered by default so real gains are not silently lost. |
@@ -1269,9 +1273,10 @@ Use an every-minute cron for the inventory Worker when HTG sharding is enabled:
 * * * * *
 ```
 
-With the default five shards, this still gives each HTG user an approximately
-five-minute check interval, but spreads API calls and database writes across
-five separate scheduled invocations.
+With 16 shards, this gives each HTG user an approximately 16-minute check
+interval and no more than 90 scheduled forced refreshes per rolling 24 hours.
+API calls and database writes are spread across separate scheduled invocations;
+recovering accounts remain on their assigned shards rather than bursting at once.
 
 Set these on `c0ld-discord-search`:
 

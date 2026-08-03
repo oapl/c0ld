@@ -23,9 +23,13 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 # HTG Big Games app.
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
-HTG_SCAN_INTERVAL_MINUTES = "15"
-HTG_SHARD_COUNT = "15"
+HTG_SCAN_INTERVAL_MINUTES = "16"
+HTG_SHARD_COUNT = "16"
 HTG_MAX_CONCURRENT_SCANS = "3"
+HTG_REFRESH_QUOTA_LIMIT = "96"
+HTG_REFRESH_QUOTA_RESERVE = "6"
+HTG_FAILURE_RETRY_MINUTES = "15"
+HTG_FAILURE_RETRY_MAX_MINUTES = "120"
 HTG_REQUIRE_SOURCE_FILTER = "true"
 # Diagnostic age threshold for a pending gain whose trade/booth/mail source
 # verification is unavailable. The gain remains pending and is retried; it is
@@ -55,8 +59,9 @@ HATCH_ALERT_CHANNEL_ID = ""
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
-# HTG-enabled accounts are sharded across this every-minute cron. With the
-# default 5 shards, each user is scanned about every 5 minutes. Normal inventory
+# HTG-enabled accounts are sharded across this every-minute cron. The 16-minute
+# cadence uses at most 90 scheduled refreshes per account/day, leaving six for
+# OAuth/setup and deliberate diagnostics. Normal inventory
 # accounts still use the hourly synchronized cohort unless manually refreshed.
 [triggers]
 crons = ["* * * * *"]

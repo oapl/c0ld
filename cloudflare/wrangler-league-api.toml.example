@@ -50,7 +50,7 @@ GENERAL_LEAGUE_REFRESH_CONCURRENCY = "4"
 # Exact-league pulls retry temporary Big Games throttling/server failures.
 LEAGUE_API_RETRY_ATTEMPTS = "4"
 LEAGUE_API_RETRY_BASE_MS = "1500"
-# The */5 cron checks the two exact-league cadences above and updates whichever top list
+# The one-minute cron checks the exact-league cadences above and updates whichever top list
 # size is configured below. For league reward cutoffs that rely on Top 30,000 and
 # similar points, keep this at 10000 (or higher) to keep all milestone rows fresh.
 # Run POST /api/leagues/top-leagues/ingest?limit=10000&page_size=25 manually once to seed
@@ -67,10 +67,10 @@ ALL_TOP_LEAGUES_PAGE_DELAY_MS = "2500"
 # Extended League-player reward cutoffs are simulated by collecting every
 # member from the stored Top-X League list. BIG Games' direct player endpoint
 # remains authoritative for ranks 1-100.
-LEAGUE_PLAYER_POOL_TOP_LEAGUES = "1000"
+LEAGUE_PLAYER_POOL_TOP_LEAGUES = "10000"
 LEAGUE_PLAYER_POOL_BATCH_SIZE = "25"
 LEAGUE_PLAYER_POOL_CONCURRENCY = "4"
-LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT = "100"
+LEAGUE_PLAYER_DIRECT_AUTHORITATIVE_LIMIT = "500"
 INGEST_TRACKED_RANK_WINDOWS = "true"
 TRACKED_RANK_WINDOW_SIZE = "50"
 TRACKED_RANK_WINDOW_PAGE_DELAY_MS = "2500"
@@ -82,18 +82,21 @@ TOP_LEAGUES_MAX_STALE_MINUTES = "15"
 COLD_LEAGUES_BATCH_SIZE = "30"
 COLD_LEAGUES_TOP_LIMIT = "10000"
 COLD_LEAGUES_CONCURRENCY = "8"
-# Background matcher. The */5 cron checks this cadence and scans the Top 10000 in rolling windows.
-# Cloudflare limits subrequests per Worker invocation, so use scripts/backfill-league-overlap.js
-# for a forced full sweep and let the Worker keep discoveries fresh afterward.
+# Background matcher. A scan starts every 15 minutes and resumes across the
+# one-minute cron ticks. Seven 100-League shards per tick cover the Top 10000
+# in about 15 ticks while leaving request headroom for the Worker's other jobs.
+# Current matches publish only after every shard completes.
 LEAGUE_OVERLAP_SCAN_ENABLED = "true"
 LEAGUE_OVERLAP_SCAN_MINUTES = "15"
 LEAGUE_OVERLAP_SCAN_CLANS = "c0ld,WMSY"
 LEAGUE_OVERLAP_SCAN_TOP_LIMIT = "10000"
-LEAGUE_OVERLAP_SCAN_WINDOW_SIZE = "30"
-LEAGUE_OVERLAP_SCAN_WINDOWS_PER_RUN = "1"
-LEAGUE_OVERLAP_CURRENT_TTL_MINUTES = "360"
-LEAGUE_OVERLAP_SCAN_BATCH_DELAY_MS = "500"
+LEAGUE_OVERLAP_SCAN_WINDOW_SIZE = "100"
+LEAGUE_OVERLAP_SCAN_SHARDS_PER_TICK = "7"
 LEAGUE_OVERLAP_SCAN_CONCURRENCY = "8"
+LEAGUE_OVERLAP_SCAN_CLAIM_LEASE_MINUTES = "5"
+# Safety window for an in-progress resumable Top-10k sweep. Completed public
+# data still refreshes independently and charts retain only their normal 24h.
+LEAGUE_OVERLAP_SCAN_MAX_AGE_MINUTES = "240"
 # Optional JSON map/list for known c0ld members if the upstream live clan endpoint misses someone.
 # COLD_MEMBER_OVERRIDES_JSON = "{\"1462748729\":\"dragonballx1412\"}"
 # Preferred if the league Worker uses the same Supabase project as the clan Worker.
@@ -114,7 +117,7 @@ INACTIVE_ALERT_EDIT_MESSAGES = "true"
 SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # Optional, recommended over COLD_CLAN_CURRENT_URL for Worker-to-Worker calls:
 # [[services]]

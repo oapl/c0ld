@@ -56,14 +56,21 @@ const DEFAULT_HATCH_BACKFILL_HTG_GAIN_COUNT = 2;
 const DEFAULT_HATCH_BACKFILL_TOTAL_GAIN_COUNT = 20;
 const DEFAULT_HATCH_HISTORICAL_ECHO_LOOKBACK_HOURS = 48;
 // BIG Games currently grants 96 forced inventory refreshes per account/day.
-// Fifteen minutes is the fastest sustainable 24-hour cadence (96 * 15m).
+// Keep a small reserve for OAuth/setup and deliberate manual diagnostics. A
+// 90-refresh scheduled budget resolves to a 16-minute effective cadence, so a
+// tracker remains live for the full rolling day without operating at the exact
+// provider ceiling.
 const DEFAULT_HTG_SCAN_INTERVAL_MINUTES = 15;
 const MIN_HTG_FORCE_REFRESH_INTERVAL_MINUTES = 15;
+const DEFAULT_HTG_REFRESH_QUOTA_LIMIT = 96;
+const DEFAULT_HTG_REFRESH_QUOTA_RESERVE = 6;
+const DEFAULT_HTG_FAILURE_RETRY_MINUTES = 15;
+const DEFAULT_HTG_FAILURE_RETRY_MAX_MINUTES = 120;
 const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-adaptive-quota-2026-08-03a";
+const INVENTORY_BUILD_ID = "inventory-htg-rolling-quota-guard-2026-08-03b";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -143,6 +150,11 @@ export default {
             big_games_redirect_uri: bigGamesOAuthApp(env, "hatch_tracker", { allowMissing: true }).redirectUri || null,
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
             scan_interval_minutes: htgScanIntervalMinutes(env),
+            effective_minimum_interval_minutes: htgMinimumFullDayIntervalMinutes(env),
+            refresh_quota_limit: htgRefreshQuotaLimit(env),
+            refresh_quota_reserve: htgRefreshQuotaReserve(env),
+            scheduled_refresh_budget: htgScheduledRefreshBudget(env),
+            maximum_scheduled_refreshes_per_24h: Math.floor(1440 / htgMinimumFullDayIntervalMinutes(env)),
             quota_aware_scheduling: true,
             max_concurrent_scans: htgMaxConcurrentScans(env),
             shard_count: htgShardCount(env),
@@ -237,12 +249,8 @@ export default {
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
       const hatchResults = await mapSettledWithConcurrency(trackers, htgMaxConcurrentScans(env), async tracker => {
         const user = hatchTrackerUser(tracker);
-        const overdue = htgTrackerIsOverdue(env, tracker, now);
         const schedule = htgScheduleDecision(env, tracker, user.user_id, now, {
-          cron: event?.cron,
-          // A missed shard must never strand an account indefinitely. Once an
-          // account is overdue, the next cron invocation owns its recovery.
-          ignoreShard: overdue
+          cron: event?.cron
         });
         if (!schedule.due) return { user, tracker_id: tracker.id || null, posted: false, skipped: true, ...schedule };
         try {
@@ -1231,7 +1239,7 @@ function compactHatchTrackerHealth(trackers, env, now = new Date()) {
       const overdueMs = Math.max(5, htgTrackerScanIntervalMinutes(env, row, now) * 2) * 60000;
       return !Number.isFinite(checkedAt) || checkedAt <= 0 || now.getTime() - checkedAt > overdueMs;
     }).length,
-    quota_paused_tracker_count: rows.filter(row => htgTrackerQuotaSchedule(row, now).exhausted_until_reset).length,
+    quota_paused_tracker_count: rows.filter(row => htgTrackerQuotaSchedule(row, now, env).exhausted_until_reset).length,
     oldest_last_checked_at: checkedTimes.length ? new Date(Math.min(...checkedTimes)).toISOString() : null
   };
 }
@@ -1264,6 +1272,20 @@ async function markHtgScanFailed(env, tracker, error, attemptedAt = new Date()) 
     last_scan_error_at: attemptedIso,
     last_scan_error: String(error?.message || error || "Unknown HTG scan error").slice(0, 1000),
     consecutive_scan_failures: Math.max(0, Number(previousState.consecutive_scan_failures || 0)) + 1
+  });
+  await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
+    metadata,
+    updated_at: attemptedIso
+  });
+  return metadata;
+}
+
+async function markHtgScanStarted(env, tracker, attemptedAt = new Date(), schedule = {}) {
+  const attemptedIso = attemptedAt instanceof Date ? attemptedAt.toISOString() : new Date(attemptedAt).toISOString();
+  const metadata = hatchTrackerMetadataWithHtgState(tracker?.metadata, {
+    last_scan_attempt_at: attemptedIso,
+    last_scan_reason: firstString(schedule?.reason, "HTG inventory scan started."),
+    active_scan_shard: Number.isFinite(Number(schedule?.current_shard)) ? Number(schedule.current_shard) : null
   });
   await supabaseUpdate(env, HATCH_TRACKER_USERS_TABLE, hatchTrackerRowFilter(tracker), {
     metadata,
@@ -2513,12 +2535,17 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   if (!tracker) return { posted: false, reason: "HTG gain alerts are not enabled for this Roblox account." };
 
   const now = new Date();
-  if (!options.force) {
-    const schedule = options.schedule || htgScheduleDecision(env, tracker, userId, now, { ignoreShard: true });
-    if (!schedule.due) return { posted: false, skipped: true, ...schedule };
-  }
+  // `force` forces alert evaluation, but it must not bypass the provider-refresh
+  // budget. This keeps repeated diagnostics, deployments, and stale retries from
+  // consuming the rolling daily allowance in a burst.
+  const schedule = options.schedule || htgScheduleDecision(env, tracker, userId, now, { ignoreShard: true });
+  if (!schedule.due) return { posted: false, skipped: true, ...schedule };
 
   const checkedAt = now.toISOString();
+  const startedMetadata = await markHtgScanStarted(env, tracker, checkedAt, schedule);
+  // Preserve the gate in later metadata writes made by pending/source-check
+  // branches during this same scan.
+  tracker = { ...tracker, metadata: startedMetadata };
   const raw = options.rawInventory || await fetchHtgInventory(env, { user_id: userId, username: user?.username || tracker.roblox_username || userId }, {
     forceRefresh: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true)
   });
@@ -5445,6 +5472,31 @@ function htgScanIntervalMinutes(env) {
     ? Math.max(minimum, Math.min(1440, value))
     : Math.max(minimum, DEFAULT_HTG_SCAN_INTERVAL_MINUTES);
 }
+function htgRefreshQuotaLimit(env) {
+  const value = Number(env.HTG_REFRESH_QUOTA_LIMIT || env.HATCH_REFRESH_QUOTA_LIMIT || DEFAULT_HTG_REFRESH_QUOTA_LIMIT);
+  return Number.isFinite(value) ? Math.max(1, Math.min(100000, Math.floor(value))) : DEFAULT_HTG_REFRESH_QUOTA_LIMIT;
+}
+function htgRefreshQuotaReserve(env) {
+  const limit = htgRefreshQuotaLimit(env);
+  const value = Number(env.HTG_REFRESH_QUOTA_RESERVE || env.HATCH_REFRESH_QUOTA_RESERVE || DEFAULT_HTG_REFRESH_QUOTA_RESERVE);
+  return Number.isFinite(value) ? Math.max(0, Math.min(limit - 1, Math.floor(value))) : Math.min(DEFAULT_HTG_REFRESH_QUOTA_RESERVE, limit - 1);
+}
+function htgScheduledRefreshBudget(env, providerLimit = 0) {
+  const limit = Math.max(1, Number(providerLimit || htgRefreshQuotaLimit(env)));
+  return Math.max(1, Math.floor(limit) - Math.min(htgRefreshQuotaReserve(env), Math.floor(limit) - 1));
+}
+function htgMinimumFullDayIntervalMinutes(env, providerLimit = 0) {
+  return Math.max(1, Math.ceil(1440 / htgScheduledRefreshBudget(env, providerLimit)));
+}
+function htgFailureRetryMinutes(env, tracker) {
+  const failures = Math.max(0, Math.floor(Number(tracker?.metadata?.htg_state?.consecutive_scan_failures || 0)));
+  if (!failures) return 0;
+  const baseValue = Number(env.HTG_FAILURE_RETRY_MINUTES || env.HATCH_FAILURE_RETRY_MINUTES || DEFAULT_HTG_FAILURE_RETRY_MINUTES);
+  const maxValue = Number(env.HTG_FAILURE_RETRY_MAX_MINUTES || env.HATCH_FAILURE_RETRY_MAX_MINUTES || DEFAULT_HTG_FAILURE_RETRY_MAX_MINUTES);
+  const base = Number.isFinite(baseValue) ? Math.max(5, Math.min(1440, Math.floor(baseValue))) : DEFAULT_HTG_FAILURE_RETRY_MINUTES;
+  const maximum = Number.isFinite(maxValue) ? Math.max(base, Math.min(1440, Math.floor(maxValue))) : DEFAULT_HTG_FAILURE_RETRY_MAX_MINUTES;
+  return Math.min(maximum, base * (2 ** Math.min(8, failures - 1)));
+}
 function htgMaxConcurrentScans(env) {
   const value = Number(env.HTG_MAX_CONCURRENT_SCANS || 3);
   return Number.isFinite(value) ? Math.max(1, Math.min(10, Math.floor(value))) : 3;
@@ -5455,9 +5507,9 @@ function htgTrackerIsOverdue(env, tracker, now = new Date()) {
   return now.getTime() - lastChecked > htgTrackerScanIntervalMinutes(env, tracker, now) * 2 * 60000;
 }
 function htgShardCount(env) {
-  const fallback = htgScanIntervalMinutes(env);
+  const fallback = Math.max(htgScanIntervalMinutes(env), htgMinimumFullDayIntervalMinutes(env));
   const value = Number(env.HTG_SHARD_COUNT || env.HATCH_SHARD_COUNT || fallback);
-  return Number.isFinite(value) ? Math.max(1, Math.min(1440, Math.floor(value))) : fallback;
+  return Number.isFinite(value) ? Math.max(fallback, Math.min(1440, Math.floor(value))) : fallback;
 }
 function htgCurrentShard(env, now = new Date()) {
   const count = htgShardCount(env);
@@ -5484,7 +5536,7 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
   const currentShard = htgCurrentShard(env, now);
   const userShard = htgUserShard(userId, shardCount);
   const shardCompatible = htgCronSupportsMinuteSharding(options.cron);
-  const quota = htgTrackerQuotaSchedule(tracker, now);
+  const quota = htgTrackerQuotaSchedule(tracker, now, env);
   if (quota.exhausted_until_reset) {
     return {
       due: false,
@@ -5501,47 +5553,61 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
   }
 
   const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
-  if (!Number.isFinite(lastChecked) || lastChecked <= 0) {
+  const lastAttempt = new Date(tracker?.metadata?.htg_state?.last_scan_attempt_at || 0).getTime();
+  const latestGateTime = Math.max(
+    Number.isFinite(lastChecked) && lastChecked > 0 ? lastChecked : 0,
+    Number.isFinite(lastAttempt) && lastAttempt > 0 ? lastAttempt : 0
+  );
+  if (!latestGateTime) {
     return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
 
   const intervalMinutes = htgTrackerScanIntervalMinutes(env, tracker, now);
-  const intervalMs = intervalMinutes * 60000;
-  const elapsedMs = now.getTime() - lastChecked;
+  const failureRetryMinutes = htgFailureRetryMinutes(env, tracker);
+  const gateMinutes = Math.max(intervalMinutes, failureRetryMinutes);
+  const intervalMs = gateMinutes * 60000;
+  const elapsedMs = now.getTime() - latestGateTime;
   if (elapsedMs < Math.max(0, intervalMs - 30000)) {
-    return { due: false, reason: "HTG quota-safe scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
+    return { due: false, reason: failureRetryMinutes > intervalMinutes ? "HTG failure backoff has not elapsed." : "HTG quota-safe scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, failure_retry_minutes: failureRetryMinutes, gate_minutes: gateMinutes, last_scan_attempt_at: Number.isFinite(lastAttempt) && lastAttempt > 0 ? new Date(lastAttempt).toISOString() : null, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
-  return { due: true, reason: "HTG quota-safe scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
+  return { due: true, reason: "HTG quota-safe scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, failure_retry_minutes: failureRetryMinutes, gate_minutes: gateMinutes, last_scan_attempt_at: Number.isFinite(lastAttempt) && lastAttempt > 0 ? new Date(lastAttempt).toISOString() : null, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
 }
 
 function htgTrackerScanIntervalMinutes(env, tracker, now = new Date()) {
   const configured = htgScanIntervalMinutes(env);
-  const quota = htgTrackerQuotaSchedule(tracker, now);
-  if (!quota.limit || quota.reset_has_passed) return Math.max(configured, quota.minimum_full_day_interval_minutes || 0);
+  const quota = htgTrackerQuotaSchedule(tracker, now, env);
+  if (!quota.limit || quota.reset_has_passed) return Math.max(configured, quota.minimum_full_day_interval_minutes || htgMinimumFullDayIntervalMinutes(env));
   return Math.max(configured, quota.minimum_full_day_interval_minutes || 0, quota.minimum_remaining_interval_minutes || 0);
 }
 
-function htgTrackerQuotaSchedule(tracker, now = new Date()) {
+function htgTrackerQuotaSchedule(tracker, now = new Date(), env = null) {
   const stored = plainObject(tracker?.metadata?.htg_state?.refresh_quota);
   const used = Math.max(0, Number(stored.used || 0));
-  const limit = Math.max(0, Number(stored.limit || 0));
+  const configuredLimit = env ? htgRefreshQuotaLimit(env) : DEFAULT_HTG_REFRESH_QUOTA_LIMIT;
+  const limit = Math.max(1, Number(stored.limit || configuredLimit));
+  const reserve = env ? htgRefreshQuotaReserve(env) : Math.min(DEFAULT_HTG_REFRESH_QUOTA_RESERVE, limit - 1);
+  const scheduledBudget = Math.max(1, limit - reserve);
   const resetsAt = firstString(stored.resets_at);
   const resetMs = new Date(resetsAt || 0).getTime();
   const nowMs = now.getTime();
   const resetHasPassed = !Number.isFinite(resetMs) || resetMs <= nowMs;
-  const remaining = limit > 0 ? Math.max(0, limit - used) : 0;
+  const remaining = Math.max(0, limit - used);
+  const scheduledRemaining = Math.max(0, scheduledBudget - used);
   const minutesUntilReset = !resetHasPassed ? Math.max(1, Math.ceil((resetMs - nowMs) / 60000)) : 0;
-  const minimumFullDayInterval = limit > 0 ? Math.max(1, Math.ceil(1440 / limit)) : 0;
-  const minimumRemainingInterval = !resetHasPassed && remaining > 0
-    ? Math.max(1, Math.ceil(minutesUntilReset / remaining))
+  const minimumFullDayInterval = Math.max(1, Math.ceil(1440 / scheduledBudget));
+  const minimumRemainingInterval = !resetHasPassed && scheduledRemaining > 0
+    ? Math.max(1, Math.ceil(minutesUntilReset / scheduledRemaining))
     : 0;
   return {
     used,
     limit,
+    reserve,
+    scheduled_budget: scheduledBudget,
     remaining,
+    scheduled_remaining: scheduledRemaining,
     resets_at: resetsAt || null,
     reset_has_passed: resetHasPassed,
-    exhausted_until_reset: limit > 0 && remaining <= 0 && !resetHasPassed,
+    exhausted_until_reset: scheduledRemaining <= 0 && !resetHasPassed,
     minimum_full_day_interval_minutes: minimumFullDayInterval,
     minimum_remaining_interval_minutes: minimumRemainingInterval
   };

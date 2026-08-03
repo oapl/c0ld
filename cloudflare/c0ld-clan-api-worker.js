@@ -2904,29 +2904,7 @@ function rewardCutoffDiscordPayload(dashboard) {
     ? `Ends <t:${Math.floor(new Date(eventTiming).getTime() / 1000)}:R>`
     : null;
   const globalLines = rewardCutoffLines(globalSource.cutoffs, playerRewardRangeLabel);
-  const totalPlayers = toNumber(leaguePlayers.total_global_players);
-  const topLeaguesScanned = toNumber(leaguePlayers.top_leagues_scanned);
-  const trackedTopLeagueRankMax = toNumber(leaguePlayers.tracked_top_league_rank_max);
-  const directLimit = toNumber(leaguePlayers.direct_authoritative_limit);
-  if (eventMode === "leagues" && leaguePlayers.pool_completed && topLeaguesScanned && directLimit) {
-    globalLines.push(
-      `-# Top ${Math.round(directLimit).toLocaleString("en-US")} is direct; extended ranks simulate `
-      + `${Math.round(totalPlayers || 0).toLocaleString("en-US")} players collected from the Top `
-      + `${Math.round(topLeaguesScanned).toLocaleString("en-US")} League rosters.`
-    );
-  } else if (eventMode === "leagues" && directLimit) {
-    const trackedStandingText = trackedTopLeagueRankMax
-      ? `The Top ${Math.round(trackedTopLeagueRankMax).toLocaleString("en-US")} League standings are tracked`
-      : "League standings are tracked separately";
-    globalLines.push(
-      `-# Top ${Math.round(directLimit).toLocaleString("en-US")} players are direct. ${trackedStandingText}; `
-      + "individual-player cutoffs beyond that require the separate League-roster scan."
-    );
-  } else if (eventMode === "leagues" && leaguePlayers.pool_is_partial) {
-    globalLines.push(totalPlayers
-      ? `-# Based on the latest ${Math.round(totalPlayers).toLocaleString("en-US")} League players currently available.`
-      : "-# Based on the latest League player leaderboard data currently available.");
-  }
+  globalLines.push("-# Global ranks are estimations by pulling the top 10k leagues/clans. Not 100% accurate, but close.");
 
   const headerSummary = [
       `**${eventName}**`,
@@ -5717,7 +5695,8 @@ async function handleHistory(request, env) {
   requireSupabase(env);
 
   const url = new URL(request.url);
-  const clan = url.searchParams.get("clan") || clanName(env);
+  const allClans = ["1", "true", "yes"].includes(String(url.searchParams.get("all_clans") || "").toLowerCase());
+  const clan = allClans ? null : (url.searchParams.get("clan") || clanName(env));
   const allBattles = ["1", "true", "yes"].includes(String(url.searchParams.get("all_battles") || "").toLowerCase());
   const includeArchive = !["0", "false", "no", "off"].includes(String(url.searchParams.get("include_archive") || "true").toLowerCase());
   const battle = allBattles ? null : (url.searchParams.get("battle") || battleKey(env));
@@ -5732,12 +5711,15 @@ async function handleHistory(request, env) {
 
   const params = {
     select: "snapshot_id,fetched_at,clan_name,battle_key,rank,user_id,username,total_points",
-    clan_name: `eq.${clan}`,
     fetched_at: `gte.${afterIso}`,
     order: `fetched_at.${orderDir},rank.asc`,
     limit: String(limit),
     offset: String(offset)
   };
+
+  if (clan) {
+    params.clan_name = `eq.${clan}`;
+  }
 
   if (userId) {
     params.user_id = `eq.${userId}`;
@@ -5769,6 +5751,7 @@ async function handleHistory(request, env) {
   return cacheJson({
     generated_at: new Date().toISOString(),
     clan_name: clan,
+    all_clans: allClans,
     battle,
     all_battles: allBattles,
     include_archive: includeArchive,

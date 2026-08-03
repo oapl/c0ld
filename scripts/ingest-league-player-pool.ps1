@@ -1,9 +1,9 @@
 param(
   [string]$WorkerUrl = "https://yamo-league-api-worker.opal-dde.workers.dev",
-  [string]$Run = "tap-heroes-part-2",
-  [int]$TopLeagues = 1000,
-  [int]$BatchSize = 25,
-  [int]$Concurrency = 4,
+  [string]$Run = "plants-vs-coins-part-2",
+  [int]$TopLeagues = 10000,
+  [int]$BatchSize = 100,
+  [int]$Concurrency = 8,
   [string]$Token = "",
   [int]$RetrySeconds = 15,
   [int]$MaxRetriesPerBatch = 8

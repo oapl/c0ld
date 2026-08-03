@@ -66,18 +66,30 @@ function Invoke-WorkerAdmin {
   }
 }
 
-$query = if ($Global) {
+$useGlobal = $Global -or [string]::IsNullOrWhiteSpace($GuildId)
+
+$query = if ($useGlobal) {
   New-QueryString @{ scope = "global" }
 } else {
-  New-QueryString @{ guild_id = $GuildId }
+  New-QueryString @{ scope = "guild"; guild_id = $GuildId }
 }
 
 Write-Host "Registering reward commands: /clan rewards and /league rewards..." -ForegroundColor Green
-Invoke-WorkerAdmin -Method POST -Path "/admin/register-rewards-command$query" |
-  ConvertTo-Json -Depth 12
+$registration = Invoke-WorkerAdmin -Method POST -Path "/admin/register-rewards-command$query"
+$registration | ConvertTo-Json -Depth 12
+
+if (-not $registration.ok -or -not $registration.username_option_registered) {
+  throw "Discord did not return the optional username field for both /clan rewards and /league rewards. Deploy the current Discord Worker and run this script again."
+}
+
+Write-Host "Verified: both reward subcommands now contain the optional username input." -ForegroundColor Green
+if (@($registration.removed_guild_duplicates).Count -gt 0) {
+  $removedNames = @($registration.removed_guild_duplicates | ForEach-Object { "/$($_.name)" }) -join ", "
+  Write-Host "Removed shadowing guild command copies: $removedNames" -ForegroundColor Green
+}
 
 if (-not $KeepLegacyRewards) {
-  $deleteQuery = if ($Global) {
+  $deleteQuery = if ($useGlobal) {
     New-QueryString @{ scope = "global"; name = "rewards" }
   } else {
     New-QueryString @{ scope = "guild"; guild_id = $GuildId; name = "rewards" }
@@ -89,7 +101,7 @@ if (-not $KeepLegacyRewards) {
 }
 
 if (-not $KeepLegacyCharts) {
-  $deleteDuckQuery = if ($Global) {
+  $deleteDuckQuery = if ($useGlobal) {
     New-QueryString @{ scope = "global"; name = "duck" }
   } else {
     New-QueryString @{ scope = "guild"; guild_id = $GuildId; name = "duck" }
@@ -101,7 +113,7 @@ if (-not $KeepLegacyCharts) {
 }
 
 if (-not $SkipList) {
-  $listQuery = if ($Global) {
+  $listQuery = if ($useGlobal) {
     New-QueryString @{ scope = "global" }
   } else {
     New-QueryString @{ scope = "guild"; guild_id = $GuildId }

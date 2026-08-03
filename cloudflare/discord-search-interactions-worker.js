@@ -30,11 +30,10 @@ const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
-const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
+const HISTORY_VIEWS = ["clan", "league"];
 const HISTORY_VIEW_LABELS = {
   clan: "Clan Battle History",
-  league: "League History",
-  leaderboard: "Leaderboard History"
+  league: "League History"
 };
 const DEFAULT_HISTORY_PAGE_SIZE = 10;
 const HISTORY_RENDER_CACHE_TTL_SECONDS = 20 * 60;
@@ -6470,9 +6469,13 @@ async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
   }
 
   const last = initial.attempts[initial.attempts.length - 1] || {};
-  const message = refresh.message
-    ? `Could not refresh League ${leagueName}: ${refresh.message}`
-    : last.message || `No stored league data found for ${leagueName}.`;
+  const refreshMessage = String(refresh.message || "");
+  const leagueMissing = /(?:HTTP\s+404|not\s+found)/i.test(refreshMessage);
+  const message = leagueMissing
+    ? `League ${leagueName} is not present in the current League event.`
+    : refreshMessage
+      ? `Could not refresh League ${leagueName}: ${refreshMessage}`
+      : last.message || `No stored league data found for ${leagueName}.`;
   const err = httpError(refresh.status || last.status || 502, message);
   err.attempts = initial.attempts.map(attempt => leagueAttemptSummary(attempt));
   if (options.debug) {
@@ -6902,24 +6905,42 @@ async function fetchLeagueCurrentAttempt(target, apiUrl, options = {}) {
     cf: { cacheTtl: 0, cacheEverything: false }
   };
   const request = new Request(apiUrl.toString(), init);
-  const response = target.binding
-    ? await target.binding.fetch(request)
-    : await fetch(request);
-  const text = await response.text();
-  const payload = parseJsonObject(text);
+  try {
+    const response = target.binding
+      ? await target.binding.fetch(request)
+      : await fetch(request);
+    const text = await response.text();
+    const payload = parseJsonObject(text);
 
-  return {
-    source: target.source,
-    api_url: apiUrl.toString(),
-    status: response.status,
-    response_ok: response.ok,
-    payload,
-    payload_ok: payload?.ok ?? null,
-    message: payload?.message || (!response.ok ? truncateText(text, 180) : null),
-    row_count: Array.isArray(payload?.rows) ? payload.rows.length : null,
-    league_name: payload?.league_name || null,
-    league_rank: payload?.league_rank ?? null
-  };
+    return {
+      source: target.source,
+      api_url: apiUrl.toString(),
+      status: response.status,
+      response_ok: response.ok,
+      payload,
+      payload_ok: payload?.ok ?? null,
+      message: payload?.message || (!response.ok ? truncateText(text, 180) : null),
+      row_count: Array.isArray(payload?.rows) ? payload.rows.length : null,
+      league_name: payload?.league_name || null,
+      league_rank: payload?.league_rank ?? null
+    };
+  } catch (err) {
+    // A misconfigured/self-referencing public Worker URL can raise Cloudflare
+    // error 1042 before a Response exists. Return a failed attempt so callers
+    // can continue to the service binding/default League Worker target.
+    return {
+      source: target.source,
+      api_url: apiUrl.toString(),
+      status: Number(err?.status) || 502,
+      response_ok: false,
+      payload: {},
+      payload_ok: false,
+      message: err?.message || String(err),
+      row_count: null,
+      league_name: null,
+      league_rank: null
+    };
+  }
 }
 
 function parseJsonObject(text) {
@@ -7191,9 +7212,9 @@ async function loadHistoryCommandData(query, env) {
   const [battleList, trackedHistory, cwHistory, bigHistory, leagueHistory, staticProfile] = await Promise.all([
     fetchClanHistoryJson(env, "/api/battles", { clan: scanClan, limit: 60 }),
     fetchClanHistoryJson(env, "/api/history", {
-      clan: scanClan,
       user_id: subject.userId,
       all_battles: true,
+      all_clans: true,
       hours: 100000,
       limit: 50000,
       order: "asc"
@@ -7256,11 +7277,6 @@ async function loadHistoryCommandData(query, env) {
     normalizeLeagueHistoryRows(leagueHistory?.rows),
     normalizeLeagueHistoryRows(staticProfile?.league_summaries)
   );
-  const leaderboardHistoryRows = mergeHistorySummaryRows(
-    normalizeLeaderboardHistoryRows(leaderboardRows),
-    normalizeLeaderboardHistoryRows(leagueHistory?.leaderboard_rows),
-    normalizeLeaderboardHistoryRows(staticProfile?.leaderboard_summaries)
-  );
   const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
     || absoluteProfileAssetUrl(staticProfile?.avatar_url, env)
     || await searchAvatarUrl({
@@ -7277,7 +7293,6 @@ async function loadHistoryCommandData(query, env) {
     clan_join_time: globalPayload?.row?.join_time || null,
     clan: sortClanHistoryRecords([...clanMap.values()]),
     league: leagueRows,
-    leaderboard: leaderboardHistoryRows,
     league_unavailable: leagueHistory === null && leagueRows.length === 0
   };
 }
@@ -8341,12 +8356,21 @@ async function renderHistoryMessage(history, options) {
     try {
       const filename = `c0ld-history-${history.user_id}-${view}.png`;
       const cacheId = options.cacheId || historyCreateCacheId(history.user_id);
-      const prepared = await prepareHistoryRenderCache(history, {
-        env: options.env,
-        ownerId: options.ownerId,
-        cacheId
-      });
-      const bytes = prepared.get(view) || await renderHistoryCardPng(history, view, options.env);
+      let bytes = null;
+      try {
+        const prepared = await prepareHistoryRenderCache(history, {
+          env: options.env,
+          ownerId: options.ownerId,
+          cacheId,
+          view
+        });
+        bytes = prepared.get(view) || null;
+      } catch (cacheErr) {
+        console.warn("history image cache preparation failed", cacheErr?.message || String(cacheErr));
+      }
+      // A cache/storage failure must not turn the command into the legacy text
+      // response. Render the requested card directly as the final image path.
+      bytes ||= await renderHistoryCardPng(history, view, options.env);
       return historyImageMessage({
         filename,
         bytes,
@@ -8432,17 +8456,20 @@ async function prepareHistoryRenderCache(history, options = {}) {
 
   await historyPutCachedJson(env, "meta", cacheId, meta);
 
-  await Promise.all(HISTORY_VIEWS.map(async candidate => {
+  // Render only the selected view. Rendering every full-history card in
+  // parallel made an unrelated view failure collapse /history to plain text.
+  const candidate = HISTORY_VIEWS.includes(options.view) ? options.view : "clan";
+  {
     const existing = await historyGetCachedBytes(env, "image", cacheId, candidate);
     if (existing?.byteLength) {
       rendered.set(candidate, existing);
-      return;
+      return rendered;
     }
 
     const bytes = await renderHistoryCardPng(history, candidate, env);
     rendered.set(candidate, bytes);
     await historyPutCachedBytes(env, "image", cacheId, candidate, bytes, "image/png");
-  }));
+  }
 
   return rendered;
 }
@@ -9870,25 +9897,73 @@ async function registerTCommand(url, env) {
 }
 
 async function registerRewardCommandSet(url, env) {
+  const scopedUrl = new URL(url.toString());
+  const requestedScope = String(scopedUrl.searchParams.get("scope") || "").trim().toLowerCase();
+  const requestedGuildId = String(scopedUrl.searchParams.get("guild_id") || "").trim();
+  // Reward commands are intended to be global. Previously, an empty query
+  // silently fell back to DISCORD_GUILD_ID, leaving a stale global command (or
+  // a stale guild command shadowing the global one) visible in Discord.
+  if (!requestedScope && !requestedGuildId) scopedUrl.searchParams.set("scope", "global");
+
   const payloads = rewardCommandPayloads();
   const results = [];
   for (const payload of payloads) {
-    const response = await registerCommand(url, env, payload, {
+    const response = await registerCommand(scopedUrl, env, payload, {
       retryRateLimits: true,
       maxAttempts: 5
     });
     const body = await response.json().catch(() => ({}));
+    const usernameOptionRegistered = rewardCommandHasUsernameOption(body?.command);
     results.push({
       name: payload.name,
-      ok: response.ok && body.ok !== false,
+      ok: response.ok && body.ok !== false && usernameOptionRegistered,
       status: response.status,
+      username_option_registered: usernameOptionRegistered,
       result: body
     });
     await sleep(450);
   }
 
+  const effectiveScope = String(scopedUrl.searchParams.get("scope") || "").trim().toLowerCase();
+  const isGlobal = effectiveScope === "global" || (!effectiveScope && !requestedGuildId);
+  const keepGuild = ["1", "true", "yes", "on"].includes(
+    String(scopedUrl.searchParams.get("keep_guild") || "").trim().toLowerCase()
+  );
+  const removedGuildDuplicates = [];
+  const cleanupGuildId = isGlobal && !keepGuild
+    ? String(scopedUrl.searchParams.get("cleanup_guild_id") || env.DISCORD_GUILD_ID || "").trim()
+    : "";
+
+  if (results.every(result => result.ok) && cleanupGuildId) {
+    const guildCommands = await fetchCommands(env, cleanupGuildId);
+    for (const command of guildCommands) {
+      if (!["clan", "league"].includes(String(command?.name || "").trim().toLowerCase())) continue;
+      await deleteCommandById(env, cleanupGuildId, command.id);
+      removedGuildDuplicates.push({ id: command.id, name: command.name });
+    }
+  }
+
   const ok = results.every(result => result.ok);
-  return json({ ok, results }, ok ? 200 : 502);
+  return json({
+    ok,
+    scope: isGlobal ? "global" : "guild",
+    guild_id: isGlobal ? null : (requestedGuildId || env.DISCORD_GUILD_ID || null),
+    username_option_registered: results.every(result => result.username_option_registered),
+    removed_guild_duplicates: removedGuildDuplicates,
+    results
+  }, ok ? 200 : 502);
+}
+
+function rewardCommandHasUsernameOption(command) {
+  const rewards = (command?.options || []).find(option =>
+    String(option?.name || "").trim().toLowerCase() === "rewards"
+    && Number(option?.type) === APPLICATION_COMMAND_OPTION_SUB_COMMAND
+  );
+  return Boolean((rewards?.options || []).some(option =>
+    String(option?.name || "").trim().toLowerCase() === "username"
+    && Number(option?.type) === APPLICATION_COMMAND_OPTION_STRING
+    && option?.required !== true
+  ));
 }
 
 async function registerAllCommands(url, env) {
@@ -10892,7 +10967,7 @@ function rewardCutoffNote(payload) {
       const trackedText = trackedLeagueRank
         ? `The Top ${fullNumber(trackedLeagueRank)} League standings are tracked separately`
         : "League standings are tracked separately";
-      return `Top ${fullNumber(directLimit)} players are direct. ${trackedText}; individual-player cutoffs beyond that require the separate League-roster scan.`;
+      return "Global ranks are estimations by pulling the top 10k leagues/clans. Not 100% accurate, but close.";
     }
     return "The League player leaderboard source is partial; deeper reward ranks may not be available yet.";
   }
