@@ -30,10 +30,11 @@ const BUTTON_STYLE_DANGER = 4;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
-const HISTORY_VIEWS = ["clan", "league"];
+const HISTORY_VIEWS = ["clan", "league", "leaderboard"];
 const HISTORY_VIEW_LABELS = {
   clan: "Clan Battle History",
-  league: "League History"
+  league: "League History",
+  leaderboard: "Leaderboard History"
 };
 const DEFAULT_HISTORY_PAGE_SIZE = 10;
 const HISTORY_RENDER_CACHE_TTL_SECONDS = 20 * 60;
@@ -63,7 +64,7 @@ const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HOURLY_LEAGUE_ASSIGNMENT_PREFIX = "league:";
-const HTG_BUILD_ID = "htg-debug-2026-07-31-setup-button-fallback";
+const HTG_BUILD_ID = "luna-auto-mode-history-rewards-2026-08-03a";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
 const SELF_TIMEOUT_DAYS = 7;
@@ -910,6 +911,11 @@ async function buildSearchResponse(query, env) {
   const row = payload.row;
   const avatarUrl = await searchAvatarUrl(row, env);
   const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
+  const sourceMode = String(payload.source_mode || "clans").trim().toLowerCase();
+  const isLeagueMode = sourceMode === "leagues";
+  const leaguePayload = isLeagueMode && resultClan
+    ? await fetchLeagueCurrentPayload(resultClan, env).catch(() => null)
+    : null;
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
   const clanRankText = formatClanRank(row, payload.run);
@@ -918,10 +924,12 @@ async function buildSearchResponse(query, env) {
     : row.clan_rank
       ? `🔰 Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
       : null;
-  const eventState = await hourlyClanDeliveryEventState(env).catch(() => null);
-  const freshnessLines = eventState?.reason === "event_ended"
-    ? ["Clan battle has ended"]
-    : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
+  const eventState = isLeagueMode ? null : await hourlyClanDeliveryEventState(env).catch(() => null);
+  const freshnessLines = isLeagueMode
+    ? [`Last Update: ${discordTime(row.fetched_at || leaguePayload?.snapshot_at)}`, "Updates every 5 minutes"]
+    : eventState?.reason === "event_ended"
+      ? ["Clan battle has ended"]
+      : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
   const embed = {
     title: "Global Search Results",
     color: 0x58a6ff,
@@ -939,6 +947,35 @@ async function buildSearchResponse(query, env) {
     ].filter(line => line !== null).join("\n")
   };
 
+  if (isLeagueMode) {
+    const exactGlobalRank = positiveInteger(row.global_rank);
+    const globalRankText = exactGlobalRank
+      ? `${row.global_rank_estimated ? "Estimated " : ""}${rank(exactGlobalRank)}${payload.total_global_players ? ` of ${shortNumber(payload.total_global_players)}` : ""}`
+      : "Outside the exact Top 500";
+    const leagueEventLabel = String(
+      leaguePayload?.league_run_label ||
+      leaguePayload?.league_run_key ||
+      payload.source_label ||
+      "Current League"
+    ).trim();
+
+    embed.title = "League Global Search Results";
+    embed.description = [
+      `\u{1F9D1} Name: **${displayName(row)}**`,
+      `\u{1F3C6} League: **${resultClan || "Unknown"}**`,
+      leaguePayload?.league_rank ? `\u{1F4CA} League Rank: **${rank(leaguePayload.league_rank)}**` : null,
+      "",
+      `\u{1F389} Event: **${leagueEventLabel}**`,
+      `\u{2B50} Player Points: **${shortNumber(row.points ?? row.global_points)}**`,
+      leaguePayload?.league_points !== undefined && leaguePayload?.league_points !== null
+        ? `\u{1F465} League Points: **${shortNumber(leaguePayload.league_points)}**`
+        : null,
+      `\u{1F30D} Global League-Player Rank: **${globalRankText}**`,
+      "",
+      ...freshnessLines
+    ].filter(line => line !== null).join("\n");
+  }
+
   if (avatarUrl) {
     embed.thumbnail = { url: avatarUrl };
   }
@@ -949,7 +986,9 @@ async function buildSearchResponse(query, env) {
     allowed_mentions: { parse: [] }
   };
 
-  if (searchChartEnabled(env)) {
+  // This chart is built from Clan Battle history. Do not attach it to a
+  // League result, where it produces an empty and misleading Clan card.
+  if (!isLeagueMode && searchChartEnabled(env)) {
     try {
       const chart = await buildSearchChartAttachment(payload, row, env, avatarUrl);
       if (chart?.bytes?.byteLength) {
@@ -7217,6 +7256,11 @@ async function loadHistoryCommandData(query, env) {
     normalizeLeagueHistoryRows(leagueHistory?.rows),
     normalizeLeagueHistoryRows(staticProfile?.league_summaries)
   );
+  const leaderboardHistoryRows = mergeHistorySummaryRows(
+    normalizeLeaderboardHistoryRows(leaderboardRows),
+    normalizeLeaderboardHistoryRows(leagueHistory?.leaderboard_rows),
+    normalizeLeaderboardHistoryRows(staticProfile?.leaderboard_summaries)
+  );
   const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
     || absoluteProfileAssetUrl(staticProfile?.avatar_url, env)
     || await searchAvatarUrl({
@@ -7233,6 +7277,7 @@ async function loadHistoryCommandData(query, env) {
     clan_join_time: globalPayload?.row?.join_time || null,
     clan: sortClanHistoryRecords([...clanMap.values()]),
     league: leagueRows,
+    leaderboard: leaderboardHistoryRows,
     league_unavailable: leagueHistory === null && leagueRows.length === 0
   };
 }
@@ -7491,9 +7536,9 @@ function normalizeLeaderboardHistoryRows(rows) {
   })).filter(row => row.key && (row.global_rank !== null || row.points !== null));
 }
 
-function mergeHistorySummaryRows(primaryRows, secondaryRows) {
+function mergeHistorySummaryRows(...rowGroups) {
   const map = new Map();
-  for (const row of [...(primaryRows || []), ...(secondaryRows || [])]) {
+  for (const row of rowGroups.flatMap(rows => rows || [])) {
     const key = row.key || historyRecordKey(row.name);
     if (!key) continue;
     const existing = map.get(key);
@@ -8707,6 +8752,7 @@ async function renderHistoryCardPng(history, view, env = {}) {
 
 function historyModernAccent(view, color) {
   if (view === "league") return color.yellow;
+  if (view === "leaderboard") return color.blue;
   return color.red;
 }
 
@@ -10339,16 +10385,91 @@ function firstValidDateValue(...values) {
 
 async function buildRewardsResponse(interaction, env, forcedType = null) {
   const type = rewardCommandType(interaction, forcedType);
+  const activeMode = await fetchGlobalLeaderboardRewardMode(env).catch(() => null);
+  if (type === "clans" && activeMode === "leagues") {
+    return messageResponse("No Clan Battle is active. The current global ranking source is **Leagues**.", true);
+  }
+  if (type === "leagues" && activeMode === "clans") {
+    return messageResponse("No League is active. The current global ranking source is the **Clan Battle**.", true);
+  }
+
   const payload = await fetchRewardCutoffsPayload(type, env);
 
   if (!payload.ok) {
     return messageResponse(payload.message || "No reward cutoff data is available yet.", true);
   }
 
+  const projection = await fetchRewardProjection(interaction, type, env).catch(err => ({
+    requested: true,
+    error: err?.message || String(err)
+  }));
+
   return {
     type: INTERACTION_RESPONSE_CHANNEL_MESSAGE,
-    data: rewardCutoffMessageData(payload, type, env)
+    data: rewardCutoffMessageData(payload, type, env, projection)
   };
+}
+
+async function fetchRewardProjection(interaction, type, env) {
+  const query = String(getCommandOption(interaction, "username") || "").trim();
+  if (!query) return null;
+
+  const search = await fetchGlobalSearchPayload(query, env);
+  const payload = search?.payload || {};
+  const row = payload.row;
+  if (!search?.ok || payload.ok === false || !row) {
+    throw httpError(search?.status || 404, payload.message || `No current result found for ${query}.`);
+  }
+
+  const sourceMode = String(payload.source_mode || "clans").trim().toLowerCase();
+  const expectedMode = type === "leagues" ? "leagues" : "clans";
+  if (sourceMode !== expectedMode) {
+    throw httpError(409, type === "leagues"
+      ? `${displayName(row)} is not in a current League result.`
+      : `${displayName(row)} is not in a current Clan Battle result.`);
+  }
+
+  const groupName = String(row.source_clan || row.clan_name || row.clan || "").trim();
+  if (!groupName) throw httpError(404, `No current ${type === "leagues" ? "League" : "clan"} was found for ${displayName(row)}.`);
+
+  const current = type === "leagues"
+    ? await fetchLeagueCurrentPayload(groupName, env)
+    : await fetchClanCurrentRewardPayload(groupName, env);
+  const members = Array.isArray(current?.rows) ? current.rows : [];
+  const points = finiteNumber(type === "leagues" ? current?.league_points : current?.clan_points) || 0;
+  const currentRank = positiveInteger(type === "leagues" ? current?.league_rank : current?.clan_rank);
+  const pace1h = members.reduce((sum, member) => sum + Math.max(0, finiteNumber(member?.gain_1h) || 0), 0);
+  const projectedPoints1h = points + pace1h;
+
+  return {
+    requested: true,
+    query,
+    player_name: displayName(row),
+    group_name: groupName,
+    group_kind: type === "leagues" ? "League" : "Clan",
+    current_rank: currentRank,
+    current_points: points,
+    pace_1h: pace1h,
+    projected_points_1h: projectedPoints1h
+  };
+}
+
+async function fetchClanCurrentRewardPayload(clanName, env) {
+  const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
+  const apiUrl = clanApiUrl(env, "/api/clans/current", apiBase);
+  apiUrl.searchParams.set("clan", clanName);
+  const response = await fetchClanApi(env, apiUrl, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "c0ld-Discord-Rewards-Projection"
+    },
+    cf: { cacheTtl: 0, cacheEverything: false }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw httpError(response.status || 502, payload.message || `Clan lookup failed (${response.status}).`);
+  }
+  return payload;
 }
 
 async function completeRewardsInteraction(interaction, env, forcedType = null) {
@@ -10619,7 +10740,7 @@ function rewardVariantLabel(pt, shinyValue) {
   return base;
 }
 
-function rewardCutoffMessageData(payload, type, env) {
+function rewardCutoffMessageData(payload, type, env, projection = null) {
   const theme = rewardMessageTheme(payload, type);
   const leaderboardTitle = rewardLeaderboardTitle(payload, type, env);
   const metaLine = rewardMetaLine(payload, type);
@@ -10655,6 +10776,16 @@ function rewardCutoffMessageData(payload, type, env) {
     }
   ];
 
+  if (projection?.requested) {
+    components.push(
+      { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+      {
+        type: COMPONENT_TYPE_TEXT_DISPLAY,
+        content: rewardProjectionText(projection, payload)
+      }
+    );
+  }
+
   if (note) {
     components.push(
       { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
@@ -10684,6 +10815,40 @@ function rewardCutoffMessageData(payload, type, env) {
       }
     ]
   };
+}
+
+function rewardProjectionText(projection, payload) {
+  if (projection.error) {
+    return `### Player Projection\n-# ${escapeDiscordMarkdown(projection.error)}`;
+  }
+
+  const rankText = projection.current_rank ? rank(projection.current_rank) : "Unranked";
+  const paceText = projection.pace_1h > 0 ? `+${fullNumber(projection.pace_1h)}/hr` : "no gain in the last hour";
+  const cutoffLines = (payload.cutoffs || []).map(cutoff => {
+    const cutoffPoints = finiteNumber(cutoff.points);
+    if (cutoffPoints === null) return null;
+    const label = cutoff.label || rewardDefaultCutoffLabel(cutoff.rank);
+    const needed = Math.max(0, cutoffPoints - projection.current_points);
+    if (needed <= 0) return `- ${discordInlineCode(label)} qualified by **${fullNumber(Math.abs(cutoffPoints - projection.current_points))}** pts`;
+    const eta = projection.pace_1h > 0
+      ? formatRewardProjectionDuration(needed / projection.pace_1h)
+      : "no ETA at the current pace";
+    return `- ${discordInlineCode(label)} needs **${fullNumber(needed)}** pts · ${eta}`;
+  }).filter(Boolean);
+
+  return [
+    `### Projection for ${escapeDiscordMarkdown(projection.player_name)}`,
+    `**${escapeDiscordMarkdown(projection.group_kind)}:** ${escapeDiscordMarkdown(projection.group_name)} · **${rankText}** · **${fullNumber(projection.current_points)}** pts`,
+    `**Recent pace:** ${paceText} · **Projected +1h:** ${fullNumber(projection.projected_points_1h)} pts`,
+    ...cutoffLines
+  ].join("\n");
+}
+
+function formatRewardProjectionDuration(hours) {
+  if (!Number.isFinite(hours) || hours < 0) return "no ETA at the current pace";
+  if (hours < 1) return `about **${Math.max(1, Math.ceil(hours * 60))}m**`;
+  if (hours < 48) return `about **${hours < 10 ? hours.toFixed(1) : Math.ceil(hours)}h**`;
+  return `about **${Math.ceil(hours / 24)}d**`;
 }
 
 function rewardMessageTheme(payload, type) {
@@ -11605,7 +11770,17 @@ function clanCommandPayload() {
       {
         name: "rewards",
         description: "Show clan reward cutoff points from the clan leaderboard.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Optional Roblox username for clan rank, pace, and cutoff projections",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            min_length: 1,
+            max_length: 64
+          }
+        ]
       }
     ]
   };
@@ -11655,7 +11830,17 @@ function leagueCommandPayload() {
       {
         name: "rewards",
         description: "Show league reward cutoff points from the league leaderboard.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Optional Roblox username for League rank, pace, and cutoff projections",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            min_length: 1,
+            max_length: 64
+          }
+        ]
       }
     ]
   };

@@ -1035,8 +1035,19 @@ async function handleSoloLeaderboard(request, env) {
 
   livePlayers.forEach((row, index) => { row.rank = index + 1; });
   const rowsByUser = new Map(livePlayers.map(row => [String(row.user_id), row]));
+  let publishedPool = { completed: false, total_players: null, rows: [] };
 
   if (query) {
+    publishedPool = await fetchPublishedLeaguePlayerPoolSearchRows(env, runKey, query).catch(err => {
+      console.warn("published League player-pool search unavailable", err?.message || String(err));
+      return { completed: false, total_players: null, rows: [] };
+    });
+    for (const row of publishedPool.rows) {
+      const id = String(row.user_id || "");
+      if (!id || rowsByUser.has(id) || isLeaguePubliclyHidden(env, row.league_name)) continue;
+      rowsByUser.set(id, row);
+    }
+
     const storedRows = await fetchStoredSoloSearchRows(env, runKey).catch(err => {
       console.warn("expanded solo leaderboard search unavailable", err?.message || String(err));
       return [];
@@ -1100,10 +1111,59 @@ async function handleSoloLeaderboard(request, env) {
     source: "big-games-public-league-players",
     query: query || null,
     top_limit: limit,
-    top_available: livePlayers.length,
-    search_scope: query ? "top-500-plus-direct-player-plus-stored-league-rosters" : "top-500",
+    top_available: Math.max(livePlayers.length, toNumber(publishedPool.total_players) || 0),
+    pool_completed: publishedPool.completed === true,
+    pool_total_players: toNumber(publishedPool.total_players),
+    search_scope: query
+      ? (publishedPool.completed
+          ? "top-500-direct-plus-published-top-league-roster-player-pool"
+          : "top-500-plus-direct-player-plus-stored-league-rosters")
+      : "top-500",
     rows: visibleRows
   }, env);
+}
+
+async function fetchPublishedLeaguePlayerPoolSearchRows(env, runKey, query) {
+  requireSupabase(env);
+  const userId = await resolveRobloxUserIdForSearch(query).catch(() => {
+    const numeric = toNumber(query);
+    return numeric && Number.isInteger(numeric) ? numeric : null;
+  });
+  if (!userId) return { completed: false, total_players: null, rows: [] };
+
+  const rows = await selectLeagueCurrentRows(env, {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_icon,rank,user_id,display_name,points,raw_member,raw_league",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+    user_id: `eq.${userId}`,
+    order: "rank.asc",
+    limit: "2"
+  });
+  const normalized = rows.map(row => {
+    const rawMember = normalizeRawLeague(row.raw_member);
+    const rawLeague = normalizeRawLeague(row.raw_league);
+    const sourceLeagueName = String(firstDefined(rawMember.source_league_name, rawLeague.Name) || "").trim();
+    return {
+      rank: toNumber(row.rank),
+      rank_is_estimated: true,
+      user_id: toNumber(row.user_id),
+      username: String(row.display_name || `user_${row.user_id}`).trim(),
+      display_name: String(row.display_name || `user_${row.user_id}`).trim(),
+      league_name: sourceLeagueName || "Unlisted",
+      league_id: stringOrNull(firstDefined(rawMember.source_league_id, rawLeague.ID, row.league_id)),
+      league_icon: stringOrNull(row.league_icon),
+      points: toNumber(row.points) || 0,
+      total_points: toNumber(row.points) || 0,
+      fetched_at: row.fetched_at || null,
+      source: "published-top-league-roster-player-pool"
+    };
+  });
+  const metadata = normalizeRawLeague(rows[0]?.raw_league);
+  return {
+    completed: rows.length > 0,
+    total_players: toNumber(metadata.pool_total_players),
+    rows: normalized
+  };
 }
 
 async function handleLeaguePlayerMilestones(request, env) {

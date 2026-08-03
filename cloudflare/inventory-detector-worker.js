@@ -63,7 +63,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-quota-safe-freshness-2026-08-02d";
+const INVENTORY_BUILD_ID = "inventory-htg-adaptive-quota-2026-08-03a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -143,6 +143,7 @@ export default {
             big_games_redirect_uri: bigGamesOAuthApp(env, "hatch_tracker", { allowMissing: true }).redirectUri || null,
             force_refresh_on_schedule: envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, true),
             scan_interval_minutes: htgScanIntervalMinutes(env),
+            quota_aware_scheduling: true,
             max_concurrent_scans: htgMaxConcurrentScans(env),
             shard_count: htgShardCount(env),
             current_shard: htgCurrentShard(env, new Date()),
@@ -162,6 +163,7 @@ export default {
             pending_gain_count: hatchTrackerHealth.pending_gain_count,
             overdue_tracker_count: hatchTrackerHealth.overdue_tracker_count,
             failed_tracker_count: hatchTrackerHealth.failed_tracker_count,
+            quota_paused_tracker_count: hatchTrackerHealth.quota_paused_tracker_count,
             oldest_last_checked_at: hatchTrackerHealth.oldest_last_checked_at,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
             webhook_configured: Boolean(hatchAlertWebhookUrl(env))
@@ -1217,7 +1219,6 @@ function hatchTrackerUser(tracker) {
 
 function compactHatchTrackerHealth(trackers, env, now = new Date()) {
   const rows = Array.isArray(trackers) ? trackers : [];
-  const overdueMs = Math.max(5, htgScanIntervalMinutes(env) * 2) * 60000;
   const checkedTimes = rows
     .map(row => new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime())
     .filter(value => Number.isFinite(value) && value > 0);
@@ -1227,8 +1228,10 @@ function compactHatchTrackerHealth(trackers, env, now = new Date()) {
     failed_tracker_count: rows.filter(row => firstString(row?.metadata?.htg_state?.last_scan_error)).length,
     overdue_tracker_count: rows.filter(row => {
       const checkedAt = new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime();
+      const overdueMs = Math.max(5, htgTrackerScanIntervalMinutes(env, row, now) * 2) * 60000;
       return !Number.isFinite(checkedAt) || checkedAt <= 0 || now.getTime() - checkedAt > overdueMs;
     }).length,
+    quota_paused_tracker_count: rows.filter(row => htgTrackerQuotaSchedule(row, now).exhausted_until_reset).length,
     oldest_last_checked_at: checkedTimes.length ? new Date(Math.min(...checkedTimes)).toISOString() : null
   };
 }
@@ -3375,7 +3378,7 @@ function htgGainSourceWindow(env, tracker, previousRows, checkedAt) {
     .map(row => new Date(row.last_checked_at || row.updated_at || 0).getTime())
     .filter(time => Number.isFinite(time) && time > 0)
     .sort((a, b) => b - a)[0];
-  const fallbackStart = new Date(new Date(checkedAt).getTime() - htgScanIntervalMinutes(env) * 60000).toISOString();
+  const fallbackStart = new Date(new Date(checkedAt).getTime() - htgTrackerScanIntervalMinutes(env, tracker, new Date(checkedAt)) * 60000).toISOString();
   const latestFreshSource = latestHtgStateSourceFetchedAt(previousRows);
   const startAt = firstString(
     latestFreshSource,
@@ -5449,7 +5452,7 @@ function htgMaxConcurrentScans(env) {
 function htgTrackerIsOverdue(env, tracker, now = new Date()) {
   const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
   if (!Number.isFinite(lastChecked) || lastChecked <= 0) return true;
-  return now.getTime() - lastChecked > htgScanIntervalMinutes(env) * 2 * 60000;
+  return now.getTime() - lastChecked > htgTrackerScanIntervalMinutes(env, tracker, now) * 2 * 60000;
 }
 function htgShardCount(env) {
   const fallback = htgScanIntervalMinutes(env);
@@ -5481,21 +5484,67 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
   const currentShard = htgCurrentShard(env, now);
   const userShard = htgUserShard(userId, shardCount);
   const shardCompatible = htgCronSupportsMinuteSharding(options.cron);
+  const quota = htgTrackerQuotaSchedule(tracker, now);
+  if (quota.exhausted_until_reset) {
+    return {
+      due: false,
+      reason: "HTG forced-refresh quota is exhausted; scans are paused until the provider reset instead of repeatedly reading cached inventory.",
+      shard_count: shardCount,
+      current_shard: currentShard,
+      user_shard: userShard,
+      cron: options.cron || null,
+      quota
+    };
+  }
   if (!options.ignoreShard && shardCompatible && userShard !== currentShard) {
-    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null };
+    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, quota };
   }
 
   const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
   if (!Number.isFinite(lastChecked) || lastChecked <= 0) {
-    return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
+    return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
 
-  const intervalMs = htgScanIntervalMinutes(env) * 60000;
+  const intervalMinutes = htgTrackerScanIntervalMinutes(env, tracker, now);
+  const intervalMs = intervalMinutes * 60000;
   const elapsedMs = now.getTime() - lastChecked;
   if (elapsedMs < Math.max(0, intervalMs - 30000)) {
-    return { due: false, reason: "HTG scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
+    return { due: false, reason: "HTG quota-safe scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
-  return { due: true, reason: "HTG scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard };
+  return { due: true, reason: "HTG quota-safe scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
+}
+
+function htgTrackerScanIntervalMinutes(env, tracker, now = new Date()) {
+  const configured = htgScanIntervalMinutes(env);
+  const quota = htgTrackerQuotaSchedule(tracker, now);
+  if (!quota.limit || quota.reset_has_passed) return Math.max(configured, quota.minimum_full_day_interval_minutes || 0);
+  return Math.max(configured, quota.minimum_full_day_interval_minutes || 0, quota.minimum_remaining_interval_minutes || 0);
+}
+
+function htgTrackerQuotaSchedule(tracker, now = new Date()) {
+  const stored = plainObject(tracker?.metadata?.htg_state?.refresh_quota);
+  const used = Math.max(0, Number(stored.used || 0));
+  const limit = Math.max(0, Number(stored.limit || 0));
+  const resetsAt = firstString(stored.resets_at);
+  const resetMs = new Date(resetsAt || 0).getTime();
+  const nowMs = now.getTime();
+  const resetHasPassed = !Number.isFinite(resetMs) || resetMs <= nowMs;
+  const remaining = limit > 0 ? Math.max(0, limit - used) : 0;
+  const minutesUntilReset = !resetHasPassed ? Math.max(1, Math.ceil((resetMs - nowMs) / 60000)) : 0;
+  const minimumFullDayInterval = limit > 0 ? Math.max(1, Math.ceil(1440 / limit)) : 0;
+  const minimumRemainingInterval = !resetHasPassed && remaining > 0
+    ? Math.max(1, Math.ceil(minutesUntilReset / remaining))
+    : 0;
+  return {
+    used,
+    limit,
+    remaining,
+    resets_at: resetsAt || null,
+    reset_has_passed: resetHasPassed,
+    exhausted_until_reset: limit > 0 && remaining <= 0 && !resetHasPassed,
+    minimum_full_day_interval_minutes: minimumFullDayInterval,
+    minimum_remaining_interval_minutes: minimumRemainingInterval
+  };
 }
 function htgRequireSourceFilter(env) {
   return envBool(firstString(env.HTG_REQUIRE_SOURCE_FILTER, env.HATCH_REQUIRE_SOURCE_FILTER), DEFAULT_HTG_REQUIRE_SOURCE_FILTER);

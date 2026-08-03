@@ -3790,6 +3790,7 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
     ).catch(() => new Map());
     const rows = sourceRows.map((row, index) => ({
       global_rank: toNumber(row.rank),
+      global_rank_estimated: row.rank_is_estimated === true,
       projected_rank: null,
       projected_rank_1h: null,
       projected_points_1h: null,
@@ -3818,7 +3819,9 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
       source_label: "Leagues",
       search_scope: payload.search_scope || "top-500-plus-direct-player-plus-stored-league-rosters",
       total_global_players: toNumber(payload.top_available) || null,
-      rank_is_exact: rows.every(row => toNumber(row.global_rank) !== null),
+      pool_completed: payload.pool_completed === true,
+      rank_is_exact: rows.every(row => toNumber(row.global_rank) !== null && row.global_rank_estimated !== true),
+      rank_is_estimated: rows.some(row => toNumber(row.global_rank) !== null && row.global_rank_estimated === true),
       rows,
       row: rows[0] || null
     }, env, 30);
