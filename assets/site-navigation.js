@@ -9,6 +9,7 @@
     "c0ld-league-matches.html",
     "solo-leaderboard.html",
     "league-leaderboard.html",
+    "compare-leagues.html",
     "top-leagues.html",
     "league.html",
     "league-profile.html",
@@ -279,7 +280,8 @@
     const leagueLinks = [
       ["c0ld-leagues.html", "c0ld Leagues"],
       ["solo-leaderboard.html", "Solo Leaderboard"],
-      ["league-leaderboard.html", "League Leaderboard"]
+      ["league-leaderboard.html", "League Leaderboard"],
+      ["compare-leagues.html", "Compare Leagues"]
     ];
 
     root.classList.add("c0ld-primary-nav");

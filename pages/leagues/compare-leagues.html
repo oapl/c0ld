@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compare Leagues</title>
+<link rel="stylesheet" href="assets/league-page.css">
+<link rel="stylesheet" href="assets/compare-leagues.css?v=20260804a">
+</head>
+<body>
+<header>
+  <div class="logo-wrap"><a href="index.html"><img class="site-logo" src="assets/c0ld-kitsune-logo.gif" alt="c0ld"></a></div>
+  <div class="menu">
+    <a href="index.html">c0ld Leaderboard</a>
+    <a href="clans.html">Clans Leaderboard</a>
+    <a href="global-leaderboard.html">Global Leaderboard</a>
+  </div>
+</header>
+<main class="compare-main">
+  <section class="compare-toolbar" aria-labelledby="compare-title">
+    <div>
+      <h1 id="compare-title">Compare Leagues</h1>
+      <div class="meta" id="compare-run-label">Current League</div>
+    </div>
+    <form id="compare-form" class="compare-form">
+      <label>
+        <span>Left League</span>
+        <input id="left-league" name="left" type="text" autocomplete="off" spellcheck="false" placeholder="League name" maxlength="40">
+      </label>
+      <span class="compare-versus" aria-hidden="true">VS</span>
+      <label>
+        <span>Right League</span>
+        <input id="right-league" name="right" type="text" autocomplete="off" spellcheck="false" placeholder="League name" maxlength="40">
+      </label>
+      <button id="compare-submit" type="submit">Search</button>
+    </form>
+  </section>
+
+  <section class="comparison-grid" aria-live="polite">
+    <article class="league-compare-panel" data-side="left">
+      <div class="compare-panel-header">
+        <div class="compare-league-heading">
+          <img class="compare-league-icon" data-role="icon" src="" alt="" hidden>
+          <div>
+            <h2 data-role="title">Left League</h2>
+            <div class="meta" data-role="summary">No league selected.</div>
+          </div>
+        </div>
+        <a class="compare-profile-link" data-role="profile" href="league.html" hidden>Open League</a>
+      </div>
+      <div class="compare-panel-body" data-role="body">
+        <div class="compare-empty">No league selected.</div>
+      </div>
+    </article>
+
+    <article class="league-compare-panel" data-side="right">
+      <div class="compare-panel-header">
+        <div class="compare-league-heading">
+          <img class="compare-league-icon" data-role="icon" src="" alt="" hidden>
+          <div>
+            <h2 data-role="title">Right League</h2>
+            <div class="meta" data-role="summary">No league selected.</div>
+          </div>
+        </div>
+        <a class="compare-profile-link" data-role="profile" href="league.html" hidden>Open League</a>
+      </div>
+      <div class="compare-panel-body" data-role="body">
+        <div class="compare-empty">No league selected.</div>
+      </div>
+    </article>
+  </section>
+</main>
+<script src="assets/compare-leagues.js?v=20260804a"></script>
+<script src="assets/site-navigation.js"></script>
+</body>
+</html>
