@@ -3994,7 +3994,7 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
     const y = plot.y + (index / 4) * plot.h;
     const value = yMax - (index / 4) * (yMax - yMin);
     const label = shortNumber(value);
-    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    const labelWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, label, 15);
     canvas.fillRect(plot.x, y, plot.w, 1, color.grid);
     canvas.drawFontText(fonts.regular, label, Math.max(10, plot.x - labelWidth - 12), y - 8, 12, color.muted, labelWidth + 4);
   }
@@ -5241,48 +5241,29 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
 
   const leaguePoints = finiteNumber(payload.league_points)
     ?? members.reduce((sum, item) => sum + Math.max(0, item.points || 0), 0);
-  const hourlyGain = rows
-    .map(row => finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain))
-    .filter(value => value !== null)
-    .reduce((sum, value) => sum + value, 0);
-
   const displayLeagueName = String(payload.league_name || leagueName || "Unknown").trim() || "Unknown";
   const snapshotAt = payload.snapshot_at || payload.fetched_at || payload.updated_at;
-  const eventState = await hourlyLeagueDeliveryEventState(env).catch(() => null);
-  const freshnessLine = eventState?.reason === "event_ended"
-    ? "-# League has ended"
-    : `-# **Updated**: ${discordTime(snapshotAt)} · Updates every 15 minutes`;
+  const memberHearts = ["❤️", "💙", "💚", "💛"];
+  const memberLines = members.map((item, index) => {
+    const globalRank = positiveInteger(item.globalRank) ? fullNumber(item.globalRank) : "-";
+    return `-# ${memberHearts[index] || "🤍"} ** 𓊈 ${escapeDiscordMarkdown(item.name || "Unknown")} 𓊉** · **Rank:** ${globalRank} · **${shortNumber(item.points).toLowerCase()}** ᴘᴛs · ${shortNumber(item.gain1h ?? 0).toLowerCase()}/*ʜʀ*`;
+  });
   const leagueDetails = {
     type: COMPONENT_TYPE_TEXT_DISPLAY,
     content: [
-      `## ${escapeDiscordMarkdown(displayLeagueName)}`,
-      `**Points**: ${shortNumber(leaguePoints)} (${shortNumber(hourlyGain)}/h)`,
-      `**Global Rank**: ${rank(payload.league_rank)}`,
-      freshnessLine
+      `# ${escapeDiscordMarkdown(displayLeagueName)}`,
+      `**Rank**: \`${positiveInteger(payload.league_rank) ? fullNumber(payload.league_rank) : "-"}\``,
+      `**Points**: \`${shortNumber(leaguePoints).toLowerCase()}\``,
+      `-# Updated: *${snapshotAt ? discordTime(snapshotAt) : "Unknown"}* ᓚᘏᗢ`,
+      "",
+      ...(memberLines.length ? memberLines : ["-# No League members found."]),
+      "",
+      "-# *Updates every 15 minutes.*"
     ].join("\n")
   };
 
-  const thumbnailUrl = leagueIconUrl(payload.league_icon);
-  const header = thumbnailUrl
-    ? {
-        type: COMPONENT_TYPE_SECTION,
-        components: [leagueDetails],
-        accessory: {
-          type: COMPONENT_TYPE_THUMBNAIL,
-          media: { url: thumbnailUrl },
-          description: `${displayLeagueName} league icon`
-        }
-      }
-    : leagueDetails;
-
   const containerComponents = [
-    header,
-    { type: COMPONENT_TYPE_SEPARATOR },
-    {
-      type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: "### League Members"
-    },
-    ...leagueMemberComponents(members, env)
+    leagueDetails
   ];
 
   const message = {
@@ -6791,9 +6772,11 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const yy = plot.y + (i / 4) * plot.h;
     const value = yMax - (i / 4) * (yMax - yMin);
     const label = shortNumber(value);
-    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    const labelFont = fonts.rowBold || fonts.bold;
+    const labelSize = 15;
+    const labelWidth = canvas.measureFontText(labelFont, label, labelSize);
     canvas.fillRect(plot.x, yy, plot.w, 1, [39, 49, 68, 255]);
-    canvas.drawFontText(fonts.regular, label, Math.max(30, plot.x - labelWidth - 16), yy - 8, 12, color.muted, labelWidth + 8);
+    canvas.drawFontText(labelFont, label, Math.max(24, plot.x - labelWidth - 16), yy - 9, labelSize, color.muted, labelWidth + 12);
   }
 
   const xTickCount = hours <= 1 ? 2 : Math.min(12, hours);
@@ -6801,14 +6784,14 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const xx = plot.x + (i / xTickCount) * plot.w;
     const tickTime = chartMinT + (i / xTickCount) * (chartMaxT - chartMinT);
     const tickLabel = hours <= 1 ? chartTimeOfDayAxisLabel(tickTime) : chartHourAxisLabel(tickTime);
-    const tickLabelWidth = canvas.measureFontText(fonts.regular, tickLabel, 12);
+    const tickLabelWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, tickLabel, 15);
     const tickLabelX = i === 0
       ? plot.x
       : i === xTickCount
         ? plot.x + plot.w - tickLabelWidth
         : Math.max(plot.x, Math.min(plot.x + plot.w - tickLabelWidth, xx - tickLabelWidth / 2));
     canvas.fillRect(xx, plot.y, 1, plot.h, [25, 34, 45, 255]);
-    canvas.drawFontText(fonts.regular, tickLabel, tickLabelX, plot.y + plot.h + 23, 12, color.muted, tickLabelWidth + 6);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, tickLabel, tickLabelX, plot.y + plot.h + 22, 15, color.muted, tickLabelWidth + 8);
   }
 
   visibleUpdates.forEach(marker => {
@@ -6823,11 +6806,9 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   performanceSeries.forEach((item, index) => {
     const lineOffset = (index - (performanceSeries.length - 1) / 2) * 2;
     const lineY = point => yFor(point) + lineOffset;
-    const glow = [item.color[0], item.color[1], item.color[2], 72];
-    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), lineY, glow, 7);
-    leagueDrawSegmentedPolyline(canvas, item.points, point => xForTime(point.t), lineY, item.color, 4);
+    leagueDrawSharpPolyline(canvas, item.points, point => xForTime(point.t), lineY, item.color, 3);
     const last = item.points[item.points.length - 1];
-    if (last) chartFillCircle(canvas, xForTime(last.t), lineY(last), 5, item.color);
+    if (last) chartFillCircle(canvas, xForTime(last.t), lineY(last), 4, item.color);
   });
 
   leagueDrawMemberPerformanceTable(
@@ -6888,24 +6869,28 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
   const rowHeight = 43;
   const columns = [
     { label: "Rank", x: 18, width: 72, align: "left" },
-    { label: "Player", x: 92, width: 410, align: "left" },
-    { label: "Total Points", x: 690, width: 150, align: "right" },
-    { label: "1 Hour", x: 850, width: 120, align: "right" },
-    { label: "6 Hours", x: 990, width: 120, align: "right" },
-    { label: "12 Hours", x: 1130, width: 120, align: "right" },
-    { label: "24 Hours", x: 1270, width: 120, align: "right" }
+    { label: "Player", x: 92, width: 340, align: "left" },
+    { label: "Points", x: 500, width: 130, align: "right" },
+    { label: "1h", x: 650, width: 100, align: "right" },
+    { label: "6h", x: 770, width: 100, align: "right" },
+    { label: "12h", x: 890, width: 100, align: "right" },
+    { label: "24h", x: 1010, width: 100, align: "right" },
+    { label: "Up", x: 1150, width: 120, align: "right" },
+    { label: "Down", x: 1290, width: 120, align: "right" }
   ];
   const totalHeight = headerHeight + rowHeight * Math.max(4, visible.length);
+  const activityDividerX = x + 1130;
 
   hourlyBlendRoundedRect(canvas, x, y, width, totalHeight, 8, color.inset, 225);
   hourlyDrawPanelFrame(canvas, x, y, width, totalHeight, color.line);
   canvas.fillRect(x, y + headerHeight, width, 1, color.line);
+  canvas.fillRect(activityDividerX, y + 5, 1, totalHeight - 10, color.line);
 
   for (const column of columns) {
     if (column.align === "right") {
-      hourlyDrawRightText(canvas, fonts.regular, column.label, x + column.x + column.width, y + 7, 13, color.muted, column.width);
+      leagueDrawRightTextClean(canvas, fonts.rowBold || fonts.bold, column.label, x + column.x + column.width, y + 4, 19, color.white, column.width);
     } else {
-      canvas.drawFontText(fonts.regular, column.label, x + column.x, y + 7, 13, color.muted, column.width);
+      canvas.drawFontText(fonts.rowBold || fonts.bold, column.label, x + column.x, y + 4, 19, color.white, column.width);
     }
   }
 
@@ -6917,14 +6902,16 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
     if (!item) continue;
 
     canvas.fillRect(x + 1, rowY, 4, rowHeight, item.color);
-    canvas.drawFontText(fonts.rowBold || fonts.bold, `#${index + 1}`, x + 18, rowY + 11, 16, color.white, 58);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, `#${index + 1}`, x + 18, rowY + 6, 24, color.white, 58);
     chartFillCircle(canvas, x + 103, rowY + 21, 5, item.color);
-    hourlyDrawFittedText(canvas, fonts.rowBold || fonts.bold, historyCardText(item.name, 34), x + 119, rowY + 9, 17, item.color, 380);
-    leagueDrawPerformanceValue(canvas, fonts, item.latestPoints, x + 840, rowY + 10, 16, color, false, 140);
-    leagueDrawPerformanceValue(canvas, fonts, item.latestGain, x + 970, rowY + 10, 16, color, true, 110);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain6h, x + 1110, rowY + 10, 16, color, true, 110);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain12h, x + 1250, rowY + 10, 16, color, true, 110);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain24h, x + 1390, rowY + 10, 16, color, true, 110);
+    leagueDrawFittedTextClean(canvas, fonts.rowBold || fonts.bold, item.name, x + 119, rowY + 5, 24, item.color, 310);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestPoints, x + 630, rowY + 6, 24, color, false, 120);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestGain, x + 750, rowY + 6, 24, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain6h, x + 870, rowY + 6, 24, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain12h, x + 990, rowY + 6, 24, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain24h, x + 1110, rowY + 6, 24, color, true, 112);
+    leagueDrawDurationValue(canvas, fonts, item.activeMs, x + 1270, rowY + 6, 24, color, 130);
+    leagueDrawDurationValue(canvas, fonts, item.downtimeMs, x + 1410, rowY + 6, 24, color, 130);
   }
 }
 
@@ -6942,21 +6929,61 @@ function leagueDrawPerformanceValue(canvas, fonts, value, rightX, y, size, color
       : number < 0
         ? color.red
         : color.white;
-  hourlyDrawRightText(canvas, fonts.rowBold || fonts.bold, text, rightX, y, size, textColor, maxWidth);
+  leagueDrawRightTextClean(canvas, fonts.rowBold || fonts.bold, text, rightX, y, size, textColor, maxWidth);
 }
 
-function leagueDrawSegmentedPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
-  let segment = [];
-  const flush = () => {
-    if (segment.length >= 2) searchChartDrawPolyline(canvas, segment, xFor, yFor, rgba, width);
-    segment = [];
-  };
+function leagueDrawDurationValue(canvas, fonts, value, rightX, y, size, color, maxWidth) {
+  const milliseconds = finiteNumber(value);
+  const text = milliseconds === null ? "—" : searchChartDurationLabel(milliseconds);
+  leagueDrawRightTextClean(canvas, fonts.rowBold || fonts.bold, text, rightX, y, size, color.white, maxWidth);
+}
 
-  for (const point of points) {
-    if (point.breakBefore) flush();
-    segment.push(point);
+function leagueDrawFittedTextClean(canvas, font, value, x, y, size, rgba, maxWidth = Infinity) {
+  const text = historyCardText(value, 10000);
+  const fittedSize = leagueFitFontSize(canvas, font, text, size, maxWidth, 14);
+  const width = canvas.measureFontText(font, text, fittedSize);
+  canvas.drawFontText(font, text, x, y + Math.max(0, (size - fittedSize) / 2), fittedSize, rgba, width + 4);
+}
+
+function leagueDrawRightTextClean(canvas, font, value, rightX, y, size, rgba, maxWidth = Infinity) {
+  const text = historyCardText(value, 10000);
+  const fittedSize = leagueFitFontSize(canvas, font, text, size, maxWidth, 15);
+  const width = canvas.measureFontText(font, text, fittedSize);
+  canvas.drawFontText(font, text, rightX - width, y + Math.max(0, (size - fittedSize) / 2), fittedSize, rgba, width + 4);
+}
+
+function leagueFitFontSize(canvas, font, text, preferredSize, maxWidth, minimumSize) {
+  if (!Number.isFinite(maxWidth)) return preferredSize;
+  let size = preferredSize;
+  while (size > minimumSize && canvas.measureFontText(font, text, size) > maxWidth) size -= 1;
+  return size;
+}
+
+function leagueDrawSharpPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
+  if (!Array.isArray(points) || points.length < 2) return;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    if (current.breakBefore) continue;
+
+    const x1 = xFor(previous);
+    const y1 = yFor(previous);
+    const x2 = xFor(current);
+    const y2 = yFor(current);
+    if (Math.abs(y2 - y1) < 0.5 || x2 <= x1) {
+      chartDrawLine(canvas, x1, y1, x2, y2, rgba, width);
+      continue;
+    }
+
+    // Hold the recorded value across the interval, then use a short, crisp
+    // ramp at the new observation instead of implying gradual point growth.
+    const intervalWidth = x2 - x1;
+    const rampWidth = Math.min(14, Math.max(5, intervalWidth * 0.16));
+    const rampStartX = Math.max(x1, x2 - rampWidth);
+    chartDrawLine(canvas, x1, y1, rampStartX, y1, rgba, width);
+    chartDrawLine(canvas, rampStartX, y1, x2, y2, rgba, width);
   }
-  flush();
 }
 
 function leagueChartMembers(payload) {
@@ -7028,6 +7055,12 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       : leagueGainWithinWindow(samples, end - 60 * 60 * 1000, end);
     const totalGain = leagueGainWithinWindow(samples, start, end);
     const peakGain = points.reduce((max, point) => Math.max(max, Math.max(0, point.intervalGain || 0)), 0);
+    const activity = searchChartMetrics(
+      points.map(point => ({ t: point.t, points: point.value })),
+      start,
+      end
+    );
+    const hasTrackedActivity = activity.activeMs + activity.downtimeMs > 0;
 
     return {
       id: member.id,
@@ -7042,7 +7075,9 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       gain: totalGain,
       totalGain,
       avgGain: totalGain / Math.max(1, hours),
-      peakGain
+      peakGain,
+      activeMs: hasTrackedActivity ? activity.activeMs : null,
+      downtimeMs: hasTrackedActivity ? activity.downtimeMs : null
     };
   });
 }
@@ -10761,7 +10796,15 @@ async function fetchRewardProjection(interaction, type, env) {
   const members = Array.isArray(current?.rows) ? current.rows : [];
   const points = finiteNumber(type === "leagues" ? current?.league_points : current?.clan_points) || 0;
   const currentRank = positiveInteger(type === "leagues" ? current?.league_rank : current?.clan_rank);
-  const pace1h = members.reduce((sum, member) => sum + Math.max(0, finiteNumber(member?.gain_1h) || 0), 0);
+  const memberPace1h = members.reduce((sum, member) => sum + Math.max(0, finiteNumber(member?.gain_1h) || 0), 0);
+  const leagueProjection = type === "leagues"
+    ? await fetchLeagueRewardRankProjection(groupName, current?.league_id, points, memberPace1h, env).catch(() => null)
+    : null;
+  const aggregatePace1h = Math.max(0, finiteNumber(leagueProjection?.projected_gain_1h) || 0);
+  // The full-roster row can legitimately omit its pace while the fresher member
+  // snapshot already contains the four individual gains. Never let that zero
+  // erase a usable member-derived pace and all of the cutoff ETAs with it.
+  const pace1h = memberPace1h > 0 ? memberPace1h : aggregatePace1h;
   const projectedPoints1h = points + pace1h;
 
   return {
@@ -10773,8 +10816,51 @@ async function fetchRewardProjection(interaction, type, env) {
     current_rank: currentRank,
     current_points: points,
     pace_1h: pace1h,
-    projected_points_1h: projectedPoints1h
+    projected_points_1h: projectedPoints1h,
+    projected_rank_1h: positiveInteger(leagueProjection?.projected_rank_1h)
   };
+}
+
+async function fetchLeagueRewardRankProjection(leagueName, leagueId, currentPoints, memberPace1h, env) {
+  const wantedName = String(leagueName || "").trim().toLowerCase();
+  const wantedId = String(leagueId || "").trim().toLowerCase();
+
+  for (const target of leagueApiTargets(env)) {
+    const apiUrl = new URL("/api/leagues/top-leagues", target.base);
+    apiUrl.searchParams.set("limit", "10000");
+    const result = await fetchLeagueCurrentAttempt(target, apiUrl);
+    if (!result.response_ok || result.payload?.ok === false) continue;
+
+    const rows = Array.isArray(result.payload?.rows) ? result.payload.rows : [];
+    const matched = rows.find(row => {
+      const rowName = String(row?.league_name || row?.display_name || row?.name || "").trim().toLowerCase();
+      const rowId = String(row?.league_id || row?.id || "").trim().toLowerCase();
+      return (wantedId && rowId === wantedId) || (wantedName && rowName === wantedName);
+    });
+    if (!matched) continue;
+
+    const aggregatePace1h = Math.max(0, finiteNumber(matched.projected_gain_1h ?? matched.gain_1h) || 0);
+    const selectedPace1h = memberPace1h > 0 ? memberPace1h : aggregatePace1h;
+    const selectedPoints = Math.max(0, finiteNumber(currentPoints) ?? finiteNumber(matched.total_points ?? matched.points) ?? 0);
+    const projectedPoints1h = selectedPoints + selectedPace1h;
+    const projectedRank1h = selectedPace1h > 0
+      ? 1 + rows.reduce((count, row) => {
+          if (row === matched) return count;
+          const rowPoints = Math.max(0, finiteNumber(row?.total_points ?? row?.points) || 0);
+          const rowPace = Math.max(0, finiteNumber(row?.projected_gain_1h ?? row?.gain_1h) || 0);
+          const rowProjected = finiteNumber(row?.projected_points_1h) ?? (rowPoints + rowPace);
+          return count + (rowProjected > projectedPoints1h ? 1 : 0);
+        }, 0)
+      : positiveInteger(matched.projected_rank_1h);
+
+    return {
+      projected_gain_1h: selectedPace1h,
+      projected_points_1h: projectedPoints1h,
+      projected_rank_1h: projectedRank1h
+    };
+  }
+
+  return null;
 }
 
 async function fetchClanCurrentRewardPayload(clanName, env) {
@@ -11147,6 +11233,9 @@ function rewardProjectionText(projection, payload) {
 
   const rankText = projection.current_rank ? rank(projection.current_rank) : "Unranked";
   const paceText = projection.pace_1h > 0 ? `+${fullNumber(projection.pace_1h)}/hr` : "no gain in the last hour";
+  const projectedRankText = projection.projected_rank_1h
+    ? rank(projection.projected_rank_1h)
+    : "estimate unavailable";
   const cutoffLines = (payload.cutoffs || []).map(cutoff => {
     const cutoffPoints = finiteNumber(cutoff.points);
     if (cutoffPoints === null) return null;
@@ -11162,7 +11251,7 @@ function rewardProjectionText(projection, payload) {
   return [
     `### Projection for ${escapeDiscordMarkdown(projection.player_name)}`,
     `**${escapeDiscordMarkdown(projection.group_kind)}:** ${escapeDiscordMarkdown(projection.group_name)} · **${rankText}** · **${fullNumber(projection.current_points)}** pts`,
-    `**Recent pace:** ${paceText} · **Projected +1h:** ${fullNumber(projection.projected_points_1h)} pts`,
+    `**${projection.group_kind} pace:** ${paceText} · **Projected +1h:** ${projectedRankText}`,
     ...cutoffLines
   ].join("\n");
 }
