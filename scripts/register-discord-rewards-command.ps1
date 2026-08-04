@@ -74,15 +74,15 @@ $query = if ($useGlobal) {
   New-QueryString @{ scope = "guild"; guild_id = $GuildId }
 }
 
-Write-Host "Registering reward commands: /clan rewards and /league rewards..." -ForegroundColor Green
+Write-Host "Registering reward commands: /clan rewards, /league rewards, and /leaderboard rewards..." -ForegroundColor Green
 $registration = Invoke-WorkerAdmin -Method POST -Path "/admin/register-rewards-command$query"
 $registration | ConvertTo-Json -Depth 12
 
 if (-not $registration.ok -or -not $registration.username_option_registered) {
-  throw "Discord did not return the optional username field for both /clan rewards and /league rewards. Deploy the current Discord Worker and run this script again."
+  throw "Discord did not return the optional username field for all three reward commands. Deploy the current Discord Worker and run this script again."
 }
 
-Write-Host "Verified: both reward subcommands now contain the optional username input." -ForegroundColor Green
+Write-Host "Verified: all three reward subcommands now contain the optional username input." -ForegroundColor Green
 if (@($registration.removed_guild_duplicates).Count -gt 0) {
   $removedNames = @($registration.removed_guild_duplicates | ForEach-Object { "/$($_.name)" }) -join ", "
   Write-Host "Removed shadowing guild command copies: $removedNames" -ForegroundColor Green

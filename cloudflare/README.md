@@ -741,7 +741,7 @@ Required Worker variables:
 | `SITE_BASE_URL` | Optional site origin used to expand relative avatar URLs. Defaults to `https://c0ld-clan.com`. |
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
-| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated `/league rewards` tiers. Defaults to `1,3,15,50,100,250,2000`. |
+| `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated League reward tiers used by `/league rewards`, League-mode `/leaderboard rewards`, and the persistent League player cutoffs. Defaults to `1,3,15,50,100,250,2000`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full legacy player rewards header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -912,6 +912,7 @@ The reward cutoff commands are:
 ```text
 /clan rewards
 /league rewards
+/leaderboard rewards
 ```
 
 They post the current point minimums for reward ranks. Clan categories and labels
@@ -1001,7 +1002,7 @@ Useful endpoints:
 | `/api/leagues/current?league=YAMO` | Latest stored member rows for one tracked league. |
 | `/api/leagues/top-leagues?limit=1000` | Latest Top 1000 league leaderboard with gain projections. |
 | `/api/leagues/solo-leaderboard?limit=500` | Live Top 500 individual league contributors. Add `q=` to search those rows, every stored tracked-league roster, and an exact Roblox username/user ID through BIG Games' direct league-player lookup. |
-| `/api/leagues/player-milestones?ranks=3,10,100,250,500` | Current live League-player reward thresholds from the public Top 500 source. |
+| `/api/leagues/player-milestones?ranks=1,3,15,50,100,250,2000` | Current live League-player reward thresholds from the stored League player pool. |
 | `/api/leagues/player-location?user_id=123` | Finds the player's current league from stored current rosters, with BIG Games' direct league-player lookup as fallback. |
 | `/api/leagues/milestones?ranks=1,3,15,50,100,250,2000` | Exact stored League-team point thresholds used by the league reward milestone cards, plus the configured League label and end time. |
 | `/api/leagues/profile?user_id=123` | Per-player league summaries grouped by league/run for profile pages. |
@@ -1198,6 +1199,23 @@ so `/htg setup` opens the Luna Bot app instead.
 | `INVENTORY_SNAPSHOT_ITEM_READ_LIMIT` | Optional. Defaults to `50000`; maximum snapshot item rows read when comparing full inventories for HTG and inventory diffs. |
 | `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored HTG gain alerts when no `/htg assign` channel exists. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
+
+Successful BIG Games inventory responses can include refresh-quota metadata.
+The Worker accepts those payloads and uses their source revision normally; it
+only classifies an actual error response as rate limited. If a forced refresh
+returns HTTP 429, HTG performs one non-refresh read so a provider-cached
+revision that already advanced can still be compared without spending another
+refresh. An unchanged cached revision never advances the HTG baseline.
+
+`/htg accounts` also verifies that each saved HTG access token can be opened
+with the currently configured encryption/client secrets. An account shown as
+`auth needs refresh` must run `/htg setup` again before scheduled comparisons
+can resume.
+
+`POST /api/hatch/alerts/check?username=<name>&force=1` bypasses the normal
+account shard and interval/failure-backoff gates for a deliberate diagnostic.
+It still honors the stored provider quota guard and therefore cannot spend a
+reserved refresh after the scheduled budget is exhausted.
 
 For the live Luna HTG app, register this exact Big Games DB redirect URL and set
 the Worker variable to the same value:

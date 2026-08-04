@@ -2561,16 +2561,14 @@ async function buildVersionsPersistentPost(env) {
       const published = place.published_at
         ? ` — <t:${Math.floor(new Date(place.published_at).getTime() / 1000)}:R>`
         : "";
-      const gap = index > 0 && persistentVersionPlaceGroup(place) !== persistentVersionPlaceGroup(normalizedPlaces[index - 1])
-        ? [""]
-        : [];
-      return [
-        ...gap,
+      const lines = [
         `**${escapeDiscordMarkdown(persistentVersionPlaceName(place))}:** ${place.version ?? "Unknown"}${published}`,
         ...(place.update_reference
           ? [`-# *Updated ${place.update_reference.count.toLocaleString("en-US")} ${place.update_reference.count === 1 ? "time" : "times"} since launch version ${place.update_reference.launch_version.toLocaleString("en-US")}*`]
           : [])
       ];
+      if (index < normalizedPlaces.length - 1) lines.push("");
+      return lines;
     })
     : ["No tracked PS99 place versions are stored yet."];
   const ps99Section = [
@@ -2647,8 +2645,11 @@ function isHiddenPersistentVersionPlace(place) {
 
 function persistentVersionPlaceName(place) {
   if (place?.root_place || toNumber(place?.place_id) === 8737899170) {
-    return "👆 [TAP HEROES] Pet Simulator 99! 🔑";
+    return String(place?.place_name || "Pet Simulator 99").trim();
   }
+  const name = normalizeText(place?.place_name);
+  if (name === "petsimulator99farming") return "Farm World";
+  if (name === "petsimulator99fishing") return "Fishing World";
   return String(place?.place_name || `Place ${place?.place_id || ""}`).trim();
 }
 
@@ -2725,7 +2726,7 @@ async function buildRewardCutoffDashboard(env) {
     ok: true,
     type: "players",
     pool_source: "leagues",
-    ranks: playerRanks,
+    ranks: leagueRanks,
     cutoffs: []
   };
 
@@ -2744,12 +2745,12 @@ async function buildRewardCutoffDashboard(env) {
   } else {
     [leagues, leaguePlayers] = await Promise.all([
       buildLeagueRewardCutoffs(env, leagueRanks),
-      buildLeaguePlayerRewardCutoffs(env, playerRanks).catch(error => ({
+      buildLeaguePlayerRewardCutoffs(env, leagueRanks).catch(error => ({
         ok: false,
         type: "players",
         pool_source: "leagues",
         message: error?.message || String(error),
-        ranks: playerRanks,
+        ranks: leagueRanks,
         cutoffs: []
       }))
     ]);
@@ -2959,6 +2960,19 @@ function persistentDiscordComponentPayload(title, sections, timestamp, options =
     if (index > 0) body.push(discordSeparatorComponent());
     body.push({ type: 10, content: section.slice(0, 4000) });
   });
+  const mediaUrl = safeHttpUrl(options.mediaUrl);
+  if (mediaUrl) {
+    body.push(
+      discordSeparatorComponent(),
+      {
+        type: 12,
+        items: [{
+          media: { url: mediaUrl },
+          description: String(options.mediaDescription || "PS99 update preview").slice(0, 1024)
+        }]
+      }
+    );
+  }
   body.push(
     discordSeparatorComponent(),
     {
@@ -13805,17 +13819,25 @@ async function postRobloxFflagAlert(env, event) {
 async function postPs99DevBlogAlert(env, post) {
   const publishedAt = safeIso(post.published_at) || new Date().toISOString();
   const publishedUnix = Math.floor(new Date(publishedAt).getTime() / 1000);
-  const postTitle = escapeDiscordMarkdown(post.title || "New Pet Simulator 99 post");
+  const rawPostTitle = String(post.title || "New Pet Simulator 99 post");
   const postUrl = safeHttpUrl(post.url);
-  const linkedTitle = postUrl ? `[${postTitle}](${postUrl})` : postTitle;
+  const linkedTitle = postUrl
+    ? `[${escapeDiscordLinkLabel(rawPostTitle)}](${postUrl})`
+    : escapeDiscordMarkdown(rawPostTitle);
   const excerpt = String(post.excerpt || "A new official BIG Games Pet Simulator 99 post is available.").slice(0, 3000);
   return postDiscordFeedAlert(env, "ps99_dev_blogs", {
     ...persistentDiscordComponentPayload("📰 Pet Simulator 99 Dev Blog", [
       `### ${linkedTitle}\n${excerpt}\n\n**Published:** <t:${publishedUnix}:R>\n-# Official BIG Games post`
     ], publishedAt, {
-      headerSummary: `Last Updated: <t:${publishedUnix}:R>`
+      headerSummary: `Last Updated: <t:${publishedUnix}:R>`,
+      mediaUrl: post.image_url,
+      mediaDescription: `${rawPostTitle} preview image`
     })
   });
+}
+
+function escapeDiscordLinkLabel(value) {
+  return String(value || "").replace(/([\\[\]])/g, "\\$1");
 }
 
 async function postPs99DiscordAlert(env, payload) {

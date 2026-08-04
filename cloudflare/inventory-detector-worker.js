@@ -70,7 +70,7 @@ const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-rolling-quota-guard-2026-08-03b";
+const INVENTORY_BUILD_ID = "inventory-htg-due-scan-recovery-2026-08-04c";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -172,9 +172,12 @@ export default {
             channel_configured: Boolean(assignedHatchChannelCount || hatchAlertChannelId(env) || hatchAlertWebhookUrl(env)),
             assigned_channel_count: assignedHatchChannelCount,
             enabled_tracker_count: hatchTrackerHealth.enabled_tracker_count,
+            enabled_account_count: hatchTrackerHealth.enabled_account_count,
+            shared_account_subscription_count: hatchTrackerHealth.shared_account_subscription_count,
             pending_gain_count: hatchTrackerHealth.pending_gain_count,
             overdue_tracker_count: hatchTrackerHealth.overdue_tracker_count,
             failed_tracker_count: hatchTrackerHealth.failed_tracker_count,
+            failed_tracker_errors: hatchTrackerHealth.failed_tracker_errors,
             quota_paused_tracker_count: hatchTrackerHealth.quota_paused_tracker_count,
             oldest_last_checked_at: hatchTrackerHealth.oldest_last_checked_at,
             bot_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
@@ -1227,13 +1230,26 @@ function hatchTrackerUser(tracker) {
 
 function compactHatchTrackerHealth(trackers, env, now = new Date()) {
   const rows = Array.isArray(trackers) ? trackers : [];
+  const enabledAccountIds = new Set(rows
+    .map(row => String(row?.roblox_user_id || "").trim())
+    .filter(Boolean));
   const checkedTimes = rows
     .map(row => new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime())
     .filter(value => Number.isFinite(value) && value > 0);
+  const failedTrackerErrors = new Map();
+  for (const row of rows) {
+    const error = firstString(row?.metadata?.htg_state?.last_scan_error);
+    if (!error) continue;
+    const category = htgScanErrorCategory(error);
+    failedTrackerErrors.set(category, (failedTrackerErrors.get(category) || 0) + 1);
+  }
   return {
     enabled_tracker_count: rows.length,
+    enabled_account_count: enabledAccountIds.size,
+    shared_account_subscription_count: Math.max(0, rows.length - enabledAccountIds.size),
     pending_gain_count: rows.filter(row => htgPendingGainState(row).active).length,
     failed_tracker_count: rows.filter(row => firstString(row?.metadata?.htg_state?.last_scan_error)).length,
+    failed_tracker_errors: Object.fromEntries([...failedTrackerErrors.entries()].sort((a, b) => b[1] - a[1])),
     overdue_tracker_count: rows.filter(row => {
       const checkedAt = new Date(row?.last_checked_at || row?.metadata?.htg_state?.last_checked_at || 0).getTime();
       const overdueMs = Math.max(5, htgTrackerScanIntervalMinutes(env, row, now) * 2) * 60000;
@@ -1242,6 +1258,16 @@ function compactHatchTrackerHealth(trackers, env, now = new Date()) {
     quota_paused_tracker_count: rows.filter(row => htgTrackerQuotaSchedule(row, now, env).exhausted_until_reset).length,
     oldest_last_checked_at: checkedTimes.length ? new Date(Math.min(...checkedTimes)).toISOString() : null
   };
+}
+
+function htgScanErrorCategory(error) {
+  const text = String(error || "").toLowerCase();
+  if (/quota|rate.?limit|too many requests|429/.test(text)) return "provider_refresh_quota";
+  if (/authoriz|oauth|token|grant/.test(text)) return "authorization";
+  if (/permission|scope|forbidden|403/.test(text)) return "permission";
+  if (/no verified owned|item array|inventory payload/.test(text)) return "inventory_shape";
+  if (/non-json|upstream|player api|fetch failed|502|1042/.test(text)) return "provider_upstream";
+  return "other";
 }
 
 async function mapSettledWithConcurrency(values, concurrency, worker) {
@@ -1291,6 +1317,7 @@ async function markHtgScanStarted(env, tracker, attemptedAt = new Date(), schedu
     metadata,
     updated_at: attemptedIso
   });
+  return metadata;
 }
 
 async function savePendingHatchTracker(env, { existing, discordUserId, discordUsername, enabled, tiers, alertGuildId }) {
@@ -1834,10 +1861,23 @@ async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEF
     return { configured, connected: false, expires_at: null, authorization_missing: true };
   }
   try {
-    const grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at");
+    const verifyCredential = purpose === "hatch_tracker";
+    const grant = await findOAuthGrant(
+      env,
+      userId,
+      `grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at${verifyCredential ? ",access_token_ciphertext,metadata" : ""}`
+    );
     const missingScopes = grant ? missingOAuthScopes(env, purpose, grant.scope) : [];
     const expired = !!grant && new Date(grant.expires_at).getTime() <= Date.now();
-    const connected = !!grant && !expired && !missingScopes.length;
+    let credentialUsable = true;
+    if (grant && !expired && !missingScopes.length && verifyCredential) {
+      try {
+        await openOAuthAccessToken(env, grant, purpose);
+      } catch {
+        credentialUsable = false;
+      }
+    }
+    const connected = !!grant && !expired && !missingScopes.length && credentialUsable;
     return {
       configured,
       connected,
@@ -1847,7 +1887,10 @@ async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEF
       scope: grant?.scope || null,
       missing_scopes: missingScopes,
       authorization_missing: !grant,
-      reauthorization_required: !!grant && (expired || missingScopes.length > 0)
+      reauthorization_required: !!grant && (expired || missingScopes.length > 0 || !credentialUsable),
+      message: grant && !credentialUsable
+        ? "Stored Big Games authorization could not be opened. Run /htg setup again for this account."
+        : null
     };
   } catch (error) {
     return { configured, connected: false, expires_at: null, storage_ready: false, message: error?.message || String(error) };
@@ -2538,7 +2581,10 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   // `force` forces alert evaluation, but it must not bypass the provider-refresh
   // budget. This keeps repeated diagnostics, deployments, and stale retries from
   // consuming the rolling daily allowance in a burst.
-  const schedule = options.schedule || htgScheduleDecision(env, tracker, userId, now, { ignoreShard: true });
+  const schedule = options.schedule || htgScheduleDecision(env, tracker, userId, now, {
+    ignoreShard: true,
+    force: options.force === true
+  });
   if (!schedule.due) return { posted: false, skipped: true, ...schedule };
 
   const checkedAt = now.toISOString();
@@ -4494,10 +4540,25 @@ async function fetchHtgInventory(env, user, options = {}) {
   try {
     payload = await fetchInventoryWithAccessToken(env, accessToken, options);
   } catch (error) {
-    if (error?.status === 401 || error?.status === 403) {
-      await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+    if (error?.status === 429 && options.forceRefresh) {
+      try {
+        payload = await fetchInventoryWithAccessToken(env, accessToken, { ...options, forceRefresh: false });
+      } catch (fallbackError) {
+        if (fallbackError?.status === 401 || fallbackError?.status === 403) {
+          await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+        }
+        throw fallbackError;
+      }
+      attachHtgRefreshFallback(payload, {
+        used: true,
+        reason: "Forced refresh was rate limited; HTG inspected the latest cached inventory revision instead."
+      });
+    } else {
+      if (error?.status === 401 || error?.status === 403) {
+        await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }).catch(() => {});
+      }
+      throw error;
     }
-    throw error;
   }
   try {
     await supabaseUpdate(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${grant.grant_key}` }, { last_used_at: new Date().toISOString() });
@@ -4610,9 +4671,38 @@ async function fetchInventoryWithAccessToken(env, accessToken, options = {}) {
   try { payload = JSON.parse(text); } catch { throw httpError(502, `Big Games Player API returned non-JSON: ${text.slice(0, 160)}`); }
   if (res.status === 401) throw httpError(401, "Big Games authorization expired or was revoked. Run the OAuth authorization flow again.");
   if (res.status === 403) throw httpError(403, "Big Games token does not include the Inventory permission. Re-authorize the app.");
-  if (!res.ok || payload.status === "error") throw httpError(502, `Big Games Player API inventory fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
+  if (res.status === 429) {
+    throw httpError(429, `Big Games Player API refresh quota or rate limit was reached: ${JSON.stringify(payload).slice(0, 300)}`);
+  }
+  if (!res.ok || payload.status === "error") {
+    if (bigGamesInventoryPayloadIsRateLimited(payload)) {
+      throw httpError(429, `Big Games Player API refresh quota or rate limit was reached: ${JSON.stringify(payload).slice(0, 300)}`);
+    }
+    throw httpError(502, `Big Games Player API inventory fetch failed: ${JSON.stringify(payload).slice(0, 300)}`);
+  }
   attachResponseHeaders(payload, res.headers);
   return payload;
+}
+
+function bigGamesInventoryPayloadIsRateLimited(payload) {
+  const error = plainObject(payload?.error);
+  const code = firstString(payload?.code, payload?.error_code, error.code, payload?.status_code).toLowerCase();
+  const message = firstString(
+    payload?.message,
+    typeof payload?.error === "string" ? payload.error : "",
+    error.message
+  ).toLowerCase();
+  return /^(?:429|rate[_-]?limit(?:ed)?|too_many_requests)$/.test(code)
+    || /(?:rate.?limit|too many requests|quota (?:is )?exhausted|refresh quota (?:reached|exceeded))/.test(message);
+}
+
+function attachHtgRefreshFallback(payload, details) {
+  if (!payload || typeof payload !== "object") return;
+  Object.defineProperty(payload, "_htg_refresh_fallback", {
+    value: details || { used: true },
+    enumerable: false,
+    configurable: true
+  });
 }
 
 async function fetchProfileWithAccessToken(env, accessToken) {
@@ -4931,7 +5021,8 @@ function inventorySourceMeta(raw) {
       is_stale: data?.cached ?? null,
       available: true,
       cached: data?.cached ?? null,
-      refresh: raw.refresh || null
+      refresh: raw.refresh || null,
+      refresh_fallback: raw._htg_refresh_fallback || null
     };
   }
   const view = data?.views?.inventory || data?.inventory || null;
@@ -5548,8 +5639,17 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
       quota
     };
   }
-  if (!options.ignoreShard && shardCompatible && userShard !== currentShard) {
-    return { due: false, reason: "HTG user is assigned to a different shard for this minute.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, quota };
+  if (options.force) {
+    return {
+      due: true,
+      reason: "Manual HTG check bypassed the shard and interval gates; provider quota protection remains active.",
+      shard_count: shardCount,
+      current_shard: currentShard,
+      user_shard: userShard,
+      cron: options.cron || null,
+      shard_ignored: true,
+      quota
+    };
   }
 
   const lastChecked = new Date(tracker?.last_checked_at || tracker?.metadata?.htg_state?.last_checked_at || 0).getTime();
@@ -5559,6 +5659,9 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
     Number.isFinite(lastAttempt) && lastAttempt > 0 ? lastAttempt : 0
   );
   if (!latestGateTime) {
+    if (!options.ignoreShard && shardCompatible && userShard !== currentShard) {
+      return { due: false, reason: "HTG account is waiting for its initial baseline shard.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, quota };
+    }
     return { due: true, reason: "HTG account has not been checked yet.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
 
@@ -5570,14 +5673,17 @@ function htgScheduleDecision(env, tracker, userId, now = new Date(), options = {
   if (elapsedMs < Math.max(0, intervalMs - 30000)) {
     return { due: false, reason: failureRetryMinutes > intervalMinutes ? "HTG failure backoff has not elapsed." : "HTG quota-safe scan interval has not elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, failure_retry_minutes: failureRetryMinutes, gate_minutes: gateMinutes, last_scan_attempt_at: Number.isFinite(lastAttempt) && lastAttempt > 0 ? new Date(lastAttempt).toISOString() : null, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
   }
-  return { due: true, reason: "HTG quota-safe scan interval elapsed.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, failure_retry_minutes: failureRetryMinutes, gate_minutes: gateMinutes, last_scan_attempt_at: Number.isFinite(lastAttempt) && lastAttempt > 0 ? new Date(lastAttempt).toISOString() : null, cron: options.cron || null, shard_ignored: !shardCompatible && !options.ignoreShard, quota };
+  return { due: true, reason: "HTG quota-safe scan interval elapsed; established accounts do not wait for another shard cycle.", shard_count: shardCount, current_shard: currentShard, user_shard: userShard, elapsed_seconds: Math.floor(elapsedMs / 1000), interval_minutes: intervalMinutes, failure_retry_minutes: failureRetryMinutes, gate_minutes: gateMinutes, last_scan_attempt_at: Number.isFinite(lastAttempt) && lastAttempt > 0 ? new Date(lastAttempt).toISOString() : null, cron: options.cron || null, shard_ignored: options.ignoreShard === true || !shardCompatible || userShard !== currentShard, quota };
 }
 
 function htgTrackerScanIntervalMinutes(env, tracker, now = new Date()) {
   const configured = htgScanIntervalMinutes(env);
   const quota = htgTrackerQuotaSchedule(tracker, now, env);
   if (!quota.limit || quota.reset_has_passed) return Math.max(configured, quota.minimum_full_day_interval_minutes || htgMinimumFullDayIntervalMinutes(env));
-  return Math.max(configured, quota.minimum_full_day_interval_minutes || 0, quota.minimum_remaining_interval_minutes || 0);
+  // Once the provider reports this account's live usage and reset time, pace
+  // against what actually remains. Keeping the full-day minimum here wastes
+  // quota after quiet periods and can delay a real hatch by an extra cycle.
+  return Math.max(configured, quota.minimum_remaining_interval_minutes || 0);
 }
 
 function htgTrackerQuotaSchedule(tracker, now = new Date(), env = null) {

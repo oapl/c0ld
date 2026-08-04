@@ -634,6 +634,21 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "leaderboard") {
+    const subcommand = getSubcommandName(interaction);
+    if (subcommand !== "rewards") {
+      return interactionJson(messageResponse("Use `/leaderboard rewards`.", true));
+    }
+
+    ctx.waitUntil(completeRewardsInteraction(interaction, env, "leaderboard"));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: {
+        flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+      }
+    });
+  }
+
   if (commandName === "history") {
     if (!memberHasAllowedRole(interaction, env)) {
       return interactionJson(messageResponse("You do not have access to use `/history`.", true));
@@ -2389,10 +2404,10 @@ function hatchTrackerAccountLine(account) {
     ? account.authorization_expires_at
       ? `auth expires ${discordTime(account.authorization_expires_at)}`
       : "auth active"
-    : account.reauthorization_required || authorizationIsExpired(account.authorization_expires_at)
-      ? Array.isArray(account.missing_scopes) && account.missing_scopes.length
+    : authorizationIsExpired(account.authorization_expires_at)
+      ? "auth expired"
+      : account.reauthorization_required
         ? "auth needs refresh"
-        : "auth expired"
       : account.authorization_missing
         ? "auth missing"
         : account.authorization_message
@@ -3839,7 +3854,7 @@ async function buildHourlyLeagueReport(env, leagueNameValue) {
   const displayLeagueName = String(payload.league_name || leagueName).trim() || leagueName;
   let historyRows = [];
   try {
-    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, 24);
+    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, 24, payload.league_run_key);
     historyRows = Array.isArray(historyPayload.rows) ? historyPayload.rows : [];
   } catch {
     historyRows = [];
@@ -5279,7 +5294,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
   };
 
   try {
-    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours);
+    const historyPayload = await fetchLeagueHistoryPayload(displayLeagueName, env, chartHours, payload.league_run_key);
     const chartBytes = await renderLeagueMemberGrowthChartPng(payload, historyPayload.rows || [], { hours: chartHours, env });
     if (chartBytes?.byteLength) {
       const filename = `league-${chartFilenamePart(displayLeagueName)}-${chartHours}h.png`;
@@ -5971,7 +5986,15 @@ function buildClanLookupMessage(data, options = {}) {
   const payload = data.payload || {};
   const members = (data.rows || [])
     .slice()
-    .sort((a, b) => (finiteNumber(b.total_points) || 0) - (finiteNumber(a.total_points) || 0) || String(a.username || "").localeCompare(String(b.username || "")));
+    .sort((a, b) => {
+      const rankA = positiveInteger(a.rank);
+      const rankB = positiveInteger(b.rank);
+      if (rankA && rankB && rankA !== rankB) return rankA - rankB;
+      if (rankA && !rankB) return -1;
+      if (!rankA && rankB) return 1;
+      return (finiteNumber(b.total_points) || 0) - (finiteNumber(a.total_points) || 0)
+        || String(a.username || "").localeCompare(String(b.username || ""));
+    });
   const pageSize = CLAN_LOOKUP_PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(members.length / pageSize));
   const page = clampPage(options.page, totalPages);
@@ -6674,21 +6697,26 @@ function parseLeagueChartCustomId(value) {
   };
 }
 
-async function fetchLeagueHistoryPayload(leagueName, env, hours = 24) {
+async function fetchLeagueHistoryPayload(leagueName, env, hours = 24, leagueRunKey = "") {
   const historyHours = leagueChartHours(hours);
+  let emptyPayload = null;
   for (const target of leagueApiTargets(env)) {
     const apiUrl = new URL("/api/leagues/history", target.base);
     apiUrl.searchParams.set("league", leagueName);
     apiUrl.searchParams.set("hours", String(Math.max(3, historyHours + 2)));
     apiUrl.searchParams.set("limit", "50000");
+    if (String(leagueRunKey || "").trim()) {
+      apiUrl.searchParams.set("run", String(leagueRunKey).trim());
+    }
 
     const result = await fetchLeagueCurrentAttempt(target, apiUrl);
     if (result.response_ok && result.payload?.ok !== false && Array.isArray(result.payload?.rows)) {
-      return result.payload;
+      if (result.payload.rows.length) return result.payload;
+      emptyPayload ||= result.payload;
     }
   }
 
-  return { rows: [] };
+  return emptyPayload || { rows: [] };
 }
 
 async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
@@ -6738,18 +6766,8 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
       points: item.points.filter(point => point.t >= chartMinT && point.t <= chartMaxT)
     }))
     .filter(item => item.points.length);
-  const performanceSeries = visibleSeries.map(item => {
-    const baseline = item.points[0]?.value ?? 0;
-    return {
-      ...item,
-      points: item.points.map(point => ({
-        ...point,
-        rawValue: point.value,
-        value: Math.max(0, point.value - baseline)
-      }))
-    };
-  });
-  const visiblePoints = performanceSeries.flatMap(item => item.points);
+  const chartSeries = visibleSeries;
+  const visiblePoints = chartSeries.flatMap(item => item.points);
   const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, chartMaxT).catch(() => ({ updates: [], restarts: [] }));
   const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
   const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
@@ -6803,8 +6821,8 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.orange, 10, 5);
   });
 
-  performanceSeries.forEach((item, index) => {
-    const lineOffset = (index - (performanceSeries.length - 1) / 2) * 2;
+  chartSeries.forEach((item, index) => {
+    const lineOffset = (index - (chartSeries.length - 1) / 2) * 2;
     const lineY = point => yFor(point) + lineOffset;
     leagueDrawSharpPolyline(canvas, item.points, point => xForTime(point.t), lineY, item.color, 3);
     const last = item.points[item.points.length - 1];
@@ -6814,7 +6832,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   leagueDrawMemberPerformanceTable(
     canvas,
     fonts,
-    performanceSeries,
+    chartSeries,
     chartPanel.x + 34,
     chartPanel.y + 514,
     chartPanel.w - 68,
@@ -6888,9 +6906,9 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
 
   for (const column of columns) {
     if (column.align === "right") {
-      leagueDrawRightTextClean(canvas, fonts.rowBold || fonts.bold, column.label, x + column.x + column.width, y + 4, 19, color.white, column.width);
+      leagueDrawRightTextClean(canvas, fonts.rowBold || fonts.bold, column.label, x + column.x + column.width, y + 6, 16, color.white, column.width);
     } else {
-      canvas.drawFontText(fonts.rowBold || fonts.bold, column.label, x + column.x, y + 4, 19, color.white, column.width);
+      canvas.drawFontText(fonts.rowBold || fonts.bold, column.label, x + column.x, y + 6, 16, color.white, column.width);
     }
   }
 
@@ -6902,16 +6920,16 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
     if (!item) continue;
 
     canvas.fillRect(x + 1, rowY, 4, rowHeight, item.color);
-    canvas.drawFontText(fonts.rowBold || fonts.bold, `#${index + 1}`, x + 18, rowY + 6, 24, color.white, 58);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, `#${index + 1}`, x + 18, rowY + 9, 20, color.white, 58);
     chartFillCircle(canvas, x + 103, rowY + 21, 5, item.color);
-    leagueDrawFittedTextClean(canvas, fonts.rowBold || fonts.bold, item.name, x + 119, rowY + 5, 24, item.color, 310);
-    leagueDrawPerformanceValue(canvas, fonts, item.latestPoints, x + 630, rowY + 6, 24, color, false, 120);
-    leagueDrawPerformanceValue(canvas, fonts, item.latestGain, x + 750, rowY + 6, 24, color, true, 112);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain6h, x + 870, rowY + 6, 24, color, true, 112);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain12h, x + 990, rowY + 6, 24, color, true, 112);
-    leagueDrawPerformanceValue(canvas, fonts, item.gain24h, x + 1110, rowY + 6, 24, color, true, 112);
-    leagueDrawDurationValue(canvas, fonts, item.activeMs, x + 1270, rowY + 6, 24, color, 130);
-    leagueDrawDurationValue(canvas, fonts, item.downtimeMs, x + 1410, rowY + 6, 24, color, 130);
+    leagueDrawFittedTextClean(canvas, fonts.rowBold || fonts.bold, item.name, x + 119, rowY + 8, 20, item.color, 310);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestPoints, x + 630, rowY + 9, 20, color, false, 120);
+    leagueDrawPerformanceValue(canvas, fonts, item.latestGain, x + 750, rowY + 9, 20, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain6h, x + 870, rowY + 9, 20, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain12h, x + 990, rowY + 9, 20, color, true, 112);
+    leagueDrawPerformanceValue(canvas, fonts, item.gain24h, x + 1110, rowY + 9, 20, color, true, 112);
+    leagueDrawDurationValue(canvas, fonts, item.activeMs, x + 1270, rowY + 9, 20, color, 130);
+    leagueDrawDurationValue(canvas, fonts, item.downtimeMs, x + 1410, rowY + 9, 20, color, 130);
   }
 }
 
@@ -7026,11 +7044,14 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const colors = leagueChartPalette();
 
   return members.map((member, index) => {
-    const samples = leagueQuarterHourPointSamples(
+    const storedSamples = leagueQuarterHourPointSamples(
       leagueDedupPointSamples([...(byUser.get(member.id) || []), { time: currentAt, points: member.points }])
     )
       .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
       .sort((a, b) => a.time - b.time);
+    const samples = storedSamples.length >= 2
+      ? storedSamples
+      : leagueDerivedGrowthSamples(member, currentAt, storedSamples);
     const baseline = [...samples].reverse().find(sample => sample.time < start) || null;
     const visibleSamples = samples.filter(sample => sample.time >= start && sample.time <= end);
     if (baseline) visibleSamples.unshift({ time: start, points: baseline.points, synthetic: true });
@@ -7080,6 +7101,31 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       downtimeMs: hasTrackedActivity ? activity.downtimeMs : null
     };
   });
+}
+
+function leagueDerivedGrowthSamples(member, currentAt, storedSamples = []) {
+  const derived = [...storedSamples];
+  const windows = [
+    { hours: 24, gain: member.gain24h },
+    { hours: 12, gain: member.gain12h },
+    { hours: 6, gain: member.gain6h },
+    { hours: 1, gain: member.gain1h }
+  ];
+
+  for (const window of windows) {
+    const gain = finiteNumber(window.gain);
+    if (gain === null) continue;
+    derived.push({
+      time: currentAt - window.hours * 60 * 60 * 1000,
+      points: Math.max(0, member.points - Math.max(0, gain)),
+      synthetic: true
+    });
+  }
+
+  derived.push({ time: currentAt, points: member.points });
+  return leagueQuarterHourPointSamples(leagueDedupPointSamples(derived))
+    .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
+    .sort((a, b) => a.time - b.time);
 }
 
 function leagueDedupPointSamples(samples) {
@@ -10220,7 +10266,7 @@ async function registerRewardCommandSet(url, env) {
   if (results.every(result => result.ok) && cleanupGuildId) {
     const guildCommands = await fetchCommands(env, cleanupGuildId);
     for (const command of guildCommands) {
-      if (!["clan", "league"].includes(String(command?.name || "").trim().toLowerCase())) continue;
+      if (!["clan", "league", "leaderboard"].includes(String(command?.name || "").trim().toLowerCase())) continue;
       await deleteCommandById(env, cleanupGuildId, command.id);
       removedGuildDuplicates.push({ id: command.id, name: command.name });
     }
@@ -10757,7 +10803,10 @@ async function buildRewardsResponse(interaction, env, forcedType = null) {
     return messageResponse(payload.message || "No reward cutoff data is available yet.", true);
   }
 
-  const projection = await fetchRewardProjection(interaction, type, env).catch(err => ({
+  const projectionType = type === "leaderboard"
+    ? (activeMode === "leagues" ? "leagues" : "clans")
+    : type;
+  const projection = await fetchRewardProjection(interaction, projectionType, env).catch(err => ({
     requested: true,
     error: err?.message || String(err)
   }));
@@ -10971,7 +11020,7 @@ async function fetchLeagueRewardCutoffsPayload(env) {
 }
 
 async function fetchLeaguePlayerRewardCutoffsPayload(env) {
-  const ranks = configuredRewardRanks("leaderboard", env);
+  const ranks = configuredRewardRanks("leagues", env);
   const payload = await fetchLeagueMilestoneEndpoint(env, "/api/leagues/player-milestones", ranks);
   return normalizeLeagueRewardPayload(payload, ranks, "leaderboard");
 }
@@ -11403,6 +11452,7 @@ function rewardCommandType(interaction, forcedType = null) {
   if (forcedType) return forcedType;
   const commandName = String(interaction?.data?.name || "").toLowerCase();
   if (commandName === "lb") return "leaderboard";
+  if (commandName === "leaderboard") return "leaderboard";
   if (commandName === "clan") return "clans";
   if (commandName === "league") return "leagues";
 
@@ -12161,8 +12211,35 @@ function topCommandPayload() {
 function rewardCommandPayloads() {
   return [
     clanCommandPayload(),
-    leagueCommandPayload()
+    leagueCommandPayload(),
+    leaderboardCommandPayload()
   ];
+}
+
+function leaderboardCommandPayload() {
+  return {
+    name: "leaderboard",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Global player leaderboard tools.",
+    dm_permission: false,
+    options: [
+      {
+        name: "rewards",
+        description: "Show global player leaderboard reward cutoff points.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "username",
+            description: "Optional Roblox username for rank, pace, and cutoff projections",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: false,
+            min_length: 1,
+            max_length: 64
+          }
+        ]
+      }
+    ]
+  };
 }
 
 function historyCommandPayload() {
