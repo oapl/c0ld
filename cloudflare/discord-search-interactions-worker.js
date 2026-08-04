@@ -11007,6 +11007,9 @@ function normalizeLeagueRewardPayload(payload, ranks, type) {
       rank: rankValue,
       label: type === "leagues" ? leagueRewardLabel(rankValue) : rewardDefaultCutoffLabel(rankValue),
       points: available ? finiteNumber(row.points ?? row.total_points) : null,
+      pace_1h: available ? finiteNumber(row.pace_1h ?? row.gain_1h) : null,
+      pace_snapshot_at: row?.pace_snapshot_at || null,
+      pace_elapsed_hours: finiteNumber(row?.pace_elapsed_hours),
       available,
       holder: row?.username || row?.display_name
         ? {
@@ -11241,11 +11244,33 @@ function rewardProjectionText(projection, payload) {
     if (cutoffPoints === null) return null;
     const label = cutoff.label || rewardDefaultCutoffLabel(cutoff.rank);
     const needed = Math.max(0, cutoffPoints - projection.current_points);
-    if (needed <= 0) return `- ${discordInlineCode(label)} qualified by **${fullNumber(Math.abs(cutoffPoints - projection.current_points))}** pts`;
-    const eta = projection.pace_1h > 0
-      ? formatRewardProjectionDuration(needed / projection.pace_1h)
-      : "no ETA at the current pace";
-    return `- ${discordInlineCode(label)} needs **${fullNumber(needed)}** pts · ${eta}`;
+    const boundaryPace1h = cutoff.pace_1h === null || cutoff.pace_1h === undefined
+      ? null
+      : finiteNumber(cutoff.pace_1h);
+    const hasMovingBoundary = boundaryPace1h !== null;
+    const netPace1h = hasMovingBoundary ? projection.pace_1h - boundaryPace1h : null;
+    const boundaryText = hasMovingBoundary
+      ? `cutoff +${fullNumber(Math.max(0, boundaryPace1h))}/hr`
+      : "cutoff pace unavailable";
+
+    if (needed <= 0) {
+      const margin = Math.abs(cutoffPoints - projection.current_points);
+      if (!hasMovingBoundary) return `- ${discordInlineCode(label)} qualified by **${fullNumber(margin)}** pts · ${boundaryText}`;
+      if (netPace1h < 0) {
+        return `- ${discordInlineCode(label)} qualified by **${fullNumber(margin)}** pts · margin shrinking **${fullNumber(Math.abs(netPace1h))}/hr** · at risk ${formatRewardProjectionDuration(margin / Math.abs(netPace1h))}`;
+      }
+      const holdingText = netPace1h > 0 ? `holding +${fullNumber(netPace1h)}/hr` : "holding pace";
+      return `- ${discordInlineCode(label)} qualified by **${fullNumber(margin)}** pts · ${holdingText}`;
+    }
+
+    if (!hasMovingBoundary) return `- ${discordInlineCode(label)} needs **${fullNumber(needed)}** pts · ${boundaryText}`;
+    if (netPace1h <= 0) {
+      const trend = netPace1h < 0
+        ? `falling behind **${fullNumber(Math.abs(netPace1h))}/hr**`
+        : "not closing";
+      return `- ${discordInlineCode(label)} needs **${fullNumber(needed)}** pts · ${boundaryText} · ${trend}`;
+    }
+    return `- ${discordInlineCode(label)} needs **${fullNumber(needed)}** pts · ${boundaryText} · net +${fullNumber(netPace1h)}/hr · ${formatRewardProjectionDuration(needed / netPace1h)}`;
   }).filter(Boolean);
 
   return [

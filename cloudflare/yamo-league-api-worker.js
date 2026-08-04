@@ -1836,6 +1836,22 @@ async function handleLeagueMilestones(request, env) {
     .sort()
     .pop() || null;
 
+  // Reward thresholds move while the event is active. Compare each requested
+  // rank with that same rank about one hour earlier. Rank-based comparison is
+  // stable even when two Leagues exchange places during the hour.
+  const boundaryHistoryByList = new Map();
+  await Promise.all([...new Set([...byRank.values()].map(row => String(row?.league_name || "").trim()).filter(Boolean))]
+    .map(async listName => {
+      const listRows = [...byRank.entries()].filter(([, row]) => String(row?.league_name || "").trim() === listName);
+      const listRanks = listRows.map(([rank]) => rank);
+      const fetchedTimes = listRows.map(([, row]) => new Date(row?.fetched_at || 0).getTime()).filter(Number.isFinite);
+      const latestMs = fetchedTimes.length ? Math.max(...fetchedTimes) : NaN;
+      if (!Number.isFinite(latestMs) || !listRanks.length) return;
+      const history = await fetchClosestMilestonePointMap(env, runKey, listName, latestMs, listRanks, 60, 20, 180)
+        .catch(() => null);
+      if (history) boundaryHistoryByList.set(listName, history);
+    }));
+
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
@@ -1846,10 +1862,26 @@ async function handleLeagueMilestones(request, env) {
     rows: ranks.map(rank => {
       const row = byRank.get(rank);
       const hidden = row && isLeaguePubliclyHidden(env, row.display_name);
+      const currentPoints = row && !hidden ? (toNumber(row.points) || 0) : null;
+      const history = row ? boundaryHistoryByList.get(String(row.league_name || "").trim()) : null;
+      const previous = history?.points?.get(Number(rank));
+      const currentMs = new Date(row?.fetched_at || 0).getTime();
+      const previousMs = new Date(history?.snapshot_at || 0).getTime();
+      const elapsedHours = Number.isFinite(currentMs) && Number.isFinite(previousMs) && currentMs > previousMs
+        ? (currentMs - previousMs) / 3600000
+        : null;
+      const rawGain = currentPoints !== null && previous !== undefined ? currentPoints - previous : null;
+      const pace1h = rawGain !== null && elapsedHours && elapsedHours >= 0.25
+        ? Math.max(0, rawGain / elapsedHours)
+        : null;
       return {
         rank,
         available: Boolean(row && !hidden),
-        points: row && !hidden ? (toNumber(row.points) || 0) : null
+        points: currentPoints,
+        previous_points_1h: previous ?? null,
+        pace_1h: pace1h,
+        pace_snapshot_at: history?.snapshot_at || null,
+        pace_elapsed_hours: elapsedHours
       };
     })
   }, env);
@@ -4294,6 +4326,34 @@ async function fetchClosestPointMap(env, runKey, league, latestMs, minutes, tole
   return fallbackRows.length ? closestSnapshotPointMap(fallbackRows, targetMs) : new Map();
 }
 
+async function fetchClosestMilestonePointMap(env, runKey, league, latestMs, ranks, minutes, toleranceMinutes, fallbackMinutes = 0) {
+  const wantedRanks = [...new Set((ranks || []).map(toNumber).filter(rank => Number.isInteger(rank) && rank > 0))];
+  if (!wantedRanks.length) return null;
+  const targetMs = latestMs - minutes * 60 * 1000;
+  const readWindow = (fromMs, toMs) => supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: "snapshot_id,fetched_at,rank,points",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${league}`,
+    rank: `in.(${wantedRanks.join(",")})`,
+    fetched_at: `gte.${new Date(fromMs).toISOString()}`,
+    fetched_at_lte: `lte.${new Date(toMs).toISOString()}`,
+    order: "fetched_at.desc,rank.asc",
+    limit: String(Math.max(100, wantedRanks.length * 20))
+  }, { paramRename: { fetched_at_lte: "fetched_at" } });
+
+  let rows = await readWindow(
+    targetMs - toleranceMinutes * 60 * 1000,
+    targetMs + toleranceMinutes * 60 * 1000
+  );
+  if (!rows.length && fallbackMinutes) {
+    rows = await readWindow(
+      targetMs - fallbackMinutes * 60 * 1000,
+      Math.min(latestMs - 15 * 60 * 1000, targetMs + 45 * 60 * 1000)
+    );
+  }
+  return rows.length ? closestSnapshotMilestonePointMap(rows, targetMs) : null;
+}
+
 async function fetchClosestRankMap(env, runKey, league, latestMs, minutes, toleranceMinutes, fallbackMinutes = 0) {
   const targetMs = latestMs - minutes * 60 * 1000;
   const rows = await supabaseSelect(env, SNAPSHOT_TABLE, { select: "snapshot_id,fetched_at,user_id,rank", league_run_key: `eq.${runKey}`, league_name: `eq.${league}`, fetched_at: `gte.${new Date(targetMs - toleranceMinutes * 60 * 1000).toISOString()}`, fetched_at_lte: `lte.${new Date(targetMs + toleranceMinutes * 60 * 1000).toISOString()}`, order: "fetched_at.desc,rank.asc", limit: "5000" }, { paramRename: { fetched_at_lte: "fetched_at" } });
@@ -4946,6 +5006,25 @@ function leaguePlayerPoolTopLeagues(env) {
     env.COLD_LEAGUES_TOP_LIMIT ||
     DEFAULT_LEAGUE_PLAYER_POOL_TOP_LEAGUES
   ), 1, MAX_TOP_LEAGUES_LIMIT);
+}
+
+function closestSnapshotMilestonePointMap(rows, targetMs) {
+  const snapshots = new Map();
+  for (const row of rows) {
+    const id = String(row.snapshot_id || "");
+    const fetchedMs = new Date(row.fetched_at || 0).getTime();
+    const milestoneRank = toNumber(row.rank);
+    if (!id || !Number.isFinite(fetchedMs) || !Number.isInteger(milestoneRank)) continue;
+    if (!snapshots.has(id)) {
+      snapshots.set(id, {
+        distance: Math.abs(fetchedMs - targetMs),
+        snapshot_at: row.fetched_at,
+        points: new Map()
+      });
+    }
+    snapshots.get(id).points.set(milestoneRank, toNumber(row.points) || 0);
+  }
+  return [...snapshots.values()].sort((a, b) => a.distance - b.distance)[0] || null;
 }
 function leaguePlayerPoolBatchSize(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_BATCH_SIZE || DEFAULT_LEAGUE_PLAYER_POOL_BATCH_SIZE), 1, MAX_LEAGUE_PLAYER_POOL_BATCH_SIZE); }
 function leaguePlayerPoolConcurrency(env) { return clamp(Number(env.LEAGUE_PLAYER_POOL_CONCURRENCY || DEFAULT_LEAGUE_PLAYER_POOL_CONCURRENCY), 1, 12); }
