@@ -1185,6 +1185,7 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HTG_FAILURE_RETRY_MINUTES` | Optional. Defaults to `15`. First failed HTG refresh retry delay. |
 | `HTG_FAILURE_RETRY_MAX_MINUTES` | Optional. Defaults to `120`. Caps exponential failure retry delays (`15`, `30`, `60`, then `120` minutes). |
 | `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries briefly instead of posting an unverified gain. |
+| `HTG_SOURCE_CONFIRMATION_OBSERVATIONS` | Optional. Defaults to `2`. An inventory gain not matched to trade, booth, or mail is held for this many consecutive observations before alerting. The default adds one confirmation scan so delayed source-history records can suppress transfers; set to `1` only if immediate alerts matter more than transfer accuracy. |
 | `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; exposes how long a source-verification outage has lasted in HTG diagnostics. Gains are retained as pending after this window rather than silently discarded. |
 | `HTG_STALE_ALERT_WINDOW_MINUTES` | Optional. Classifies long gaps for diagnostics. Fresh inventory received after a gap is still compared and source-filtered by default so real gains are not silently lost. |
 | `HTG_DROP_STALE_GAINS` | Optional. Defaults to `false`. Set to `true` only if you intentionally want Luna to absorb gains after a long refresh gap without alerting. |
@@ -1251,7 +1252,12 @@ comparisons for frequent checks. Each scan fetches the current Big Games
 inventory, extracts only Huge, Titanic, and Gargantuan pet stacks, compares them
 against `ps99_htg_inventory_state`, then removes matching gains when those same
 pets appear as received trade items, booth purchases, or incoming mail within
-the scan window. A unique pet whose ownership log names the tracked account as
+the scan window. Source history is parsed through the current nested response
+wrappers and quantity fields; an HTTP-success response whose received-item
+shape is unknown is treated as unavailable instead of as an empty history. An
+otherwise unmatched gain is also held for the configured confirmation count so
+an inventory refresh that arrives before its trade/booth/mail record does not
+produce a false hatch alert. A unique pet whose ownership log names the tracked account as
 its only owner can be accepted as a first-owner hatch without waiting for the
 other source endpoints; a pet with prior owners is suppressed as a transfer.
 It also suppresses unstable baseline/backfill data while a

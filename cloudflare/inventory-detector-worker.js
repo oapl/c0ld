@@ -67,10 +67,11 @@ const DEFAULT_HTG_REFRESH_QUOTA_RESERVE = 6;
 const DEFAULT_HTG_FAILURE_RETRY_MINUTES = 15;
 const DEFAULT_HTG_FAILURE_RETRY_MAX_MINUTES = 120;
 const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
+const DEFAULT_HTG_SOURCE_CONFIRMATION_OBSERVATIONS = 2;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-due-scan-recovery-2026-08-04c";
+const INVENTORY_BUILD_ID = "inventory-htg-transfer-filter-2026-08-04d";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -2721,6 +2722,34 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     };
   }
 
+  // Inventory refreshes can become visible before BIG Games publishes the
+  // corresponding trade/booth/mail history row. Hold an otherwise-unmatched
+  // gain for one additional scheduled observation so a just-completed transfer
+  // cannot race the source history and masquerade as a hatch.
+  const confirmationTarget = htgSourceConfirmationObservations(env);
+  const candidateSignature = htgPendingGainSignature(candidates);
+  const samePendingGain = pendingBeforeScan.active && pendingBeforeScan.signature === candidateSignature;
+  const confirmationObservation = samePendingGain
+    ? Math.max(1, Number(pendingBeforeScan.observations || 1)) + 1
+    : 1;
+  if (
+    htgRequireSourceFilter(env) &&
+    sourceFilter.available &&
+    sourceFilter.unresolved.length &&
+    confirmationObservation < confirmationTarget
+  ) {
+    const pending = await saveHtgPendingGain(env, tracker, candidates, checkedAt, sourceFilter);
+    return {
+      posted: false,
+      pending: true,
+      reason: "HTG gain is awaiting one confirmation scan so delayed trade, booth, or mail history can be matched before alerting.",
+      htg_state: compactHtgStateSummary(currentRows, previousRows),
+      source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      pending_gain: pending,
+      source: sourceMeta
+    };
+  }
+
   const gainedHtg = sourceFilter.rows;
   if (!gainedHtg.length) {
     await saveHtgInventoryState(env, tracker, user, currentRows, previousRows, {
@@ -3855,10 +3884,20 @@ async function filterHatchSourceGains(env, userId, rows, period) {
   const fetched = await Promise.all(HATCH_SOURCE_ENDPOINTS.map(async endpoint => {
     try {
       const payload = await fetchAccountSourceWithAccessToken(env, accessToken, endpoint);
-      const items = hatchSourceItemsFromPayload(endpoint, payload, userId, period);
-      return { ok: true, endpoint, items };
+      const parsed = hatchSourceItemsFromPayload(endpoint, payload, userId, period);
+      return { ok: parsed.recognized, endpoint, ...parsed, error: parsed.recognized ? null : parsed.reason };
     } catch (error) {
-      return { ok: false, endpoint, error: error?.message || String(error), items: [] };
+      return {
+        ok: false,
+        recognized: false,
+        endpoint,
+        error: error?.message || String(error),
+        entries: [],
+        items: [],
+        entry_path: null,
+        in_window_entry_count: 0,
+        unrecognized_entry_count: 0
+      };
     }
   }));
 
@@ -3866,13 +3905,18 @@ async function filterHatchSourceGains(env, userId, rows, period) {
   const sources = fetched.map(result => ({
     key: result.endpoint.key,
     ok: result.ok,
+    recognized: result.recognized,
+    entry_path: result.entry_path || null,
+    entry_count: result.entries.length,
+    in_window_entry_count: result.in_window_entry_count || 0,
+    unrecognized_entry_count: result.unrecognized_entry_count || 0,
     item_count: result.items.length,
     ...(result.error ? { error: result.error } : {})
   }));
   if (failed.length) {
     return {
       ...unchanged,
-      reason: `Source fetch failed for ${failed.map(result => result.endpoint.key).join(", ")}.`,
+      reason: `Source verification failed for ${failed.map(result => result.endpoint.key).join(", ")}.`,
       sources
     };
   }
@@ -3882,7 +3926,7 @@ async function filterHatchSourceGains(env, userId, rows, period) {
   return {
     rows: [...ownership.firstOwner, ...filtered.rows],
     suppressed: [...ownership.transferred, ...filtered.suppressed],
-    unresolved: [],
+    unresolved: filtered.rows,
     available: true,
     reason: null,
     source_item_count: sourceItems.length,
@@ -3942,30 +3986,145 @@ async function fetchAccountSourceWithAccessToken(env, accessToken, endpoint) {
 }
 
 function hatchSourceItemsFromPayload(endpoint, payload, userId, period) {
-  const entries = Array.isArray(payload?.data?.entries)
-    ? payload.data.entries
-    : Array.isArray(payload?.entries)
-      ? payload.entries
-      : [];
+  const extracted = hatchSourceEntriesFromPayload(endpoint, payload);
+  const entries = extracted.entries;
   const output = [];
+  let inWindowEntryCount = 0;
+  let unrecognizedEntryCount = 0;
   for (const entry of entries) {
     if (!hatchSourceEntryInWindow(entry, period)) continue;
-    const items = hatchSourceReceivedItems(endpoint.key, entry, userId);
-    for (const item of items) {
+    inWindowEntryCount += 1;
+    const received = hatchSourceReceivedItems(endpoint.key, entry, userId);
+    if (!received.recognized) {
+      unrecognizedEntryCount += 1;
+      continue;
+    }
+    for (const item of received.items) {
       const normalized = normalizeHatchSourceItem(item, endpoint, entry);
       if (normalized) output.push(normalized);
     }
   }
-  return output;
+  const recognized = extracted.recognized && unrecognizedEntryCount === 0;
+  return {
+    recognized,
+    reason: recognized
+      ? null
+      : !extracted.recognized
+        ? `Big Games ${endpoint.key} payload did not contain a recognized history list.`
+        : `${unrecognizedEntryCount} recent ${endpoint.key} record(s) used an unrecognized received-item shape.`,
+    entries,
+    items: output,
+    entry_path: extracted.path,
+    in_window_entry_count: inWindowEntryCount,
+    unrecognized_entry_count: unrecognizedEntryCount
+  };
+}
+
+function hatchSourceEntriesFromPayload(endpoint, payload) {
+  const sourceKey = String(endpoint?.key || "").trim();
+  const aliases = sourceKey === "trades"
+    ? ["trades", "tradeHistory", "trade_history", "transactions"]
+    : sourceKey === "booth"
+      ? ["booth", "boothHistory", "booth_history", "purchases", "sales", "transactions"]
+      : ["mail", "mailHistory", "mail_history", "messages", "transactions"];
+  const candidates = [
+    ["data", "entries"],
+    ...aliases.map(key => ["data", key]),
+    ["data", "history"],
+    ["data", "records"],
+    ["data", "results"],
+    ["data", "items"],
+    ["entries"],
+    ...aliases.map(key => [key]),
+    ["history"],
+    ["records"],
+    ["results"],
+    ["items"],
+    ["data"]
+  ];
+  for (const path of candidates) {
+    let value = payload;
+    for (const key of path) value = value && typeof value === "object" ? value[key] : undefined;
+    if (Array.isArray(value)) return { recognized: true, entries: value, path: path.join(".") };
+  }
+  return { recognized: false, entries: [], path: null };
 }
 
 function hatchSourceReceivedItems(sourceKey, entry, userId) {
-  if (!entry || typeof entry !== "object") return [];
+  if (!entry || typeof entry !== "object") return { recognized: false, items: [] };
   if (sourceKey === "mail") {
-    if (!isIncomingHatchMail(entry, userId)) return [];
-    return entry.item ? [entry.item] : [];
+    if (!isIncomingHatchMail(entry, userId)) return { recognized: true, items: [] };
+    const mailKeys = ["received", "receivedItems", "received_items", "itemsReceived", "items_received", "item", "items"];
+    for (const key of mailKeys) {
+      if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+      return { recognized: true, items: flattenHatchSourceItems(entry[key]) };
+    }
+    return { recognized: false, items: [] };
   }
-  return Array.isArray(entry.received) ? entry.received : [];
+
+  const receivedKeys = [
+    "received", "receiving", "receive", "receivedItems", "received_items",
+    "itemsReceived", "items_received", "gained", "incoming", "incomingItems", "incoming_items"
+  ];
+  for (const key of receivedKeys) {
+    if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+    return { recognized: true, items: flattenHatchSourceItems(entry[key]) };
+  }
+
+  const receiverId = partyUserId(entry.receiver || entry.recipient || entry.buyer);
+  if (receiverId) {
+    if (receiverId !== String(userId || "").trim()) return { recognized: true, items: [] };
+    const party = entry.receiver || entry.recipient || entry.buyer;
+    const items = flattenHatchSourceItems(party?.received ?? party?.items ?? entry.items ?? entry.item);
+    if (items.length || Object.prototype.hasOwnProperty.call(entry, "items") || Object.prototype.hasOwnProperty.call(entry, "item")) {
+      return { recognized: true, items };
+    }
+  }
+  return { recognized: false, items: [] };
+}
+
+function flattenHatchSourceItems(value, depth = 0) {
+  if (depth > 4 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.flatMap(item => flattenHatchSourceItems(item, depth + 1));
+  if (typeof value !== "object") return [];
+
+  const object = value;
+  if (hatchSourceLooksLikeItem(object)) return [object];
+  const containerKeys = ["items", "pets", "inventory", "received", "data", "contents", "rewards"];
+  const output = [];
+  for (const key of containerKeys) {
+    if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
+    output.push(...flattenHatchSourceItems(object[key], depth + 1));
+  }
+  if (output.length) return output;
+
+  // Some save payloads key item stacks by an opaque UUID rather than placing
+  // them in an `items` array. Only recurse into values that themselves look
+  // like an item/container; party and timestamp metadata is therefore ignored.
+  return Object.values(object).flatMap(item => {
+    if (!item || typeof item !== "object") return [];
+    return hatchSourceLooksLikeItem(item) || Array.isArray(item)
+      ? flattenHatchSourceItems(item, depth + 1)
+      : [];
+  });
+}
+
+function hatchSourceLooksLikeItem(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const nested = plainObject(value.item);
+  const data = plainObject(value.data);
+  return [value, nested, data].some(item => firstString(
+    item.id,
+    item.itemId,
+    item.item_id,
+    item.configName,
+    item.config_name,
+    item.displayName,
+    item.display_name,
+    item.stackKey,
+    item.stack_key,
+    item.name
+  ));
 }
 
 function isIncomingHatchMail(entry, userId) {
@@ -3993,7 +4152,9 @@ function hatchSourceEntryInWindow(entry, period) {
 }
 
 function sourceEntryTimeMs(entry) {
-  const raw = entry?.timestamp ?? entry?.time ?? entry?.createdAt ?? entry?.created_at ?? entry?.date;
+  const raw = entry?.timestamp ?? entry?.time ?? entry?.createdAt ?? entry?.created_at
+    ?? entry?.updatedAt ?? entry?.updated_at ?? entry?.completedAt ?? entry?.completed_at
+    ?? entry?.tradedAt ?? entry?.traded_at ?? entry?.claimedAt ?? entry?.claimed_at ?? entry?.date;
   if (raw === null || raw === undefined || raw === "") return 0;
   const number = Number(raw);
   if (Number.isFinite(number)) return number > 100000000000 ? number : number * 1000;
@@ -4003,31 +4164,66 @@ function sourceEntryTimeMs(entry) {
 
 function normalizeHatchSourceItem(item, endpoint, entry) {
   if (!item || typeof item !== "object") return null;
-  const itemClass = firstString(item.class, item.category, item.collection, "Pet");
-  const itemId = firstString(item.id, item.itemId, item.configName, item.name);
-  const displayName = firstString(item.displayName, item.name, itemId, item.stackKey, "Unknown item");
-  const variant = getVariant(item);
-  const count = Math.max(0, Math.floor(Number(itemCount(item)) || 0));
-  const raw = {
+  const details = [plainObject(item.item), plainObject(item.data), plainObject(item.rawData)]
+    .find(candidate => hatchSourceLooksLikeItem(candidate)) || {};
+  const normalizedItem = {
+    ...details,
     ...item,
+    rawData: {
+      ...plainObject(details.rawData),
+      ...plainObject(item.rawData),
+      ...plainObject(details.data)
+    }
+  };
+  const itemClass = firstString(normalizedItem.class, normalizedItem.type, normalizedItem.category, normalizedItem.collection, "Pet");
+  const itemId = firstString(
+    normalizedItem.id,
+    normalizedItem.itemId,
+    normalizedItem.item_id,
+    normalizedItem.configName,
+    normalizedItem.config_name,
+    normalizedItem.name
+  );
+  const displayName = firstString(
+    normalizedItem.displayName,
+    normalizedItem.display_name,
+    normalizedItem.name,
+    itemId,
+    normalizedItem.stackKey,
+    normalizedItem.stack_key,
+    "Unknown item"
+  );
+  const variant = getVariant(normalizedItem);
+  const count = Math.max(0, Math.floor(Number(itemCount(normalizedItem)) || 0));
+  const raw = {
+    ...normalizedItem,
     class: itemClass,
-    category: firstString(item.category, item.collection, itemClass),
-    collection: firstString(item.collection, item.category, itemClass)
+    category: firstString(normalizedItem.category, normalizedItem.collection, itemClass),
+    collection: firstString(normalizedItem.collection, normalizedItem.category, itemClass)
   };
   const row = {
-    item_key: getItemKey(item, itemClass, itemId, variant),
+    item_key: getItemKey(normalizedItem, itemClass, itemId, variant),
     item_class: itemClass,
     item_category: raw.category || raw.collection || null,
     item_id: itemId,
     display_name: displayName,
     variant,
     delta: count || 1,
-    rap: itemRap(item),
-    icon: firstString(item.icon, item.goldenIcon),
+    rap: itemRap(normalizedItem),
+    icon: firstString(normalizedItem.icon, normalizedItem.goldenIcon),
     raw,
     source: endpoint.key,
     source_label: endpoint.label,
-    source_timestamp: entry?.timestamp || null
+    source_timestamp: firstString(
+      entry?.timestamp,
+      entry?.time,
+      entry?.createdAt,
+      entry?.created_at,
+      entry?.completedAt,
+      entry?.completed_at,
+      entry?.tradedAt,
+      entry?.traded_at
+    ) || null
   };
   const tier = hatchTier(row);
   return tier ? { ...row, tier, match_key: hatchSourceMatchKey(row) } : null;
@@ -5720,6 +5916,10 @@ function htgTrackerQuotaSchedule(tracker, now = new Date(), env = null) {
 }
 function htgRequireSourceFilter(env) {
   return envBool(firstString(env.HTG_REQUIRE_SOURCE_FILTER, env.HATCH_REQUIRE_SOURCE_FILTER), DEFAULT_HTG_REQUIRE_SOURCE_FILTER);
+}
+function htgSourceConfirmationObservations(env) {
+  const value = Number(env.HTG_SOURCE_CONFIRMATION_OBSERVATIONS || DEFAULT_HTG_SOURCE_CONFIRMATION_OBSERVATIONS);
+  return Number.isFinite(value) ? Math.max(1, Math.min(4, Math.floor(value))) : DEFAULT_HTG_SOURCE_CONFIRMATION_OBSERVATIONS;
 }
 function inventorySnapshotItemReadLimit(env) {
   const value = Number(env.INVENTORY_SNAPSHOT_ITEM_READ_LIMIT || DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT);

@@ -31,6 +31,9 @@ HTG_REFRESH_QUOTA_RESERVE = "6"
 HTG_FAILURE_RETRY_MINUTES = "15"
 HTG_FAILURE_RETRY_MAX_MINUTES = "120"
 HTG_REQUIRE_SOURCE_FILTER = "true"
+# Require two consecutive unmatched observations before posting an HTG alert.
+# This gives delayed trade/booth/mail history one extra scan to catch up.
+HTG_SOURCE_CONFIRMATION_OBSERVATIONS = "2"
 # Diagnostic age threshold for a pending gain whose trade/booth/mail source
 # verification is unavailable. The gain remains pending and is retried; it is
 # not silently absorbed into the baseline.
