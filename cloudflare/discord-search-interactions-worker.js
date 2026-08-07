@@ -839,6 +839,16 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(messageResponse("Use `/htg setup account:<roblox username>`, `/htg accounts`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
     }
 
+    // The tracker is intentionally configured per Discord server.  Do not let
+    // a DM setup create an unscoped account record that could later be routed
+    // to an unrelated server's HTG channel.
+    if (hatchSubcommand !== "accounts" && !interaction.guild_id) {
+      return interactionJson(messageResponse(
+        "HTG setup and alert settings must be run inside the Discord server that should receive the alerts. Use `/htg accounts` to view your connected accounts.",
+        true
+      ));
+    }
+
     if (hatchSubcommand === "assign") {
       const permitted = await memberCanManageServerTracker(interaction, env, {
         allowDiscordManage: false
@@ -1997,7 +2007,7 @@ async function completeHatchInteraction(interaction, env, subcommand) {
 
       await editOriginalInteraction(interaction, {
         content: payload.config
-          ? `HTG hatch alerts are assigned to <#${requestedChannelId}>. Hatch alerts will only post to assigned HTG channels.`
+          ? `HTG hatch alerts are assigned to <#${requestedChannelId}>. Only accounts explicitly enabled in this server can post here; another server's setup will not send alerts here.`
           : `HTG hatch-alert assignment was saved for <#${requestedChannelId}>.`,
         embeds: [],
         components: [],
@@ -5277,8 +5287,21 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
     ].join("\n")
   };
 
+  const leagueIcon = leagueIconUrl(payload.league_icon);
+  const leagueHeader = leagueIcon
+    ? {
+        type: COMPONENT_TYPE_SECTION,
+        components: [leagueDetails],
+        accessory: {
+          type: COMPONENT_TYPE_THUMBNAIL,
+          media: { url: leagueIcon },
+          description: `${displayLeagueName} League icon`
+        }
+      }
+    : leagueDetails;
+
   const containerComponents = [
-    leagueDetails
+    leagueHeader
   ];
 
   const message = {

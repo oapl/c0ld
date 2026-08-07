@@ -1176,37 +1176,30 @@ so `/htg setup` opens the Luna Bot app instead.
 | `HATCH_BIG_GAMES_CLIENT_ID` | Client ID from the Luna Bot HTG Big Games DB app. |
 | `HATCH_BIG_GAMES_REDIRECT_URI` | Exact redirect URL registered in the Luna Bot HTG Big Games DB app. Use the short stable Workers callback, for example `https://inventory-detector-worker.opal-dde.workers.dev/cb`, until any custom domain opens with a clean trusted HTTPS certificate from normal browsers and networks. |
 | `HATCH_OAUTH_PUBLIC_BASE` | Public base URL used only for the fallback short OAuth link, usually `https://inventory-detector-worker.opal-dde.workers.dev`. Do not point this at a custom domain that can produce browser certificate warnings. |
-| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. New HTG approvals always include Profile and Inventory, then default to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Existing account-bound Inventory grants remain usable for scheduled reads; they are not blocked merely because an older approval lacks Profile. |
-| `HTG_SCAN_INTERVAL_MINUTES` | Optional. Set to `16`. BIG Games allows 96 forced inventory refreshes per account/day. Luna reserves six refreshes for OAuth/setup and deliberate diagnostics, leaving a hard scheduled budget of 90; a 16-minute cadence uses at most 90 scheduled refreshes in 24 hours. The Worker enforces this minimum even if the variable is still `15`. |
-| `HTG_SHARD_COUNT` | Optional. Set to `16`. With an every-minute cron, enabled accounts are spread across 16 minute shards. Accounts recovering from an outage or quota reset remain on their assigned shards instead of all refreshing in one burst. The Worker enforces at least the quota-safe interval. |
+| `HATCH_BIG_GAMES_SCOPES` | Optional override for the space/comma-separated scopes requested by the HTG app. HTG approvals always include Profile and Inventory, then default to trade, booth, and mail read scopes so source filtering can distinguish tracked HTG gains from trade, booth, or mail gains. Scheduled HTG scans verify the live Profile identity before reading inventory; older grants without Profile must be re-authorized so an alt account can never be reported under a main account's name. |
+| `HTG_SCAN_INTERVAL_MINUTES` | Optional preferred cadence. Set to `15`. BIG Games reports the actual refresh allowance for each Roblox account: 48/day for standard accounts and 96/day for VIP. Luna calculates a quota-safe minimum of about 35 minutes for a standard account or 16 minutes for VIP when six pulls are reserved, then adapts to remaining allowance and reset time. |
+| `HTG_SCHEDULE_ALIGNMENT_MINUTES` | Optional. Defaults to `15`. Scheduled HTG scans may begin only at `:00`, `:15`, `:30`, or `:45`; an account that is not yet quota-eligible skips that slot and waits for the next one. A confirmed VIP account uses every slot only when its quota reserve is set to `0`. |
+| `HTG_SHARD_COUNT` | Optional compatibility/diagnostic setting. Set to `15` or leave unset. Initial recovery metadata retains a deterministic shard, while scheduled HTG reads use the quarter-hour grid and `HTG_MAX_CONCURRENT_SCANS` prevents a burst of simultaneous API calls. |
 | `HTG_MAX_CONCURRENT_SCANS` | Optional. Defaults to `3`. Limits simultaneous BIG Games reads so one cron run cannot burst every connected HTG account at the API. |
-| `HTG_REFRESH_QUOTA_LIMIT` | Optional. Defaults to `96`, matching the current BIG Games forced-refresh allowance per account/day. |
-| `HTG_REFRESH_QUOTA_RESERVE` | Optional. Defaults to `6`. Scheduled scans stop after 90 provider-reported refreshes and remain paused until reset, preserving six emergency/setup pulls. |
-| `HTG_FAILURE_RETRY_MINUTES` | Optional. Defaults to `15`. First failed HTG refresh retry delay. |
-| `HTG_FAILURE_RETRY_MAX_MINUTES` | Optional. Defaults to `120`. Caps exponential failure retry delays (`15`, `30`, `60`, then `120` minutes). |
-| `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before advancing compact HTG state. If source checks fail, Luna retries briefly instead of posting an unverified gain. |
-| `HTG_SOURCE_CONFIRMATION_OBSERVATIONS` | Optional. Defaults to `2`. An inventory gain not matched to trade, booth, or mail is held for this many consecutive observations before alerting. The default adds one confirmation scan so delayed source-history records can suppress transfers; set to `1` only if immediate alerts matter more than transfer accuracy. |
+| `HTG_REFRESH_QUOTA_LIMIT` | Optional compatibility fallback. Defaults to `48` while an account's API response has not yet reported its actual limit. A stored API-reported 48 or 96 always takes precedence. Do not set this to `96` to make standard accounts scan faster. |
+| `HTG_REFRESH_QUOTA_RESERVE` | Optional. Defaults to `6`. Luna reserves these account pulls for an owner visiting BIG Games, OAuth setup, or deliberate diagnostics. |
+| `HTG_REQUIRE_SOURCE_FILTER` | Optional. Defaults to `true`; when an HTG gain candidate appears, Luna requires trade/booth/mail source checks before posting. If source checks cannot be read, the candidate remains pending and the baseline is not advanced. |
+| `HTG_SCAN_HISTORY_LIMIT` | Optional. Defaults to `96`. Number of completed per-account HTG scan/pull outcomes retained in the authoritative v2 metadata ledger. |
 | `HTG_SOURCE_FILTER_HOLD_MINUTES` | Optional. Defaults to `20`; exposes how long a source-verification outage has lasted in HTG diagnostics. Gains are retained as pending after this window rather than silently discarded. |
 | `HTG_STALE_ALERT_WINDOW_MINUTES` | Optional. Classifies long gaps for diagnostics. Fresh inventory received after a gap is still compared and source-filtered by default so real gains are not silently lost. |
 | `HTG_DROP_STALE_GAINS` | Optional. Defaults to `false`. Set to `true` only if you intentionally want Luna to absorb gains after a long refresh gap without alerting. |
-| `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `true`; enabled HTG accounts use `refresh=true` on scheduled inventory pulls so new HTG gains are not missed because of cached Big Games inventory data. |
+| `HATCH_FORCE_REFRESH_ON_SCHEDULE` | Optional. Defaults to `false` and should remain false. BIG Games can charge `refresh=true` even when a current snapshot already exists. Normal scheduled account reads still refresh when the provider's five-minute cache is stale, while preserving quota when it is not. Use a manual diagnostic only when you deliberately want to spend a pull. |
 | `HATCH_SOURCE_FILTER_ENABLED` | Optional. Defaults to `true`; set to `false` only to temporarily post HTG inventory gains without checking trade, booth, or mail source logs. |
-| `HATCH_BASELINE_PROTECTION_ENABLED` | Optional. Defaults to `true`; HTG alerts wait for a stable inventory baseline and reset instead of posting when a late Big Games inventory backfill is detected. Once a tracker is armed, broad backfill/bulk-gain guards no longer suppress new HTG deltas; source filtering still applies. |
-| `HATCH_BASELINE_STABLE_COMPARISONS` | Optional. Defaults to `1`; number of clean snapshot comparisons required after setup or a baseline reset before HTG alerts can post. |
-| `HATCH_BACKFILL_MIN_ITEM_GROWTH` | Optional. Defaults to `25`; minimum snapshot stack-count jump considered a possible inventory backfill while the tracker is warming up. |
-| `HATCH_BACKFILL_ITEM_GROWTH_RATIO` | Optional. Defaults to `0.05`; required stack-count growth ratio for the backfill guard. |
-| `HATCH_BACKFILL_HTG_GAIN_COUNT` | Optional. Defaults to `2`; HTG gained count that can trigger the bulk-gain backfill guard while a tracker is still warming up. |
-| `HATCH_BACKFILL_TOTAL_GAIN_COUNT` | Optional. Defaults to `20`; total gained stack count that can trigger the bulk-inventory backfill guard while the tracker is warming up. |
 | `INVENTORY_SNAPSHOT_ITEM_READ_LIMIT` | Optional. Defaults to `50000`; maximum snapshot item rows read when comparing full inventories for HTG and inventory diffs. |
-| `HATCH_ALERT_CHANNEL_ID` | Optional legacy fallback Discord channel ID for bot-authored HTG gain alerts when no `/htg assign` channel exists. |
+| `HATCH_ALERT_CHANNEL_ID` | Legacy only. HTG delivery is now intentionally server-scoped and does not fall back to this channel. Use `/htg assign` in each server instead. |
 | `HATCH_TRACKER_RETURN_URL` | Optional dedicated HTG page to open after OAuth completes. Leave blank for Discord-only HTG setup; this intentionally does not fall back to `INVENTORY_OAUTH_RETURN_URL`. |
 
-Successful BIG Games inventory responses can include refresh-quota metadata.
-The Worker accepts those payloads and uses their source revision normally; it
-only classifies an actual error response as rate limited. If a forced refresh
-returns HTTP 429, HTG performs one non-refresh read so a provider-cached
-revision that already advanced can still be compared without spending another
-refresh. An unchanged cached revision never advances the HTG baseline.
+Successful BIG Games inventory responses include per-account refresh metadata.
+That allowance is shared with the official BIG Games site, public profile
+reads, and other apps; hitting exhaustion can return a stale snapshot with HTTP
+200 rather than a conventional error. HTG stores the provider-reported limit,
+usage, reset time, and actual `consumedThisCall` result, then leaves its
+baseline untouched until a newer inventory revision appears.
 
 `/htg accounts` also verifies that each saved HTG access token can be opened
 with the currently configured encryption/client secrets. An account shown as
@@ -1214,9 +1207,22 @@ with the currently configured encryption/client secrets. An account shown as
 can resume.
 
 `POST /api/hatch/alerts/check?username=<name>&force=1` bypasses the normal
-account shard and interval/failure-backoff gates for a deliberate diagnostic.
-It still honors the stored provider quota guard and therefore cannot spend a
-reserved refresh after the scheduled budget is exhausted.
+account shard and interval gates for a deliberate diagnostic. The endpoint is
+safe for a one-off test, but repeatedly forcing it can consume the account's
+daily Big Games refresh allowance.
+
+For a missed-alert investigation, use the read-only history command instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\show-htg-observation-history.ps1 -Username DietPizza
+```
+
+It reads only the saved inventory snapshots and reports every Huge, Titanic,
+and Gargantuan first observed in the retained window, each later count increase,
+and items that disappeared. It does **not** call BIG Games or consume a refresh.
+`first observed` means first present in the saved history window—not proof of
+the exact time the item was acquired. The Worker endpoint is
+`GET /api/hatch/diagnostics/htg-history` and requires the admin token.
 
 For the live Luna HTG app, register this exact Big Games DB redirect URL and set
 the Worker variable to the same value:
@@ -1242,41 +1248,57 @@ Required/optional secrets on `inventory-detector-worker`:
 | `HATCH_BIG_GAMES_CLIENT_SECRET` | Secret from the Luna Bot HTG Big Games DB app. |
 | `INVENTORY_TOKEN_ENCRYPTION_SECRET` | Optional stable encryption secret for saved grants. |
 | `INGEST_ADMIN_TOKEN` | Shared private token used by the Discord interaction Worker. |
-| `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts or the legacy `HATCH_ALERT_CHANNEL_ID` fallback. |
-| `HATCH_ALERT_WEBHOOK_URL` | Optional fallback if not posting through the bot token/channel. |
+| `DISCORD_BOT_TOKEN` | Required for `/htg assign` channel posts. |
+| `HATCH_ALERT_WEBHOOK_URL` | Legacy only; HTG alerts do not use a shared webhook fallback. |
 
 The HTG detector owns its scheduler roster directly from enabled
 `ps99_hatch_tracker_users` rows; it does not depend on the general inventory or
-League inventory user list. It uses a compact state table rather than full snapshot
-comparisons for frequent checks. Each scan fetches the current Big Games
-inventory, extracts only Huge, Titanic, and Gargantuan pet stacks, compares them
-against `ps99_htg_inventory_state`, then removes matching gains when those same
-pets appear as received trade items, booth purchases, or incoming mail within
-the scan window. Source history is parsed through the current nested response
-wrappers and quantity fields; an HTTP-success response whose received-item
-shape is unknown is treated as unavailable instead of as an empty history. An
-otherwise unmatched gain is also held for the configured confirmation count so
-an inventory refresh that arrives before its trade/booth/mail record does not
-produce a false hatch alert. A unique pet whose ownership log names the tracked account as
-its only owner can be accepted as a first-owner hatch without waiting for the
-other source endpoints; a pet with prior owners is suppressed as a transfer.
-It also suppresses unstable baseline/backfill data while a
-tracker is warming up; after that, detected HTG gains are not dropped just
-because other inventory also changed. If source endpoints cannot be read and
-`HTG_REQUIRE_SOURCE_FILTER=true`, Luna stores the exact candidate as a durable
-pending gain, preserves the previous compact baseline, and retries on later
-scans. It never absorbs that unverified increase merely because the source
-outage lasted too long. Likewise, if
-the tracker has not been checked inside `HTG_STALE_ALERT_WINDOW_MINUTES`, Luna
-re-baselines instead of posting delayed HTG gains all at once, unless that gain
-was already observed and retained as pending.
+League inventory user list. HTG v2 stores one authoritative state record in
+each tracker's `metadata.htg_v2`; it does not read or advance the earlier
+compact state table. The first fresh verified inventory scan is intentionally a
+quiet baseline (including an empty HTG inventory). Each later scan requires a
+new Big Games source revision, then compares only Huge, Titanic, and
+Gargantuan stacks against that baseline. Matching trade, booth, mail, and
+prior-owner records suppress a candidate as a transfer. An unmatched candidate
+must remain through one later fresh source revision before it posts. This adds
+one normal scan of latency but avoids falsely announcing a trade whose source
+history arrived late. If source checks are unavailable, the exact candidate is
+kept pending and the baseline is preserved. The v2 ledger records every
+attempt, cache fallback, source check, suppression, failure, and posted alert.
+
+Deploying HTG v2 causes each enabled account to establish one new quiet
+baseline on its next fresh scan. That is intentional: it prevents the account's
+existing inventory from being treated as newly hatched. The old
+`HTG_FAILURE_RETRY_*`, `HTG_SOURCE_CONFIRMATION_OBSERVATIONS`, and
+`HATCH_BACKFILL_*` settings are retained for compatibility with the inactive
+legacy path and do not alter the v2 scanner.
+
+#### HTG v2 rollout
+
+1. Deploy this `inventory-detector-worker` build with the existing HTG variables
+   and the every-minute cron still enabled. No database migration is required.
+2. Do **not** run repeated forced checks. Each connected account will take its
+   next quota-safe scheduled slot and save a quiet `baseline_saved` result.
+   Until BIG Games reports the account's tier, Luna treats it as a standard
+   48-refresh account.
+3. After that baseline, an unmatched Huge/Titanic/Gargantuan is observed once,
+   then confirmed on the next fresh revision before an alert is posted.
+4. Existing accounts do **not** need to revoke/re-authorize just because this
+   worker is deployed. Re-authorize only if diagnostics reports a missing
+   Profile scope, expired grant, or identity mismatch.
+5. Use `GET /api/hatch/diagnostics/summary?history_limit=24` with the admin
+   token to inspect the exact scan ledger. It is read-only and does not consume
+   a Big Games inventory refresh.
 
 HTG OAuth uses Profile scope to verify that the Big Games token belongs to the
 same Roblox account saved on the tracker. If a saved token is missing Profile
 scope, or Big Games reports a different Roblox account, Luna refuses to scan that
 grant and the user must run `/htg setup` again for the correct linked account.
 Each HTG gain now posts and stores as its own alert row, and alert titles include
-variants such as `Shiny`, `Golden`, or `Rainbow`.
+variants such as `Shiny`, `Golden`, or `Rainbow`. When multiple guild channels
+are assigned, delivery is isolated per channel: a failure in one destination is
+reported as partial delivery and cannot replay the same alert into channels that
+already accepted it.
 
 To audit a suspected account mixup, call the diagnostics endpoint or run the SQL
 helper:
@@ -1286,6 +1308,20 @@ Invoke-RestMethod `
   -Uri "https://inventory-detector-worker.opal-dde.workers.dev/api/hatch/diagnostics?username=DietPizza&item=Carrot%20Crocodile&limit=12" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
+
+For a read-only view of every enabled account and its recent pull usage, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-hatch-tracker.ps1 -Summary
+```
+
+Add `-FullJson` when the complete recent per-account ledger is needed.
+
+This calls `GET /api/hatch/diagnostics/summary`. It does not contact BIG Games
+and therefore consumes no inventory refresh. Each account includes its scheduler
+decision, current provider quota, pending gain, last error, and a capped pull
+ledger showing inventory attempts, source-verification reads, quota changes, and
+Discord-post outcomes.
 
 ```text
 supabase/diagnose_htg_account_mixup.sql
@@ -1297,10 +1333,14 @@ Use an every-minute cron for the inventory Worker when HTG sharding is enabled:
 * * * * *
 ```
 
-With 16 shards, this gives each HTG user an approximately 16-minute check
-interval and no more than 90 scheduled forced refreshes per rolling 24 hours.
-API calls and database writes are spread across separate scheduled invocations;
-recovering accounts remain on their assigned shards rather than bursting at once.
+The scheduler uses a quarter-hour clock grid: scheduled reads begin only at
+`:00`, `:15`, `:30`, or `:45`. It does **not** override a Roblox account's
+quota-safe cadence. A standard account starts with a roughly 35-minute minimum
+(48 daily refreshes less a six-refresh reserve), while an API-confirmed VIP
+account starts with a roughly 16-minute minimum. A not-yet-eligible account
+waits for the next quarter-hour slot. Set the reserve to `0` only when a
+confirmed VIP account is intentionally dedicated to 15-minute monitoring and
+does not need manual refresh capacity.
 
 Set these on `c0ld-discord-search`:
 
@@ -1323,10 +1363,13 @@ The user flow is:
   even when Big Games Profile does not expose a parseable Roblox user ID.
 - `/htg accounts` lists every Roblox account connected to the user's Discord
   account.
-- `/htg assign channel:<channel>` sets the only HTG gain-alert destination for the
-  Discord server. Once one or more assigned channels exist, the inventory Worker
-  posts only to those assigned channels and ignores the legacy channel/webhook
-  fallback.
+- `/htg assign channel:<channel>` sets the HTG gain-alert destination for that
+  Discord server. HTG opt-ins are server-scoped: an account posts only to the
+  server where that account was explicitly enabled, and only if that same server
+  has an assigned channel. Enabling the same account in two servers intentionally
+  sends one alert to each server. Legacy unscoped tracker settings are not routed
+  after this change; run `/htg enable` once in the server that should receive the
+  account's future alerts. HTG never falls back to a shared channel or webhook.
 - `/htg enable tier:<huge|titanic|gargantuan|all>` enables selected alerts for
   every connected Roblox account on that Discord user by default. Add
   `account:<roblox username>` to target one alt, or `account:id:<number>` to

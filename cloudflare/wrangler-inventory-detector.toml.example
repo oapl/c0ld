@@ -23,17 +23,24 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 # HTG Big Games app.
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
-HTG_SCAN_INTERVAL_MINUTES = "16"
-HTG_SHARD_COUNT = "16"
+HTG_SCAN_INTERVAL_MINUTES = "15"
+# Scheduled HTG inventory reads begin only at :00, :15, :30, and :45. The
+# quota-safe interval may skip a slot; it never drifts to an arbitrary minute.
+HTG_SCHEDULE_ALIGNMENT_MINUTES = "15"
+HTG_SHARD_COUNT = "15"
 HTG_MAX_CONCURRENT_SCANS = "3"
-HTG_REFRESH_QUOTA_LIMIT = "96"
+HTG_REFRESH_QUOTA_LIMIT = "48"
 HTG_REFRESH_QUOTA_RESERVE = "6"
+# Legacy retry/backfill variables remain accepted for existing deployments, but
+# HTG v2 deliberately uses the normal quota-safe cadence after a failed scan.
+# It never applies exponential failure backoff to an account.
 HTG_FAILURE_RETRY_MINUTES = "15"
 HTG_FAILURE_RETRY_MAX_MINUTES = "120"
 HTG_REQUIRE_SOURCE_FILTER = "true"
-# Require two consecutive unmatched observations before posting an HTG alert.
-# This gives delayed trade/booth/mail history one extra scan to catch up.
+# HTG v2 always requires exactly one later fresh inventory revision before
+# posting an unmatched gain. This legacy variable no longer changes that.
 HTG_SOURCE_CONFIRMATION_OBSERVATIONS = "2"
+HTG_SCAN_HISTORY_LIMIT = "96"
 # Diagnostic age threshold for a pending gain whose trade/booth/mail source
 # verification is unavailable. The gain remains pending and is retried; it is
 # not silently absorbed into the baseline.
@@ -44,7 +51,9 @@ HTG_STALE_ALERT_WINDOW_MINUTES = "30"
 # Default false. Leave false so a fresh inventory received after an outage is
 # source-filtered and alerted instead of silently absorbed into the baseline.
 HTG_DROP_STALE_GAINS = "false"
-HATCH_FORCE_REFRESH_ON_SCHEDULE = "true"
+# Keep false. `refresh=true` can spend quota even when BIG Games already has a
+# fresh snapshot. Routine HTG scans use the normal account read instead.
+HATCH_FORCE_REFRESH_ON_SCHEDULE = "false"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"
 HATCH_BASELINE_STABLE_COMPARISONS = "1"
@@ -62,10 +71,12 @@ HATCH_ALERT_CHANNEL_ID = ""
 PUBLIC_CACHE_SECONDS = "5"
 ALLOWED_ORIGIN = "https://c0ld-clan.com"
 
-# HTG-enabled accounts are sharded across this every-minute cron. The 16-minute
-# cadence uses at most 90 scheduled refreshes per account/day, leaving six for
-# OAuth/setup and deliberate diagnostics. Normal inventory
-# accounts still use the hourly synchronized cohort unless manually refreshed.
+# HTG-enabled accounts are sharded across this every-minute cron. Their actual
+# 48/day (standard) or 96/day (VIP) BIG Games refresh allowance is learned per
+# Roblox account and is shared with the BIG Games site and other apps. The
+# Worker starts conservatively at standard-account pace and adapts after the
+# first account response. Normal inventory accounts still use the hourly
+# synchronized cohort unless manually refreshed.
 [triggers]
 crons = ["* * * * *"]
 
