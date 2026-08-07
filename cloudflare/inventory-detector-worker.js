@@ -71,7 +71,11 @@ const DEFAULT_HTG_SCAN_HISTORY_LIMIT = 96;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
-const INVENTORY_BUILD_ID = "inventory-htg-v2-quarter-hour-schedule-2026-08-07e";
+// Every server destination must be explicitly re-enabled after the HTG
+// server-scoping rollout.  Old subscriptions deliberately have no version,
+// so they remain inert rather than continuing to post in a former server.
+const HTG_SUBSCRIPTION_CONSENT_VERSION = 2;
+const INVENTORY_BUILD_ID = "inventory-htg-v2-server-consent-2026-08-07g";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -265,9 +269,29 @@ export default {
         trackedInventoryUsers(env),
         fetchEnabledHatchTrackers(env)
       ]);
+      const authorizationExpiryResults = await mapSettledWithConcurrency(trackers, 8, tracker =>
+        notifyHatchAuthorizationExpiryIfNeeded(env, tracker, now)
+      );
+      for (const result of authorizationExpiryResults) {
+        if (result.status === "rejected") {
+          console.warn("Scheduled HTG authorization-expiry notice failed", result.reason?.message || result.reason);
+        }
+      }
       const discordUsers = new Set(configuredUsers(env).map(user => String(user.user_id)));
       const hatchResults = await mapSettledWithConcurrency(trackers, htgMaxConcurrentScans(env), async tracker => {
         const user = hatchTrackerUser(tracker);
+        // The expiry notifier above works only from the saved grant timestamp.
+        // Do not turn the same expired grant into a failed inventory scan on every
+        // later cron run: it cannot produce a fresh provider revision or an alert.
+        if (hatchAuthorizationHasExpired(tracker, now)) {
+          return {
+            user,
+            tracker_id: tracker.id || null,
+            posted: false,
+            skipped: true,
+            reason: "Big Games authorization expired; waiting for the member to renew it."
+          };
+        }
         const schedule = htgV2ScheduleDecision(env, tracker, user.user_id, now, {
           cron: event?.cron
         });
@@ -1171,7 +1195,7 @@ async function hatchTrackerStatus(env, discordUserId) {
       discord_username: row.discord_username || null,
       roblox_user_id: row.roblox_user_id || null,
       roblox_username: row.roblox_username || null,
-      enabled: Boolean(row.enabled),
+      enabled: hatchTrackerHasEnabledGuildSubscription(row),
       enabled_tiers: hatchTrackerEnabledTiers(row),
       alert_guild_ids: hatchTrackerAlertGuildIds(row),
       guild_subscriptions: hatchTrackerGuildSubscriptions(row),
@@ -2100,10 +2124,14 @@ function hatchTrackerGuildSubscriptions(value) {
     const tiers = [...new Set((Array.isArray(subscription.tiers) ? subscription.tiers : [])
       .map(normalizeHatchTierValue)
       .filter(tier => HATCH_TRACKER_TIERS.includes(tier)))];
+    const consentVersion = Math.max(0, Math.floor(Number(subscription.consent_version || 0)));
     deduped.set(guildId, {
       guild_id: guildId,
-      enabled: subscription.enabled === true && tiers.length > 0,
+      enabled: subscription.enabled === true
+        && tiers.length > 0
+        && consentVersion >= HTG_SUBSCRIPTION_CONSENT_VERSION,
       tiers,
+      consent_version: consentVersion,
       updated_at: firstString(subscription.updated_at) || null
     });
   }
@@ -2129,6 +2157,49 @@ function hatchTrackerAlertGuildIds(value) {
     .map(subscription => subscription.guild_id);
 }
 
+function hatchAuthorizationExpiryNoticeState(value) {
+  const metadata = plainObject(value?.metadata);
+  const notice = plainObject(metadata.htg_authorization_expiry_notice);
+  return {
+    expires_at: firstString(notice.expires_at) || null,
+    notified_guild_ids: [...new Set((Array.isArray(notice.notified_guild_ids) ? notice.notified_guild_ids : [])
+      .map(guildId => String(guildId || "").trim())
+      .filter(guildId => /^\d{10,24}$/.test(guildId)))],
+    last_notified_at: firstString(notice.last_notified_at) || null
+  };
+}
+
+function hatchAuthorizationHasExpired(tracker, now = new Date()) {
+  const expiresAt = firstString(tracker?.authorization_expires_at);
+  const expiresMs = new Date(expiresAt).getTime();
+  return Boolean(expiresAt && Number.isFinite(expiresMs) && expiresMs <= now.getTime());
+}
+
+function hatchAuthorizationExpiryNoticeGuildIdsNeeded(tracker, now = new Date()) {
+  if (!hatchAuthorizationHasExpired(tracker, now)) return [];
+  const expiresAt = firstString(tracker?.authorization_expires_at);
+  const notice = hatchAuthorizationExpiryNoticeState(tracker);
+  const alreadyNotified = notice.expires_at === expiresAt ? new Set(notice.notified_guild_ids) : new Set();
+  return hatchTrackerAlertGuildIds(tracker).filter(guildId => !alreadyNotified.has(guildId));
+}
+
+function hatchTrackerMetadataWithAuthorizationExpiryNotice(metadata, expiresAt, guildIds, notifiedAt = new Date().toISOString()) {
+  const base = plainObject(metadata);
+  const previous = hatchAuthorizationExpiryNoticeState({ metadata: base });
+  const preserve = previous.expires_at === expiresAt ? previous.notified_guild_ids : [];
+  const notifiedGuildIds = [...new Set([...preserve, ...(guildIds || [])]
+    .map(guildId => String(guildId || "").trim())
+    .filter(guildId => /^\d{10,24}$/.test(guildId)))];
+  return {
+    ...base,
+    htg_authorization_expiry_notice: {
+      expires_at: expiresAt,
+      notified_guild_ids: notifiedGuildIds,
+      last_notified_at: notifiedAt
+    }
+  };
+}
+
 function hatchTrackerGuildIdsForTier(value, tier) {
   const normalizedTier = normalizeHatchTierValue(tier);
   if (!normalizedTier) return [];
@@ -2147,11 +2218,17 @@ function hatchTrackerMetadataWithGuildSubscription(metadata, guildId, tiers, ena
     .map(normalizeHatchTierValue)
     .filter(tier => HATCH_TRACKER_TIERS.includes(tier)))];
   const existing = plainObject(base.guild_subscriptions);
+  const existingSubscription = plainObject(existing[normalizedGuildId]);
   const subscriptions = {
     ...existing,
     [normalizedGuildId]: {
       enabled: enabled === true && normalizedTiers.length > 0,
       tiers: normalizedTiers,
+      // Only an explicit /htg enable (or its OAuth completion) grants the
+      // current server consent. Disabling preserves the recorded version.
+      consent_version: enabled === true
+        ? HTG_SUBSCRIPTION_CONSENT_VERSION
+        : Math.max(0, Math.floor(Number(existingSubscription.consent_version || 0))),
       updated_at: new Date().toISOString()
     }
   };
@@ -5479,6 +5556,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
     const alertTheme = hatchAlertTheme(featured.tier);
     const alertImageUrl = featured.image_url || HATCH_ALERT_THUMBNAIL_URL;
     const alertRap = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
+    const alertExists = hatchExistsCount(featured);
     const alertQuantity = Number(featured.delta) > 1 ? ` x${shortInventoryNumber(featured.delta)}` : "";
     const alertPlayer = alertDiscordUserId
       ? `**Player:** **<@${alertDiscordUserId}>** (${escapeDiscordMarkdown(alertUsername)})`
@@ -5490,10 +5568,11 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
         }).join(", ")}`
       : "";
     const alertLines = [
-      `**${escapeDiscordMarkdown(alertUsername)} acquired a ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}**`,
+      `${alertTheme.icon} **${escapeDiscordMarkdown(alertUsername)} acquired a ${escapeDiscordMarkdown(alertDisplayItem)}${alertQuantity}** :sparkles:`,
       alertPlayer,
       `**RAP:** ${alertRap}`,
-      "-# *Luna ignores HTG's from purchases, mail, or trades. :brain: *"
+      `**Exists:** ${alertExists === null ? "Unknown" : shortInventoryNumber(alertExists)}`,
+      "-# *Luna ignores HTGs from booth purchases, mail, or trades when their source history confirms it. :brain:*"
     ].filter(Boolean);
     const bodyComponents = [
       {
@@ -5544,6 +5623,65 @@ function hatchAlertTheme(tier) {
     return { title: "Titanic Acquired", icon: ":milky_way:", accent: 0xff5db8 };
   }
   return { title: "Huge Acquired", icon: ":sparkles:", accent: 0x34e1ef };
+}
+
+function buildHatchAuthorizationExpiredDiscordPayload(tracker) {
+  const discordUserId = String(tracker?.discord_user_id || "").trim();
+  const username = escapeDiscordMarkdown(firstString(tracker?.roblox_username, tracker?.roblox_user_id, "this Roblox account"));
+  const player = discordUserId ? `<@${discordUserId}>` : `**${username}**`;
+  return {
+    username: LUNA_WEBHOOK_USERNAME,
+    avatar_url: LUNA_AVATAR_URL,
+    allowed_mentions: discordUserId ? { users: [discordUserId] } : { parse: [] },
+    flags: DISCORD_COMPONENTS_V2_FLAG,
+    components: [{
+      type: 17,
+      accent_color: 0xffc857,
+      components: [{
+        type: 10,
+        content: [
+          ":warning: **BIG Games inventory access expired**",
+          `${player}, HTG alerts for **${username}** are paused until you renew inventory access.`,
+          "Run `/htg enable tier:All` in this server to reconnect.",
+          "-# BIG Games limits this authorization to 30 days, unfortunately."
+        ].join("\n")
+      }]
+    }]
+  };
+}
+
+// This is intentionally separate from the scan cadence. Checking a saved expiry
+// timestamp consumes no BIG Games request and gives the member one clear notice
+// at expiry, in every server where they explicitly enabled HTG alerts.
+async function notifyHatchAuthorizationExpiryIfNeeded(env, tracker, now = new Date()) {
+  const targetGuildIds = hatchAuthorizationExpiryNoticeGuildIdsNeeded(tracker, now);
+  if (!targetGuildIds.length) return { notified: false, skipped: true, reason: "authorization_active_or_already_notified" };
+  const expiry = firstString(tracker?.authorization_expires_at);
+  const delivery = await sendHatchAlert(
+    env,
+    buildHatchAuthorizationExpiredDiscordPayload(tracker),
+    tracker,
+    { guildIds: targetGuildIds }
+  );
+  const deliveredGuildIds = (delivery.destinations || [])
+    .map(destination => String(destination?.guild_id || "").trim())
+    .filter(guildId => /^\d{10,24}$/.test(guildId));
+  if (deliveredGuildIds.length) {
+    await updateHatchTrackerRow(env, tracker, {
+      metadata: hatchTrackerMetadataWithAuthorizationExpiryNotice(
+        tracker.metadata,
+        expiry,
+        deliveredGuildIds,
+        now.toISOString()
+      ),
+      updated_at: now.toISOString()
+    });
+  }
+  return {
+    notified: deliveredGuildIds.length > 0,
+    expires_at: expiry,
+    delivery
+  };
 }
 
 async function sendHatchAlert(env, payload, tracker = null, options = {}) {
@@ -5620,6 +5758,28 @@ async function sendHatchAlert(env, payload, tracker = null, options = {}) {
       failures
     };
   }
+}
+
+// BIG Games' enriched inventory response supplies `exists` as the total
+// in-game count for that exact item stack. Keep the lookup narrow so an
+// owner's own `count` never accidentally appears as the global Exists value.
+function hatchExistsCount(item) {
+  const sources = [
+    plainObject(item),
+    plainObject(item?.raw),
+    plainObject(item?.raw?.rawData),
+    plainObject(item?.raw?.configData),
+    plainObject(item?.rawData),
+    plainObject(item?.configData)
+  ];
+  const keys = ["exists", "existCount", "existsCount", "globalCount", "exist_count", "global_count"];
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = Number(source[key]);
+      if (Number.isFinite(value) && value >= 0) return Math.floor(value);
+    }
+  }
+  return null;
 }
 
 async function sendHatchAlertBotMessage(channelId, botToken, payload) {

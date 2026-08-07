@@ -31,7 +31,12 @@ const {
   hatchTrackerMetadataWithGuildSubscription,
   hatchTrackerEnabledTiersForGuild,
   hatchTrackerGuildIdsForTier,
-  hatchTrackerHasEnabledGuildSubscription
+  hatchTrackerHasEnabledGuildSubscription,
+  buildHatchAlertDiscordPayload,
+  hatchExistsCount,
+  hatchAuthorizationHasExpired,
+  hatchAuthorizationExpiryNoticeGuildIdsNeeded,
+  hatchTrackerMetadataWithAuthorizationExpiryNotice
 } = context;
 
 const coldGuild = "1457088639006670979";
@@ -51,10 +56,90 @@ assert.deepEqual(
   [coldGuild],
   "a Huge alert must route only to the guild that enabled Huge"
 );
+const legacySubscription = {
+  enabled: true,
+  metadata: {
+    guild_subscriptions: {
+      [coldGuild]: { enabled: true, tiers: ["huge"] }
+    }
+  }
+};
+assert.equal(
+  hatchTrackerHasEnabledGuildSubscription(legacySubscription, coldGuild),
+  false,
+  "pre-consent subscriptions must not keep posting until the member explicitly re-enables in that server"
+);
+const reenabledMetadata = hatchTrackerMetadataWithGuildSubscription(
+  legacySubscription.metadata,
+  coldGuild,
+  ["huge"],
+  true
+);
+assert.equal(
+  hatchTrackerHasEnabledGuildSubscription({ enabled: true, metadata: reenabledMetadata }, coldGuild),
+  true,
+  "an explicit re-enable must reactivate only that server subscription"
+);
 assert.equal(
   hatchTier({ display_name: "Huge Druid Owl", item_class: "Pet", raw: { tradeable: false } }),
   "huge",
   "an untradable Huge reward must still be classified as a Huge"
+);
+assert.equal(
+  hatchExistsCount({ raw: { exists: 312 } }),
+  312,
+  "the alert must use BIG Games' enriched global exists count rather than the owner's quantity"
+);
+const alertPreview = buildHatchAlertDiscordPayload(
+  { discord_user_id: "123456789012345678" },
+  { username: "Tester", user_id: "1" },
+  {
+    tier: "titanic",
+    display_name: "Titanic Test",
+    delta: 1,
+    rap: 1_500_000,
+    image_url: "https://example.test/titanic.png",
+    raw: { exists: 312 }
+  },
+  [],
+  []
+);
+const alertPreviewText = alertPreview.components[0].components[0].components[0].content;
+assert.match(alertPreviewText, /^:milky_way: \*\*Tester acquired a Titanic Test\*\* :sparkles:/, "each tier should retain its distinct alert emoji and the title sparkle");
+assert.match(alertPreviewText, /\*\*Exists:\*\* 312/, "HTG alerts should include the exact global Exists count below RAP");
+
+const expiredTracker = {
+  ...scopedTracker,
+  authorization_expires_at: "2026-08-06T00:00:00.000Z"
+};
+assert.equal(
+  hatchAuthorizationHasExpired(expiredTracker, new Date("2026-08-06T00:01:00.000Z")),
+  true,
+  "an expired grant must be skipped before the scheduled inventory scan"
+);
+assert.equal(
+  hatchAuthorizationHasExpired({ ...expiredTracker, authorization_expires_at: "2026-08-06T01:00:00.000Z" }, new Date("2026-08-06T00:01:00.000Z")),
+  false,
+  "a renewed grant must become eligible for normal HTG scans again"
+);
+assert.deepEqual(
+  Array.from(hatchAuthorizationExpiryNoticeGuildIdsNeeded(expiredTracker, new Date("2026-08-06T00:01:00.000Z"))),
+  [coldGuild, lunaGuild],
+  "an expired authorization should notify each explicitly enabled server once"
+);
+const expiryNoticeMetadata = hatchTrackerMetadataWithAuthorizationExpiryNotice(
+  expiredTracker.metadata,
+  expiredTracker.authorization_expires_at,
+  [coldGuild, lunaGuild],
+  "2026-08-06T00:01:00.000Z"
+);
+assert.deepEqual(
+  Array.from(hatchAuthorizationExpiryNoticeGuildIdsNeeded(
+    { ...expiredTracker, metadata: expiryNoticeMetadata },
+    new Date("2026-08-06T00:02:00.000Z")
+  )),
+  [],
+  "an expiry reminder must not repost on each scheduled scan"
 );
 
 const baseline = {
