@@ -38,12 +38,14 @@ const PS99_DEV_BLOG_STATE_TABLE = "c0ld_ps99_dev_blog_state";
 const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
 const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
+const DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE = "discord_clan_log_assignments";
 const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
 const DISCORD_OFFLINE_PING_CLANS_TABLE = "discord_offline_ping_clans";
 const DISCORD_OFFLINE_PING_LEAGUES_TABLE = "discord_offline_ping_leagues";
 const DISCORD_OFFLINE_PING_USERS_TABLE = "discord_offline_ping_users";
 const DISCORD_OFFLINE_PING_ALERT_STATE_TABLE = "discord_offline_ping_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
+const DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,last_event_id,last_event_at,last_error,created_at,updated_at";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -257,6 +259,12 @@ export default {
       ) {
         requireAdmin(request, env);
         response = await handleDiscordHourlyClanAssignments(request, env);
+      } else if (
+        ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
+        && url.pathname === "/api/discord/clan-log-assignments"
+      ) {
+        requireAdmin(request, env);
+        response = await handleDiscordClanLogAssignments(request, env);
       } else if (
         ["GET", "POST", "PATCH"].includes(request.method)
         && url.pathname === "/api/offline/config"
@@ -7066,6 +7074,105 @@ async function handleClanActivityStatus(request, env) {
   }, 200, {
     "Cache-Control": "no-store"
   });
+}
+
+function discordClanLogAssignmentKey(guildId, channelId, clanName) {
+  const guild = String(guildId || "").trim();
+  const channel = String(channelId || "").trim();
+  const clan = normalizeText(clanName);
+  return guild && channel && clan ? `${guild}:${channel}:clan-log:${clan}` : "";
+}
+
+async function handleDiscordClanLogAssignments(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+
+  if (request.method === "GET") {
+    const params = {
+      select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+      order: "created_at.asc",
+      limit: String(clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000))
+    };
+    const guildId = String(url.searchParams.get("guild_id") || "").trim();
+    const channelId = String(url.searchParams.get("channel_id") || "").trim();
+    const clanKey = normalizeText(url.searchParams.get("clan") || "");
+    const assignmentKey = String(url.searchParams.get("assignment_key") || "").trim();
+    const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
+    if (guildId) params.guild_id = `eq.${guildId}`;
+    if (channelId) params.channel_id = `eq.${channelId}`;
+    if (clanKey) params.clan_key = `eq.${clanKey}`;
+    if (assignmentKey) params.assignment_key = `eq.${assignmentKey}`;
+    if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
+    if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
+
+    return noStoreJson({
+      ok: true,
+      assignments: await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, params)
+    });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const assignmentKey = String(body.assignment_key || "").trim();
+
+  if (request.method === "DELETE") {
+    if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+    const assignments = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${assignmentKey}`,
+      limit: "1"
+    });
+    await supabaseDelete(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+      assignment_key: `eq.${assignmentKey}`
+    });
+    return noStoreJson({ ok: true, removed: assignments.length > 0, assignment: assignments[0] || null });
+  }
+
+  if (request.method === "POST") {
+    const guildId = String(body.guild_id || "").trim();
+    const channelId = String(body.channel_id || "").trim();
+    const clanName = String(body.clan_name || "").trim();
+    if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
+    if (!/^\d{5,30}$/.test(channelId)) throw httpError(400, "A valid Discord channel or thread ID is required.");
+    if (!clanName || clanName.length > 100) throw httpError(400, "A clan name between 1 and 100 characters is required.");
+
+    const key = discordClanLogAssignmentKey(guildId, channelId, clanName);
+    await supabaseUpsert(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, [{
+      assignment_key: key,
+      guild_id: guildId,
+      channel_id: channelId,
+      channel_type: toNumber(body.channel_type),
+      clan_name: clanName,
+      clan_key: normalizeText(clanName),
+      assigned_by: stringOrNull(body.assigned_by),
+      enabled: body.enabled !== false,
+      last_event_id: stringOrNull(body.last_event_id),
+      last_event_at: stringOrNull(body.last_event_at),
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }], "assignment_key");
+
+    const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${key}`,
+      limit: "1"
+    });
+    return noStoreJson({ ok: true, assignment: rows[0] || null });
+  }
+
+  if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+  const patch = { updated_at: new Date().toISOString() };
+  for (const key of ["enabled", "last_event_id", "last_event_at", "last_error"]) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) patch[key] = body[key] === "" ? null : body[key];
+  }
+  await supabasePatch(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+    assignment_key: `eq.${assignmentKey}`
+  }, patch);
+  const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+    select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+    assignment_key: `eq.${assignmentKey}`,
+    limit: "1"
+  });
+  return noStoreJson({ ok: true, updated: rows.length > 0, assignment: rows[0] || null });
 }
 
 async function handleClanActivityDetail(request, env) {

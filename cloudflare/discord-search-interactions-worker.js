@@ -285,16 +285,20 @@ export default {
 
   async scheduled(event, env, ctx) {
     const scheduledTime = event?.scheduledTime || Date.now();
-    if (!shouldRunHourlyScheduledPosts(env, scheduledTime)) {
-      return;
+    if (shouldRunHourlyScheduledPosts(env, scheduledTime)) {
+      ctx.waitUntil(runHourlyClanAssignments(env, {
+        scheduledTime,
+        alignToHour: true
+      }).catch(err => {
+        console.error("Hourly clan delivery failed", err);
+      }));
     }
 
-    ctx.waitUntil(runHourlyClanAssignments(env, {
-      scheduledTime,
-      alignToHour: true
-    }).catch(err => {
-      console.error("Hourly clan delivery failed", err);
-    }));
+    if (shouldRunClanLogScheduledPosts(env, scheduledTime)) {
+      ctx.waitUntil(runClanLogAssignments(env, { scheduledTime }).catch(err => {
+        console.error("Clan activity log delivery failed", err);
+      }));
+    }
   }
 };
 
@@ -676,6 +680,36 @@ async function handleInteraction(request, env, ctx) {
 
   if (commandName === "clan") {
     const subcommand = getSubcommandName(interaction);
+    if (subcommand === "log") {
+      const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
+      if (!clanName) {
+        return interactionJson(messageResponse("Use `/clan log clan:<name>` to view activity, or add `assign:<channel>` to send future activity there.", true));
+      }
+
+      const assignmentChannelId = getCommandOption(interaction, "assign");
+      const demoChannelId = getCommandOption(interaction, "demo");
+      if (assignmentChannelId && demoChannelId) {
+        return interactionJson(messageResponse("Choose either assign:<channel> or demo:<channel>, not both.", true));
+      }
+      const action = assignmentChannelId ? "assign" : demoChannelId ? "demo" : "view";
+
+      if (action === "assign" || action === "demo") {
+        if (!interaction.guild_id) {
+          return interactionJson(messageResponse("Clan activity log setup and demos must be run inside the Discord server that should receive the posts.", true));
+        }
+        const permitted = await memberCanManageServerTracker(interaction, env, { allowDiscordManage: false });
+        if (!permitted) {
+          return interactionJson(messageResponse("You need the configured Luna administrator role to assign a clan activity log channel or post a demo.", true));
+        }
+      }
+
+      ctx.waitUntil(completeClanLogInteraction(interaction, env, action, clanName));
+      return interactionJson({
+        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+        data: { flags: action !== "view" || ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined }
+      });
+    }
+
     if (subcommand === "info") {
       const clanName = getCommandOption(interaction, "name");
       if (!clanName) {
@@ -957,6 +991,9 @@ async function buildSearchResponse(query, env) {
     : eventState?.reason === "event_ended"
       ? ["Clan battle has ended"]
       : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
+  const globalPlayerCountSuffix = row.total_global_players
+    ? ` of ${shortNumber(row.total_global_players)}`
+    : "";
   const embed = {
     title: "Global Search Results",
     color: 0x58a6ff,
@@ -967,7 +1004,7 @@ async function buildSearchResponse(query, env) {
       "",
       `🎉 Event: **${row.event_name || row.battle_display_name || row.battle_key || "Current Event"}**`,
       `🌟 Stars: **${shortNumber(row.global_points ?? row.clan_points)}** ⭐`,
-      `🏆 Global Rank: **${rank(row.global_rank)}${row.total_global_players ? ` of ${shortNumber(row.total_global_players)}` : ""}**`,
+      `🏆 Global Rank: **${rank(row.global_rank)}${globalPlayerCountSuffix}**`,
       betterThanLine(row),
       "",
       ...freshnessLines
@@ -3454,6 +3491,18 @@ function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now()) {
   return date.getUTCMinutes() === hourlyScheduledPostMinute(env);
 }
 
+function clanLogScheduledIntervalMinutes(env) {
+  const value = Number(env.CLAN_LOG_POST_INTERVAL_MINUTES ?? 5);
+  if (!Number.isFinite(value)) return 5;
+  return Math.max(1, Math.min(60, Math.round(value)));
+}
+
+function shouldRunClanLogScheduledPosts(env, scheduledTime = Date.now()) {
+  const date = new Date(scheduledTime || Date.now());
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getUTCMinutes() % clanLogScheduledIntervalMinutes(env) === 0;
+}
+
 function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MINUTE) {
   const date = new Date(value || Date.now());
   if (Number.isNaN(date.getTime())) return 0;
@@ -5692,6 +5741,283 @@ function handleClanLookupComponent(interaction, env, ctx) {
   }
   ctx.waitUntil(completeClanLookupInteraction(interaction, env, state));
   return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completeClanLogInteraction(interaction, env, action, clanName) {
+  try {
+    if (action === "assign" || action === "demo") {
+      const channelId = getCommandOption(interaction, action === "demo" ? "demo" : "assign");
+      if (!channelId) throw httpError(400, "Choose the text channel or thread that should receive the activity posts.");
+      const channel = await resolveHourlyClanChannel(interaction, env, channelId);
+      if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel?.type))) {
+        throw httpError(400, "Choose a text channel or thread that Luna can post in.");
+      }
+
+      const activity = await fetchClanActivityDetailPayloadForCommand(clanName, env);
+      if (action === "demo") {
+        const event = clanActivityEvents(activity)
+          .filter(isDiscordClanLogEvent)
+          .slice()
+          .sort((a, b) => clanActivityEventTime(b) - clanActivityEventTime(a))[0];
+        if (!event) {
+          throw httpError(404, `No stored clan activity is available yet for ${activity.clan_name || clanName}.`);
+        }
+        await postClanActivityLogEvent(env, channelId, event, activity.clan_name || clanName);
+        await editOriginalInteraction(interaction, {
+          content: `Posted a demo of Luna's clan activity format to <#${channelId}> using the latest recorded **${escapeDiscordMarkdown(clanActivityLogTitle(event))}** event. No log assignment was changed.`,
+          allowed_mentions: { parse: [] },
+          embeds: [],
+          components: [],
+          attachments: []
+        });
+        return;
+      }
+      const newest = newestClanActivityEvent(activity);
+      const assignment = await hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
+        method: "POST",
+        body: {
+          guild_id: interaction.guild_id,
+          channel_id: channelId,
+          channel_type: Number(channel?.type),
+          clan_name: activity.clan_name || clanName,
+          assigned_by: interactionUserId(interaction),
+          // Assignment deliberately starts from the latest stored event. It does
+          // not flood the channel with historic activity that happened before setup.
+          last_event_id: newest?.event_id || null,
+          last_event_at: newest?.event_at || newest?.detected_at || null
+        }
+      });
+      await editOriginalInteraction(interaction, {
+        content: `Clan activity logging is now enabled for **${escapeDiscordMarkdown(activity.clan_name || clanName)}** in <#${channelId}>. Future joins, leaves, inferred kicks, promotions, and demotions will post there. Existing history was used only as the baseline.`,
+        allowed_mentions: { parse: [] },
+        embeds: [],
+        components: [],
+        attachments: []
+      });
+      return assignment;
+    }
+
+    const activity = await fetchClanActivityDetailPayloadForCommand(clanName, env);
+    await editOriginalInteraction(interaction, buildClanActivityLogViewMessage(activity, clanName));
+  } catch (err) {
+    await editOriginalInteraction(interaction, commandErrorMessage("Clan activity log failed", err, env)).catch(() => null);
+  }
+}
+
+function newestClanActivityEvent(payload) {
+  return clanActivityEvents(payload)
+    .slice()
+    .sort((a, b) => clanActivityEventTime(b) - clanActivityEventTime(a))[0] || null;
+}
+
+function clanActivityEvents(payload) {
+  const events = [
+    ...(Array.isArray(payload?.clan_events) ? payload.clan_events : []),
+    ...(Array.isArray(payload?.rank_events) ? payload.rank_events : [])
+  ];
+  const seen = new Set();
+  return events.filter(event => {
+    const key = String(event?.event_id || "").trim()
+      || `${event?.event_type || ""}:${event?.event_at || event?.detected_at || ""}:${event?.clan_name || ""}:${event?.user_id || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isDiscordClanLogEvent(event) {
+  return [
+    "member_joined",
+    "member_left",
+    "member_kicked",
+    "member_promoted",
+    "member_demoted",
+    "rank_up",
+    "rank_down"
+  ].includes(String(event?.event_type || ""));
+}
+
+function clanActivityEventTime(event) {
+  const value = new Date(event?.event_at || event?.detected_at || 0).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function clanActivityLogEventLabel(event) {
+  const type = String(event?.event_type || "").toLowerCase();
+  if (type === "member_joined") return "joined";
+  if (type === "member_kicked") return "was kicked";
+  if (type === "member_left") return "left";
+  if (type === "member_promoted") return `was promoted to ${event.current_member_role || event.current_value || "a new role"}`;
+  if (type === "member_demoted") return `was demoted to ${event.current_member_role || event.current_value || "a new role"}`;
+  if (type === "rank_up") {
+    const places = Math.max(1, Number(event.previous_rank || 0) - Number(event.current_rank || 0));
+    return `climbed ${fullNumber(places)} rank${places === 1 ? "" : "s"}, from #${fullNumber(event.previous_rank)} to #${fullNumber(event.current_rank)}`;
+  }
+  if (type === "rank_down") {
+    const places = Math.max(1, Number(event.current_rank || 0) - Number(event.previous_rank || 0));
+    return `dropped ${fullNumber(places)} rank${places === 1 ? "" : "s"}, from #${fullNumber(event.previous_rank)} to #${fullNumber(event.current_rank)}`;
+  }
+  if (type === "kick_used") return "used a clan kick";
+  if (type === "kick_available") return "has a clan kick available";
+  return String(event?.event_type || "activity changed").replace(/_/g, " ");
+}
+
+function clanActivityLogAccent(event) {
+  const type = String(event?.event_type || "").toLowerCase();
+  if (type === "member_joined") return 0x57f287;
+  if (type === "member_promoted") return 0x5865f2;
+  if (type === "member_demoted") return 0xfee75c;
+  if (type === "member_left" || type === "member_kicked") return 0xed4245;
+  if (type === "rank_up") return 0x57f287;
+  if (type === "rank_down") return 0xed4245;
+  return 0x58a6ff;
+}
+
+function clanActivityLogTitle(event) {
+  const type = String(event?.event_type || "").toLowerCase();
+  if (type === "rank_up") return "Clan Rank Up";
+  if (type === "rank_down") return "Clan Rank Down";
+  if (type === "member_joined") return "🟢 Player Joined";
+  if (type === "member_kicked") return "🔴 Player Kicked";
+  if (type === "member_left") return "🔴 Player Left";
+  if (type === "member_promoted") return "⬆️ Player Promoted";
+  if (type === "member_demoted") return "⬇️ Player Demoted";
+  return "📋 Clan Activity";
+}
+
+function clanActivityAvatarUrl(event) {
+  const userId = String(event?.user_id || "").trim();
+  return /^\d+$/.test(userId)
+    ? `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(userId)}&width=420&height=420&format=png`
+    : null;
+}
+
+function buildClanActivityEventEmbed(event, fallbackClan = "") {
+  const type = String(event?.event_type || "").toLowerCase();
+  const isRankEvent = type === "rank_up" || type === "rank_down";
+  const username = String(event?.display_name || event?.username || event?.user_id || "A member").trim();
+  const clanName = String(event?.clan_name || fallbackClan || "Clan").trim();
+  const details = event?.details && typeof event.details === "object" ? event.details : {};
+  const memberCount = Number(details.member_count ?? details.current_members);
+  const capacity = Number(details.member_capacity);
+  const roleLine = event?.current_member_role || event?.current_value || "";
+  const description = [
+    isRankEvent
+      ? `**[${escapeDiscordMarkdown(clanName)}]** ${clanActivityLogEventLabel(event)}.`
+      : `**${escapeDiscordMarkdown(username)}** ${clanActivityLogEventLabel(event)} **[${escapeDiscordMarkdown(clanName)}]**.`,
+    Number.isFinite(memberCount) ? `${fullNumber(memberCount)}${Number.isFinite(capacity) && capacity > 0 ? `/${fullNumber(capacity)}` : ""} Members` : "",
+    roleLine && /member_(promoted|demoted)/.test(String(event?.event_type || "")) ? `Role: **${escapeDiscordMarkdown(roleLine)}**` : "",
+    `Detected ${discordTime(event?.event_at || event?.detected_at)}`
+  ].filter(Boolean).join("\n");
+  const avatar = clanActivityAvatarUrl(event);
+  return {
+    title: clanActivityLogTitle(event),
+    color: clanActivityLogAccent(event),
+    description,
+    ...(avatar ? { thumbnail: { url: avatar } } : {}),
+    footer: { text: "Luna clan activity tracker" }
+  };
+}
+
+function buildClanActivityLogViewMessage(payload, fallbackClan) {
+  const events = clanActivityEvents(payload)
+    .filter(isDiscordClanLogEvent)
+    .slice(0, 10);
+  const summary = payload?.summary && typeof payload.summary === "object" ? payload.summary : {};
+  const lines = events.length
+    ? events.map(event => `• ${discordTime(event.event_at || event.detected_at)} — **${escapeDiscordMarkdown(event.display_name || event.username || event.user_id || "member")}** ${clanActivityLogEventLabel(event)}`)
+    : ["No roster changes have been recorded yet."];
+  return {
+    embeds: [{
+      title: `Clan Activity • ${String(payload?.clan_name || fallbackClan || "Clan").toUpperCase()}`,
+      color: 0x58a6ff,
+      description: [
+        `**Battle:** ${escapeDiscordMarkdown(payload?.display_name || payload?.battle || "Current battle")}`,
+        summary.current_members ? `**Members:** ${fullNumber(summary.current_members)}` : "",
+        "",
+        "**Recent Activity**",
+        ...lines
+      ].filter(Boolean).join("\n"),
+      ...(summary.icon_url ? { thumbnail: { url: summary.icon_url } } : {}),
+      footer: { text: "Use /clan log clan:<name> assign:<channel> to post future activity." }
+    }],
+    allowed_mentions: { parse: [] },
+    components: [],
+    attachments: []
+  };
+}
+
+function clanLogEventsSince(payload, assignment) {
+  const all = clanActivityEvents(payload)
+    .slice()
+    .sort((a, b) => clanActivityEventTime(a) - clanActivityEventTime(b));
+  if (!all.length) return { all, events: [], newest: null };
+  const lastId = String(assignment?.last_event_id || "").trim();
+  const lastIndex = lastId ? all.findIndex(event => String(event?.event_id || "") === lastId) : -1;
+  const after = lastIndex >= 0
+    ? all.slice(lastIndex + 1)
+    : assignment?.last_event_at
+      ? all.filter(event => clanActivityEventTime(event) > new Date(assignment.last_event_at).getTime())
+      : [];
+  return {
+    all,
+    newest: all[all.length - 1],
+    events: after.filter(isDiscordClanLogEvent)
+  };
+}
+
+async function postClanActivityLogEvent(env, channelId, event, fallbackClan) {
+  const response = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      embeds: [buildClanActivityEventEmbed(event, fallbackClan)],
+      allowed_mentions: { parse: [] }
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(response.status === 403 ? 403 : 502, payload.message || `Discord clan activity post failed (${response.status}).`);
+  }
+  return payload;
+}
+
+async function updateClanLogAssignment(env, assignment, patch) {
+  return hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
+    method: "PATCH",
+    body: { assignment_key: String(assignment?.assignment_key || ""), ...patch }
+  });
+}
+
+async function runClanLogAssignments(env, options = {}) {
+  const response = await hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
+    query: { enabled: "true", limit: 1000 }
+  });
+  const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
+  const results = [];
+  for (const assignment of assignments) {
+    try {
+      const payload = await fetchClanActivityDetailPayloadForCommand(assignment.clan_name, env);
+      const delta = clanLogEventsSince(payload, assignment);
+      if (!delta.newest) {
+        results.push({ assignment_key: assignment.assignment_key, skipped: true, reason: "no_activity" });
+        continue;
+      }
+      for (const event of delta.events.slice(0, 25)) {
+        await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name);
+      }
+      await updateClanLogAssignment(env, assignment, {
+        last_event_id: delta.newest.event_id || null,
+        last_event_at: delta.newest.event_at || delta.newest.detected_at || new Date(options.scheduledTime || Date.now()).toISOString(),
+        last_error: null
+      });
+      results.push({ assignment_key: assignment.assignment_key, posted: delta.events.length });
+    } catch (err) {
+      await updateClanLogAssignment(env, assignment, { last_error: String(err?.message || err).slice(0, 500) }).catch(() => null);
+      results.push({ assignment_key: assignment.assignment_key, posted: false, error: err?.message || String(err) });
+    }
+  }
+  return { ok: true, assignments: assignments.length, results };
 }
 
 async function completeClanLookupInteraction(interaction, env, state) {
@@ -12316,6 +12642,35 @@ function clanCommandPayload() {
             required: false,
             min_length: 1,
             max_length: 64
+          }
+        ]
+      },
+      {
+        name: "log",
+        description: "View clan activity or assign its log channel.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "clan",
+            description: "Clan name, for example COLD or c0ld",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 32
+          },
+          {
+            name: "assign",
+            description: "Optional text channel or thread for future activity posts",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          },
+          {
+            name: "demo",
+            description: "Optional text channel or thread for a one-time format preview",
+            type: APPLICATION_COMMAND_OPTION_CHANNEL,
+            required: false,
+            channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
           }
         ]
       }
