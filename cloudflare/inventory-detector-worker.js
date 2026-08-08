@@ -75,7 +75,7 @@ const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
 // server-scoping rollout.  Old subscriptions deliberately have no version,
 // so they remain inert rather than continuing to post in a former server.
 const HTG_SUBSCRIPTION_CONSENT_VERSION = 2;
-const INVENTORY_BUILD_ID = "inventory-htg-v2-server-consent-2026-08-07g";
+const INVENTORY_BUILD_ID = "inventory-htg-v2-reliable-refresh-2026-08-07h";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -660,7 +660,7 @@ async function handleOAuthCallback(request, env) {
       : "Authorization succeeded, but BIG Games did not identify the approving Roblox account.");
   }
   if (account.user_id && account.user_id !== targetUserId) {
-    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${oauthGrantKey(targetUserId)}` });
+    await supabaseDelete(env, OAUTH_GRANTS_TABLE, { grant_key: `eq.${oauthGrantKey(targetUserId, isHatchTrackerOAuth ? "hatch_tracker" : "inventory")}` });
     await markOAuthStateUsed(env, stateHash);
     return oauthCompletion(pending, false, invitedUserId
       ? `This invitation is for Roblox user ${invitedUserId}, but a different account approved it.`
@@ -2355,7 +2355,8 @@ async function oauthStatus(env, userId = configuredUsers(env)[0]?.user_id || DEF
     const grant = await findOAuthGrant(
       env,
       userId,
-      `grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at${verifyCredential ? ",access_token_ciphertext,metadata" : ""}`
+      `grant_key,roblox_user_id,scope,authorized_at,expires_at,last_used_at${verifyCredential ? ",access_token_ciphertext,metadata" : ""}`,
+      purpose
     );
     const missingScopes = grant ? missingOAuthScopes(env, purpose, grant.scope) : [];
     const expired = !!grant && new Date(grant.expires_at).getTime() <= Date.now();
@@ -2391,7 +2392,7 @@ async function getUsableOAuthGrant(env, userId, purpose = "inventory") {
   if (!supabaseUrl(env)) return null;
   let grant;
   try {
-    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at,metadata");
+    grant = await findOAuthGrant(env, userId, "grant_key,roblox_user_id,access_token_ciphertext,token_type,scope,authorized_at,expires_at,last_used_at,metadata", purpose);
   } catch (error) {
     if (/does not exist|schema cache|PGRST205/i.test(error?.message || "")) return null;
     throw error;
@@ -2404,26 +2405,60 @@ async function getUsableOAuthGrant(env, userId, purpose = "inventory") {
   return grant;
 }
 
-async function findOAuthGrant(env, userId, select) {
+async function findOAuthGrant(env, userId, select, purpose = "inventory") {
   const normalizedUserId = String(userId || "").trim();
   if (!normalizedUserId) return null;
+  // Keep the two OAuth applications separate. Previously both apps wrote to
+  // `big_games_inventory:<userId>` even though their access tokens were
+  // encrypted with different client secrets. A later website-inventory OAuth
+  // approval could therefore silently replace a working HTG grant and leave
+  // the scheduled tracker unable to open its stored token.
   const keyed = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
     select,
-    grant_key: `eq.${oauthGrantKey(normalizedUserId)}`,
+    grant_key: `eq.${oauthGrantKey(normalizedUserId, purpose)}`,
     limit: "1"
   });
   if (keyed[0]) return keyed[0];
-  const legacy = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
-    select,
-    roblox_user_id: `eq.${normalizedUserId}`,
-    order: "updated_at.desc",
+
+  // Read legacy shared-key grants only when their saved purpose agrees with
+  // the caller. This preserves existing HTG authorizations made before the
+  // split, while ensuring a normal inventory grant cannot masquerade as an
+  // HTG grant (or vice versa). New authorizations always use purpose keys.
+  const legacyKey = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select: oauthGrantSelectIncludingMetadata(select),
+    grant_key: `eq.${oauthGrantKey(normalizedUserId, "inventory")}`,
     limit: "1"
   });
-  return legacy[0] || null;
+  const legacy = legacyKey[0] || null;
+  if (legacy && oauthGrantMatchesPurpose(legacy, purpose)) return legacy;
+
+  // Very old rows may not have used a grant key at all. Retain inventory-only
+  // compatibility for those records, but never guess that an unlabelled row
+  // belongs to the HTG application.
+  const legacyRows = await supabaseSelect(env, OAUTH_GRANTS_TABLE, {
+    select: oauthGrantSelectIncludingMetadata(select),
+    roblox_user_id: `eq.${normalizedUserId}`,
+    order: "updated_at.desc",
+    limit: "20"
+  });
+  return legacyRows.find(row => oauthGrantMatchesPurpose(row, purpose)) || null;
 }
 
-function oauthGrantKey(userId) {
-  return `${BIG_GAMES_GRANT_KEY}:${String(userId || "").trim()}`;
+function oauthGrantSelectIncludingMetadata(select) {
+  const fields = String(select || "*").split(",").map(field => field.trim()).filter(Boolean);
+  if (!fields.includes("metadata") && !fields.includes("*")) fields.push("metadata");
+  return fields.join(",");
+}
+
+function oauthGrantMatchesPurpose(grant, purpose = "inventory") {
+  const saved = firstString(grant?.metadata?.oauth_app, grant?.metadata?.purpose);
+  if (purpose === "hatch_tracker") return saved === "hatch_tracker";
+  return !saved || saved === "inventory";
+}
+
+function oauthGrantKey(userId, purpose = "inventory") {
+  const namespace = purpose === "hatch_tracker" ? "big_games_hatch_tracker" : BIG_GAMES_GRANT_KEY;
+  return `${namespace}:${String(userId || "").trim()}`;
 }
 
 function bigGamesOAuthConfigured(env) {
@@ -2677,7 +2712,7 @@ function oauthCompletion(pending, success, message, params = {}) {
 
 async function saveOAuthGrant(env, { userId, username, token, scopes, authorizedAt, expiresAt, expiresIn, identityVerified, purpose = "inventory" }) {
   await supabaseUpsert(env, OAUTH_GRANTS_TABLE, [{
-    grant_key: oauthGrantKey(userId),
+    grant_key: oauthGrantKey(userId, purpose),
     roblox_user_id: Number(userId),
     access_token_ciphertext: await sealSecret(token.access_token, inventoryCredentialSecret(env, purpose), "big-games-access-token"),
     token_type: token.token_type || "Bearer",
@@ -3215,7 +3250,17 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
   };
   const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
   const sourceRequired = htgRequireSourceFilter(env);
-  if (!sourceFilter.available && sourceRequired) {
+  // A unique owner-log is direct evidence that the item first appeared on this
+  // Roblox account. Do not make that strong signal wait on optional Trade,
+  // Booth, and Mail permissions, which many otherwise-valid community grants
+  // do not include. Unknown ownership still remains pending when source checks
+  // are unavailable, so transfers cannot become hatch alerts by accident.
+  const eligible = sourceFilter.available
+    ? sourceFilter.rows
+    : sourceRequired
+      ? sourceFilter.rows
+      : candidates;
+  if (!sourceFilter.available && sourceRequired && !eligible.length) {
     const nextState = htgV2CompletedState(state, {
       checkedAt,
       source,
@@ -3237,7 +3282,6 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     };
   }
 
-  const eligible = sourceFilter.available ? sourceFilter.rows : candidates;
   if (!eligible.length) {
     const nextState = htgV2CompletedState(state, {
       checkedAt,
@@ -3259,11 +3303,11 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     };
   }
 
-  // One later fresh revision is the only confirmation gate. It is intentionally
-  // independent of the legacy pending table and catches source-history lag
-  // without a bulk-gain heuristic silently discarding a legitimate hatch.
-  const pending = htgV2PendingFromCandidates(state.pending, candidates, checkedAt, sourceFilter);
-  if (pending.observations < 2) {
+  // A unique first-owner log is already confirmation. Items without that log
+  // still require one later fresh revision so a source-history delay cannot
+  // turn a transfer into a hatch alert.
+  const pending = htgV2PendingFromCandidates(state.pending, eligible, checkedAt, sourceFilter);
+  if (htgV2CandidatesNeedConfirmation(eligible) && pending.observations < 2) {
     const nextState = htgV2CompletedState(state, {
       checkedAt,
       source,
@@ -3502,6 +3546,10 @@ function htgV2PendingFromCandidates(existing, candidates, checkedAt, sourceFilte
   };
 }
 
+function htgV2CandidatesNeedConfirmation(candidates) {
+  return (candidates || []).some(candidate => firstString(candidate?.hatch_verification) !== "first_owner_log");
+}
+
 function htgV2FreshnessDecision(baseline, source) {
   const currentFetchedAt = firstString(source?.fetched_at);
   const baselineFetchedAt = firstString(baseline?.source_fetched_at);
@@ -3526,10 +3574,10 @@ function htgV2ScheduleDecision(env, tracker, userId, now = new Date(), options =
   const state = htgV2State(tracker);
   const quota = htgTrackerQuotaSchedule(tracker, now, env);
   const intervalMinutes = htgTrackerScanIntervalMinutes(env, tracker, now);
-  const clock = htgClockSlot(env, now);
-  const shardCount = Math.max(1, Number(env.HTG_SHARD_COUNT || intervalMinutes));
-  const currentShard = Math.floor(now.getTime() / 60000) % shardCount;
-  const userShard = htgUserShard(userId, shardCount);
+  const clock = htgClockSlot(env, now, userId);
+  const shardCount = clock.minutes;
+  const currentShard = now.getUTCMinutes() % shardCount;
+  const userShard = clock.offset;
   if (quota.exhausted_until_reset) {
     return {
       due: false,
@@ -3547,18 +3595,18 @@ function htgV2ScheduleDecision(env, tracker, userId, now = new Date(), options =
   const latestAttempt = new Date(state.last_attempt_at || 0).getTime();
   if (!latestAttempt) {
     if (!clock.is_slot) {
-      return { due: false, reason: "HTG v2 account is waiting for the next quarter-hour scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
+      return { due: false, reason: "HTG v2 account is waiting for its assigned scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
     }
-    return { due: true, reason: "HTG v2 account has not been scanned yet and reached a quarter-hour scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
+    return { due: true, reason: "HTG v2 account has not been scanned yet and reached its assigned scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
   }
   const elapsedMs = now.getTime() - latestAttempt;
   if (elapsedMs < intervalMinutes * 60000 - 30000) {
     return { due: false, reason: "HTG v2 quota-safe interval has not elapsed.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, elapsed_seconds: Math.floor(elapsedMs / 1000), last_attempt_at: state.last_attempt_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
   }
   if (!clock.is_slot) {
-    return { due: false, reason: "HTG v2 quota-safe interval elapsed; waiting for the next quarter-hour scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, elapsed_seconds: Math.floor(elapsedMs / 1000), last_attempt_at: state.last_attempt_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
+    return { due: false, reason: "HTG v2 quota-safe interval elapsed; waiting for this account's assigned scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, elapsed_seconds: Math.floor(elapsedMs / 1000), last_attempt_at: state.last_attempt_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
   }
-  return { due: true, reason: "HTG v2 quota-safe interval elapsed on a quarter-hour scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, elapsed_seconds: Math.floor(elapsedMs / 1000), last_attempt_at: state.last_attempt_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
+  return { due: true, reason: "HTG v2 quota-safe interval elapsed on this account's assigned scan slot.", interval_minutes: intervalMinutes, clock_slot_minutes: clock.minutes, next_clock_slot_at: clock.next_slot_at, elapsed_seconds: Math.floor(elapsedMs / 1000), last_attempt_at: state.last_attempt_at, shard_count: shardCount, current_shard: currentShard, user_shard: userShard, quota };
 }
 
 async function saveHtgV2Tracker(env, tracker, state, options = {}) {
@@ -5317,18 +5365,44 @@ async function handleHatchDiagnosticsSummary(request, env) {
   const includeHistory = parseBool(url.searchParams.get("include_history")) !== false;
   const historyLimit = Math.max(1, Math.min(htgScanHistoryLimit(env), Number(url.searchParams.get("history_limit") || 24)));
   const now = new Date();
-  const trackers = await fetchEnabledHatchTrackers(env);
-  const accounts = trackers.map(tracker => {
+  const [trackers, guildConfigs] = await Promise.all([
+    fetchEnabledHatchTrackers(env),
+    fetchEnabledHatchGuildConfigs(env)
+  ]);
+  const guildConfigById = new Map(guildConfigs.map(config => [String(config?.guild_id || "").trim(), config]));
+  const accounts = await Promise.all(trackers.map(async tracker => {
     const userId = String(tracker?.roblox_user_id || "").trim();
     const state = htgV2State(tracker);
     const completeHistory = state.scan_history;
     const history = completeHistory.slice(0, historyLimit);
     const recent = htgRecentScanUsage(completeHistory, now);
     const scheduler = htgV2ScheduleDecision(env, tracker, userId, now, { ignoreShard: true });
+    const authorization = await oauthStatus(env, userId, "hatch_tracker");
+    const subscriptions = hatchTrackerGuildSubscriptions(tracker).filter(subscription => subscription.enabled).map(subscription => {
+      const guildConfig = guildConfigById.get(subscription.guild_id);
+      return {
+        guild_id: subscription.guild_id,
+        tiers: subscription.tiers,
+        channel_assigned: Boolean(String(guildConfig?.channel_id || "").trim()),
+        channel_id: String(guildConfig?.channel_id || "").trim() || null
+      };
+    });
     return {
       roblox_user_id: userId || null,
       roblox_username: firstString(tracker?.roblox_username, userId) || null,
       enabled_tiers: hatchTrackerEnabledTiers(tracker),
+      authorization: {
+        connected: Boolean(authorization.connected),
+        reauthorization_required: Boolean(authorization.reauthorization_required),
+        authorization_expires_at: authorization.expires_at || null,
+        missing_scopes: authorization.missing_scopes || [],
+        message: authorization.message || null
+      },
+      delivery: {
+        active_server_count: subscriptions.length,
+        assigned_server_count: subscriptions.filter(subscription => subscription.channel_assigned).length,
+        subscriptions
+      },
       last_checked_at: state.last_checked_at || tracker?.last_checked_at || null,
       last_scan_attempt_at: state.last_attempt_at || null,
       last_alert_at: tracker?.last_alert_at || null,
@@ -5346,7 +5420,7 @@ async function handleHatchDiagnosticsSummary(request, env) {
       htg_v2: htgV2StateSummary(tracker),
       ...(includeHistory ? { pull_ledger: history } : {})
     };
-  });
+  }));
   return json({
     ok: true,
     service: "ps99-inventory-detector",
@@ -7132,10 +7206,12 @@ async function resolveRequestUser(env, url) {
 function timeZone(env) { return env.INVENTORY_TIME_ZONE || DEFAULT_TIME_ZONE; }
 function inventoryMinFetchIntervalMinutes(env) { const value = Number(env.INVENTORY_MIN_FETCH_INTERVAL_MINUTES || DEFAULT_MIN_FETCH_INTERVAL_MINUTES); return Number.isFinite(value) ? Math.max(5, Math.min(1440, value)) : DEFAULT_MIN_FETCH_INTERVAL_MINUTES; }
 function htgForceRefreshOnSchedule(env) {
-  // `refresh=true` can consume a quota unit even when BIG Games already has a
-  // fresh snapshot. Scheduled HTG scans therefore use the ordinary endpoint by
-  // default; set this true only for a short, deliberate troubleshooting window.
-  return envBool(env.HATCH_FORCE_REFRESH_ON_SCHEDULE, false);
+  // HTG compares inventory revisions, not cached account payloads. Routine
+  // scans must therefore request a fresh revision at the quota-safe schedule.
+  // The former HATCH_FORCE_REFRESH_ON_SCHEDULE=false default made the scanner
+  // appear healthy while repeatedly reading the same inventory. Deliberately
+  // ignore that legacy switch; the only opt-out is explicit and diagnostic-only.
+  return !envBool(env.HTG_DISABLE_FORCED_REFRESH, false);
 }
 function htgClockSlotMinutes(env) {
   const value = Math.floor(Number(env.HTG_SCHEDULE_ALIGNMENT_MINUTES || 15));
@@ -7143,16 +7219,25 @@ function htgClockSlotMinutes(env) {
   // divisors of an hour keep that promise across every hour boundary.
   return [1, 5, 10, 15, 20, 30, 60].includes(value) ? value : 15;
 }
-function htgClockSlot(env, now = new Date()) {
+function htgClockSlot(env, now = new Date(), userId = "") {
   const minutes = htgClockSlotMinutes(env);
   const minute = now.getUTCMinutes();
-  const isSlot = minute % minutes === 0;
+  // Keep a stable per-account minute inside each aligned schedule window.
+  // This prevents every connected account from hitting the same BIG Games app
+  // key at :00/:15/:30/:45, which can exceed its per-key minute limit.
+  const staggered = !envBool(env.HTG_DISABLE_SCHEDULE_STAGGER, false);
+  const offset = staggered && userId ? htgUserShard(userId, minutes) : 0;
+  const minuteInWindow = minute % minutes;
+  const isSlot = minuteInWindow === offset;
   const next = new Date(now.getTime());
   next.setUTCSeconds(0, 0);
-  const increment = isSlot ? minutes : minutes - (minute % minutes);
+  let increment = (offset - minuteInWindow + minutes) % minutes;
+  if (increment === 0) increment = minutes;
   next.setUTCMinutes(next.getUTCMinutes() + increment);
   return {
     minutes,
+    staggered,
+    offset,
     is_slot: isSlot,
     next_slot_at: next.toISOString()
   };

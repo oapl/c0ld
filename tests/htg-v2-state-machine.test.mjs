@@ -25,7 +25,11 @@ const {
   htgV2State,
   htgV2FreshnessDecision,
   htgV2PendingFromCandidates,
+  htgV2CandidatesNeedConfirmation,
   htgV2ScheduleDecision,
+  htgForceRefreshOnSchedule,
+  htgUserShard,
+  oauthGrantKey,
   htgProviderRefreshUnits,
   hatchTier,
   hatchTrackerMetadataWithGuildSubscription,
@@ -194,50 +198,83 @@ const firstPending = htgV2PendingFromCandidates(null, firstCandidates, "2026-08-
 assert.equal(firstPending.observations, 1, "the first fresh gain must wait for confirmation");
 const confirmedPending = htgV2PendingFromCandidates(firstPending, firstCandidates, "2026-08-06T00:32:00.000Z", { available: true, rows: firstCandidates });
 assert.equal(confirmedPending.observations, 2, "the same retained gain must confirm on the next fresh scan");
+assert.equal(
+  htgV2CandidatesNeedConfirmation([{ ...firstCandidates[0], hatch_verification: "first_owner_log" }]),
+  false,
+  "a unique first-owner log must be sufficient confirmation even when optional source-history scopes are unavailable"
+);
+assert.equal(
+  htgV2CandidatesNeedConfirmation(firstCandidates),
+  true,
+  "an item without a unique owner-log must still wait for the later fresh revision"
+);
 
 const env = { HTG_SCAN_INTERVAL_MINUTES: "15", HATCH_FORCE_REFRESH_ON_SCHEDULE: "false", HTG_REFRESH_QUOTA_LIMIT: "96" };
+assert.equal(
+  htgForceRefreshOnSchedule(env),
+  true,
+  "the legacy false switch must not leave HTG reading cached inventory forever"
+);
+assert.equal(
+  htgForceRefreshOnSchedule({ HTG_DISABLE_FORCED_REFRESH: "true" }),
+  false,
+  "the explicit diagnostic opt-out must remain available"
+);
+assert.notEqual(
+  oauthGrantKey("109818", "hatch_tracker"),
+  oauthGrantKey("109818", "inventory"),
+  "normal inventory OAuth must never overwrite a hatch-tracker authorization"
+);
 const tracker = { metadata: { htg_v2: { last_attempt_at: "2026-08-06T00:00:00.000Z" } } };
 const unscannedTracker = { metadata: { htg_v2: {} } };
+const scheduleUserId = "109818";
+const scheduleOffset = htgUserShard(scheduleUserId, 15);
+const atAssignedMinute = minute => new Date(Date.UTC(2026, 7, 6, 0, minute, 0));
+const atNonAssignedMinute = (scheduleOffset + 1) % 15;
+// A real account's prior attempt happens at its own assigned minute, not
+// necessarily at :00. Model that explicitly so the quota-window assertions
+// remain correct for every possible account offset.
+tracker.metadata.htg_v2.last_attempt_at = atAssignedMinute(scheduleOffset).toISOString();
 assert.equal(
-  htgV2ScheduleDecision(env, unscannedTracker, "109818", new Date("2026-08-06T00:07:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, unscannedTracker, scheduleUserId, atAssignedMinute(atNonAssignedMinute), { ignoreShard: true }).due,
   false,
-  "an initial HTG baseline must wait for a quarter-hour slot"
+  "an initial HTG baseline must wait for its assigned minute within the scan window"
 );
 assert.equal(
-  htgV2ScheduleDecision(env, unscannedTracker, "109818", new Date("2026-08-06T00:15:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, unscannedTracker, scheduleUserId, atAssignedMinute(scheduleOffset), { ignoreShard: true }).due,
   true,
-  "an initial HTG baseline must start at :00/:15/:30/:45"
+  "an initial HTG baseline must start at the account's stable assigned minute"
 );
-const schedule = htgV2ScheduleDecision(env, tracker, "109818", new Date("2026-08-06T00:15:00.000Z"), { ignoreShard: true });
+const schedule = htgV2ScheduleDecision(env, tracker, scheduleUserId, atAssignedMinute(15 + scheduleOffset), { ignoreShard: true });
 assert.equal(schedule.due, false, "an account with no reported limit must begin at standard-account pace");
 assert.equal(schedule.interval_minutes, 35, "an unknown account must reserve six of the 48 standard daily refreshes");
 assert.equal(
-  htgV2ScheduleDecision(env, tracker, "109818", new Date("2026-08-06T00:35:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, tracker, scheduleUserId, atAssignedMinute(30 + scheduleOffset), { ignoreShard: true }).due,
   false,
-  "a due account must wait for a quarter-hour slot instead of drifting to an arbitrary minute"
+  "a due account must wait for its assigned minute instead of drifting to an arbitrary minute"
 );
 assert.equal(
-  htgV2ScheduleDecision(env, tracker, "109818", new Date("2026-08-06T00:45:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, tracker, scheduleUserId, atAssignedMinute(45 + scheduleOffset), { ignoreShard: true }).due,
   true,
-  "the next standard-account attempt must run at the next quarter-hour slot"
+  "the next standard-account attempt must run in the next assigned scan window"
 );
 
-const vipTracker = { metadata: { htg_v2: { last_attempt_at: "2026-08-06T00:00:00.000Z", refresh_quota: { limit: 96, used: 0, resets_at: "2026-08-07T00:00:00.000Z" } } } };
+const vipTracker = { metadata: { htg_v2: { last_attempt_at: atAssignedMinute(scheduleOffset).toISOString(), refresh_quota: { limit: 96, used: 0, resets_at: "2026-08-07T00:00:00.000Z" } } } };
 assert.equal(
-  htgV2ScheduleDecision(env, vipTracker, "109818", new Date("2026-08-06T00:16:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, vipTracker, scheduleUserId, atAssignedMinute(15 + scheduleOffset), { ignoreShard: true }).due,
   false,
-  "a VIP account with a safety reserve must wait for a clock-aligned scan slot"
+  "a VIP account with a safety reserve must wait for its next quota-safe assigned slot"
 );
 assert.equal(
-  htgV2ScheduleDecision(env, vipTracker, "109818", new Date("2026-08-06T00:30:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(env, vipTracker, scheduleUserId, atAssignedMinute(30 + scheduleOffset), { ignoreShard: true }).due,
   true,
-  "an API-confirmed VIP account must run on the next quarter-hour scan slot"
+  "an API-confirmed VIP account must run in its next quota-safe assigned window"
 );
 const vipFastEnv = { ...env, HTG_REFRESH_QUOTA_RESERVE: "0" };
 assert.equal(
-  htgV2ScheduleDecision(vipFastEnv, vipTracker, "109818", new Date("2026-08-06T00:15:00.000Z"), { ignoreShard: true }).due,
+  htgV2ScheduleDecision(vipFastEnv, vipTracker, scheduleUserId, atAssignedMinute(15 + scheduleOffset), { ignoreShard: true }).due,
   true,
-  "a confirmed VIP account with no reserve can use every :00/:15/:30/:45 slot"
+  "a confirmed VIP account with no reserve can use its assigned minute in every window"
 );
 assert.equal(htgProviderRefreshUnits({ consumedThisCall: true }), 1, "the provider's explicit debit must be counted");
 assert.equal(htgProviderRefreshUnits({ consumedThisCall: false }), 0, "a cached response must not be recorded as a quota debit");

@@ -63,13 +63,15 @@ if ($Summary) {
       Outcome = $_.last_outcome.outcome
       Pulls24h = $_.observed_usage_last_24h.provider_refresh_units
       Attempts24h = $_.observed_usage_last_24h.inventory_attempts
+      Auth = if ($_.authorization.connected) { "ready" } elseif ($_.authorization.reauthorization_required) { "re-auth" } else { "not ready" }
+      Delivery = "{0}/{1}" -f $_.delivery.assigned_server_count, $_.delivery.active_server_count
       Failures = $_.consecutive_scan_failures
       Due = $_.scheduler.due
       Pending = $_.pending_gain.active
       Error = Get-ShortDiagnosticError $_.last_scan_error
     }
   }
-  $accountRows | Format-Table Account, LastCheck, Outcome, Pulls24h, Attempts24h, Failures, Due, Pending, Error -AutoSize
+  $accountRows | Format-Table Account, Auth, Delivery, LastCheck, Outcome, Pulls24h, Attempts24h, Failures, Due, Pending, Error -AutoSize
 
   $failedAccounts = @($summaryResponse.accounts | Where-Object { $_.last_scan_error })
   if ($failedAccounts.Count) {
@@ -77,6 +79,22 @@ if ($Summary) {
     Write-Host "Current account errors:" -ForegroundColor Yellow
     foreach ($account in $failedAccounts) {
       Write-Host ("- {0}: {1}" -f $account.roblox_username, (([string]$account.last_scan_error -replace "\s+", " ").Trim()))
+    }
+  }
+
+  $notReadyAccounts = @($summaryResponse.accounts | Where-Object { -not $_.authorization.connected -or $_.delivery.assigned_server_count -lt $_.delivery.active_server_count })
+  if ($notReadyAccounts.Count) {
+    Write-Host ""
+    Write-Host "Accounts that cannot currently deliver alerts:" -ForegroundColor Yellow
+    foreach ($account in $notReadyAccounts) {
+      $issues = [System.Collections.Generic.List[string]]::new()
+      if (-not $account.authorization.connected) {
+        $issues.Add($(if ($account.authorization.reauthorization_required) { "Big Games re-authorization required" } else { "Big Games authorization unavailable" }))
+      }
+      if ($account.delivery.assigned_server_count -lt $account.delivery.active_server_count) {
+        $issues.Add(("channel assigned for {0}/{1} opted-in server(s)" -f $account.delivery.assigned_server_count, $account.delivery.active_server_count))
+      }
+      Write-Host ("- {0}: {1}" -f $account.roblox_username, ($issues -join "; "))
     }
   }
 

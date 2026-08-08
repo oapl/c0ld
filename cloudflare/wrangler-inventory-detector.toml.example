@@ -24,10 +24,14 @@ HATCH_OAUTH_PUBLIC_BASE = "https://inventory-detector-worker.YOUR-SUBDOMAIN.work
 # Existing grants must reauthorize after changing app credentials or scopes.
 # HATCH_BIG_GAMES_SCOPES = "player-data:pet-simulator-99:inventory:read player-data:pet-simulator-99:trades:read player-data:pet-simulator-99:booth:read player-data:pet-simulator-99:mail:read"
 HTG_SCAN_INTERVAL_MINUTES = "15"
-# Scheduled HTG inventory reads begin only at :00, :15, :30, and :45. The
-# quota-safe interval may skip a slot; it never drifts to an arbitrary minute.
+# Each account receives one stable minute within each 15-minute window. This
+# spreads community scans over the window instead of bursting every account at
+# :00/:15/:30/:45, while keeping a predictable quota-safe cadence.
 HTG_SCHEDULE_ALIGNMENT_MINUTES = "15"
 HTG_SHARD_COUNT = "15"
+# Diagnostic only. Do not set this in production: it sends every account at
+# the same minute and can trip BIG Games' per-key minute limit.
+# HTG_DISABLE_SCHEDULE_STAGGER = "false"
 HTG_MAX_CONCURRENT_SCANS = "3"
 HTG_REFRESH_QUOTA_LIMIT = "48"
 HTG_REFRESH_QUOTA_RESERVE = "6"
@@ -51,9 +55,10 @@ HTG_STALE_ALERT_WINDOW_MINUTES = "30"
 # Default false. Leave false so a fresh inventory received after an outage is
 # source-filtered and alerted instead of silently absorbed into the baseline.
 HTG_DROP_STALE_GAINS = "false"
-# Keep false. `refresh=true` can spend quota even when BIG Games already has a
-# fresh snapshot. Routine HTG scans use the normal account read instead.
-HATCH_FORCE_REFRESH_ON_SCHEDULE = "false"
+# HTG uses `refresh=true` by default at its quota-safe schedule so every alert
+# comparison is against a new provider inventory revision. Do not add this
+# variable in production unless you are deliberately diagnosing cached reads.
+# HTG_DISABLE_FORCED_REFRESH = "false"
 HATCH_SOURCE_FILTER_ENABLED = "true"
 HATCH_BASELINE_PROTECTION_ENABLED = "true"
 HATCH_BASELINE_STABLE_COMPARISONS = "1"
