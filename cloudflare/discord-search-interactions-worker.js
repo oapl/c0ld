@@ -213,6 +213,19 @@ export default {
         }));
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/clan-tracker/run") {
+        requireAdmin(request, env);
+        return json(await runClanTrackerAssignments(env, {
+          scheduledTime: Date.now(),
+          manual: true
+        }));
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/clan-tracker/status") {
+        requireAdmin(request, env);
+        return json(await clanTrackerAssignmentStatus(env));
+      }
+
       if (request.method === "POST" && url.pathname === "/admin/hourly/run-one") {
         requireAdmin(request, env);
         return json(await runOneHourlyClanAssignment(url, env, {
@@ -517,6 +530,10 @@ async function handleInteraction(request, env, ctx) {
 
     if (parseClanLogCustomId(interaction.data?.custom_id)) {
       return interactionJson(handleClanLogComponent(interaction, env, ctx));
+    }
+
+    if (parseOfflineConfigCustomId(interaction.data?.custom_id)) {
+      return interactionJson(handleOfflineConfigComponent(interaction, env, ctx));
     }
 
     const hatchSetup = parseHtgSetupCustomId(interaction.data?.custom_id);
@@ -870,8 +887,8 @@ async function handleInteraction(request, env, ctx) {
     const offlinePath = getOfflineSubcommandPath(interaction);
     const subcommand = offlinePath.group || offlinePath.subcommand;
     const validAssignTarget = offlinePath.group !== "assign" || ["clan", "league", "users"].includes(offlinePath.subcommand);
-    if (!validAssignTarget || !["assign", "mode", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "members", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline mode`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline members`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
+    if (!validAssignTarget || !["assign", "mode", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "members", "remove-user", "remove-users", "post-rate", "config"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline mode`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline members`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, or `/offline config`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -2713,17 +2730,16 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
-    if (subcommand === "list") {
+    if (subcommand === "config") {
       const query = new URLSearchParams({ guild_id: guildId });
       const payload = await hourlyClanApiRequest(env, `/api/offline/status?${query}`, {
         method: "GET"
       });
-      await editOriginalInteraction(interaction, {
-        content: formatOfflinePingListResponse(payload, guildId),
-        embeds: [],
-        components: [],
-        allowed_mentions: { parse: [] }
-      });
+      await editOriginalInteraction(interaction, buildOfflinePingConfigMessage(payload, {
+        guildId,
+        ownerId: actorId,
+        page: 0
+      }));
       return;
     }
 
@@ -2818,7 +2834,7 @@ async function completeOfflinePingInteraction(interaction, env) {
         }
       });
       await editOriginalInteraction(interaction, {
-        content: `Offline pings will watch every tracked member in **${escapeDiscordMarkdown(clan)}**. Use \`/offline list\` to confirm the clan alert channel is assigned.`,
+        content: `Offline pings will watch every tracked member in **${escapeDiscordMarkdown(clan)}**. Use \`/offline config\` to confirm the clan alert channel is assigned.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2839,7 +2855,7 @@ async function completeOfflinePingInteraction(interaction, env) {
         }
       });
       await editOriginalInteraction(interaction, {
-        content: `Offline pings will watch every tracked member in League **${escapeDiscordMarkdown(league)}**. Use \`/offline list\` to confirm the League alert channel is assigned.`,
+        content: `Offline pings will watch every tracked member in League **${escapeDiscordMarkdown(league)}**. Use \`/offline config\` to confirm the League alert channel is assigned.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2933,7 +2949,7 @@ async function completeOfflinePingInteraction(interaction, env) {
         ? `<@${discordUserId}>`
         : "RoVer lookup (when the user has consented in this server)";
       await editOriginalInteraction(interaction, {
-        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> ${identityText}.${sourceText}${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> ${identityText}.${sourceText}${channelText} Use \`/offline config\` to confirm the alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -3043,21 +3059,6 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
-    if (subcommand === "check") {
-      // The actual scan can be considerably longer than Discord's interaction
-      // response window. Queue it in the API Worker and acknowledge the user
-      // immediately instead of leaving the interaction on "thinking" forever.
-      const query = new URLSearchParams({ guild_id: guildId, force: "1", async: "1" });
-      const payload = await offlinePingCheckApiRequest(env, `/api/offline/check?${query}`);
-      await editOriginalInteraction(interaction, {
-        content: payload.accepted
-          ? "Offline check queued. Luna will refresh this server's configured offline posts shortly. Use `/offline list` to review the active watch modes and channels."
-          : formatOfflinePingCheckResponse(payload),
-        embeds: [],
-        components: [],
-        allowed_mentions: { parse: [] }
-      });
-    }
   } catch (err) {
     await editOriginalInteraction(interaction, {
       content: offlinePingSetupErrorMessage(err),
@@ -3157,18 +3158,72 @@ function normalizeOfflineSourceModeOption(value) {
   return "auto";
 }
 
-function formatOfflinePingListResponse(payload, guildId) {
+// Six full watch rows leave room for the compact configuration summary and
+// avoid Discord's 2,000-character message limit without truncating data.
+const OFFLINE_CONFIG_PAGE_SIZE = 6;
+
+function offlineConfigCustomId(ownerId, guildId, page) {
+  return [
+    "offlineconfig",
+    String(ownerId || "").trim(),
+    String(guildId || "").trim(),
+    Math.max(0, Math.trunc(Number(page) || 0))
+  ].join("|");
+}
+
+function parseOfflineConfigCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 4 || parts[0] !== "offlineconfig") return null;
+  const ownerId = String(parts[1] || "").trim();
+  const guildId = String(parts[2] || "").trim();
+  const page = Math.max(0, Math.trunc(Number(parts[3]) || 0));
+  if (!validDiscordSnowflake(ownerId) || !validDiscordSnowflake(guildId)) return null;
+  return { ownerId, guildId, page };
+}
+
+function handleOfflineConfigComponent(interaction, env, ctx) {
+  const state = parseOfflineConfigCustomId(interaction.data?.custom_id);
+  if (!state) return messageResponse("That offline configuration page is no longer valid. Run `/offline config` again.", true);
+  if (interactionUserId(interaction) !== state.ownerId) {
+    return messageResponse("Only the person who ran `/offline config` can use these page controls.", true);
+  }
+  if (String(interaction.guild_id || "").trim() !== state.guildId) {
+    return messageResponse("This offline configuration page belongs to a different Discord server.", true);
+  }
+  ctx.waitUntil(completeOfflineConfigInteraction(interaction, env, state));
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completeOfflineConfigInteraction(interaction, env, state) {
+  try {
+    const query = new URLSearchParams({ guild_id: state.guildId });
+    const payload = await hourlyClanApiRequest(env, `/api/offline/status?${query}`, {
+      method: "GET"
+    });
+    await editOriginalInteraction(interaction, buildOfflinePingConfigMessage(payload, state));
+  } catch (err) {
+    await editOriginalInteraction(interaction, commandErrorMessage("Offline configuration failed", err, env)).catch(() => null);
+  }
+}
+
+function buildOfflinePingConfigMessage(payload, options = {}) {
+  const guildId = String(options.guildId || "").trim();
   const guild = (payload?.guilds || [])
-    .find(row => String(row?.config?.guild_id || "") === String(guildId || ""))
+    .find(row => String(row?.config?.guild_id || "") === guildId)
     || null;
 
   if (!guild) {
-    return [
-      "## Offline Ping Setup",
-      "No offline ping config is saved for this server yet.",
-      "",
-      "Start with `/offline assign clan channel:#channel`, `/offline assign league channel:#channel`, or `/offline assign users channel:#channel`."
-    ].join("\n");
+    return {
+      content: [
+        "## Offline Ping Setup",
+        "No offline ping config is saved for this server yet.",
+        "",
+        "Start with `/offline assign clan channel:#channel`, `/offline assign league channel:#channel`, or `/offline assign users channel:#channel`."
+      ].join("\n"),
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] }
+    };
   }
 
   const config = guild.config || {};
@@ -3193,6 +3248,38 @@ function formatOfflinePingListResponse(payload, guildId) {
     warnings.push("Direct user watches exist, but `/offline assign users` has not been set.");
   }
 
+  const entries = [
+    ...clans.map(row => ({
+      group: "Watched Clans",
+      text: `- **${escapeDiscordMarkdown(row.clan_name || row.clan_key || "Unknown")}**`
+    })),
+    ...leagues.map(row => ({
+      group: "Watched Leagues",
+      text: `- **${escapeDiscordMarkdown(row.league_name || row.league_key || "Unknown")}**`
+    })),
+    ...clanMembers.map(row => ({
+      group: "Clan Member Pings",
+      text: formatOfflinePingUserRow(row, "clan")
+    })),
+    ...directUsers.map(row => ({
+      group: "Direct User Watches",
+      text: formatOfflinePingUserRow(row, "users")
+    }))
+  ];
+  const totalPages = Math.max(1, Math.ceil(entries.length / OFFLINE_CONFIG_PAGE_SIZE));
+  const page = clampPage(options.page, totalPages);
+  const start = page * OFFLINE_CONFIG_PAGE_SIZE;
+  const pageEntries = entries.slice(start, start + OFFLINE_CONFIG_PAGE_SIZE);
+  const groupedEntries = [];
+  for (const entry of pageEntries) {
+    const previous = groupedEntries[groupedEntries.length - 1];
+    if (!previous || previous.group !== entry.group) {
+      groupedEntries.push({ group: entry.group, rows: [entry.text] });
+    } else {
+      previous.rows.push(entry.text);
+    }
+  }
+
   const lines = [
     "## Offline Ping Setup",
     `**Clan alert channel:** ${clanChannel}`,
@@ -3205,23 +3292,39 @@ function formatOfflinePingListResponse(payload, guildId) {
     `**Last checked:** ${config.last_checked_at ? discordTime(config.last_checked_at) : "Never"}`,
     warnings.length ? `-# ${warnings.join(" ")}` : "",
     "",
-    `### Watched Clans (${clans.length})`,
-    ...formatOfflinePingClanRows(clans),
+    `**Saved watches:** ${clans.length} clan${clans.length === 1 ? "" : "s"} Â· ${leagues.length} League${leagues.length === 1 ? "" : "s"} Â· ${clanMembers.length} clan-member ping${clanMembers.length === 1 ? "" : "s"} Â· ${directUsers.length} direct user${directUsers.length === 1 ? "" : "s"}`,
+    entries.length ? `**Showing:** ${start + 1}-${start + pageEntries.length} of ${entries.length} saved watches Â· Page ${page + 1}/${totalPages}` : "**Saved watches:** None yet.",
     "",
-    `### Watched Leagues (${leagues.length})`,
-    ...formatOfflinePingLeagueRows(leagues),
-    "",
-    `### Clan Member Pings (${clanMembers.length})`,
-    ...formatOfflinePingUserRows(clanMembers, "clan"),
-    "",
-    `### Direct User Watches (${directUsers.length})`,
-    ...formatOfflinePingUserRows(directUsers, "users")
+    ...(groupedEntries.length
+      ? groupedEntries.flatMap(group => [
+        `### ${group.group}`,
+        ...group.rows
+      ])
+      : ["Use `/offline clan`, `/offline league`, `/offline user`, or `/offline members` to add watches."])
   ].filter(line => line !== "");
 
-  const content = lines.join("\n");
-  return content.length <= 1950
-    ? content
-    : `${content.slice(0, 1900)}\n-# Output truncated. Use the API status endpoint for the full list.`;
+  return {
+    content: lines.join("\n"),
+    embeds: [],
+    components: offlineConfigPageButtons(options.ownerId, guildId, page, totalPages),
+    allowed_mentions: { parse: [] }
+  };
+}
+
+function offlineConfigPageButtons(ownerId, guildId, page, totalPages) {
+  if (totalPages <= 1) return [];
+  return [{
+    type: COMPONENT_TYPE_ACTION_ROW,
+    components: [
+      historyButton("Previous", offlineConfigCustomId(ownerId, guildId, page - 1), BUTTON_STYLE_SECONDARY, page <= 0),
+      historyButton(`Page ${page + 1}/${totalPages}`, offlineConfigCustomId(ownerId, guildId, page), BUTTON_STYLE_SECONDARY, true),
+      historyButton("Next", offlineConfigCustomId(ownerId, guildId, page + 1), BUTTON_STYLE_SECONDARY, page >= totalPages - 1)
+    ]
+  }];
+}
+
+function formatOfflinePingListResponse(payload, guildId) {
+  return buildOfflinePingConfigMessage(payload, { guildId }).content;
 }
 
 function formatOfflinePingCheckResponse(payload) {
@@ -3312,6 +3415,22 @@ function formatOfflinePingUserRows(users, deliveryScope = "users") {
     });
   if (users.length > rows.length) rows.push(`-# ...and ${users.length - rows.length} more.`);
   return rows;
+}
+
+function formatOfflinePingUserRow(row, deliveryScope = "users") {
+  const name = escapeDiscordMarkdown(row?.roblox_username || row?.roblox_username_key || "Unknown");
+  const discordUserId = validDiscordSnowflake(row?.discord_user_id)
+    ? String(row.discord_user_id).trim()
+    : "";
+  const discord = discordUserId
+    ? `<@${discordUserId}>`
+    : escapeDiscordMarkdown(row?.discord_label || "RoVer lookup");
+  const clan = row?.clan_name ? ` Â· ${escapeDiscordMarkdown(row.clan_name)}` : "";
+  const sourceMode = normalizeOfflineSourceModeOption(row?.source_mode);
+  const source = sourceMode === "auto" ? "" : ` Â· ${sourceMode === "league" ? "League" : "Clan"}`;
+  const channel = validDiscordSnowflake(row?.channel_id) ? ` Â· <#${row.channel_id}>` : "";
+  const delivery = deliveryScope === "clan" ? " Â· clan post" : "";
+  return `- **${name}** -> ${discord}${clan}${source}${channel}${delivery}`;
 }
 
 function formatOfflinePingChannel(channelId) {
@@ -5005,10 +5124,12 @@ async function renderHourlyClanBoardPng(current) {
       const rankCenterX = x + 31;
       const nameX = x + 76;
       const nameWidth = 218;
-      const barTrackWidth = 108;
       const barX = x + 308;
       const barY = y + 8;
       const valueRightX = x + columnWidth - 18;
+      // The points label owns the right edge. Let only the progress bar shrink
+      // when needed, so it can never draw beneath a member's points value.
+      const barTrackWidth = Math.max(42, valueRightX - 72 - 12 - barX);
 
       hourlyDrawCenteredText(canvas, rowFont, rankText, rankCenterX, rowTextY, rowFontSize, tone, 36);
       hourlyDrawFittedText(canvas, rowFont, name, nameX, rowTextY, rowFontSize, nameTone, nameWidth);
@@ -6075,7 +6196,7 @@ function buildClanActivityEventEmbed(event, fallbackClan = "", options = {}) {
   const capacity = Number(details.member_capacity);
   const description = [
     isRankEvent
-      ? `[${escapeDiscordMarkdown(clanName)}] ${clanActivityLogEventLabel(event)}.`
+      ? `${escapeDiscordMarkdown(clanName)} ${clanActivityLogEventLabel(event)}.`
       : `**${escapeDiscordMarkdown(username)}** ${clanActivityLogEventLabel(event)} **[${escapeDiscordMarkdown(clanName)}]**.`,
     Number.isFinite(memberCount) ? `${fullNumber(memberCount)}${Number.isFinite(capacity) && capacity > 0 ? `/${fullNumber(capacity)}` : ""} Members` : "",
     clanActivityJoinGlobalRankLine(event, details),
@@ -6106,10 +6227,17 @@ function buildClanActivityLogViewMessage(payload, fallbackClan, options = {}) {
   const page = clampPage(options.page, totalPages);
   const events = allEvents.slice(page * pageSize, (page + 1) * pageSize);
   const summary = payload?.summary && typeof payload.summary === "object" ? payload.summary : {};
-  const lines = events.length
-    ? events.map(event => `• ${discordTime(event.event_at || event.detected_at)} — **${escapeDiscordMarkdown(event.display_name || event.username || event.user_id || "member")}** ${clanActivityLogEventLabel(event)}`)
-    : ["No roster changes have been recorded yet."];
   const clanName = String(payload?.clan_name || fallbackClan || "Clan").trim();
+  const lines = events.length
+    ? events.map(event => {
+        const eventType = String(event?.event_type || "").toLowerCase();
+        const isRankEvent = eventType === "rank_up" || eventType === "rank_down";
+        const subject = isRankEvent
+          ? `**${escapeDiscordMarkdown(clanName)}**`
+          : `**${escapeDiscordMarkdown(event.display_name || event.username || event.user_id || "member")}**`;
+        return `• ${discordTime(event.event_at || event.detected_at)} — ${subject} ${clanActivityLogEventLabel(event)}`;
+      })
+    : ["No roster changes have been recorded yet."];
   const components = totalPages > 1 && options.ownerId
     ? [{
       type: COMPONENT_TYPE_ACTION_ROW,
@@ -6371,24 +6499,48 @@ function clanTrackerTableCell(value, width, alignment = "left") {
   return alignment === "right" ? `${padding}${visible}` : `${visible}${padding}`;
 }
 
+// Discord Components V2 does not offer a true table layout. A fixed-width,
+// monospaced three-card grid is the closest reliable equivalent: every member
+// gets the same sized space and ranks always run across the row (1, 2, 3 / 4,
+// 5, 6), rather than filling one tall column at a time.
+const CLAN_TRACKER_GRID_COLUMNS = 3;
+const CLAN_TRACKER_GRID_CELL_WIDTH = 21;
+
+function clanTrackerGridCell(value, width = CLAN_TRACKER_GRID_CELL_WIDTH) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  const visible = normalized.length > width
+    ? `${normalized.slice(0, Math.max(1, width - 1))}.`
+    : normalized;
+  return `${visible}${" ".repeat(Math.max(0, width - visible.length))}`;
+}
+
+function clanTrackerMemberGridLines(row) {
+  if (!row) return ["", "", "", ""];
+  const downtime = row.tracker_downtime === null
+    ? "-"
+    : hourlyDowntimeLabel(row.tracker_downtime);
+  return [
+    `#${fullNumber(row.tracker_rank)} ${row.tracker_username}`,
+    `Pts ${shortNumber(row.tracker_points)}`,
+    `5m ${clanTrackerDelta(row.tracker_gain_5m)} | 1h ${clanTrackerDelta(row.tracker_gain_1h)}`,
+    `Down ${downtime}`
+  ];
+}
+
 function clanTrackerTableBlock(rows) {
-  const header = [
-    clanTrackerTableCell("RK", 3, "right"),
-    clanTrackerTableCell("PLAYER", 19),
-    clanTrackerTableCell("POINTS", 9, "right"),
-    clanTrackerTableCell("5M", 7, "right"),
-    clanTrackerTableCell("1H", 7, "right"),
-    clanTrackerTableCell("DOWN", 8, "right")
-  ].join("  ");
-  const lines = rows.map(row => [
-    clanTrackerTableCell(`#${fullNumber(row.tracker_rank)}`, 3, "right"),
-    clanTrackerTableCell(row.tracker_username, 19),
-    clanTrackerTableCell(shortNumber(row.tracker_points), 9, "right"),
-    clanTrackerTableCell(clanTrackerDelta(row.tracker_gain_5m), 7, "right"),
-    clanTrackerTableCell(clanTrackerDelta(row.tracker_gain_1h), 7, "right"),
-    clanTrackerTableCell(row.tracker_downtime === null ? "-" : hourlyDowntimeLabel(row.tracker_downtime), 8, "right")
-  ].join("  "));
-  return `**Ranks #${rows[0]?.tracker_rank || "?"}-#${rows[rows.length - 1]?.tracker_rank || "?"}**\n\`\`\`text\n${header}\n${lines.join("\n")}\n\`\`\``;
+  const lines = [];
+  const separator = "-".repeat((CLAN_TRACKER_GRID_CELL_WIDTH * CLAN_TRACKER_GRID_COLUMNS) + ((CLAN_TRACKER_GRID_COLUMNS - 1) * 3));
+  for (let index = 0; index < rows.length; index += CLAN_TRACKER_GRID_COLUMNS) {
+    const memberLines = Array.from(
+      { length: CLAN_TRACKER_GRID_COLUMNS },
+      (_, column) => clanTrackerMemberGridLines(rows[index + column])
+    );
+    for (let line = 0; line < 4; line += 1) {
+      lines.push(memberLines.map(member => clanTrackerGridCell(member[line])).join(" | "));
+    }
+    if (index + CLAN_TRACKER_GRID_COLUMNS < rows.length) lines.push(separator);
+  }
+  return `**Ranks #${rows[0]?.tracker_rank || "?"}-#${rows[rows.length - 1]?.tracker_rank || "?"}**\n\`\`\`text\n${lines.join("\n")}\n\`\`\``;
 }
 
 function buildClanTrackerComponentsMessage(current, fallbackClan = "", env = {}) {
@@ -6398,7 +6550,6 @@ function buildClanTrackerComponentsMessage(current, fallbackClan = "", env = {})
   const memberCount = positiveInteger(current?.member_count ?? current?.current_members) || rows.length;
   const capacity = positiveInteger(current?.member_capacity ?? current?.max_members);
   const snapshotAt = current?.snapshot_at || current?.fetched_at || current?.updated_at || null;
-  const iconUrl = String(current?.icon_url || current?.clan_icon_url || current?.clan?.icon_url || "").trim();
   const displayClan = String(current?.clan_name || fallbackClan || "Clan").trim();
   const summary = [
     `## ${escapeDiscordMarkdown(displayClan.toUpperCase())} Members`,
@@ -6406,24 +6557,22 @@ function buildClanTrackerComponentsMessage(current, fallbackClan = "", env = {})
     `**Members:** ${fullNumber(memberCount)}${capacity ? `/${fullNumber(capacity)}` : ""}`,
     `-# Last Updated: ${snapshotAt ? discordTime(snapshotAt) : "Unknown"} | Refreshes every ${clanTrackerScheduledIntervalMinutes(env)} minutes`
   ].join("\n");
-  const header = iconUrl
-    ? {
-        type: COMPONENT_TYPE_SECTION,
-        components: [{ type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary }],
-        accessory: {
-          type: COMPONENT_TYPE_THUMBNAIL,
-          media: { url: iconUrl },
-          description: `${displayClan} clan icon`
-        }
-      }
-    : { type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary };
+  // Keep the tracker header full-width. The clan icon previously consumed the
+  // right side of the container and made the three-column member presentation
+  // feel cramped on Discord.
+  const header = { type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary };
   const components = [header, { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 }];
-  const blocks = chunkClanTrackerRows(rows, 25);
+  // Twenty-four members make eight symmetrical rows of three while remaining
+  // comfortably inside Discord's component text limit.
+  const blocks = chunkClanTrackerRows(rows, 24);
   if (blocks.length) {
-    components.push(...blocks.map(block => ({
-      type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: clanTrackerTableBlock(block)
-    })));
+    blocks.forEach((block, index) => {
+      if (index > 0) components.push({ type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 });
+      components.push({
+        type: COMPONENT_TYPE_TEXT_DISPLAY,
+        content: clanTrackerTableBlock(block)
+      });
+    });
   } else {
     components.push({ type: COMPONENT_TYPE_TEXT_DISPLAY, content: "No current members were returned yet." });
   }
@@ -6449,6 +6598,7 @@ async function postOrUpdateClanTrackerMessage(env, assignment, message) {
   // A persistent tracker is a Components V2 message. Do not send legacy
   // content with it: Discord disables content/embeds for V2 messages.
   const body = JSON.stringify({ ...message, embeds: [] });
+  let legacyMessageId = "";
   if (messageId) {
     const edit = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
       method: "PATCH",
@@ -6457,7 +6607,14 @@ async function postOrUpdateClanTrackerMessage(env, assignment, message) {
     });
     const payload = await edit.json().catch(() => ({}));
     if (edit.ok) return payload;
-    if (edit.status !== 404) {
+    // Discord cannot always convert an existing legacy embed into a Components
+    // V2 message. Post the upgraded tracker once, then remove that old legacy
+    // post so an assignment remains a single persistent tracker.
+    const detail = String(payload?.message || "").toLowerCase();
+    const needsV2Replacement = edit.status === 400 && (detail.includes("component") || detail.includes("flag"));
+    if (needsV2Replacement) {
+      legacyMessageId = messageId;
+    } else if (edit.status !== 404) {
       throw httpError(edit.status === 403 ? 403 : 502, payload.message || `Discord clan tracker update failed (${edit.status}).`);
     }
   }
@@ -6470,6 +6627,12 @@ async function postOrUpdateClanTrackerMessage(env, assignment, message) {
   const payload = await create.json().catch(() => ({}));
   if (!create.ok) {
     throw httpError(create.status === 403 ? 403 : 502, payload.message || `Discord clan tracker post failed (${create.status}).`);
+  }
+  if (legacyMessageId) {
+    await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(legacyMessageId)}`, {
+      method: "DELETE",
+      headers: discordBotHeaders(env)
+    }).catch(() => null);
   }
   return payload;
 }
@@ -13925,13 +14088,8 @@ function offlineCommandPayload() {
         ]
       },
       {
-        name: "check",
-        description: "Run the offline ping check now for this server.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
-      },
-      {
-        name: "list",
-        description: "Show configured offline ping channels, clans, Leagues, and direct user watches.",
+        name: "config",
+        description: "Show configured offline alert channels, watch modes, and tracked users.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
       }
     ]

@@ -5743,7 +5743,6 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
     const alertDiscordUserId = String(tracker.discord_user_id || "").trim();
     const alertUsername = firstString(user.username, tracker.roblox_username, featured.roblox_username, user.user_id, "Someone");
     const alertDisplayItem = hatchFullDisplayItemName(featured);
-    const alertTier = hatchTierLabel(featured.tier);
     const alertTheme = hatchAlertTheme(featured.tier);
     const alertImageUrl = featured.image_url || HATCH_ALERT_THUMBNAIL_URL;
     const alertRap = featured.rap > 0 ? shortInventoryNumber(featured.rap) : "Unknown";
@@ -5777,7 +5776,7 @@ function buildHatchAlertDiscordPayload(tracker, user, featured, gainedHtg, snaps
         accessory: {
           type: 11,
           media: { url: alertImageUrl },
-          description: `${alertTier} ${alertDisplayItem}`
+          description: alertDisplayItem
         }
       }
     ];
@@ -6037,7 +6036,9 @@ function hatchFullDisplayItemName(row) {
     : (() => {
         const tier = hatchTierTitle(row?.tier);
         const name = hatchDisplayItemName(row);
-        return tier ? `${tier} ${name}` : name;
+        // Some API payloads already use the tier itself as the display name.
+        // Avoid producing labels such as "Titanic Titanic" in that case.
+        return tier && name.toLowerCase() !== tier.toLowerCase() ? `${tier} ${name}` : name;
       })();
   const variant = hatchVariantDisplayPrefix(row);
   if (!variant || baseName.toLowerCase().startsWith(`${variant.toLowerCase()} `)) return baseName;
