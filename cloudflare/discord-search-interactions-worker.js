@@ -870,8 +870,8 @@ async function handleInteraction(request, env, ctx) {
     const offlinePath = getOfflineSubcommandPath(interaction);
     const subcommand = offlinePath.group || offlinePath.subcommand;
     const validAssignTarget = offlinePath.group !== "assign" || ["clan", "league", "users"].includes(offlinePath.subcommand);
-    if (!validAssignTarget || !["assign", "mode", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline mode`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
+    if (!validAssignTarget || !["assign", "mode", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "members", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline mode`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline members`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -2943,8 +2943,8 @@ async function completeOfflinePingInteraction(interaction, env) {
 
     if (subcommand === "users" || subcommand === "members") {
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
-      if (!clan) {
-        throw httpError(400, `Use \`/offline ${subcommand} clan:<clan> user1:<roblox name> discord1:<Discord user>\`.`);
+      if (subcommand === "members" && !clan) {
+        throw httpError(400, "Use `/offline members clan:<clan> user1:<roblox name> discord1:<Discord user>`.");
       }
       const users = [];
       const pairErrors = [];
@@ -2984,7 +2984,7 @@ async function completeOfflinePingInteraction(interaction, env) {
       await editOriginalInteraction(interaction, {
         content: subcommand === "members"
           ? `Saved **${payload.users?.length || users.length}** clan-member ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Luna uses any Discord overrides you supplied, then RoVer for the rest. Use \`/offline assign clan\` to set its destination.${warningText}`
-          : `Saved **${payload.users?.length || users.length}** direct-user ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Luna uses any Discord overrides you supplied, then RoVer for the rest. Use \`/offline assign users\` to set the direct-user alert destination.${warningText}`,
+          : `Saved **${payload.users?.length || users.length}** direct-user ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"}${clan ? ` with **${escapeDiscordMarkdown(clan)}** as a lookup hint` : ""}. Luna uses any Discord overrides you supplied, then RoVer or Bloxlink for the rest. Use \`/offline assign users\` to set the direct-user alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -3044,10 +3044,15 @@ async function completeOfflinePingInteraction(interaction, env) {
     }
 
     if (subcommand === "check") {
-      const query = new URLSearchParams({ guild_id: guildId, force: "1" });
+      // The actual scan can be considerably longer than Discord's interaction
+      // response window. Queue it in the API Worker and acknowledge the user
+      // immediately instead of leaving the interaction on "thinking" forever.
+      const query = new URLSearchParams({ guild_id: guildId, force: "1", async: "1" });
       const payload = await offlinePingCheckApiRequest(env, `/api/offline/check?${query}`);
       await editOriginalInteraction(interaction, {
-        content: formatOfflinePingCheckResponse(payload),
+        content: payload.accepted
+          ? "Offline check queued. Luna will refresh this server's configured offline posts shortly. Use `/offline list` to review the active watch modes and channels."
+          : formatOfflinePingCheckResponse(payload),
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -4505,15 +4510,28 @@ async function offlinePingCheckApiRequest(env, path) {
     env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev"
   ).replace(/\/$/, "");
   const url = clanApiUrl(env, path, apiBase);
-  const response = await fetchClanApi(env, url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      "User-Agent": "Luna-Offline-Ping-Check"
-    },
-    cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  const timeout = new AbortController();
+  const timeoutId = setTimeout(() => timeout.abort(), 12_000);
+  let response;
+  try {
+    response = await fetchClanApi(env, url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "User-Agent": "Luna-Offline-Ping-Check"
+      },
+      signal: timeout.signal,
+      cf: { cacheTtl: 0, cacheEverything: false }
+    });
+  } catch (err) {
+    if (timeout.signal.aborted) {
+      throw httpError(504, "Offline check could not be queued within 12 seconds. Try again shortly.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -13619,6 +13637,23 @@ function offlineUsersBulkOptions() {
   return options;
 }
 
+function offlineDirectUsersBulkOptions() {
+  const options = offlineUsersBulkOptions();
+  const firstRequiredUser = options.shift();
+  return [
+    firstRequiredUser,
+    {
+      name: "clan",
+      description: "Optional Clan or League lookup hint; leave blank for automatic lookup",
+      type: APPLICATION_COMMAND_OPTION_STRING,
+      required: false,
+      min_length: 1,
+      max_length: 100
+    },
+    ...options
+  ];
+}
+
 function offlineCommandPayload() {
   return {
     name: "offline",
@@ -13826,17 +13861,7 @@ function offlineCommandPayload() {
         name: "users",
         description: "Add up to 12 Roblox users to direct offline pings.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-        options: [
-          {
-            name: "clan",
-            description: "Clan or League these users belong to, for example c0ld, WMSY, or dezzz",
-            type: APPLICATION_COMMAND_OPTION_STRING,
-            required: true,
-            min_length: 1,
-            max_length: 100
-          },
-          ...offlineUsersBulkOptions()
-        ]
+        options: offlineDirectUsersBulkOptions()
       },
       {
         name: "members",

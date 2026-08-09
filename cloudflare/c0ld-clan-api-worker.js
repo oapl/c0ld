@@ -390,11 +390,31 @@ export default {
         });
       } else if (request.method === "POST" && url.pathname === "/api/offline/check") {
         requireAdmin(request, env);
-        response = await handleOfflinePingCheck(env, "manual", {
+        const offlineCheckOptions = {
           force: isForceRequest(url),
           guildId: url.searchParams.get("guild_id") || "",
           sourceMode: normalizeOfflineWatchSourceMode(url.searchParams.get("source_mode") || url.searchParams.get("source"))
-        });
+        };
+
+        // A Discord interaction must be acknowledged promptly.  A full offline
+        // scan can include multiple roster reads, identity lookups, and Discord
+        // deliveries, so let an explicit async request return immediately while
+        // the same scan continues through the Worker execution context.
+        if (isTruthyParam(url, "async") && typeof ctx?.waitUntil === "function") {
+          ctx.waitUntil(
+            handleOfflinePingCheck(env, "manual", offlineCheckOptions).catch((err) => {
+              console.error("Queued offline ping check failed", err);
+            })
+          );
+          response = noStoreJson({
+            ok: true,
+            accepted: true,
+            guild_id: offlineCheckOptions.guildId || null,
+            queued_at: new Date().toISOString()
+          }, 202);
+        } else {
+          response = await handleOfflinePingCheck(env, "manual", offlineCheckOptions);
+        }
       } else if (request.method === "POST" && url.pathname === "/api/offline/test-post") {
         requireAdmin(request, env);
         response = await handleOfflinePingTestPost(request, env);
@@ -484,8 +504,11 @@ export default {
           () => refreshPs99RestartAnalyticsDashboard(env, { reason: "schedule" })
         ));
       }
-      if (standaloneJobs.length) ctx.waitUntil(Promise.allSettled(standaloneJobs));
-      return;
+      // The production Worker uses the every-minute cron for both restart
+      // observation and the normal clan/global schedules. Do not return here:
+      // doing so turns the per-minute restart cron into a restart-only lane
+      // and silently starves all member, clan, global-rank, and Discord data
+      // refreshes. The individual jobs below retain their own cadence guards.
     }
 
     const mainJobs = runScheduledIngests(env, false, scheduledAt);
@@ -7632,10 +7655,7 @@ async function handleOfflinePingClans(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one clan name.");
 
-  await ensureOfflineGuildConfig(env, requestedGuildId, {
-    ...body,
-    clan_watches_enabled: true
-  });
+  await ensureOfflineGuildConfig(env, requestedGuildId, body);
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_CLANS_TABLE, rows, "guild_id,clan_key", 500);
 
   return noStoreJson({
@@ -7717,10 +7737,7 @@ async function handleOfflinePingLeagues(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one league name.");
 
-  await ensureOfflineGuildConfig(env, requestedGuildId, {
-    ...body,
-    league_watches_enabled: true
-  });
+  await ensureOfflineGuildConfig(env, requestedGuildId, body);
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, rows, "guild_id,league_key", 500);
 
   return noStoreJson({
@@ -7856,23 +7873,9 @@ async function handleOfflinePingUsers(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one username.");
 
-  const enablesClanSource = rows.some(row => {
-    const deliveryScope = normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users";
-    return deliveryScope === "clan" || row.source_mode === "clan" || row.source_mode === "auto";
-  });
-  const enablesLeagueSource = rows.some(row => {
-    const deliveryScope = normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users";
-    return deliveryScope !== "clan" && (row.source_mode === "league" || row.source_mode === "auto");
-  });
-  const enablesUserSource = rows.some(row => (
-    (normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users") === "users"
-  ));
-  await ensureOfflineGuildConfig(env, requestedGuildId, {
-    ...body,
-    ...(enablesClanSource ? { clan_watches_enabled: true } : {}),
-    ...(enablesLeagueSource ? { league_watches_enabled: true } : {}),
-    ...(enablesUserSource ? { user_watches_enabled: true } : {})
-  });
+  // Adding a watch never changes the server's source modes. `/offline mode`
+  // is the sole control for clan, League, and direct-user alert activity.
+  await ensureOfflineGuildConfig(env, requestedGuildId, body);
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_USERS_TABLE, rows, "guild_id,roblox_username_key", 500);
 
   return noStoreJson({
@@ -8290,8 +8293,10 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
   const dueAlerts = [];
   const checkedRows = [];
 
-  const getClanBundle = async clanNameValue => {
-    if (!includeClanWatches) return null;
+  const getClanBundle = async (clanNameValue, bundleOptions = {}) => {
+    // Direct-user watches are independent of the clan-board mode. They may
+    // still need one clan lookup to find that specific user's current score.
+    if (!includeClanWatches && bundleOptions.allowDirectLookup !== true) return null;
     const clanKey = normalizeText(clanNameValue);
     if (!clanKey) return null;
     if (!clanBundleCache.has(clanKey)) {
@@ -8300,8 +8305,10 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     return clanBundleCache.get(clanKey);
   };
 
-  const getLeagueBundle = async leagueNameValue => {
-    if (!includeLeagueWatches) return null;
+  const getLeagueBundle = async (leagueNameValue, bundleOptions = {}) => {
+    // Same principle as clan lookups: disabling the League board must not
+    // disable a saved direct-user watch whose current row is in a League.
+    if (!includeLeagueWatches && bundleOptions.allowDirectLookup !== true) return null;
     const leagueKey = normalizeText(leagueNameValue);
     if (!leagueKey) return null;
     if (!leagueBundleCache.has(leagueKey)) {
@@ -8312,9 +8319,9 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
 
   for (const watch of userWatches) {
     const status = await findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, {
-    includeClan: true,
-    includeLeague: true,
-    allowDirectLookup: true
+      includeClan: true,
+      includeLeague: true,
+      allowDirectLookup: true
     });
     const subjectKey = offlineUserSubjectKey(watch);
     const trackedKey = status?.user_key || subjectKey;
@@ -8871,23 +8878,24 @@ async function findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBu
   const knownGroup = String(watch.clan_name || "").trim();
   const includeClan = options.includeClan !== false;
   const includeLeague = options.includeLeague !== false;
+  const bundleOptions = options.allowDirectLookup === true ? { allowDirectLookup: true } : undefined;
 
   if (knownGroup && sourceMode === "league" && includeLeague) {
-    const bundle = await getLeagueBundle(knownGroup);
+    const bundle = await getLeagueBundle(knownGroup, bundleOptions);
     return findOfflineStatusInBundle(bundle, userId, usernameKey);
   }
   if (knownGroup && sourceMode === "clan" && includeClan) {
-    const bundle = await getClanBundle(knownGroup);
+    const bundle = await getClanBundle(knownGroup, bundleOptions);
     return findOfflineStatusInBundle(bundle, userId, usernameKey);
   }
   if (knownGroup) {
     if (includeClan) {
-      const clanBundle = await getClanBundle(knownGroup);
+      const clanBundle = await getClanBundle(knownGroup, bundleOptions);
       const found = findOfflineStatusInBundle(clanBundle, userId, usernameKey);
       if (found) return found;
     }
     if (includeLeague) {
-      const leagueBundle = await getLeagueBundle(knownGroup);
+      const leagueBundle = await getLeagueBundle(knownGroup, bundleOptions);
       const found = findOfflineStatusInBundle(leagueBundle, userId, usernameKey);
       if (found) return found;
     }
@@ -8910,8 +8918,8 @@ async function findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBu
   const currentRows = await fetchOfflineCurrentRowsForUser(env, watch, { includeClan, includeLeague });
   for (const current of currentRows) {
     const bundle = current.source_mode === "league"
-      ? await getLeagueBundle(current.clan_name)
-      : await getClanBundle(current.clan_name);
+      ? await getLeagueBundle(current.clan_name, bundleOptions)
+      : await getClanBundle(current.clan_name, bundleOptions);
     const found = findOfflineStatusInBundle(bundle, userId, usernameKey);
     if (found) return found;
   }
@@ -9100,15 +9108,6 @@ function normalizeOfflineWatchSourceMode(value) {
   if (["clan", "clans", "battle", "battles"].includes(text)) return "clan";
   if (["league", "leagues"].includes(text)) return "league";
   return "";
-}
-
-function offlineUserWatchIncludedForCheck(watch, options = {}) {
-  const sourceMode = normalizeOfflineWatchSourceMode(watch?.source_mode) || "auto";
-  const includeClan = options.includeClan !== false;
-  const includeLeague = options.includeLeague !== false;
-  if (sourceMode === "clan") return includeClan;
-  if (sourceMode === "league") return includeLeague;
-  return includeClan || includeLeague;
 }
 
 function offlineMemberMappingForStatus(mappings, status) {
@@ -9876,9 +9875,8 @@ async function ensureOfflineGuildConfig(env, guildId, body = {}) {
     guild_id: `eq.${guildId}`,
     limit: "1"
   }).catch(() => []);
-  // Re-adding a watch after `/offline mode` turned that source off should
-  // make the new watch usable immediately. Previously an existing config
-  // returned early here, leaving saved watches invisible to the scheduler.
+  // `/offline mode` is the only source-mode control. Adding a watch or
+  // assigning a destination may update metadata, but never turns a source on.
   if (existing.length) {
     const patch = {
       guild_id: guildId,
