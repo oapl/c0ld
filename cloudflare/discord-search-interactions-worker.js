@@ -11,6 +11,7 @@ const APPLICATION_COMMAND_OPTION_SUB_COMMAND = 1;
 const APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP = 2;
 const APPLICATION_COMMAND_OPTION_STRING = 3;
 const APPLICATION_COMMAND_OPTION_INTEGER = 4;
+const APPLICATION_COMMAND_OPTION_BOOLEAN = 5;
 const APPLICATION_COMMAND_OPTION_USER = 6;
 const APPLICATION_COMMAND_OPTION_CHANNEL = 7;
 const APPLICATION_COMMAND_OPTION_ROLE = 8;
@@ -299,6 +300,12 @@ export default {
         console.error("Clan activity log delivery failed", err);
       }));
     }
+
+    if (shouldRunClanTrackerScheduledPosts(env, scheduledTime)) {
+      ctx.waitUntil(runClanTrackerAssignments(env, { scheduledTime }).catch(err => {
+        console.error("Persistent clan tracker delivery failed", err);
+      }));
+    }
   }
 };
 
@@ -508,6 +515,10 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(handleClanLookupComponent(interaction, env, ctx));
     }
 
+    if (parseClanLogCustomId(interaction.data?.custom_id)) {
+      return interactionJson(handleClanLogComponent(interaction, env, ctx));
+    }
+
     const hatchSetup = parseHtgSetupCustomId(interaction.data?.custom_id);
     if (hatchSetup) {
       return interactionJson(handleHtgSetupComponent(interaction, env, ctx, hatchSetup));
@@ -687,26 +698,52 @@ async function handleInteraction(request, env, ctx) {
       }
 
       const assignmentChannelId = getCommandOption(interaction, "assign");
-      const demoChannelId = getCommandOption(interaction, "demo");
-      if (assignmentChannelId && demoChannelId) {
-        return interactionJson(messageResponse("Choose either assign:<channel> or demo:<channel>, not both.", true));
-      }
-      const action = assignmentChannelId ? "assign" : demoChannelId ? "demo" : "view";
+      const action = assignmentChannelId ? "assign" : "view";
 
-      if (action === "assign" || action === "demo") {
+      if (action === "assign") {
         if (!interaction.guild_id) {
-          return interactionJson(messageResponse("Clan activity log setup and demos must be run inside the Discord server that should receive the posts.", true));
+          return interactionJson(messageResponse("Clan activity log setup must be run inside the Discord server that should receive the posts.", true));
         }
         const permitted = await memberCanManageServerTracker(interaction, env, { allowDiscordManage: false });
         if (!permitted) {
-          return interactionJson(messageResponse("You need the configured Luna administrator role to assign a clan activity log channel or post a demo.", true));
+          return interactionJson(messageResponse("You need the configured Luna administrator role to assign a clan activity log channel.", true));
         }
       }
 
-      ctx.waitUntil(completeClanLogInteraction(interaction, env, action, clanName));
+      ctx.waitUntil(completeClanLogInteraction(interaction, env, action, clanName, 0, interactionUserId(interaction)));
       return interactionJson({
         type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
         data: { flags: action !== "view" || ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined }
+      });
+    }
+
+    if (subcommand === "tracker") {
+      const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
+      if (!clanName) {
+        return interactionJson(messageResponse("Use `/clan tracker clan:<name>` to preview a tracker, or add `assign:<channel>` to keep one updated there.", true));
+      }
+
+      const assignmentChannelId = getCommandOption(interaction, "assign");
+      if (assignmentChannelId) {
+        if (!interaction.guild_id) {
+          return interactionJson(messageResponse("Persistent clan trackers must be assigned from inside the Discord server that should receive them.", true));
+        }
+        const permitted = await memberCanManageServerTracker(interaction, env, { allowDiscordManage: false });
+        if (!permitted) {
+          return interactionJson(messageResponse("You need the configured Luna administrator role to assign a persistent clan tracker.", true));
+        }
+      }
+
+      ctx.waitUntil(completeClanTrackerInteraction(interaction, env, assignmentChannelId ? "assign" : "view", clanName));
+      return interactionJson({
+        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+        // The tracker is intentionally a Components V2 message so the roster can
+        // use wide, readable table blocks instead of cramped embed fields.
+        data: {
+          flags: assignmentChannelId
+            ? MESSAGE_FLAG_EPHEMERAL
+            : MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0)
+        }
       });
     }
 
@@ -833,8 +870,8 @@ async function handleInteraction(request, env, ctx) {
     const offlinePath = getOfflineSubcommandPath(interaction);
     const subcommand = offlinePath.group || offlinePath.subcommand;
     const validAssignTarget = offlinePath.group !== "assign" || ["clan", "league", "users"].includes(offlinePath.subcommand);
-    if (!validAssignTarget || !["assign", "enable", "disable", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
-      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline enable`, `/offline disable`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
+    if (!validAssignTarget || !["assign", "mode", "minutes", "clan", "league", "remove-clan", "remove-league", "user", "users", "remove-user", "remove-users", "post-rate", "check", "list"].includes(subcommand)) {
+      return interactionJson(messageResponse("Use `/offline assign clan`, `/offline assign league`, `/offline assign users`, `/offline mode`, `/offline minutes`, `/offline clan`, `/offline league`, `/offline remove-clan`, `/offline remove-league`, `/offline user`, `/offline users`, `/offline remove-user`, `/offline remove-users`, `/offline post-rate`, `/offline check`, or `/offline list`.", true));
     }
 
     const permitted = await memberCanManageServerTracker(interaction, env, {
@@ -967,22 +1004,47 @@ async function buildSearchResponse(query, env) {
   }
 
   const row = payload.row;
-  const avatarUrl = await searchAvatarUrl(row, env);
-  const resultClan = String(row.source_clan || row.clan_name || scanClan).trim();
-  const sourceMode = searchResponseSourceMode(payload, row);
+  // The compact current row uses `points`; the latest history row carries
+  // member rank and other details. Normalise both shapes for the text card.
+  const newestHistoryRow = Array.isArray(payload.history) && payload.history.length
+    ? payload.history[0]
+    : {};
+  const displayRow = {
+    ...newestHistoryRow,
+    ...row,
+    event_name: row.event_name || row.battle_display_name || row.battle_key ||
+      newestHistoryRow.event_name || newestHistoryRow.battle_display_name || newestHistoryRow.battle_key ||
+      payload.run?.event_name || payload.run?.battle_display_name || payload.run?.battle_key || null,
+    global_points: row.global_points ?? row.points ?? newestHistoryRow.global_points ?? newestHistoryRow.member_points ?? null,
+    clan_points: row.clan_points ?? row.points ?? newestHistoryRow.clan_points ?? newestHistoryRow.member_points ?? null,
+    clan_rank: row.clan_rank ?? row.member_rank ?? newestHistoryRow.clan_rank ?? newestHistoryRow.member_rank ?? null,
+    total_global_players: row.total_global_players ?? newestHistoryRow.total_global_players ??
+      payload.total_global_players ?? payload.run?.total_global_players ?? payload.run?.candidate_player_count ?? null
+  };
+  // Keep the existing renderers and chart helpers on one complete shape.
+  // This avoids a compact API response causing the Discord copy to display
+  // dashes while the image (which reads history) displays the real values.
+  row.event_name ??= displayRow.event_name;
+  row.global_points ??= displayRow.global_points;
+  row.clan_points ??= displayRow.clan_points;
+  row.clan_rank ??= displayRow.clan_rank;
+  row.total_global_players ??= displayRow.total_global_players;
+  const avatarUrl = await searchAvatarUrl(displayRow, env);
+  const resultClan = String(displayRow.source_clan || displayRow.clan_name || scanClan).trim();
+  const sourceMode = searchResponseSourceMode(payload, displayRow);
   const isLeagueMode = sourceMode === "leagues";
   const leaguePayload = isLeagueMode && resultClan
     ? await fetchLeagueCurrentPayload(resultClan, env).catch(() => null)
     : null;
-  const leagueRankPayload = isLeagueMode && !positiveInteger(row.global_rank)
-    ? await fetchLeaguePlayerPoolRank(query, row.user_id, env).catch(() => null)
+  const leagueRankPayload = isLeagueMode && !positiveInteger(displayRow.global_rank)
+    ? await fetchLeaguePlayerPoolRank(query, displayRow.user_id, env).catch(() => null)
     : null;
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
-  const clanRankText = formatClanRank(row, payload.run);
+  const clanRankText = formatClanRank(displayRow, payload.run);
   const clanRankLine = isPrimaryClanMember
     ? `🔰 Rank in ${resultClan.toUpperCase()}: **${clanRankText}**`
-    : row.clan_rank
+    : displayRow.clan_rank
       ? `🔰 Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
       : null;
   const eventState = isLeagueMode ? null : await hourlyClanDeliveryEventState(env).catch(() => null);
@@ -991,8 +1053,8 @@ async function buildSearchResponse(query, env) {
     : eventState?.reason === "event_ended"
       ? ["Clan battle has ended"]
       : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
-  const globalPlayerCountSuffix = row.total_global_players
-    ? ` of ${shortNumber(row.total_global_players)}`
+  const globalPlayerCountSuffix = displayRow.total_global_players
+    ? ` of ${shortNumber(displayRow.total_global_players)}`
     : "";
   const embed = {
     title: "Global Search Results",
@@ -2620,23 +2682,30 @@ async function completeOfflinePingInteraction(interaction, env) {
 
     if (!guildId) throw httpError(400, "Offline pings can only be configured inside a Discord server.");
 
-    if (subcommand === "enable" || subcommand === "disable") {
-      const enabled = subcommand === "enable";
+    if (subcommand === "mode") {
+      const clansOption = getCommandBooleanOption(interaction, "clans");
+      const leaguesOption = getCommandBooleanOption(interaction, "leagues");
+      const usersOption = getCommandBooleanOption(interaction, "users");
+      const hasClansOption = clansOption !== null;
+      const hasLeaguesOption = leaguesOption !== null;
+      const hasUsersOption = usersOption !== null;
+      if (!hasClansOption && !hasLeaguesOption && !hasUsersOption) {
+        throw httpError(400, "Choose at least one setting, for example `/offline mode clans:true leagues:false users:false`.");
+      }
+      // `/offline mode` is the sole on/off control for each source. Keep the
+      // legacy overall flag on so an older `/offline disable` cannot block a
+      // newly selected source mode.
+      const body = { guild_id: guildId, enabled: true, updated_by: actorId };
+      if (hasClansOption) body.clan_watches_enabled = clansOption;
+      if (hasLeaguesOption) body.league_watches_enabled = leaguesOption;
+      if (hasUsersOption) body.user_watches_enabled = usersOption;
       const payload = await hourlyClanApiRequest(env, "/api/offline/config", {
         method: "PATCH",
-        body: {
-          guild_id: guildId,
-          enabled,
-          updated_by: actorId
-        }
+        body
       });
-      const resetNote = payload.alert_state_reset
-        ? " Active alert state was cleared."
-        : "";
+      const config = payload.config || {};
       await editOriginalInteraction(interaction, {
-        content: enabled
-          ? `Offline alerts are enabled for this server. Current threshold: **${payload.config?.minutes_threshold || 30}m** no point gain.`
-          : `Offline alerts are disabled for this server.${resetNote}`,
+        content: `Offline watch modes updated. **Clans:** ${config.clan_watches_enabled === false ? "Off" : "On"} · **Leagues:** ${config.league_watches_enabled === false ? "Off" : "On"} · **Direct users:** ${config.user_watches_enabled === false ? "Off" : "On"}.`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2676,8 +2745,7 @@ async function completeOfflinePingInteraction(interaction, env) {
           channel_type: Number(channel.type),
           destination_scope: assignTarget,
           assigned_by: actorId,
-          updated_by: actorId,
-          enabled: true
+          updated_by: actorId
         }
       });
       const label = assignTarget === "users"
@@ -2829,8 +2897,8 @@ async function completeOfflinePingInteraction(interaction, env) {
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
       const sourceMode = normalizeOfflineSourceModeOption(getCommandOption(interaction, "source"));
       const requestedChannelId = String(getCommandOption(interaction, "channel") || "").trim();
-      if (!username || !discordUserId) {
-        throw httpError(400, "Use `/offline user username:<roblox name> discord:<Discord user>`.");
+      if (!username) {
+        throw httpError(400, "Use `/offline user username:<roblox name>`. Add `discord:<Discord user>` only to override RoVer.");
       }
       let directChannel = null;
       if (requestedChannelId) {
@@ -2848,6 +2916,7 @@ async function completeOfflinePingInteraction(interaction, env) {
           discord_user_id: discordUserId,
           discord_label: label,
           clan_name: clan || null,
+          delivery_scope: "users",
           source_mode: sourceMode,
           channel_id: requestedChannelId || null,
           channel_type: directChannel ? Number(directChannel.type) : null,
@@ -2860,8 +2929,11 @@ async function completeOfflinePingInteraction(interaction, env) {
         ? ` Alerts for this user will post in <#${requestedChannelId}>.`
         : "";
       const sourceText = sourceMode === "auto" ? "" : ` Source: **${sourceMode === "league" ? "League" : "Clan"}**.`;
+      const identityText = discordUserId
+        ? `<@${discordUserId}>`
+        : "RoVer lookup (when the user has consented in this server)";
       await editOriginalInteraction(interaction, {
-        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> <@${discordUserId}>.${sourceText}${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
+        content: `Offline ping mapping saved: **${escapeDiscordMarkdown(username)}** -> ${identityText}.${sourceText}${channelText} Use \`/offline list\` to confirm the alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2869,10 +2941,10 @@ async function completeOfflinePingInteraction(interaction, env) {
       return;
     }
 
-    if (subcommand === "users") {
+    if (subcommand === "users" || subcommand === "members") {
       const clan = String(getCommandOption(interaction, "clan") || "").trim();
       if (!clan) {
-        throw httpError(400, "Use `/offline users clan:<clan> user1:<roblox name> discord1:<Discord user>`.");
+        throw httpError(400, `Use \`/offline ${subcommand} clan:<clan> user1:<roblox name> discord1:<Discord user>\`.`);
       }
       const users = [];
       const pairErrors = [];
@@ -2880,22 +2952,23 @@ async function completeOfflinePingInteraction(interaction, env) {
         const username = String(getCommandOption(interaction, `user${index}`) || "").trim();
         const discordUserId = String(getCommandOption(interaction, `discord${index}`) || "").trim();
         if (!username && !discordUserId) continue;
-        if (!username || !discordUserId) {
-          pairErrors.push(`user${index}/discord${index}`);
+        if (!username) {
+          pairErrors.push(`user${index}`);
           continue;
         }
         users.push({
           username,
           discord_user_id: discordUserId,
           discord_label: offlineDiscordUserLabel(interaction, discordUserId),
-          clan_name: clan || null
+          clan_name: clan || null,
+          delivery_scope: subcommand === "members" ? "clan" : "users"
         });
       }
       if (pairErrors.length) {
-        throw httpError(400, `Each numbered offline mapping needs both boxes filled: ${pairErrors.join(", ")}.`);
+        throw httpError(400, `Every supplied Discord override needs its matching Roblox username: ${pairErrors.join(", ")}.`);
       }
       if (!users.length) {
-        throw httpError(400, "Add at least one Roblox username and Discord user pair, starting with user1 and discord1.");
+        throw httpError(400, "Add at least one Roblox username, starting with user1. Discord overrides are optional when RoVer is configured.");
       }
       const payload = await hourlyClanApiRequest(env, "/api/offline/users", {
         method: "POST",
@@ -2909,7 +2982,9 @@ async function completeOfflinePingInteraction(interaction, env) {
       const warnings = [...(payload.warnings || [])];
       const warningText = warnings.length ? `\n-# ${warnings.slice(0, 5).join(" ")}` : "";
       await editOriginalInteraction(interaction, {
-        content: `Saved **${payload.users?.length || users.length}** offline ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Use \`/offline list\` to confirm the direct user alert channel is assigned.${warningText}`,
+        content: subcommand === "members"
+          ? `Saved **${payload.users?.length || users.length}** clan-member ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Luna uses any Discord overrides you supplied, then RoVer for the rest. Use \`/offline assign clan\` to set its destination.${warningText}`
+          : `Saved **${payload.users?.length || users.length}** direct-user ping mapping${(payload.users?.length || users.length) === 1 ? "" : "s"} for **${escapeDiscordMarkdown(clan)}**. Luna uses any Discord overrides you supplied, then RoVer for the rest. Use \`/offline assign users\` to set the direct-user alert destination.${warningText}`,
         embeds: [],
         components: [],
         allowed_mentions: { parse: [] }
@@ -2990,6 +3065,9 @@ async function completeOfflinePingInteraction(interaction, env) {
 
 function offlinePingSetupErrorMessage(err) {
   const message = String(err?.message || err || "Unknown offline ping setup error");
+  if (message.includes("delivery_scope") || message.includes("054_discord_offline_member_routing")) {
+    return "Offline ping setup failed: apply `supabase/migrations/054_discord_offline_member_routing.sql`, then retry the command.";
+  }
   if (message.includes("discord_offline_ping_leagues") || message.includes("PGRST205")) {
     return "Offline ping setup failed: the League watch table is missing in Supabase. Apply `supabase/migrations/050_discord_offline_league_pings.sql`, then retry `/offline league`.";
   }
@@ -3092,6 +3170,8 @@ function formatOfflinePingListResponse(payload, guildId) {
   const clans = (guild.clans || []).filter(row => row?.enabled !== false);
   const leagues = (guild.leagues || []).filter(row => row?.enabled !== false);
   const users = (guild.users || []).filter(row => row?.enabled !== false);
+  const clanMembers = users.filter(row => String(row?.delivery_scope || "users").toLowerCase() === "clan");
+  const directUsers = users.filter(row => String(row?.delivery_scope || "users").toLowerCase() !== "clan");
   const clanChannel = formatOfflinePingChannel(config.clan_channel_id || config.channel_id);
   const leagueChannel = formatOfflinePingChannel(config.league_channel_id || config.channel_id);
   const usersChannel = formatOfflinePingChannel(config.users_channel_id || config.channel_id);
@@ -3103,8 +3183,8 @@ function formatOfflinePingListResponse(payload, guildId) {
   if (leagues.length && !validDiscordSnowflake(config.league_channel_id || config.channel_id)) {
     warnings.push("League watches exist, but `/offline assign league` has not been set.");
   }
-  const usersMissingDestination = users.some(row => !validDiscordSnowflake(row.channel_id));
-  if (users.length && usersMissingDestination && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
+  const usersMissingDestination = directUsers.some(row => !validDiscordSnowflake(row.channel_id));
+  if (directUsers.length && usersMissingDestination && !validDiscordSnowflake(config.users_channel_id || config.channel_id)) {
     warnings.push("Direct user watches exist, but `/offline assign users` has not been set.");
   }
 
@@ -3115,7 +3195,7 @@ function formatOfflinePingListResponse(payload, guildId) {
     `**Direct user alert channel:** ${usersChannel}`,
     `**Threshold:** ${Math.max(1, Math.round(Number(config.minutes_threshold) || 30))}m with no point gain`,
     `**Re-alert rate:** ${Math.max(1, Math.round(Number(config.post_rate_minutes) || 30))}m`,
-    `**Enabled:** ${config.enabled === false ? "No" : "Yes"}`,
+    `**Watch modes:** Clans ${config.clan_watches_enabled === false ? "Off" : "On"} · Leagues ${config.league_watches_enabled === false ? "Off" : "On"} · Direct users ${config.user_watches_enabled === false ? "Off" : "On"}`,
     `**Scheduled checks:** ${payload?.runtime?.ingest_offline_alerts ? "Enabled" : "Disabled"}`,
     `**Last checked:** ${config.last_checked_at ? discordTime(config.last_checked_at) : "Never"}`,
     warnings.length ? `-# ${warnings.join(" ")}` : "",
@@ -3126,8 +3206,11 @@ function formatOfflinePingListResponse(payload, guildId) {
     `### Watched Leagues (${leagues.length})`,
     ...formatOfflinePingLeagueRows(leagues),
     "",
-    `### Direct User Watches (${users.length})`,
-    ...formatOfflinePingUserRows(users)
+    `### Clan Member Pings (${clanMembers.length})`,
+    ...formatOfflinePingUserRows(clanMembers, "clan"),
+    "",
+    `### Direct User Watches (${directUsers.length})`,
+    ...formatOfflinePingUserRows(directUsers, "users")
   ].filter(line => line !== "");
 
   const content = lines.join("\n");
@@ -3161,13 +3244,20 @@ function formatOfflinePingCheckResponse(payload) {
       result.users_channel_id ? `users <#${result.users_channel_id}>` : "",
       !result.clan_channel_id && !result.league_channel_id && !result.users_channel_id && result.channel_id ? `fallback <#${result.channel_id}>` : ""
     ].filter(Boolean).join(" · ") || "no channel";
+    const inactiveModes = [
+      result.clan_watches_enabled === false ? "Clans" : "",
+      result.league_watches_enabled === false ? "Leagues" : "",
+      result.user_watches_enabled === false ? "Direct users" : ""
+    ].filter(Boolean);
     lines.push([
       `### ${ok} · ${channels}`,
+      `**Watch modes:** Clans ${result.clan_watches_enabled === false ? "Off" : "On"} | Leagues ${result.league_watches_enabled === false ? "Off" : "On"} | Direct users ${result.user_watches_enabled === false ? "Off" : "On"}`,
       `**Watched clans:** ${Math.max(0, Math.round(Number(result.clan_watches) || 0))}`,
       `**Watched Leagues:** ${Math.max(0, Math.round(Number(result.league_watches) || 0))}`,
       `**Direct users:** ${Math.max(0, Math.round(Number(result.user_watches) || 0))}`,
       `**Checked users:** ${Math.max(0, Math.round(Number(result.checked_users) || 0))}`,
       `**Skipped no channel:** ${Math.max(0, Math.round(Number(result.alerts_skipped_no_channel) || 0))}`,
+      inactiveModes.length ? `-# ${inactiveModes.join(", ")} are disabled and skipped. Direct-user watches remain checked whenever Direct users is On.` : "",
       result.message ? `**Error:** ${escapeDiscordMarkdown(truncateText(result.message, 260))}` : ""
     ].filter(Boolean).join("\n"));
   }
@@ -3196,8 +3286,8 @@ function formatOfflinePingLeagueRows(leagues) {
   return rows;
 }
 
-function formatOfflinePingUserRows(users) {
-  if (!users.length) return ["None yet. Use `/offline user username:<roblox> discord:<discord user>`."];
+function formatOfflinePingUserRows(users, deliveryScope = "users") {
+  if (!users.length) return ["None yet. Use `/offline user username:<roblox>`. Add a Discord user only to override RoVer."];
   const rows = users
     .slice(0, 25)
     .map(row => {
@@ -3207,12 +3297,13 @@ function formatOfflinePingUserRows(users) {
         : "";
       const discord = discordUserId
         ? `<@${discordUserId}>`
-        : escapeDiscordMarkdown(row.discord_label || "no Discord mention");
+        : escapeDiscordMarkdown(row.discord_label || "RoVer lookup");
       const clan = row.clan_name ? ` · ${escapeDiscordMarkdown(row.clan_name)}` : "";
       const sourceMode = normalizeOfflineSourceModeOption(row.source_mode);
       const source = sourceMode === "auto" ? "" : ` · ${sourceMode === "league" ? "League" : "Clan"}`;
       const channel = validDiscordSnowflake(row.channel_id) ? ` · <#${row.channel_id}>` : "";
-      return `- **${name}** -> ${discord}${clan}${source}${channel}`;
+      const delivery = deliveryScope === "clan" ? " · clan post" : "";
+      return `- **${name}** -> ${discord}${clan}${source}${channel}${delivery}`;
     });
   if (users.length > rows.length) rows.push(`-# ...and ${users.length - rows.length} more.`);
   return rows;
@@ -3492,8 +3583,8 @@ function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now()) {
 }
 
 function clanLogScheduledIntervalMinutes(env) {
-  const value = Number(env.CLAN_LOG_POST_INTERVAL_MINUTES ?? 5);
-  if (!Number.isFinite(value)) return 5;
+  const value = Number(env.CLAN_LOG_POST_INTERVAL_MINUTES ?? 1);
+  if (!Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(60, Math.round(value)));
 }
 
@@ -3501,6 +3592,18 @@ function shouldRunClanLogScheduledPosts(env, scheduledTime = Date.now()) {
   const date = new Date(scheduledTime || Date.now());
   if (Number.isNaN(date.getTime())) return false;
   return date.getUTCMinutes() % clanLogScheduledIntervalMinutes(env) === 0;
+}
+
+function clanTrackerScheduledIntervalMinutes(env) {
+  const value = Number(env.CLAN_TRACKER_POST_INTERVAL_MINUTES ?? 5);
+  if (!Number.isFinite(value)) return 5;
+  return Math.max(1, Math.min(60, Math.round(value)));
+}
+
+function shouldRunClanTrackerScheduledPosts(env, scheduledTime = Date.now()) {
+  const date = new Date(scheduledTime || Date.now());
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getUTCMinutes() % clanTrackerScheduledIntervalMinutes(env) === 0;
 }
 
 function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MINUTE) {
@@ -5743,10 +5846,43 @@ function handleClanLookupComponent(interaction, env, ctx) {
   return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
 }
 
-async function completeClanLogInteraction(interaction, env, action, clanName) {
+function clanLogCustomId(ownerId, clanName, page, action = "open") {
+  const safeClan = encodeURIComponent(String(clanName || "").trim()).slice(0, 56);
+  return ["clanlog", String(ownerId || "").trim(), Math.max(0, Math.trunc(Number(page) || 0)), String(action || "open").trim().toLowerCase(), safeClan].join("|");
+}
+
+function parseClanLogCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 5 || parts[0] !== "clanlog") return null;
+  const ownerId = String(parts[1] || "").trim();
+  const page = Math.max(0, Math.trunc(Number(parts[2]) || 0));
+  const action = String(parts[3] || "").trim().toLowerCase();
+  let clanName = "";
   try {
-    if (action === "assign" || action === "demo") {
-      const channelId = getCommandOption(interaction, action === "demo" ? "demo" : "assign");
+    clanName = decodeURIComponent(String(parts[4] || "")).trim();
+  } catch {
+    return null;
+  }
+  if (!/^\d+$/.test(ownerId) || !/^[a-z_]+$/.test(action) || !clanName || clanName.length > 64) return null;
+  return { ownerId, page, action, clanName };
+}
+
+function handleClanLogComponent(interaction, env, ctx) {
+  const state = parseClanLogCustomId(interaction.data?.custom_id);
+  if (!state) {
+    return messageResponse("That clan activity page is no longer valid. Run `/clan log` again.", true);
+  }
+  if (interactionUserId(interaction) !== state.ownerId) {
+    return messageResponse("Only the person who ran `/clan log` can use these page controls.", true);
+  }
+  ctx.waitUntil(completeClanLogInteraction(interaction, env, "view", state.clanName, state.page, state.ownerId));
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completeClanLogInteraction(interaction, env, action, clanName, page = 0, ownerId = "") {
+  try {
+    if (action === "assign") {
+      const channelId = getCommandOption(interaction, "assign");
       if (!channelId) throw httpError(400, "Choose the text channel or thread that should receive the activity posts.");
       const channel = await resolveHourlyClanChannel(interaction, env, channelId);
       if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel?.type))) {
@@ -5754,24 +5890,6 @@ async function completeClanLogInteraction(interaction, env, action, clanName) {
       }
 
       const activity = await fetchClanActivityDetailPayloadForCommand(clanName, env);
-      if (action === "demo") {
-        const event = clanActivityEvents(activity)
-          .filter(isDiscordClanLogEvent)
-          .slice()
-          .sort((a, b) => clanActivityEventTime(b) - clanActivityEventTime(a))[0];
-        if (!event) {
-          throw httpError(404, `No stored clan activity is available yet for ${activity.clan_name || clanName}.`);
-        }
-        await postClanActivityLogEvent(env, channelId, event, activity.clan_name || clanName);
-        await editOriginalInteraction(interaction, {
-          content: `Posted a demo of Luna's clan activity format to <#${channelId}> using the latest recorded **${escapeDiscordMarkdown(clanActivityLogTitle(event))}** event. No log assignment was changed.`,
-          allowed_mentions: { parse: [] },
-          embeds: [],
-          components: [],
-          attachments: []
-        });
-        return;
-      }
       const newest = newestClanActivityEvent(activity);
       const assignment = await hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
         method: "POST",
@@ -5783,7 +5901,7 @@ async function completeClanLogInteraction(interaction, env, action, clanName) {
           assigned_by: interactionUserId(interaction),
           // Assignment deliberately starts from the latest stored event. It does
           // not flood the channel with historic activity that happened before setup.
-          last_event_id: newest?.event_id || null,
+          last_event_id: clanActivityEventFingerprint(newest),
           last_event_at: newest?.event_at || newest?.detected_at || null
         }
       });
@@ -5798,7 +5916,7 @@ async function completeClanLogInteraction(interaction, env, action, clanName) {
     }
 
     const activity = await fetchClanActivityDetailPayloadForCommand(clanName, env);
-    await editOriginalInteraction(interaction, buildClanActivityLogViewMessage(activity, clanName));
+    await editOriginalInteraction(interaction, buildClanActivityLogViewMessage(activity, clanName, { page, ownerId }));
   } catch (err) {
     await editOriginalInteraction(interaction, commandErrorMessage("Clan activity log failed", err, env)).catch(() => null);
   }
@@ -5817,12 +5935,24 @@ function clanActivityEvents(payload) {
   ];
   const seen = new Set();
   return events.filter(event => {
-    const key = String(event?.event_id || "").trim()
-      || `${event?.event_type || ""}:${event?.event_at || event?.detected_at || ""}:${event?.clan_name || ""}:${event?.user_id || ""}`;
+    const key = clanActivityEventFingerprint(event);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+// API event IDs have proven to be regenerated in some activity responses.  A
+// fingerprint from the immutable event details is stable across refreshes, so
+// an assignment never replays an old event merely because its API ID changed.
+function clanActivityEventFingerprint(event) {
+  const type = String(event?.event_type || "").trim().toLowerCase();
+  const timestamp = String(event?.event_at || event?.detected_at || "").trim();
+  const clan = String(event?.clan_name || "").trim().toLowerCase();
+  const member = String(event?.user_id || event?.username || event?.display_name || "").trim().toLowerCase();
+  const before = String(event?.previous_rank ?? event?.previous_value ?? event?.previous_member_role ?? "").trim().toLowerCase();
+  const after = String(event?.current_rank ?? event?.current_value ?? event?.current_member_role ?? "").trim().toLowerCase();
+  return [type, timestamp, clan, member, before, after].join("|");
 }
 
 function isDiscordClanLogEvent(event) {
@@ -5849,14 +5979,8 @@ function clanActivityLogEventLabel(event) {
   if (type === "member_left") return "left";
   if (type === "member_promoted") return `was promoted to ${event.current_member_role || event.current_value || "a new role"}`;
   if (type === "member_demoted") return `was demoted to ${event.current_member_role || event.current_value || "a new role"}`;
-  if (type === "rank_up") {
-    const places = Math.max(1, Number(event.previous_rank || 0) - Number(event.current_rank || 0));
-    return `climbed ${fullNumber(places)} rank${places === 1 ? "" : "s"}, from #${fullNumber(event.previous_rank)} to #${fullNumber(event.current_rank)}`;
-  }
-  if (type === "rank_down") {
-    const places = Math.max(1, Number(event.current_rank || 0) - Number(event.previous_rank || 0));
-    return `dropped ${fullNumber(places)} rank${places === 1 ? "" : "s"}, from #${fullNumber(event.previous_rank)} to #${fullNumber(event.current_rank)}`;
-  }
+  if (type === "rank_up") return `climbed from rank **#${fullNumber(event.previous_rank)}** to rank **#${fullNumber(event.current_rank)}**`;
+  if (type === "rank_down") return `dropped from rank **#${fullNumber(event.previous_rank)}** to rank **#${fullNumber(event.current_rank)}**`;
   if (type === "kick_used") return "used a clan kick";
   if (type === "kick_available") return "has a clan kick available";
   return String(event?.event_type || "activity changed").replace(/_/g, " ");
@@ -5892,7 +6016,38 @@ function clanActivityAvatarUrl(event) {
     : null;
 }
 
-function buildClanActivityEventEmbed(event, fallbackClan = "") {
+function clanActivityDurationText(startAt, endAt) {
+  const start = new Date(startAt || "").getTime();
+  const end = new Date(endAt || Date.now()).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "";
+  const totalMinutes = Math.floor((end - start) / 60000);
+  if (totalMinutes < 1) return "less than a minute";
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (!days && minutes) parts.push(`${minutes}m`);
+  return parts.slice(0, 2).join(" ");
+}
+
+function clanActivityJoinGlobalRankLine(event, details) {
+  if (String(event?.event_type || "").toLowerCase() !== "member_joined") return "";
+  const rank = Math.trunc(Number(details?.global_rank));
+  const total = Math.trunc(Number(details?.global_rank_total));
+  if (!(rank > 0)) return "";
+  return `🌍 Global Rank: **#${fullNumber(rank)}${total > 0 ? ` of ${fullNumber(total)}` : ""}**`;
+}
+
+function clanActivityLeaveTenureLine(event, details) {
+  const type = String(event?.event_type || "").toLowerCase();
+  if (type !== "member_left" && type !== "member_kicked") return "";
+  const duration = clanActivityDurationText(details?.join_time, event?.detected_at || event?.event_at);
+  return duration ? `⏱️ Time in clan: **${duration}**` : "";
+}
+
+function buildClanActivityEventEmbed(event, fallbackClan = "", options = {}) {
   const type = String(event?.event_type || "").toLowerCase();
   const isRankEvent = type === "rank_up" || type === "rank_down";
   const username = String(event?.display_name || event?.username || event?.user_id || "A member").trim();
@@ -5900,33 +6055,53 @@ function buildClanActivityEventEmbed(event, fallbackClan = "") {
   const details = event?.details && typeof event.details === "object" ? event.details : {};
   const memberCount = Number(details.member_count ?? details.current_members);
   const capacity = Number(details.member_capacity);
-  const roleLine = event?.current_member_role || event?.current_value || "";
   const description = [
     isRankEvent
-      ? `**[${escapeDiscordMarkdown(clanName)}]** ${clanActivityLogEventLabel(event)}.`
+      ? `[${escapeDiscordMarkdown(clanName)}] ${clanActivityLogEventLabel(event)}.`
       : `**${escapeDiscordMarkdown(username)}** ${clanActivityLogEventLabel(event)} **[${escapeDiscordMarkdown(clanName)}]**.`,
     Number.isFinite(memberCount) ? `${fullNumber(memberCount)}${Number.isFinite(capacity) && capacity > 0 ? `/${fullNumber(capacity)}` : ""} Members` : "",
-    roleLine && /member_(promoted|demoted)/.test(String(event?.event_type || "")) ? `Role: **${escapeDiscordMarkdown(roleLine)}**` : "",
-    `Detected ${discordTime(event?.event_at || event?.detected_at)}`
+    clanActivityJoinGlobalRankLine(event, details),
+    clanActivityLeaveTenureLine(event, details),
+    `Detected ${discordTime(event?.detected_at || event?.event_at)}`
   ].filter(Boolean).join("\n");
-  const avatar = clanActivityAvatarUrl(event);
+  // Feed alerts use compact left-side thumbnails.  Membership events use the
+  // player portrait; clan-rank events represent the clan itself.
+  const imageUrl = isRankEvent
+    ? String(options?.clanIconUrl || "").trim()
+    : clanActivityAvatarUrl(event);
   return {
     title: clanActivityLogTitle(event),
     color: clanActivityLogAccent(event),
     description,
-    ...(avatar ? { thumbnail: { url: avatar } } : {}),
+    ...(imageUrl ? { thumbnail: { url: imageUrl } } : {}),
     footer: { text: "Luna clan activity tracker" }
   };
 }
 
-function buildClanActivityLogViewMessage(payload, fallbackClan) {
-  const events = clanActivityEvents(payload)
+function buildClanActivityLogViewMessage(payload, fallbackClan, options = {}) {
+  const pageSize = 10;
+  const allEvents = clanActivityEvents(payload)
     .filter(isDiscordClanLogEvent)
-    .slice(0, 10);
+    .slice()
+    .sort((a, b) => clanActivityEventTime(b) - clanActivityEventTime(a));
+  const totalPages = Math.max(1, Math.ceil(allEvents.length / pageSize));
+  const page = clampPage(options.page, totalPages);
+  const events = allEvents.slice(page * pageSize, (page + 1) * pageSize);
   const summary = payload?.summary && typeof payload.summary === "object" ? payload.summary : {};
   const lines = events.length
     ? events.map(event => `• ${discordTime(event.event_at || event.detected_at)} — **${escapeDiscordMarkdown(event.display_name || event.username || event.user_id || "member")}** ${clanActivityLogEventLabel(event)}`)
     : ["No roster changes have been recorded yet."];
+  const clanName = String(payload?.clan_name || fallbackClan || "Clan").trim();
+  const components = totalPages > 1 && options.ownerId
+    ? [{
+      type: COMPONENT_TYPE_ACTION_ROW,
+      components: [
+        historyButton("Previous", clanLogCustomId(options.ownerId, clanName, page - 1, "previous"), BUTTON_STYLE_SECONDARY, page <= 0),
+        historyButton(`Page ${page + 1}/${totalPages}`, clanLogCustomId(options.ownerId, clanName, page, "indicator"), BUTTON_STYLE_SECONDARY, true),
+        historyButton("Next", clanLogCustomId(options.ownerId, clanName, page + 1, "next"), BUTTON_STYLE_SECONDARY, page >= totalPages - 1)
+      ]
+    }]
+    : [];
   return {
     embeds: [{
       title: `Clan Activity • ${String(payload?.clan_name || fallbackClan || "Clan").toUpperCase()}`,
@@ -5936,13 +6111,14 @@ function buildClanActivityLogViewMessage(payload, fallbackClan) {
         summary.current_members ? `**Members:** ${fullNumber(summary.current_members)}` : "",
         "",
         "**Recent Activity**",
-        ...lines
+        ...lines,
+        totalPages > 1 ? `\nPage ${page + 1}/${totalPages} · ${fullNumber(allEvents.length)} recorded events` : ""
       ].filter(Boolean).join("\n"),
       ...(summary.icon_url ? { thumbnail: { url: summary.icon_url } } : {}),
       footer: { text: "Use /clan log clan:<name> assign:<channel> to post future activity." }
     }],
     allowed_mentions: { parse: [] },
-    components: [],
+    components,
     attachments: []
   };
 }
@@ -5953,7 +6129,7 @@ function clanLogEventsSince(payload, assignment) {
     .sort((a, b) => clanActivityEventTime(a) - clanActivityEventTime(b));
   if (!all.length) return { all, events: [], newest: null };
   const lastId = String(assignment?.last_event_id || "").trim();
-  const lastIndex = lastId ? all.findIndex(event => String(event?.event_id || "") === lastId) : -1;
+  const lastIndex = lastId ? all.findIndex(event => clanActivityEventFingerprint(event) === lastId) : -1;
   const after = lastIndex >= 0
     ? all.slice(lastIndex + 1)
     : assignment?.last_event_at
@@ -5966,12 +6142,12 @@ function clanLogEventsSince(payload, assignment) {
   };
 }
 
-async function postClanActivityLogEvent(env, channelId, event, fallbackClan) {
+async function postClanActivityLogEvent(env, channelId, event, fallbackClan, options = {}) {
   const response = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
     body: JSON.stringify({
-      embeds: [buildClanActivityEventEmbed(event, fallbackClan)],
+      embeds: [buildClanActivityEventEmbed(event, fallbackClan, options)],
       allowed_mentions: { parse: [] }
     })
   });
@@ -6004,10 +6180,12 @@ async function runClanLogAssignments(env, options = {}) {
         continue;
       }
       for (const event of delta.events.slice(0, 25)) {
-        await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name);
+        await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name, {
+          clanIconUrl: payload?.summary?.icon_url || payload?.icon_url || null
+        });
       }
       await updateClanLogAssignment(env, assignment, {
-        last_event_id: delta.newest.event_id || null,
+        last_event_id: clanActivityEventFingerprint(delta.newest),
         last_event_at: delta.newest.event_at || delta.newest.detected_at || new Date(options.scheduledTime || Date.now()).toISOString(),
         last_error: null
       });
@@ -6018,6 +6196,306 @@ async function runClanLogAssignments(env, options = {}) {
     }
   }
   return { ok: true, assignments: assignments.length, results };
+}
+
+async function completeClanTrackerInteraction(interaction, env, action, clanName) {
+  try {
+    const current = await fetchClanTrackerCurrent(env, clanName);
+    const message = buildClanTrackerComponentsMessage(current, clanName, env);
+
+    if (action !== "assign") {
+      await editOriginalInteraction(interaction, message);
+      return;
+    }
+
+    const channelId = getCommandOption(interaction, "assign");
+    if (!channelId) throw httpError(400, "Choose a text channel or thread for the persistent tracker.");
+    const channel = await resolveHourlyClanChannel(interaction, env, channelId);
+    if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel?.type))) {
+      throw httpError(400, "Choose a text channel or thread that Luna can post in.");
+    }
+
+    const assignment = await hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
+      method: "POST",
+      body: {
+        guild_id: interaction.guild_id,
+        channel_id: channelId,
+        channel_type: Number(channel?.type),
+        clan_name: current.clan_name || clanName,
+        assigned_by: interactionUserId(interaction),
+        message_id: null,
+        last_updated_at: null,
+        last_error: null
+      }
+    });
+    const savedAssignment = assignment?.assignment || assignment;
+    const delivery = await postOrUpdateClanTrackerMessage(env, savedAssignment, message);
+    await updateClanTrackerAssignment(env, savedAssignment, {
+      message_id: delivery?.id || savedAssignment?.message_id || null,
+      last_updated_at: current.snapshot_at || new Date().toISOString(),
+      last_error: null
+    });
+
+    await editOriginalInteraction(interaction, {
+      content: `Persistent tracking is now enabled for **${escapeDiscordMarkdown(current.clan_name || clanName)}** in <#${channelId}>. Luna will edit one tracker post there every ${clanTrackerScheduledIntervalMinutes(env)} minutes.`,
+      allowed_mentions: { parse: [] },
+      embeds: [],
+      components: [],
+      attachments: []
+    });
+  } catch (err) {
+    await editOriginalInteraction(interaction, commandErrorMessage("Clan tracker failed", err, env)).catch(() => null);
+  }
+}
+
+async function fetchClanTrackerCurrent(env, clanNameValue) {
+  const clan = String(clanNameValue || "").trim();
+  if (!clan) throw httpError(400, "A clan name is required.");
+
+  // This is deliberately a light live read. It uses the same current clan
+  // snapshot as the website instead of creating a separate, competing dataset.
+  await hourlyClanApiRequest(env, "/api/ingest", {
+    method: "POST",
+    query: { clan }
+  }).catch(err => {
+    // /api/current can still return a good stored snapshot if an ingest is
+    // temporarily unavailable, so do not take the tracker offline for that.
+    console.warn("Clan tracker ingest skipped", clan, err?.message || String(err));
+  });
+
+  const current = await hourlyClanApiRequest(env, "/api/current", {
+    query: { clan, avatars: 0, downtime: 1, fresh: 1 }
+  });
+  const rows = Array.isArray(current?.rows) ? current.rows : [];
+  if (!rows.length) throw httpError(409, `No current clan rows were returned for ${clan}.`);
+  return {
+    ...current,
+    clan_name: current.clan_name || current.clan || clan,
+    rows
+  };
+}
+
+function clanTrackerRows(current) {
+  return (Array.isArray(current?.rows) ? current.rows : [])
+    .map((row, index) => ({
+      ...row,
+      tracker_rank: positiveInteger(row?.rank ?? row?.member_rank ?? row?.clan_rank) || index + 1,
+      tracker_username: String(row?.username || row?.display_name || row?.user_id || "Unknown").trim(),
+      tracker_points: finiteNumber(row?.total_points ?? row?.member_points ?? row?.points ?? row?.total) || 0,
+      tracker_gain_5m: finiteNumber(row?.gain_5m ?? row?.last_5m ?? row?.five_minute_gain),
+      tracker_gain_1h: finiteNumber(row?.gain_1h ?? row?.one_hour_gain ?? row?.hourly_points ?? row?.projected_gain_1h),
+      tracker_downtime: hourlyDowntimeMinutes(row)
+    }))
+    .sort((a, b) => a.tracker_rank - b.tracker_rank || b.tracker_points - a.tracker_points);
+}
+
+function clanTrackerDelta(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const number = Number(value);
+  return number > 0 ? `+${shortNumber(number)}` : shortNumber(number);
+}
+
+function chunkClanTrackerRows(rows, chunkSize = 8) {
+  const chunks = [];
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    chunks.push(rows.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+function buildClanTrackerMessage(current, fallbackClan = "", env = {}) {
+  const rows = clanTrackerRows(current).slice(0, 75);
+  const totalPoints = hourlyClanPoints(current, rows);
+  const currentRank = positiveInteger(current?.clan_rank ?? current?.rank ?? current?.source_clan_rank);
+  const memberCount = positiveInteger(current?.member_count ?? current?.current_members) || rows.length;
+  const capacity = positiveInteger(current?.member_capacity ?? current?.max_members);
+  const snapshotAt = current?.snapshot_at || current?.fetched_at || current?.updated_at || null;
+  const iconUrl = String(current?.icon_url || current?.clan_icon_url || current?.clan?.icon_url || "").trim();
+  const displayClan = String(current?.clan_name || fallbackClan || "Clan").trim();
+  const fields = chunkClanTrackerRows(rows).map(chunk => ({
+    name: `Ranks #${chunk[0]?.tracker_rank || "?"}–#${chunk[chunk.length - 1]?.tracker_rank || "?"}`,
+    value: chunk.map(row => {
+      const downtime = row.tracker_downtime === null ? "" : ` · ⏱ ${hourlyDowntimeLabel(row.tracker_downtime)}`;
+      return `**#${fullNumber(row.tracker_rank)} · ${escapeDiscordMarkdown(row.tracker_username)}**\n⭐ **${shortNumber(row.tracker_points)}** · 5m **${clanTrackerDelta(row.tracker_gain_5m)}** · 1h **${clanTrackerDelta(row.tracker_gain_1h)}**${downtime}`;
+    }).join("\n\n"),
+    inline: true
+  }));
+
+  if (!fields.length) {
+    fields.push({ name: "Members", value: "No current members were returned yet.", inline: false });
+  }
+
+  return {
+    embeds: [{
+      title: `${displayClan.toUpperCase()} Members`,
+      color: 0x9b59f6,
+      description: [
+        currentRank ? `🏆 Rank: **#${fullNumber(currentRank)}** — Total: **${shortNumber(totalPoints)}** ⭐` : `Total: **${shortNumber(totalPoints)}** ⭐`,
+        `👥 Members: **${fullNumber(memberCount)}${capacity ? `/${fullNumber(capacity)}` : ""}**`,
+        `🕒 Last Updated: ${discordTime(snapshotAt)} · Refreshes every ${clanTrackerScheduledIntervalMinutes(env)} minutes`
+      ].join("\n"),
+      fields,
+      ...(iconUrl ? { thumbnail: { url: iconUrl } } : {}),
+      footer: { text: "Luna persistent clan tracker" }
+    }],
+    allowed_mentions: { parse: [] },
+    components: [],
+    attachments: []
+  };
+}
+
+function clanTrackerTableCell(value, width, alignment = "left") {
+  const normalized = String(value ?? "-").replace(/\s+/g, " ").trim() || "-";
+  const visible = normalized.length > width
+    ? `${normalized.slice(0, Math.max(1, width - 1))}.`
+    : normalized;
+  const padding = " ".repeat(Math.max(0, width - visible.length));
+  return alignment === "right" ? `${padding}${visible}` : `${visible}${padding}`;
+}
+
+function clanTrackerTableBlock(rows) {
+  const header = [
+    clanTrackerTableCell("RK", 3, "right"),
+    clanTrackerTableCell("PLAYER", 19),
+    clanTrackerTableCell("POINTS", 9, "right"),
+    clanTrackerTableCell("5M", 7, "right"),
+    clanTrackerTableCell("1H", 7, "right"),
+    clanTrackerTableCell("DOWN", 8, "right")
+  ].join("  ");
+  const lines = rows.map(row => [
+    clanTrackerTableCell(`#${fullNumber(row.tracker_rank)}`, 3, "right"),
+    clanTrackerTableCell(row.tracker_username, 19),
+    clanTrackerTableCell(shortNumber(row.tracker_points), 9, "right"),
+    clanTrackerTableCell(clanTrackerDelta(row.tracker_gain_5m), 7, "right"),
+    clanTrackerTableCell(clanTrackerDelta(row.tracker_gain_1h), 7, "right"),
+    clanTrackerTableCell(row.tracker_downtime === null ? "-" : hourlyDowntimeLabel(row.tracker_downtime), 8, "right")
+  ].join("  "));
+  return `**Ranks #${rows[0]?.tracker_rank || "?"}-#${rows[rows.length - 1]?.tracker_rank || "?"}**\n\`\`\`text\n${header}\n${lines.join("\n")}\n\`\`\``;
+}
+
+function buildClanTrackerComponentsMessage(current, fallbackClan = "", env = {}) {
+  const rows = clanTrackerRows(current).slice(0, 75);
+  const totalPoints = hourlyClanPoints(current, rows);
+  const currentRank = positiveInteger(current?.clan_rank ?? current?.rank ?? current?.source_clan_rank);
+  const memberCount = positiveInteger(current?.member_count ?? current?.current_members) || rows.length;
+  const capacity = positiveInteger(current?.member_capacity ?? current?.max_members);
+  const snapshotAt = current?.snapshot_at || current?.fetched_at || current?.updated_at || null;
+  const iconUrl = String(current?.icon_url || current?.clan_icon_url || current?.clan?.icon_url || "").trim();
+  const displayClan = String(current?.clan_name || fallbackClan || "Clan").trim();
+  const summary = [
+    `## ${escapeDiscordMarkdown(displayClan.toUpperCase())} Members`,
+    currentRank ? `**Clan Rank:** #${fullNumber(currentRank)} | **Total Points:** ${shortNumber(totalPoints)}` : `**Total Points:** ${shortNumber(totalPoints)}`,
+    `**Members:** ${fullNumber(memberCount)}${capacity ? `/${fullNumber(capacity)}` : ""}`,
+    `-# Last Updated: ${snapshotAt ? discordTime(snapshotAt) : "Unknown"} | Refreshes every ${clanTrackerScheduledIntervalMinutes(env)} minutes`
+  ].join("\n");
+  const header = iconUrl
+    ? {
+        type: COMPONENT_TYPE_SECTION,
+        components: [{ type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary }],
+        accessory: {
+          type: COMPONENT_TYPE_THUMBNAIL,
+          media: { url: iconUrl },
+          description: `${displayClan} clan icon`
+        }
+      }
+    : { type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary };
+  const components = [header, { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 }];
+  const blocks = chunkClanTrackerRows(rows, 25);
+  if (blocks.length) {
+    components.push(...blocks.map(block => ({
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: clanTrackerTableBlock(block)
+    })));
+  } else {
+    components.push({ type: COMPONENT_TYPE_TEXT_DISPLAY, content: "No current members were returned yet." });
+  }
+  components.push({ type: COMPONENT_TYPE_TEXT_DISPLAY, content: "-# Luna persistent clan tracker" });
+  return {
+    components: [{
+      type: COMPONENT_TYPE_CONTAINER,
+      accent_color: 0x9b59f6,
+      components
+    }],
+    embeds: [],
+    allowed_mentions: { parse: [] },
+    attachments: [],
+    flags: MESSAGE_FLAG_COMPONENTS_V2
+  };
+}
+
+async function postOrUpdateClanTrackerMessage(env, assignment, message) {
+  const channelId = String(assignment?.channel_id || "").trim();
+  const messageId = String(assignment?.message_id || "").trim();
+  if (!channelId) throw httpError(400, "The clan tracker assignment is missing its channel.");
+
+  // A persistent tracker is a Components V2 message. Do not send legacy
+  // content with it: Discord disables content/embeds for V2 messages.
+  const body = JSON.stringify({ ...message, embeds: [] });
+  if (messageId) {
+    const edit = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
+      method: "PATCH",
+      headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
+      body
+    });
+    const payload = await edit.json().catch(() => ({}));
+    if (edit.ok) return payload;
+    if (edit.status !== 404) {
+      throw httpError(edit.status === 403 ? 403 : 502, payload.message || `Discord clan tracker update failed (${edit.status}).`);
+    }
+  }
+
+  const create = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
+    body
+  });
+  const payload = await create.json().catch(() => ({}));
+  if (!create.ok) {
+    throw httpError(create.status === 403 ? 403 : 502, payload.message || `Discord clan tracker post failed (${create.status}).`);
+  }
+  return payload;
+}
+
+async function updateClanTrackerAssignment(env, assignment, patch) {
+  return hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
+    method: "PATCH",
+    body: { assignment_key: String(assignment?.assignment_key || ""), ...patch }
+  });
+}
+
+async function runClanTrackerAssignments(env, options = {}) {
+  const response = await hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
+    query: { enabled: "true", limit: 1000 }
+  });
+  const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
+  const reports = new Map();
+  const results = [];
+
+  for (const assignment of assignments) {
+    const clanKey = String(assignment?.clan_name || "").trim().toLowerCase();
+    try {
+      let current = reports.get(clanKey);
+      if (!current) {
+        current = await fetchClanTrackerCurrent(env, assignment.clan_name);
+        reports.set(clanKey, current);
+      }
+      const message = buildClanTrackerComponentsMessage(current, assignment.clan_name, env);
+      const delivery = await postOrUpdateClanTrackerMessage(env, assignment, message);
+      await updateClanTrackerAssignment(env, assignment, {
+        message_id: delivery?.id || assignment?.message_id || null,
+        last_updated_at: current.snapshot_at || new Date(options.scheduledTime || Date.now()).toISOString(),
+        last_error: null
+      });
+      results.push({ assignment_key: assignment.assignment_key, updated: true, message_id: delivery?.id || assignment?.message_id || null });
+    } catch (err) {
+      await updateClanTrackerAssignment(env, assignment, {
+        last_error: String(err?.message || err).slice(0, 500)
+      }).catch(() => null);
+      results.push({ assignment_key: assignment.assignment_key, updated: false, error: err?.message || String(err) });
+    }
+  }
+
+  return { ok: results.every(result => result.updated), assignments: assignments.length, results };
 }
 
 async function completeClanLookupInteraction(interaction, env, state) {
@@ -12664,10 +13142,25 @@ function clanCommandPayload() {
             type: APPLICATION_COMMAND_OPTION_CHANNEL,
             required: false,
             channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+          }
+        ]
+      },
+      {
+        name: "tracker",
+        description: "Preview or assign one persistent, live clan tracker post.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "clan",
+            description: "Clan name, for example COLD or c0ld",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 32
           },
           {
-            name: "demo",
-            description: "Optional text channel or thread for a one-time format preview",
+            name: "assign",
+            description: "Optional text channel or thread for the persistent tracker",
             type: APPLICATION_COMMAND_OPTION_CHANNEL,
             required: false,
             channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
@@ -13117,9 +13610,9 @@ function offlineUsersBulkOptions() {
       },
       {
         name: `discord${index}`,
-        description: `Discord user to ping for Roblox user #${index}`,
+        description: `Optional Discord-user override for Roblox user #${index}`,
         type: APPLICATION_COMMAND_OPTION_USER,
-        required
+        required: false
       }
     );
   }
@@ -13183,14 +13676,29 @@ function offlineCommandPayload() {
         ]
       },
       {
-        name: "enable",
-        description: "Turn offline alerts back on for this server.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
-      },
-      {
-        name: "disable",
-        description: "Turn offline alerts off for this server without deleting watches.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+        name: "mode",
+        description: "Set which offline alert sources are active in this server.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "clans",
+            description: "Enable or disable all Clan watches for this server",
+            type: APPLICATION_COMMAND_OPTION_BOOLEAN,
+            required: false
+          },
+          {
+            name: "leagues",
+            description: "Enable or disable all League watches for this server",
+            type: APPLICATION_COMMAND_OPTION_BOOLEAN,
+            required: false
+          },
+          {
+            name: "users",
+            description: "Enable or disable direct-user watches for this server",
+            type: APPLICATION_COMMAND_OPTION_BOOLEAN,
+            required: false
+          }
+        ]
       },
       {
         name: "minutes",
@@ -13269,7 +13777,7 @@ function offlineCommandPayload() {
       },
       {
         name: "user",
-        description: "Map one Roblox username to one Discord user for direct pings.",
+        description: "Add one Roblox username to direct pings; RoVer resolves the Discord user.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
         options: [
           {
@@ -13282,9 +13790,9 @@ function offlineCommandPayload() {
           },
           {
             name: "discord",
-            description: "Discord user to mention when this Roblox account stops gaining",
+            description: "Optional Discord-user override; otherwise Luna uses RoVer",
             type: APPLICATION_COMMAND_OPTION_USER,
-            required: true
+            required: false
           },
           {
             name: "clan",
@@ -13322,6 +13830,22 @@ function offlineCommandPayload() {
           {
             name: "clan",
             description: "Clan or League these users belong to, for example c0ld, WMSY, or dezzz",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            min_length: 1,
+            max_length: 100
+          },
+          ...offlineUsersBulkOptions()
+        ]
+      },
+      {
+        name: "members",
+        description: "Add up to 12 members to be tagged inside their Clan's offline post.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "clan",
+            description: "Clan these members belong to, for example c0ld or WMSY",
             type: APPLICATION_COMMAND_OPTION_STRING,
             required: true,
             min_length: 1,
@@ -13575,6 +14099,22 @@ async function verifyDiscordRequest(request, env, body) {
   }
 
   return false;
+}
+
+function getCommandBooleanOption(interaction, name) {
+  const targetName = String(name || "").toLowerCase();
+  const stack = [...(interaction.data?.options || [])];
+
+  while (stack.length) {
+    const option = stack.shift();
+    if (String(option?.name || "").toLowerCase() === targetName && option?.value !== undefined) {
+      const value = option.value;
+      return value === true || ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
+    }
+    if (Array.isArray(option?.options)) stack.push(...option.options);
+  }
+
+  return null;
 }
 
 function getCommandOption(interaction, name) {

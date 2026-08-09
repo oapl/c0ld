@@ -20,8 +20,8 @@ if ($GuildId.Trim()) {
   $query = "?scope=global"
 }
 
-Write-Host "Registering /clan globally, including /clan log..." -ForegroundColor Green
+Write-Host "Registering /clan globally, including /clan log and /clan tracker..." -ForegroundColor Green
 $result = Invoke-RestMethod -Method Post -Uri "$base/admin/register-clan-command$query" -Headers $headers
 $result | ConvertTo-Json -Depth 12
 
-Write-Host "Discord may take up to an hour to refresh global commands. Use /clan log clan:<name>, or /clan log clan:<name> assign:<channel>." -ForegroundColor Green
+Write-Host "Discord may take up to an hour to refresh global commands. Use /clan tracker clan:<name> assign:<channel> for a persistent board, or /clan log clan:<name> assign:<channel> for activity posts." -ForegroundColor Green

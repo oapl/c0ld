@@ -39,13 +39,16 @@ const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
 const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
 const DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE = "discord_clan_log_assignments";
+const DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE = "discord_clan_tracker_assignments";
 const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
 const DISCORD_OFFLINE_PING_CLANS_TABLE = "discord_offline_ping_clans";
 const DISCORD_OFFLINE_PING_LEAGUES_TABLE = "discord_offline_ping_leagues";
 const DISCORD_OFFLINE_PING_USERS_TABLE = "discord_offline_ping_users";
 const DISCORD_OFFLINE_PING_ALERT_STATE_TABLE = "discord_offline_ping_alert_state";
+const DISCORD_ROVER_MEMBER_LINKS_TABLE = "discord_rover_member_links";
 const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
 const DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,last_event_id,last_event_at,last_error,created_at,updated_at";
+const DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,message_id,last_updated_at,last_error,created_at,updated_at";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -97,11 +100,14 @@ const LEAGUE_MILESTONE_LIST_TOP_LIMIT_DEFAULT = 1000;
 const DEFAULT_GLOBAL_RANK_CLAN_DELAY_MS = 1000;
 const DEFAULT_GLOBAL_RANK_CANDIDATE_CLAN_BATCH_SIZE = 10;
 const DEFAULT_CLAN_ACTIVITY_TOP_N = 100;
-const DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES = 30;
+// Clan logs need a fresh roster quickly enough to be useful in Discord.  The
+// Worker cron is already allowed to wake every minute; this controls the
+// roster cadence, not the cron itself.
+const DEFAULT_CLAN_ACTIVITY_SCHEDULE_MINUTES = 5;
 const DEFAULT_CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_CLAN_ACTIVITY_CLAN_DELAY_MS = 250;
 const DEFAULT_CLAN_ACTIVITY_CONCURRENCY = 8;
-const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 25;
+const DEFAULT_CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = 5;
 const DEFAULT_OFFLINE_ALERT_MINUTES = 30;
 const DEFAULT_OFFLINE_POST_RATE_MINUTES = 30;
 const DEFAULT_OFFLINE_ALERT_SCHEDULE_MINUTES = 5;
@@ -266,6 +272,12 @@ export default {
         requireAdmin(request, env);
         response = await handleDiscordClanLogAssignments(request, env);
       } else if (
+        ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
+        && url.pathname === "/api/discord/clan-tracker-assignments"
+      ) {
+        requireAdmin(request, env);
+        response = await handleDiscordClanTrackerAssignments(request, env);
+      } else if (
         ["GET", "POST", "PATCH"].includes(request.method)
         && url.pathname === "/api/offline/config"
       ) {
@@ -292,6 +304,12 @@ export default {
       } else if (request.method === "GET" && url.pathname === "/api/offline/status") {
         requireAdmin(request, env);
         response = await handleOfflinePingStatus(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/offline/rover/lookup") {
+        requireAdmin(request, env);
+        response = await handleOfflineRoVerLookup(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/offline/bloxlink/lookup") {
+        requireAdmin(request, env);
+        response = await handleOfflineBloxlinkLookup(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history/cwbot/missing") {
@@ -613,7 +631,10 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
       label: "offline-pings",
       run: () => handleOfflinePingCheck(env, "schedule", {
         force,
-        skipClanWatches: !runBattleDataJobs,
+        // A registered offline clan/member watch is a user choice, not a
+        // side effect of the current event type.  Let its own source setting
+        // decide whether clan and/or League rows are used.
+        skipClanWatches: false,
         ...jobRunOptions
       })
     });
@@ -6765,6 +6786,12 @@ async function handleClanActivityIngest(env, source, options = {}) {
 
   const topN = clanActivityTopN(env);
   const topClans = await fetchTopClans(env, topN);
+  // An assigned Discord clan log must not silently stop working merely
+  // because that clan falls outside the generic top-clan activity window.
+  // Top clans remain the normal scan set; enabled log assignments are merged
+  // in as explicit targets.
+  const assignedLogClans = await fetchEnabledClanActivityLogTargets(env).catch(() => []);
+  const scanClans = buildClanActivityScanTargets(topClans, assignedLogClans);
   const previousRows = await fetchClanActivityCurrentRows(env, resolvedBattleKey).catch(() => []);
   const previousSummaries = await fetchClanActivitySummaryRows(env, resolvedBattleKey).catch(() => []);
   const previousByClanUser = new Map(previousRows.map(row => [clanActivityMemberKey(row.clan_name, row.user_id), row]));
@@ -6779,7 +6806,7 @@ async function handleClanActivityIngest(env, source, options = {}) {
   const scanErrors = [];
   let fetchedClans = 0;
 
-  await runLimited(topClans.map((clanRow, index) => ({ clanRow, index })), concurrency, async ({ clanRow, index }) => {
+  await runLimited(scanClans.map((clanRow, index) => ({ clanRow, index })), concurrency, async ({ clanRow, index }) => {
     if (delayMs > 0) {
       await sleep((index % concurrency) * delayMs);
     }
@@ -6798,10 +6825,11 @@ async function handleClanActivityIngest(env, source, options = {}) {
       const data = api.data || {};
       const battles = data.Battles || data.battles || {};
       const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
+      const scannedClanRow = resolveClanActivityScanClanRow(clanRow, data, battle);
       const members = battle ? normalizeMembers(data, battle) : [];
       const usernameMap = await resolveRobloxUsernames(members.map(member => member.user_id), env)
         .catch(() => new Map());
-      const clanKey = normalizeText(clanRow.clan_name);
+      const clanKey = normalizeText(scannedClanRow.clan_name);
       const previousClanRows = previousByClan.get(clanKey) || [];
       const previousClanByUser = new Map(previousClanRows.map(row => [String(row.user_id), row]));
       const currentByUser = new Map();
@@ -6817,7 +6845,7 @@ async function handleClanActivityIngest(env, source, options = {}) {
           source,
           battleKey: resolvedBattleKey,
           battleMeta,
-          clanRow,
+          clanRow: scannedClanRow,
           clanData: data,
           member,
           memberRank: memberIndex + 1,
@@ -6856,7 +6884,7 @@ async function handleClanActivityIngest(env, source, options = {}) {
         previousClanRows.length ? previousClanRows.length : memberCount
       );
       const increments = clanActivityIncrements({
-        clanRow,
+        clanRow: scannedClanRow,
         currentByUser,
         previousClanByUser,
         previousSummary,
@@ -6874,13 +6902,13 @@ async function handleClanActivityIngest(env, source, options = {}) {
         battle_display_name: battleMeta.displayName,
         battle_started_at: battleMeta.startedAt,
         battle_ended_at: battleMeta.endedAt,
-        clan_name: clanRow.clan_name,
+        clan_name: scannedClanRow.clan_name,
         clan_key: clanKey,
-        clan_rank: clanRow.rank,
+        clan_rank: scannedClanRow.rank,
         previous_clan_rank: toNumber(previousSummary?.clan_rank),
-        clan_points: clanRow.points,
-        icon_id: clanRow.icon_id || null,
-        icon_url: clanRow.icon_url || null,
+        clan_points: scannedClanRow.points,
+        icon_id: scannedClanRow.icon_id || null,
+        icon_url: scannedClanRow.icon_url || null,
         kick_available: kickAvailable,
         starting_members: startingMembers,
         current_members: memberCount,
@@ -6893,7 +6921,7 @@ async function handleClanActivityIngest(env, source, options = {}) {
         last_seen_at: fetchedAt,
         latest_snapshot_id: snapshotId,
         updated_at: fetchedAt,
-        raw_clan: clanRow.raw_clan || {}
+        raw_clan: scannedClanRow.raw_clan || {}
       });
     } catch (err) {
       if (err?.battleIngestClosed) throw err;
@@ -6921,6 +6949,11 @@ async function handleClanActivityIngest(env, source, options = {}) {
   await supabaseInsertChunked(env, CLAN_ACTIVITY_CURRENT_TABLE, currentRows, 500);
 
   if (eventRows.length) {
+    // The global-rank pool is already collected for the public leaderboard.
+    // Reuse that snapshot for joins rather than making a separate crawl.
+    await attachClanActivityJoinGlobalRanks(env, eventRows, resolvedBattleKey).catch(err => {
+      console.warn("Unable to attach global ranks to clan activity joins", err);
+    });
     await supabaseUpsertChunked(env, CLAN_ACTIVITY_EVENTS_TABLE, eventRows, "event_id", 500);
   }
 
@@ -6939,7 +6972,9 @@ async function handleClanActivityIngest(env, source, options = {}) {
     battle_display_name: battleMeta.displayName,
     snapshot_id: snapshotId,
     fetched_at: fetchedAt,
-    clans_requested: topClans.length,
+    clans_requested: scanClans.length,
+    top_clans_requested: topClans.length,
+    assigned_log_clans_included: assignedLogClans.length,
     clans_fetched: fetchedClans,
     clan_activity_concurrency: concurrency,
     roster_rows_inserted: rosterRows.length,
@@ -7083,6 +7118,75 @@ function discordClanLogAssignmentKey(guildId, channelId, clanName) {
   return guild && channel && clan ? `${guild}:${channel}:clan-log:${clan}` : "";
 }
 
+async function fetchEnabledClanActivityLogTargets(env) {
+  const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+    select: "clan_name,clan_key",
+    enabled: "eq.true",
+    order: "updated_at.desc",
+    limit: "1000"
+  });
+  const targets = new Map();
+  for (const row of rows || []) {
+    const name = String(row?.clan_name || "").trim();
+    const key = normalizeText(row?.clan_key || name);
+    if (name && key && !targets.has(key)) targets.set(key, name);
+  }
+  return [...targets.values()];
+}
+
+function buildClanActivityScanTargets(topClans, assignedLogClans) {
+  const targets = new Map();
+  for (const clanRow of topClans || []) {
+    const key = normalizeText(clanRow?.clan_name);
+    if (key) targets.set(key, clanRow);
+  }
+  for (const clanName of assignedLogClans || []) {
+    const name = String(clanName || "").trim();
+    const key = normalizeText(name);
+    if (!name || !key || targets.has(key)) continue;
+    targets.set(key, {
+      clan_name: name,
+      rank: null,
+      points: 0,
+      icon_id: null,
+      icon_url: null,
+      raw_clan: {},
+      activity_direct_log_target: true
+    });
+  }
+  return [...targets.values()];
+}
+
+function resolveClanActivityScanClanRow(clanRow, clanData, battle) {
+  if (!clanRow?.activity_direct_log_target) return clanRow;
+  const apiRank = toNumber(firstDefined(
+    battle?.Rank,
+    battle?.rank,
+    battle?.ClanRank,
+    battle?.clanRank,
+    clanData?.Rank,
+    clanData?.rank,
+    clanData?.ClanRank,
+    clanData?.clanRank
+  ));
+  const apiPoints = toNumber(firstDefined(
+    battle?.Points,
+    battle?.points,
+    battle?.Score,
+    battle?.score,
+    clanData?.Points,
+    clanData?.points,
+    clanData?.Score,
+    clanData?.score
+  ));
+  return {
+    ...clanRow,
+    rank: apiRank ?? toNumber(clanRow.rank),
+    points: apiPoints ?? toNumber(clanRow.points) ?? 0,
+    raw_clan: clanData || clanRow.raw_clan || {}
+  };
+}
+
 async function handleDiscordClanLogAssignments(request, env) {
   requireSupabase(env);
   const url = new URL(request.url);
@@ -7169,6 +7273,111 @@ async function handleDiscordClanLogAssignments(request, env) {
   }, patch);
   const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
     select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+    assignment_key: `eq.${assignmentKey}`,
+    limit: "1"
+  });
+  return noStoreJson({ ok: true, updated: rows.length > 0, assignment: rows[0] || null });
+}
+
+function discordClanTrackerAssignmentKey(guildId, channelId, clanName) {
+  const guild = String(guildId || "").trim();
+  const channel = String(channelId || "").trim();
+  const clan = normalizeText(clanName);
+  return guild && channel && clan ? `${guild}:${channel}:clan-tracker:${clan}` : "";
+}
+
+async function handleDiscordClanTrackerAssignments(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+
+  if (request.method === "GET") {
+    const params = {
+      select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
+      order: "created_at.asc",
+      limit: String(clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000))
+    };
+    const guildId = String(url.searchParams.get("guild_id") || "").trim();
+    const channelId = String(url.searchParams.get("channel_id") || "").trim();
+    const clanKey = normalizeText(url.searchParams.get("clan") || "");
+    const assignmentKey = String(url.searchParams.get("assignment_key") || "").trim();
+    const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
+    if (guildId) params.guild_id = `eq.${guildId}`;
+    if (channelId) params.channel_id = `eq.${channelId}`;
+    if (clanKey) params.clan_key = `eq.${clanKey}`;
+    if (assignmentKey) params.assignment_key = `eq.${assignmentKey}`;
+    if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
+    if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
+    return noStoreJson({
+      ok: true,
+      assignments: await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, params)
+    });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const assignmentKey = String(body.assignment_key || "").trim();
+
+  if (request.method === "DELETE") {
+    if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+    const assignments = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${assignmentKey}`,
+      limit: "1"
+    });
+    await supabaseDelete(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+      assignment_key: `eq.${assignmentKey}`
+    });
+    return noStoreJson({ ok: true, removed: assignments.length > 0, assignment: assignments[0] || null });
+  }
+
+  if (request.method === "POST") {
+    const guildId = String(body.guild_id || "").trim();
+    const channelId = String(body.channel_id || "").trim();
+    const clanName = String(body.clan_name || "").trim();
+    if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
+    if (!/^\d{5,30}$/.test(channelId)) throw httpError(400, "A valid Discord channel or thread ID is required.");
+    if (!clanName || clanName.length > 100) throw httpError(400, "A clan name between 1 and 100 characters is required.");
+
+    const key = discordClanTrackerAssignmentKey(guildId, channelId, clanName);
+    const existing = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${key}`,
+      limit: "1"
+    });
+    const prior = existing[0] || null;
+    await supabaseUpsert(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, [{
+      assignment_key: key,
+      guild_id: guildId,
+      channel_id: channelId,
+      channel_type: toNumber(body.channel_type),
+      clan_name: clanName,
+      clan_key: normalizeText(clanName),
+      assigned_by: stringOrNull(body.assigned_by),
+      enabled: body.enabled !== false,
+      // Re-assigning the same tracker should keep editing the existing post,
+      // not leave an old persistent card behind in the channel.
+      message_id: stringOrNull(body.message_id) || prior?.message_id || null,
+      last_updated_at: stringOrNull(body.last_updated_at) || prior?.last_updated_at || null,
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }], "assignment_key");
+    const rows = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${key}`,
+      limit: "1"
+    });
+    return noStoreJson({ ok: true, assignment: rows[0] || null });
+  }
+
+  if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+  const patch = { updated_at: new Date().toISOString() };
+  for (const key of ["enabled", "message_id", "last_updated_at", "last_error"]) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) patch[key] = body[key] === "" ? null : body[key];
+  }
+  await supabasePatch(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+    assignment_key: `eq.${assignmentKey}`
+  }, patch);
+  const rows = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+    select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
     assignment_key: `eq.${assignmentKey}`,
     limit: "1"
   });
@@ -7319,6 +7528,15 @@ async function handleOfflinePingConfig(request, env) {
     patch.post_rate_minutes = clamp(Number(body.post_rate_minutes ?? body.post_rate), 1, 1440);
   }
   if (body.enabled !== undefined) patch.enabled = parseBooleanish(body.enabled) !== false;
+  if (body.clan_watches_enabled !== undefined || body.clans_enabled !== undefined) {
+    patch.clan_watches_enabled = parseBooleanish(body.clan_watches_enabled ?? body.clans_enabled) !== false;
+  }
+  if (body.league_watches_enabled !== undefined || body.leagues_enabled !== undefined) {
+    patch.league_watches_enabled = parseBooleanish(body.league_watches_enabled ?? body.leagues_enabled) !== false;
+  }
+  if (body.user_watches_enabled !== undefined || body.users_enabled !== undefined) {
+    patch.user_watches_enabled = parseBooleanish(body.user_watches_enabled ?? body.users_enabled) !== false;
+  }
   if (body.assigned_by !== undefined) patch.assigned_by = stringOrNull(body.assigned_by);
   if (body.updated_by !== undefined) patch.updated_by = stringOrNull(body.updated_by);
   if (request.method === "POST") patch.created_at = patch.updated_at;
@@ -7414,7 +7632,10 @@ async function handleOfflinePingClans(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one clan name.");
 
-  await ensureOfflineGuildConfig(env, requestedGuildId, body);
+  await ensureOfflineGuildConfig(env, requestedGuildId, {
+    ...body,
+    clan_watches_enabled: true
+  });
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_CLANS_TABLE, rows, "guild_id,clan_key", 500);
 
   return noStoreJson({
@@ -7496,7 +7717,10 @@ async function handleOfflinePingLeagues(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one league name.");
 
-  await ensureOfflineGuildConfig(env, requestedGuildId, body);
+  await ensureOfflineGuildConfig(env, requestedGuildId, {
+    ...body,
+    league_watches_enabled: true
+  });
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, rows, "guild_id,league_key", 500);
 
   return noStoreJson({
@@ -7574,6 +7798,7 @@ async function handleOfflinePingUsers(request, env) {
       discord_label: body.discord_label,
       clan_name: body.clan_name || body.clan || body.league_name || body.league,
       source_mode: body.source_mode || body.source,
+      delivery_scope: body.delivery_scope || body.delivery || body.scope,
       channel_id: body.channel_id || body.channel,
       channel_type: body.channel_type
     }];
@@ -7595,6 +7820,7 @@ async function handleOfflinePingUsers(request, env) {
     const discordUserId = parseDiscordUserId(entry?.discord_user_id || entry?.discord || entry?.mention);
     const clanNameValue = stringOrNull(entry?.clan_name || entry?.clan || entry?.league_name || entry?.league);
     const sourceMode = normalizeOfflineWatchSourceMode(entry?.source_mode || entry?.source || body.source_mode || body.source) || "auto";
+    const deliveryScope = normalizeOfflinePingDeliveryScope(entry?.delivery_scope || entry?.delivery || body.delivery_scope || body.delivery) || "users";
     const channelId = stringOrNull(entry?.channel_id || entry?.channel || body.channel_id || body.channel);
     const channelType = toNumber(entry?.channel_type ?? body.channel_type);
 
@@ -7616,6 +7842,7 @@ async function handleOfflinePingUsers(request, env) {
       roblox_username: robloxUsername || usernameInput,
       roblox_username_key: robloxKey || normalizeText(usernameInput),
       source_mode: sourceMode,
+      delivery_scope: deliveryScope,
       discord_user_id: discordUserId || null,
       discord_label: stringOrNull(entry?.discord_label || entry?.discord || entry?.mention),
       channel_id: channelId || null,
@@ -7629,7 +7856,23 @@ async function handleOfflinePingUsers(request, env) {
 
   if (!rows.length) throw httpError(400, "Add at least one username.");
 
-  await ensureOfflineGuildConfig(env, requestedGuildId, body);
+  const enablesClanSource = rows.some(row => {
+    const deliveryScope = normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users";
+    return deliveryScope === "clan" || row.source_mode === "clan" || row.source_mode === "auto";
+  });
+  const enablesLeagueSource = rows.some(row => {
+    const deliveryScope = normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users";
+    return deliveryScope !== "clan" && (row.source_mode === "league" || row.source_mode === "auto");
+  });
+  const enablesUserSource = rows.some(row => (
+    (normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users") === "users"
+  ));
+  await ensureOfflineGuildConfig(env, requestedGuildId, {
+    ...body,
+    ...(enablesClanSource ? { clan_watches_enabled: true } : {}),
+    ...(enablesLeagueSource ? { league_watches_enabled: true } : {}),
+    ...(enablesUserSource ? { user_watches_enabled: true } : {})
+  });
   await supabaseUpsertChunked(env, DISCORD_OFFLINE_PING_USERS_TABLE, rows, "guild_id,roblox_username_key", 500);
 
   return noStoreJson({
@@ -7957,27 +8200,27 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
   const lookbackMinutes = Math.max(90, thresholdMinutes + offlineLookbackBufferMinutes(env));
   const guildId = String(config.guild_id || "");
   const requestedSourceMode = normalizeOfflineWatchSourceMode(options.sourceMode);
-  const includeClanWatches = requestedSourceMode !== "league" && options.skipClanWatches !== true;
-  const includeLeagueWatches = requestedSourceMode !== "clan";
-  const [clanWatches, leagueWatches, userWatchesRaw, states] = await Promise.all([
+  const clansEnabled = config.clan_watches_enabled !== false;
+  const leaguesEnabled = config.league_watches_enabled !== false;
+  const usersEnabled = config.user_watches_enabled !== false;
+  const includeClanWatches = clansEnabled && requestedSourceMode !== "league" && options.skipClanWatches !== true;
+  const includeLeagueWatches = leaguesEnabled && requestedSourceMode !== "clan";
+  const [registeredClanWatches, leagueWatches, userWatchesRaw, states] = await Promise.all([
     includeClanWatches ? supabaseSelect(env, DISCORD_OFFLINE_PING_CLANS_TABLE, {
       select: "*",
       guild_id: `eq.${guildId}`,
-      enabled: "eq.true",
       order: "clan_name.asc",
       limit: "1000"
     }).catch(() => []) : Promise.resolve([]),
     includeLeagueWatches ? supabaseSelect(env, DISCORD_OFFLINE_PING_LEAGUES_TABLE, {
       select: "*",
       guild_id: `eq.${guildId}`,
-      enabled: "eq.true",
       order: "league_name.asc",
       limit: "1000"
     }).catch(() => []) : Promise.resolve([]),
     supabaseSelect(env, DISCORD_OFFLINE_PING_USERS_TABLE, {
       select: "*",
       guild_id: `eq.${guildId}`,
-      enabled: "eq.true",
       order: "roblox_username.asc",
       limit: "1000"
     }).catch(() => []),
@@ -7987,10 +8230,59 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
       limit: "5000"
     }).catch(() => [])
   ]);
-  const userWatches = userWatchesRaw.filter(watch => offlineUserWatchIncludedForCheck(watch, {
-    includeClan: includeClanWatches,
-    includeLeague: includeLeagueWatches
-  }));
+  // Early versions stored `enabled` as NULL. NULL meant active in the UI,
+  // but the scheduled check queried only `enabled = true`, silently dropping
+  // those saved watches. Only an explicit false disables a saved row.
+  const activeRegisteredClanWatches = registeredClanWatches.filter(watch => watch?.enabled !== false);
+  const activeLeagueWatches = leagueWatches.filter(watch => watch?.enabled !== false);
+  const activeUserWatches = userWatchesRaw.filter(watch => watch?.enabled !== false);
+  const clanMemberWatches = clansEnabled
+    ? activeUserWatches.filter(watch => normalizeOfflinePingDeliveryScope(watch?.delivery_scope) === "clan")
+    : [];
+  const clanMemberWatchesByClan = groupRowsBy(
+    clanMemberWatches.filter(watch => normalizeText(watch?.clan_name)),
+    watch => normalizeText(watch.clan_name)
+  );
+  const registeredClanKeys = new Set();
+  const clanWatches = includeClanWatches
+    ? activeRegisteredClanWatches.map(watch => {
+      const clanKey = normalizeText(watch.clan_name || watch.clan_key);
+      registeredClanKeys.add(clanKey);
+      return {
+        ...watch,
+        _member_mappings: clanMemberWatchesByClan.get(clanKey) || [],
+        _member_only: false
+      };
+    })
+    : [];
+  // `/offline members` can be used before `/offline clan`.  It must still
+  // create one clan-formatted alert stream, but only for the explicitly
+  // mapped members rather than every player in that clan.
+  if (includeClanWatches) {
+    for (const [clanKey, mappings] of clanMemberWatchesByClan.entries()) {
+      if (registeredClanKeys.has(clanKey)) continue;
+      clanWatches.push({
+        clan_name: mappings[0]?.clan_name || clanKey,
+        clan_key: clanKey,
+        enabled: true,
+        _member_mappings: mappings,
+        _member_only: true
+      });
+    }
+  }
+  const userWatches = activeUserWatches.filter(watch => {
+    // `/offline members` routes through the clan board, so it remains active
+    // when direct-user watches are disabled.  This is what makes a
+    // clans-only setup possible without losing the explicit member pings.
+    const deliveryScope = normalizeOfflinePingDeliveryScope(watch?.delivery_scope) || "users";
+    if (deliveryScope === "clan") return false;
+    if (!usersEnabled) return false;
+    // Direct-user mode is independent: it only looks up the explicitly
+    // saved people. Turning clan or League boards off must not suppress a
+    // direct-user alert just because their score happens to come from one of
+    // those sources.
+    return true;
+  });
   const stateByKey = new Map(states.map(row => [offlineStateMapKey(row), row]));
   const clanBundleCache = new Map();
   const leagueBundleCache = new Map();
@@ -8020,8 +8312,9 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
 
   for (const watch of userWatches) {
     const status = await findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, {
-      includeClan: includeClanWatches,
-      includeLeague: includeLeagueWatches
+    includeClan: true,
+    includeLeague: true,
+    allowDirectLookup: true
     });
     const subjectKey = offlineUserSubjectKey(watch);
     const trackedKey = status?.user_key || subjectKey;
@@ -8062,6 +8355,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
       dueAlerts.push({
         scope: "user",
+        delivery_scope: normalizeOfflinePingDeliveryScope(watch.delivery_scope) || "users",
         watch,
         status,
         stateKey,
@@ -8078,21 +8372,28 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     if (!bundle) continue;
 
     for (const status of bundle.statuses) {
+      const memberMapping = offlineMemberMappingForStatus(watch._member_mappings, status);
+      if (watch._member_only === true && !memberMapping) continue;
+      const alertWatch = memberMapping ? { ...watch, ...memberMapping } : watch;
+      // Reuse the member's original user-state key when one exists. This
+      // retains its alert cooldown while changing delivery to the clan post.
+      const alertScope = memberMapping ? "user" : "clan";
+      const alertSubjectKey = memberMapping ? offlineUserSubjectKey(memberMapping) : subjectKey;
       const trackedKey = status.user_key;
       const stateKey = offlineStateMapKey({
         guild_id: guildId,
-        scope: "clan",
-        subject_key: subjectKey,
+        scope: alertScope,
+        subject_key: alertSubjectKey,
         tracked_user_key: trackedKey
       });
       const offline = status.offline_minutes >= thresholdMinutes;
       checkedRows.push(status);
       const update = offlineStateRow({
         guildId,
-        scope: "clan",
-        subjectKey,
+        scope: alertScope,
+        subjectKey: alertSubjectKey,
         trackedUserKey: trackedKey,
-        watch,
+        watch: alertWatch,
         status,
         alertActive: offline,
         checkedAt
@@ -8101,8 +8402,9 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
       const existingState = stateByKey.get(stateKey);
       if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
         dueAlerts.push({
-          scope: "clan",
-          watch,
+          scope: alertScope,
+          delivery_scope: memberMapping ? "clan" : undefined,
+          watch: alertWatch,
           status,
           stateKey,
           stateRow: update
@@ -8113,7 +8415,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     }
   }
 
-  for (const watch of leagueWatches) {
+  for (const watch of activeLeagueWatches) {
     const bundle = await getLeagueBundle(watch.league_name);
     const subjectKey = normalizeText(watch.league_name || watch.league_key);
     if (!bundle) continue;
@@ -8158,13 +8460,19 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
   const skippedAlerts = [];
   const cooldownAlerts = [];
   if (dueAlerts.length) {
-    for (const group of splitOfflinePingAlertsByDestination(config, dueAlerts)) {
+    // Direct-user and Clan-watch rows can omit a manual Discord account.
+    // Resolve only members whose alert is actually due, then cache each
+    // result per Discord server. League watches stay non-pinging because
+    // they can represent an arbitrary roster outside the configured clan.
+    const deliveryAlerts = await resolveOfflineAlertDiscordMentions(env, guildId, dueAlerts);
+
+    for (const group of splitOfflinePingAlertsByDestination(config, deliveryAlerts)) {
       if (!group.channel_id) {
         skippedAlerts.push(...group.alerts);
         continue;
       }
 
-      const channelStateKey = offlineDestinationStateMapKey(guildId, group.channel_id);
+      const channelStateKey = offlineDestinationStateMapKey(guildId, group.channel_id, group.destination_key);
       const channelState = stateByKey.get(channelStateKey);
       if (!offlinePostRateDue(channelState, postRateMinutes, checkedAt)) {
         cooldownAlerts.push(...group.alerts);
@@ -8174,6 +8482,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
         stateUpdates.push(offlineDestinationStateRow({
           guildId,
           channelId: group.channel_id,
+          destinationKey: group.destination_key,
           checkedAt,
           lastAlertAt: channelState?.last_alert_at || null,
           lastMessageId: channelState?.last_alert_message_id || null,
@@ -8202,6 +8511,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
         stateUpdates.push(offlineDestinationStateRow({
           guildId,
           channelId: group.channel_id,
+          destinationKey: group.destination_key,
           checkedAt,
           lastAlertAt: checkedAt,
           lastMessageId: messageId,
@@ -8225,6 +8535,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
         stateUpdates.push(offlineDestinationStateRow({
           guildId,
           channelId: group.channel_id,
+          destinationKey: group.destination_key,
           checkedAt,
           lastAlertAt: checkedAt,
           lastMessageId: null,
@@ -8240,7 +8551,9 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     }));
   }
 
-  const posted = postResults.filter(result => result?.posted).length;
+  const posted = postResults.reduce((count, result) => (
+    count + (result?.posted ? Math.max(1, Number(result.message_count) || 1) : 0)
+  ), 0);
   const missingDestinationMessage = skippedAlerts.length
     ? `${skippedAlerts.length} offline alert${skippedAlerts.length === 1 ? "" : "s"} skipped because that alert type has no assigned channel.`
     : null;
@@ -8272,6 +8585,9 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     users_channel_id: offlinePingDestinationChannelId(config, "users") || null,
     threshold_minutes: thresholdMinutes,
     post_rate_minutes: postRateMinutes,
+    clan_watches_enabled: clansEnabled,
+    league_watches_enabled: leaguesEnabled,
+    user_watches_enabled: usersEnabled,
     clan_watches: clanWatches.length,
     league_watches: leagueWatches.length,
     user_watches: userWatches.length,
@@ -8280,8 +8596,99 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     alerts_posted: posted,
     alerts_skipped_no_channel: skippedAlerts.length,
     alerts_skipped_channel_cooldown: cooldownAlerts.length,
-    message_ids: postResults.map(result => result?.message_id).filter(Boolean)
+    message_ids: postResults.flatMap(result => result?.message_ids || [result?.message_id]).filter(Boolean)
   };
+}
+
+// Admin-only diagnostic for verifying the exact RoVer mapping that the
+// offline-alert job will use. This deliberately makes one RoVer request and
+// does not create an offline alert or touch BIG Games data.
+async function handleOfflineRoVerLookup(request, env) {
+  requireSupabase(env);
+  const body = await request.json().catch(() => ({}));
+  const guildId = String(body.guild_id || body.guild || "").trim();
+  if (!/^\d{5,30}$/.test(guildId)) {
+    throw httpError(400, "Provide the Discord server ID as guild_id.");
+  }
+
+  const username = String(body.username || body.roblox_username || "").trim();
+  let robloxUserId = toNumber(body.roblox_user_id || body.user_id);
+  let resolvedUsername = username || null;
+  if (!robloxUserId && username) {
+    const identity = await resolveGlobalSearchIdentity(username, env).catch(() => null);
+    robloxUserId = toNumber(identity?.user_id);
+    resolvedUsername = String(identity?.username || username).trim() || null;
+  }
+  if (!robloxUserId) {
+    throw httpError(400, "Provide username or roblox_user_id.");
+  }
+
+  const probe = await fetchRoVerDiscordUserLink(env, guildId, robloxUserId);
+  await cacheOfflineDiscordUserLink(env, guildId, robloxUserId, probe, "rover").catch(err => {
+    console.warn("RoVer diagnostic cache write failed", String(err?.message || err || "unknown error"));
+  });
+
+  return noStoreJson({
+    ok: probe.lookup_state === "matched",
+    guild_id: guildId,
+    roblox_user_id: robloxUserId,
+    roblox_username: resolvedUsername,
+    rover: {
+      configured: Boolean(roverApiKey(env)),
+      endpoint: probe.endpoint,
+      http_status: probe.http_status,
+      lookup_state: probe.lookup_state,
+      discord_user_id: probe.discord_user_id,
+      response_keys: probe.response_keys,
+      response_message: probe.response_message || null,
+      error: probe.error
+    },
+    checked_at: new Date().toISOString()
+  });
+}
+
+// Admin-only diagnostic for Bloxlink. Bloxlink Server API keys are bound to a
+// Discord server, so this verifies the same guild-specific key the offline job
+// will use without posting an alert or requesting BIG Games data.
+async function handleOfflineBloxlinkLookup(request, env) {
+  requireSupabase(env);
+  const body = await request.json().catch(() => ({}));
+  const guildId = String(body.guild_id || body.guild || "").trim();
+  if (!/^\d{5,30}$/.test(guildId)) {
+    throw httpError(400, "Provide the Discord server ID as guild_id.");
+  }
+
+  const username = String(body.username || body.roblox_username || "").trim();
+  let robloxUserId = toNumber(body.roblox_user_id || body.user_id);
+  let resolvedUsername = username || null;
+  if (!robloxUserId && username) {
+    const identity = await resolveGlobalSearchIdentity(username, env).catch(() => null);
+    robloxUserId = toNumber(identity?.user_id);
+    resolvedUsername = String(identity?.username || username).trim() || null;
+  }
+  if (!robloxUserId) {
+    throw httpError(400, "Provide username or roblox_user_id.");
+  }
+
+  const probe = await fetchBloxlinkDiscordUserLink(env, guildId, robloxUserId);
+
+  return noStoreJson({
+    ok: probe.lookup_state === "matched",
+    guild_id: guildId,
+    roblox_user_id: robloxUserId,
+    roblox_username: resolvedUsername,
+    bloxlink: {
+      configured: Boolean(bloxlinkGuildApiKey(env, guildId)),
+      endpoint: probe.endpoint,
+      http_status: probe.http_status,
+      lookup_state: probe.lookup_state,
+      discord_user_id: probe.discord_user_id,
+      response_keys: probe.response_keys,
+      response_message: probe.response_message || null,
+      error: probe.error
+    },
+    checked_at: new Date().toISOString()
+  });
 }
 
 async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes) {
@@ -8600,23 +9007,32 @@ function computeOfflineMemberStatuses(currentRows, historyRows) {
 async function postOfflinePingAlerts(env, config, alerts, checkedAt, options = {}) {
   const destinationScope = normalizeOfflinePingDestinationScope(options.destinationScope) || "clan";
   const channelId = String(options.channelId || offlinePingDestinationChannelId(config, destinationScope)).trim();
-  const body = offlinePingAlertMessageBody(alerts, checkedAt, {
-    thresholdMinutes: options.thresholdMinutes || config.minutes_threshold || offlineDefaultMinutes(env),
-    postRateMinutes: options.postRateMinutes || config.post_rate_minutes || offlineDefaultPostRateMinutes(env),
-    mentionDirectUsers: destinationScope === "users"
-  });
-  const result = await discordBotChannelMessageRequest(env, {
-    method: "POST",
-    channelId,
-    body
-  });
-  if (!result.ok) {
-    throw httpError(502, result.error || "Discord offline ping post failed.");
+  // Discord components have a practical content limit.  Preserve every
+  // qualified member instead of truncating the end of a large clan alert.
+  const chunks = chunkOfflinePingAlerts(alerts, 12);
+  const messageIds = [];
+  for (const chunk of chunks) {
+    const body = offlinePingAlertMessageBody(chunk, checkedAt, {
+      thresholdMinutes: options.thresholdMinutes || config.minutes_threshold || offlineDefaultMinutes(env),
+      postRateMinutes: options.postRateMinutes || config.post_rate_minutes || offlineDefaultPostRateMinutes(env),
+      mentionMappedUsers: destinationScope === "users" || destinationScope === "clan"
+    });
+    const result = await discordBotChannelMessageRequest(env, {
+      method: "POST",
+      channelId,
+      body
+    });
+    if (!result.ok) {
+      throw httpError(502, result.error || "Discord offline ping post failed.");
+    }
+    if (stringOrNull(result.body?.id)) messageIds.push(stringOrNull(result.body.id));
   }
   return {
     posted: true,
-    message_id: stringOrNull(result.body?.id),
-    channel_id: stringOrNull(result.body?.channel_id) || channelId
+    message_id: messageIds[0] || null,
+    message_ids: messageIds,
+    message_count: chunks.length,
+    channel_id: channelId
   };
 }
 
@@ -8624,21 +9040,23 @@ function splitOfflinePingAlertsByDestination(config, alerts) {
   const groupsByKey = new Map();
 
   for (const alert of alerts) {
-    const scope = alert?.scope === "user"
-      ? "users"
-      : alert?.scope === "league"
-        ? "league"
-        : "clan";
+    const scope = offlineAlertDeliveryScope(alert);
     const channelId = scope === "users"
       ? offlineUserWatchChannelId(alert?.watch) || offlinePingDestinationChannelId(config, "users")
       : scope === "league"
         ? offlinePingDestinationChannelId(config, "league")
         : offlinePingDestinationChannelId(config, "clan");
-    const key = `${scope}|${channelId || ""}`;
+    // A clan has its own message stream and cooldown.  Direct watches retain
+    // the existing shared channel batching behavior.
+    const destinationKey = scope === "clan"
+      ? normalizeText(alert?.status?.clan_name || alert?.watch?.clan_name || "unassigned")
+      : "";
+    const key = `${scope}|${channelId || ""}|${destinationKey}`;
     if (!groupsByKey.has(key)) {
       groupsByKey.set(key, {
         scope,
         channel_id: channelId || "",
+        destination_key: destinationKey,
         alerts: []
       });
     }
@@ -8648,12 +9066,32 @@ function splitOfflinePingAlertsByDestination(config, alerts) {
   return [...groupsByKey.values()].filter(group => group.alerts.length);
 }
 
+function offlineAlertDeliveryScope(alert) {
+  if (alert?.scope === "league") return "league";
+  if (alert?.scope === "clan") return "clan";
+  return normalizeOfflinePingDeliveryScope(alert?.delivery_scope || alert?.watch?.delivery_scope) || "users";
+}
+
+function chunkOfflinePingAlerts(alerts, maxPerPost = 12) {
+  const size = clamp(Number(maxPerPost) || 12, 1, 25);
+  const chunks = [];
+  for (let index = 0; index < alerts.length; index += size) {
+    chunks.push(alerts.slice(index, index + size));
+  }
+  return chunks.length ? chunks : [[]];
+}
+
 function normalizeOfflinePingDestinationScope(value) {
   const text = String(value || "").trim().toLowerCase();
   if (["clan", "clans", "clan-wide", "clan_wide"].includes(text)) return "clan";
   if (["league", "leagues", "league-wide", "league_wide"].includes(text)) return "league";
   if (["user", "users", "direct", "direct-users", "direct_users"].includes(text)) return "users";
   return "";
+}
+
+function normalizeOfflinePingDeliveryScope(value) {
+  const scope = normalizeOfflinePingDestinationScope(value);
+  return scope === "clan" || scope === "users" ? scope : "";
 }
 
 function normalizeOfflineWatchSourceMode(value) {
@@ -8671,6 +9109,18 @@ function offlineUserWatchIncludedForCheck(watch, options = {}) {
   if (sourceMode === "clan") return includeClan;
   if (sourceMode === "league") return includeLeague;
   return includeClan || includeLeague;
+}
+
+function offlineMemberMappingForStatus(mappings, status) {
+  if (!Array.isArray(mappings) || !mappings.length || !status) return null;
+  const userId = String(toNumber(status.user_id) || "").trim();
+  const usernameKey = normalizeText(status.username || status.user_key);
+  return mappings.find(mapping => {
+    const mappedUserId = String(toNumber(mapping?.roblox_user_id) || "").trim();
+    if (userId && mappedUserId && userId === mappedUserId) return true;
+    const mappedNameKey = normalizeText(mapping?.roblox_username || mapping?.roblox_username_key);
+    return Boolean(usernameKey && mappedNameKey && usernameKey === mappedNameKey);
+  }) || null;
 }
 
 function offlinePingDestinationChannelId(config, scope) {
@@ -8694,18 +9144,430 @@ function hasOfflinePingDestination(config) {
     || /^\d{5,30}$/.test(offlinePingDestinationChannelId(config, "users"));
 }
 
+function roverApiKey(env) {
+  return String(env.ROVER_API_KEY || "").trim();
+}
+
+function roverRegistryApiBase(env) {
+  return String(env.ROVER_REGISTRY_API_BASE || "https://registry.rover.link/api")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+function bloxlinkApiBase(env) {
+  return String(env.BLOXLINK_API_BASE || "https://api.blox.link/v4/public")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+// Bloxlink issues keys per Discord server. A JSON map keeps a multi-server
+// Luna deployment safe without accidentally using one server's key elsewhere.
+function bloxlinkGuildApiKey(env, guildId) {
+  const fallback = String(env.BLOXLINK_API_KEY || "").trim();
+  const raw = String(env.BLOXLINK_GUILD_API_KEYS_JSON || "").trim();
+  if (!raw) return fallback;
+  try {
+    const keys = JSON.parse(raw);
+    if (keys && typeof keys === "object" && !Array.isArray(keys)) {
+      return String(keys[String(guildId)] || keys.default || fallback).trim();
+    }
+  } catch (err) {
+    console.warn("BLOXLINK_GUILD_API_KEYS_JSON is not valid JSON", String(err?.message || err || "unknown error"));
+  }
+  return fallback;
+}
+
+function roverPositiveCacheMinutes(env) {
+  return clamp(Number(env.ROVER_CACHE_MINUTES || 720), 15, 10080);
+}
+
+function roverNegativeCacheMinutes(env) {
+  return clamp(Number(env.ROVER_NEGATIVE_CACHE_MINUTES || 30), 5, 1440);
+}
+
+function roverErrorCacheMinutes(env) {
+  return clamp(Number(env.ROVER_ERROR_CACHE_MINUTES || 5), 1, 60);
+}
+
+function roverCacheIsFresh(row, nowMs = Date.now()) {
+  const expiresAt = Date.parse(String(row?.expires_at || ""));
+  return Number.isFinite(expiresAt) && expiresAt > nowMs;
+}
+
+function roverDiscordIdsFromValue(value, depth = 0) {
+  // RoVer has returned discordUsers as both an array and an ID-keyed object.
+  // Keep this traversal scoped to that field so it cannot mistake the response's
+  // guildId or robloxId for a Discord user ID.
+  if (value == null || depth > 6) return [];
+  if (typeof value === "string" || typeof value === "number") {
+    const discordUserId = parseDiscordUserId(value);
+    return discordUserId ? [discordUserId] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(item => roverDiscordIdsFromValue(item, depth + 1));
+  }
+  if (typeof value !== "object") return [];
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const keyUserId = parseDiscordUserId(key);
+    // Do not traverse known non-Discord identifiers when RoVer nests metadata
+    // alongside the matching Discord-user object.
+    const skipValue = /^(?:guild_?id|roblox_?id)$/i.test(key);
+    return [
+      ...(keyUserId ? [keyUserId] : []),
+      ...(skipValue ? [] : roverDiscordIdsFromValue(nestedValue, depth + 1))
+    ];
+  });
+}
+
+function roverDiscordUserIdFromPayload(payload) {
+  const nested = payload?.data && typeof payload.data === "object" ? payload.data : {};
+  const roverUsers = [
+    ...(Array.isArray(payload?.discordUsers) ? payload.discordUsers : [payload?.discordUsers]),
+    ...(Array.isArray(nested?.discordUsers) ? nested.discordUsers : [nested?.discordUsers])
+  ].filter(Boolean);
+  const candidates = [
+    payload?.discordId,
+    payload?.discord_id,
+    payload?.discordIds,
+    ...(Array.isArray(payload?.discordIDs) ? payload.discordIDs : []),
+    ...(Array.isArray(payload?.discord_ids) ? payload.discord_ids : []),
+    ...(Array.isArray(payload?.discordIds) ? payload.discordIds : []),
+    nested?.discordId,
+    nested?.discord_id,
+    nested?.discordIds,
+    ...(Array.isArray(nested?.discordIDs) ? nested.discordIDs : []),
+    ...(Array.isArray(nested?.discord_ids) ? nested.discord_ids : []),
+    ...(Array.isArray(nested?.discordIds) ? nested.discordIds : []),
+    ...roverUsers.flatMap(user => roverDiscordIdsFromValue(user))
+  ];
+  return candidates.map(parseDiscordUserId).find(Boolean) || null;
+}
+
+function bloxlinkDiscordUserIdFromPayload(payload) {
+  const nested = payload?.data && typeof payload.data === "object" ? payload.data : {};
+  const candidates = [
+    payload?.discordID,
+    payload?.discordId,
+    payload?.discord_id,
+    ...(Array.isArray(payload?.discordIDs) ? payload.discordIDs : []),
+    ...(Array.isArray(payload?.discordIds) ? payload.discordIds : []),
+    ...(Array.isArray(payload?.discord_ids) ? payload.discord_ids : []),
+    nested?.discordID,
+    nested?.discordId,
+    nested?.discord_id,
+    ...(Array.isArray(nested?.discordIDs) ? nested.discordIDs : []),
+    ...(Array.isArray(nested?.discordIds) ? nested.discordIds : []),
+    ...(Array.isArray(nested?.discord_ids) ? nested.discord_ids : [])
+  ];
+  return candidates.map(parseDiscordUserId).find(Boolean) || null;
+}
+
+async function fetchRoVerDiscordUserLink(env, guildId, robloxUserId) {
+  const apiKey = roverApiKey(env);
+  const safeGuildId = String(guildId || "").trim();
+  const safeRobloxUserId = toNumber(robloxUserId);
+  const endpoint = safeGuildId && safeRobloxUserId
+    ? `${roverRegistryApiBase(env)}/guilds/${encodeURIComponent(safeGuildId)}/roblox-to-discord/${encodeURIComponent(safeRobloxUserId)}`
+    : null;
+  if (!apiKey) {
+    return {
+      endpoint,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: "ROVER_API_KEY is not configured."
+    };
+  }
+  if (!endpoint) {
+    return {
+      endpoint: null,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: "A valid Discord server ID and Roblox user ID are required."
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "User-Agent": "Luna-PS99-Bot/1.0"
+      }
+    });
+    const rawBody = await response.text().catch(() => "");
+    let payload = {};
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      // Preserve the HTTP status/body below if RoVer returns a non-JSON error page.
+      payload = {};
+    }
+    const responseKeys = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? Object.keys(payload).slice(0, 25)
+      : [];
+    const responseMessage = String(payload?.message || payload?.error || "").trim().slice(0, 300) || null;
+    const discordUserId = response.ok ? roverDiscordUserIdFromPayload(payload) : null;
+
+    if (response.ok && discordUserId) {
+      return {
+        endpoint,
+        http_status: response.status,
+        lookup_state: "matched",
+        discord_user_id: discordUserId,
+        response_keys: responseKeys,
+        response_message: responseMessage,
+        error: null
+      };
+    }
+    if (response.status === 404) {
+      return {
+        endpoint,
+        http_status: response.status,
+        lookup_state: "not_found",
+        discord_user_id: null,
+        response_keys: responseKeys,
+        response_message: responseMessage,
+        error: null
+      };
+    }
+    return {
+      endpoint,
+      http_status: response.status,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: responseKeys,
+      response_message: responseMessage,
+      error: response.ok
+        ? "RoVer returned a successful response without a supported Discord-user-ID field."
+        : `RoVer returned HTTP ${response.status}${rawBody ? `: ${rawBody.slice(0, 300)}` : ""}`
+    };
+  } catch (err) {
+    return {
+      endpoint,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: `RoVer lookup failed: ${String(err?.message || err || "unknown error").slice(0, 500)}`
+    };
+  }
+}
+
+async function fetchBloxlinkDiscordUserLink(env, guildId, robloxUserId) {
+  const safeGuildId = String(guildId || "").trim();
+  const safeRobloxUserId = toNumber(robloxUserId);
+  const apiKey = bloxlinkGuildApiKey(env, safeGuildId);
+  const endpoint = safeGuildId && safeRobloxUserId
+    ? `${bloxlinkApiBase(env)}/guilds/${encodeURIComponent(safeGuildId)}/roblox-to-discord/${encodeURIComponent(safeRobloxUserId)}`
+    : null;
+  if (!apiKey) {
+    return {
+      endpoint,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: "No Bloxlink API key is configured for this Discord server."
+    };
+  }
+  if (!endpoint) {
+    return {
+      endpoint: null,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: "A valid Discord server ID and Roblox user ID are required."
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        Accept: "application/json",
+        Authorization: apiKey,
+        "User-Agent": "Luna-PS99-Bot/1.0"
+      }
+    });
+    const rawBody = await response.text().catch(() => "");
+    let payload = {};
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      payload = {};
+    }
+    const responseKeys = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? Object.keys(payload).slice(0, 25)
+      : [];
+    const responseMessage = String(payload?.message || payload?.error || "").trim().slice(0, 300) || null;
+    const discordUserId = response.ok ? bloxlinkDiscordUserIdFromPayload(payload) : null;
+    if (response.ok && discordUserId) {
+      return { endpoint, http_status: response.status, lookup_state: "matched", discord_user_id: discordUserId, response_keys: responseKeys, response_message: responseMessage, error: null };
+    }
+    if (response.status === 404) {
+      return { endpoint, http_status: response.status, lookup_state: "not_found", discord_user_id: null, response_keys: responseKeys, response_message: responseMessage, error: null };
+    }
+    return {
+      endpoint,
+      http_status: response.status,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: responseKeys,
+      response_message: responseMessage,
+      error: response.ok
+        ? "Bloxlink returned a successful response without a supported Discord-user-ID field."
+        : `Bloxlink returned HTTP ${response.status}${rawBody ? `: ${rawBody.slice(0, 300)}` : ""}`
+    };
+  } catch (err) {
+    return {
+      endpoint,
+      http_status: null,
+      lookup_state: "error",
+      discord_user_id: null,
+      response_keys: [],
+      error: `Bloxlink lookup failed: ${String(err?.message || err || "unknown error").slice(0, 500)}`
+    };
+  }
+}
+
+function offlineLookupStateBase(value) {
+  const state = String(value || "").trim().toLowerCase();
+  if (state.startsWith("matched")) return "matched";
+  if (state.startsWith("not_found")) return "not_found";
+  return "error";
+}
+
+function offlineLookupProviderLabel(value) {
+  return String(value || "").toLowerCase().includes("bloxlink") ? "Bloxlink" : "RoVer";
+}
+
+async function cacheOfflineDiscordUserLink(env, guildId, robloxUserId, probe, provider = "rover") {
+  const nowMs = Date.now();
+  const baseState = offlineLookupStateBase(probe?.lookup_state);
+  const cacheMinutes = baseState === "matched"
+    ? roverPositiveCacheMinutes(env)
+    : baseState === "not_found"
+      ? roverNegativeCacheMinutes(env)
+      : roverErrorCacheMinutes(env);
+  const now = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + cacheMinutes * 60 * 1000).toISOString();
+  await supabaseUpsert(env, DISCORD_ROVER_MEMBER_LINKS_TABLE, [{
+    guild_id: String(guildId),
+    roblox_user_id: toNumber(robloxUserId),
+    discord_user_id: probe?.discord_user_id || null,
+    lookup_state: `${baseState}_${String(provider || "rover").toLowerCase()}`,
+    last_error: probe?.error || null,
+    last_checked_at: now,
+    expires_at: expiresAt,
+    updated_at: now
+  }], "guild_id,roblox_user_id");
+}
+
+async function resolveOfflineDiscordUserLink(env, guildId, robloxUserId) {
+  const safeGuildId = String(guildId || "").trim();
+  const safeRobloxUserId = toNumber(robloxUserId);
+  if (!/^\d{5,30}$/.test(safeGuildId) || !safeRobloxUserId) return null;
+  const hasRoVer = Boolean(roverApiKey(env));
+  const hasBloxlink = Boolean(bloxlinkGuildApiKey(env, safeGuildId));
+  if (!hasRoVer && !hasBloxlink) return null;
+
+  const nowMs = Date.now();
+  const cached = await supabaseSelect(env, DISCORD_ROVER_MEMBER_LINKS_TABLE, {
+    select: "discord_user_id,lookup_state,expires_at",
+    guild_id: `eq.${safeGuildId}`,
+    roblox_user_id: `eq.${safeRobloxUserId}`,
+    limit: "1"
+  }).catch(() => []);
+  const cachedRow = cached[0] || null;
+  if (roverCacheIsFresh(cachedRow, nowMs)) {
+    const discordUserId = parseDiscordUserId(cachedRow.discord_user_id);
+    if (offlineLookupStateBase(cachedRow.lookup_state) === "matched" && discordUserId) {
+      return { discord_user_id: discordUserId, provider: offlineLookupProviderLabel(cachedRow.lookup_state) };
+    }
+    // A negative Bloxlink result is the final fallback. Legacy/older RoVer
+    // cache entries are deliberately allowed through so Bloxlink can fill
+    // existing servers immediately after this feature is deployed.
+    if (String(cachedRow.lookup_state || "").toLowerCase().includes("bloxlink")) return null;
+  }
+
+  let lastProbe = null;
+  let lastProvider = "rover";
+  if (hasRoVer) {
+    const probe = await fetchRoVerDiscordUserLink(env, safeGuildId, safeRobloxUserId);
+    if (probe.lookup_state === "matched" && parseDiscordUserId(probe.discord_user_id)) {
+      await cacheOfflineDiscordUserLink(env, safeGuildId, safeRobloxUserId, probe, "rover").catch(err => {
+        console.warn("RoVer cache write failed", String(err?.message || err || "unknown error"));
+      });
+      return { discord_user_id: parseDiscordUserId(probe.discord_user_id), provider: "RoVer" };
+    }
+    lastProbe = probe;
+  }
+  if (hasBloxlink) {
+    const probe = await fetchBloxlinkDiscordUserLink(env, safeGuildId, safeRobloxUserId);
+    lastProbe = probe;
+    lastProvider = "bloxlink";
+    if (probe.lookup_state === "matched" && parseDiscordUserId(probe.discord_user_id)) {
+      await cacheOfflineDiscordUserLink(env, safeGuildId, safeRobloxUserId, probe, "bloxlink").catch(err => {
+        console.warn("Bloxlink cache write failed", String(err?.message || err || "unknown error"));
+      });
+      return { discord_user_id: parseDiscordUserId(probe.discord_user_id), provider: "Bloxlink" };
+    }
+  }
+  if (lastProbe) {
+    await cacheOfflineDiscordUserLink(env, safeGuildId, safeRobloxUserId, lastProbe, lastProvider).catch(err => {
+      console.warn("Offline member-link cache write failed", String(err?.message || err || "unknown error"));
+    });
+  }
+
+  return null;
+}
+
+async function resolveOfflineAlertDiscordMentions(env, guildId, alerts) {
+  if ((!roverApiKey(env) && !bloxlinkGuildApiKey(env, guildId)) || !Array.isArray(alerts) || !alerts.length) return alerts;
+
+  const lookupByRobloxUserId = new Map();
+  return runLimited(alerts, 4, async alert => {
+    // Clan watches are the explicit opt-in for a clan-wide ping board. League
+    // rosters stay unmentioned: one League can contain unrelated players.
+    if (!['user', 'clan'].includes(alert?.scope) || parseDiscordUserId(alert?.watch?.discord_user_id)) return alert;
+
+    const robloxUserId = toNumber(alert?.status?.user_id || alert?.watch?.roblox_user_id);
+    if (!robloxUserId) return alert;
+    const lookupKey = String(robloxUserId);
+    if (!lookupByRobloxUserId.has(lookupKey)) {
+      lookupByRobloxUserId.set(lookupKey, resolveOfflineDiscordUserLink(env, guildId, robloxUserId).catch(() => null));
+    }
+    const resolved = await lookupByRobloxUserId.get(lookupKey);
+    if (!resolved?.discord_user_id) return alert;
+
+    return {
+      ...alert,
+      watch: {
+        ...(alert.watch || {}),
+        discord_user_id: resolved.discord_user_id,
+        discord_label: resolved.provider
+      }
+    };
+  });
+}
+
 function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
   const threshold = options.thresholdMinutes || DEFAULT_OFFLINE_ALERT_MINUTES;
   const postRate = options.postRateMinutes || DEFAULT_OFFLINE_POST_RATE_MINUTES;
-  const directAlerts = alerts.filter(alert => alert.scope === "user");
-  const clanAlerts = alerts.filter(alert => alert.scope === "clan");
+  const directAlerts = alerts.filter(alert => offlineAlertDeliveryScope(alert) === "users");
+  const clanAlerts = alerts.filter(alert => offlineAlertDeliveryScope(alert) === "clan");
   const leagueAlerts = alerts.filter(alert => alert.scope === "league");
   const sections = [];
 
   if (directAlerts.length) {
     sections.push([
       "## Direct User Watches",
-      ...directAlerts.slice(0, 15).map(alert => offlineAlertLine(alert, options.mentionDirectUsers === true)),
+      ...directAlerts.map(alert => offlineAlertLine(alert, options.mentionMappedUsers === true)),
       directAlerts.length > 15 ? `-# ...and ${directAlerts.length - 15} more direct user watch${directAlerts.length - 15 === 1 ? "" : "es"}.` : ""
     ].filter(Boolean).join("\n"));
   }
@@ -8716,8 +9578,7 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
     for (const [clanKey, rows] of byClan.entries()) {
       const clanNameValue = rows[0]?.status?.clan_name || rows[0]?.watch?.clan_name || clanKey;
       lines.push(`### ${escapeDiscordMarkdown(clanNameValue)}`);
-      rows.slice(0, 12).forEach(alert => lines.push(offlineAlertLine(alert, false, { includeClan: false })));
-      if (rows.length > 12) lines.push(`-# ...and ${rows.length - 12} more in ${escapeDiscordMarkdown(clanNameValue)}.`);
+      rows.forEach(alert => lines.push(offlineAlertLine(alert, options.mentionMappedUsers === true, { includeClan: false })));
     }
     sections.push(["## Clan Watches", ...lines].join("\n").slice(0, 4000));
   }
@@ -8728,13 +9589,12 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
     for (const [leagueKey, rows] of byLeague.entries()) {
       const leagueNameValue = rows[0]?.status?.clan_name || rows[0]?.watch?.league_name || leagueKey;
       lines.push(`### ${escapeDiscordMarkdown(leagueNameValue)}`);
-      rows.slice(0, 12).forEach(alert => lines.push(offlineAlertLine(alert, false, { includeClan: false })));
-      if (rows.length > 12) lines.push(`-# ...and ${rows.length - 12} more in ${escapeDiscordMarkdown(leagueNameValue)}.`);
+      rows.forEach(alert => lines.push(offlineAlertLine(alert, false, { includeClan: false })));
     }
     sections.push(["## League Watches", ...lines].join("\n").slice(0, 4000));
   }
 
-  const mentionIds = uniqueValues(directAlerts
+  const mentionIds = uniqueValues([...directAlerts, ...clanAlerts]
     .map(alert => parseDiscordUserId(alert.watch?.discord_user_id))
     .filter(Boolean));
   const payload = persistentDiscordComponentPayload("⏰ Offline Pings", sections, checkedAt, {
@@ -8748,7 +9608,7 @@ function offlinePingAlertMessageBody(alerts, checkedAt, options = {}) {
     ...payload,
     allowed_mentions: {
       parse: [],
-      users: options.mentionDirectUsers === true ? mentionIds : []
+      users: options.mentionMappedUsers === true ? mentionIds : []
     }
   };
 }
@@ -8878,22 +9738,24 @@ function offlinePostRateDue(state, postRateMinutes, checkedAt) {
   return checkedMs - lastAlertMs >= clamp(Number(postRateMinutes || DEFAULT_OFFLINE_POST_RATE_MINUTES), 1, 1440) * 60 * 1000;
 }
 
-function offlineDestinationStateMapKey(guildId, channelId) {
+function offlineDestinationStateMapKey(guildId, channelId, destinationKey = "") {
   return offlineStateMapKey({
     guild_id: guildId,
     scope: "clan",
-    subject_key: offlineDestinationSubjectKey(channelId),
+    subject_key: offlineDestinationSubjectKey(channelId, destinationKey),
     tracked_user_key: "__channel__"
   });
 }
 
-function offlineDestinationSubjectKey(channelId) {
-  return `channel:${String(channelId || "").trim()}`;
+function offlineDestinationSubjectKey(channelId, destinationKey = "") {
+  const scope = normalizeText(destinationKey);
+  return `channel:${String(channelId || "").trim()}${scope ? `|group:${scope}` : ""}`;
 }
 
 function offlineDestinationStateRow({
   guildId,
   channelId,
+  destinationKey = "",
   checkedAt,
   lastAlertAt = null,
   lastMessageId = null,
@@ -8902,7 +9764,7 @@ function offlineDestinationStateRow({
   return {
     guild_id: guildId,
     scope: "clan",
-    subject_key: offlineDestinationSubjectKey(channelId),
+    subject_key: offlineDestinationSubjectKey(channelId, destinationKey),
     tracked_user_key: "__channel__",
     clan_name: null,
     clan_key: null,
@@ -8950,6 +9812,9 @@ function normalizeOfflinePingConfigOutput(row) {
     minutes_threshold: toNumber(row.minutes_threshold) || DEFAULT_OFFLINE_ALERT_MINUTES,
     post_rate_minutes: toNumber(row.post_rate_minutes) || DEFAULT_OFFLINE_POST_RATE_MINUTES,
     enabled: row.enabled !== false,
+    clan_watches_enabled: row.clan_watches_enabled !== false,
+    league_watches_enabled: row.league_watches_enabled !== false,
+    user_watches_enabled: row.user_watches_enabled !== false,
     assigned_by: row.assigned_by || null,
     updated_by: row.updated_by || null,
     last_checked_at: row.last_checked_at || null,
@@ -8993,6 +9858,7 @@ function normalizeOfflinePingUserOutput(row) {
     roblox_username: row.roblox_username || "",
     roblox_username_key: row.roblox_username_key || normalizeText(row.roblox_username),
     source_mode: normalizeOfflineWatchSourceMode(row.source_mode) || "auto",
+    delivery_scope: normalizeOfflinePingDeliveryScope(row.delivery_scope) || "users",
     discord_user_id: parseDiscordUserId(row.discord_user_id),
     discord_label: row.discord_label || null,
     channel_id: row.channel_id || null,
@@ -9010,7 +9876,32 @@ async function ensureOfflineGuildConfig(env, guildId, body = {}) {
     guild_id: `eq.${guildId}`,
     limit: "1"
   }).catch(() => []);
-  if (existing.length) return;
+  // Re-adding a watch after `/offline mode` turned that source off should
+  // make the new watch usable immediately. Previously an existing config
+  // returned early here, leaving saved watches invisible to the scheduler.
+  if (existing.length) {
+    const patch = {
+      guild_id: guildId,
+      updated_at: new Date().toISOString()
+    };
+    if (body.enabled !== undefined) patch.enabled = parseBooleanish(body.enabled) !== false;
+    if (body.clan_watches_enabled !== undefined || body.clans_enabled !== undefined) {
+      patch.clan_watches_enabled = parseBooleanish(body.clan_watches_enabled ?? body.clans_enabled) !== false;
+    }
+    if (body.league_watches_enabled !== undefined || body.leagues_enabled !== undefined) {
+      patch.league_watches_enabled = parseBooleanish(body.league_watches_enabled ?? body.leagues_enabled) !== false;
+    }
+    if (body.user_watches_enabled !== undefined || body.users_enabled !== undefined) {
+      patch.user_watches_enabled = parseBooleanish(body.user_watches_enabled ?? body.users_enabled) !== false;
+    }
+    if (body.updated_by !== undefined || body.created_by !== undefined) {
+      patch.updated_by = stringOrNull(body.updated_by || body.created_by);
+    }
+    if (Object.keys(patch).length > 2) {
+      await supabaseUpsert(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, [patch], "guild_id");
+    }
+    return;
+  }
 
   const now = new Date().toISOString();
   await supabaseUpsert(env, DISCORD_OFFLINE_PING_GUILDS_TABLE, [{
@@ -9018,6 +9909,9 @@ async function ensureOfflineGuildConfig(env, guildId, body = {}) {
     minutes_threshold: clamp(Number(body.minutes_threshold || body.minutes || offlineDefaultMinutes(env)), 1, 1440),
     post_rate_minutes: clamp(Number(body.post_rate_minutes || body.post_rate || offlineDefaultPostRateMinutes(env)), 1, 1440),
     enabled: true,
+    clan_watches_enabled: true,
+    league_watches_enabled: true,
+    user_watches_enabled: true,
     updated_by: stringOrNull(body.updated_by || body.created_by),
     created_at: now,
     updated_at: now
@@ -15153,7 +16047,7 @@ function snapshotRecentGateResult({
 
 async function fetchClanActivityCurrentRows(env, battleKeyValue) {
   return supabaseSelectPaged(env, CLAN_ACTIVITY_CURRENT_TABLE, {
-    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count",
+    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count,member_capacity",
     battle_key: `eq.${battleKeyValue}`,
     order: "clan_key.asc,user_id.asc"
   }, 20000);
@@ -15416,6 +16310,13 @@ function clanActivityEvent({
   currentPermissionLevel = null,
   details = null
 }) {
+  const memberDetails = userRow ? {
+    member_count: toNumber(userRow.member_count),
+    member_capacity: toNumber(userRow.member_capacity),
+    member_points: toNumber(userRow.points),
+    join_time: userRow.join_time || null
+  } : {};
+
   return {
     event_id: "",
     event_at: eventAt || fetchedAt,
@@ -15440,6 +16341,7 @@ function clanActivityEvent({
     current_permission_level: currentPermissionLevel,
     details: {
       clan_points: clanRow.points,
+      ...memberDetails,
       ...(details && typeof details === "object" ? details : {})
     }
   };
@@ -16638,6 +17540,38 @@ async function readGlobalRankRankedCandidates(env, runKey) {
       ...row,
       global_rank: index + 1
     }));
+}
+
+async function attachClanActivityJoinGlobalRanks(env, eventRows, battleKeyValue = null) {
+  const joins = (eventRows || []).filter(event =>
+    String(event?.event_type || "").toLowerCase() === "member_joined" &&
+    /^\d+$/.test(String(event?.user_id || ""))
+  );
+  if (!joins.length) return eventRows;
+
+  const run = await findLatestGlobalRankSearchRun(env, clanName(env), battleKeyValue).catch(() => null);
+  if (!run?.run_key) return eventRows;
+
+  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+  if (!rankedCandidates.length) return eventRows;
+
+  const candidateByUserId = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
+  const totalPlayers = toNumber(run.total_global_players) ||
+    toNumber(run.candidate_player_count) ||
+    rankedCandidates.length;
+
+  for (const event of joins) {
+    const candidate = candidateByUserId.get(String(event.user_id));
+    if (!candidate?.global_rank) continue;
+    event.details = {
+      ...(event.details && typeof event.details === "object" ? event.details : {}),
+      global_rank: candidate.global_rank,
+      global_rank_total: totalPlayers,
+      global_rank_points: toNumber(candidate.points),
+      global_rank_snapshot_at: run.finished_at || run.updated_at || null
+    };
+  }
+  return eventRows;
 }
 
 async function validateGlobalRankRunCompleteness(env, {
@@ -20351,7 +21285,10 @@ function shouldRunGlobalRankSchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minutesUntilOffset < 5;
+  // Match the configured minute precisely. A five-minute window can create
+  // duplicate runs from an every-minute cron, which muddles diagnostics and
+  // competes with the actual alert work.
+  return minutesUntilOffset === 0;
 }
 
 function hourlyAssignmentClanIngestEnabled(env) {
@@ -20496,7 +21433,11 @@ function shouldRunClanActivitySchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minutesUntilOffset < 5;
+  // Only the exact configured minute should start an activity crawl.  A
+  // five-minute "window" turns a five-minute cadence into a run on every
+  // minute, and two matching Cloudflare cron entries can then race each other
+  // before the snapshot guard is written.
+  return minutesUntilOffset === 0;
 }
 
 function offlinePingRuntimeConfig(env) {
@@ -20512,7 +21453,11 @@ function offlinePingRuntimeConfig(env) {
 }
 
 function offlinePingEnabled(env) {
-  return String(env.INGEST_OFFLINE_ALERTS || env.OFFLINE_PING_ENABLED || "false").toLowerCase() === "true";
+  // Treat either legacy flag as an enable switch. Using `a || b` here caused
+  // an explicitly-set `INGEST_OFFLINE_ALERTS=false` to mask a valid legacy
+  // `OFFLINE_PING_ENABLED=true` value.
+  return [env.INGEST_OFFLINE_ALERTS, env.OFFLINE_PING_ENABLED]
+    .some(value => String(value || "").trim().toLowerCase() === "true");
 }
 
 function offlineDefaultMinutes(env) {
@@ -20550,7 +21495,9 @@ function shouldRunOfflinePingSchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minutesUntilOffset < 5;
+  // The worker may be invoked every minute. Run only on the configured minute
+  // so the same saved watch list is not evaluated several times per interval.
+  return minutesUntilOffset === 0;
 }
 
 function ps99VersionRuntimeConfig(env) {

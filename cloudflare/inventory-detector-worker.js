@@ -68,6 +68,10 @@ const DEFAULT_HTG_FAILURE_RETRY_MAX_MINUTES = 120;
 const DEFAULT_HTG_REQUIRE_SOURCE_FILTER = true;
 const DEFAULT_HTG_SOURCE_CONFIRMATION_OBSERVATIONS = 2;
 const DEFAULT_HTG_SCAN_HISTORY_LIMIT = 96;
+// Bump this whenever HTG item identity or baseline rules change. Existing
+// trackers will take one quiet fresh snapshot before alerting again rather
+// than carrying a potentially incompatible baseline forward.
+const HTG_V2_BASELINE_SCHEMA_VERSION = 3;
 const DEFAULT_INVENTORY_SNAPSHOT_ITEM_READ_LIMIT = 50000;
 const HATCH_TRACKER_TIERS = ["huge", "titanic", "gargantuan"];
 const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
@@ -75,7 +79,7 @@ const HATCH_TIER_PRIORITY = { huge: 1, titanic: 2, gargantuan: 3 };
 // server-scoping rollout.  Old subscriptions deliberately have no version,
 // so they remain inert rather than continuing to post in a former server.
 const HTG_SUBSCRIPTION_CONSENT_VERSION = 2;
-const INVENTORY_BUILD_ID = "inventory-htg-v2-reliable-refresh-2026-08-07h";
+const INVENTORY_BUILD_ID = "inventory-htg-v2-confirmed-baseline-2026-08-08a";
 const SNAPSHOT_PUBLIC_SELECT = "id,roblox_user_id,roblox_username,source,captured_at,local_day,is_boundary,boundary_label,item_count";
 const VERIFIED_INVENTORY_SELECTION_METHODS = Object.freeze(["configured", "recognized_path", "verified_shape"]);
 const FEATURED_EVENT_PETS = [
@@ -3248,7 +3252,65 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     start: { captured_at: baseline.captured_at },
     end: { captured_at: checkedAt }
   };
-  const sourceFilter = await filterHatchSourceGains(env, userId, candidates, period);
+
+  // A baseline only knows what the previous live response looked like.  That is
+  // not enough on its own when BIG Games changes an item's response shape (for
+  // example, a variant or an untradable reward field appearing later).  Compare
+  // candidate gains with the player's already-stored inventory snapshots before
+  // we even ask whether they were hatched.  Existing possessions are silently
+  // absorbed into the fresh baseline rather than re-announced as a gain.
+  const historicalFilter = await filterHatchHistoricalInventoryEchoes(env, userId, candidates, period);
+  const novelCandidates = historicalFilter.rows;
+  if (!novelCandidates.length) {
+    const nextState = htgV2CompletedState(state, {
+      checkedAt,
+      source,
+      baseline: htgV2BaselineFromRows(currentRows, checkedAt, source),
+      outcome: "historical_echo_suppressed",
+      reason: "Observed HTG inventory changes already existed in the saved inventory history; no alert was posted.",
+      pending: null,
+      history_filter: historicalFilter,
+      force_refresh_requested: forceRefreshRequested
+    });
+    await saveHtgV2Tracker(env, tracker, nextState, { checkedAt });
+    return {
+      posted: false,
+      reason: nextState.last_reason,
+      history_filter: compactHatchHistoryFilterSummary(historicalFilter),
+      htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
+      source
+    };
+  }
+
+  // A large batch of previously-owned pets becoming "new" at once is a data
+  // reconciliation, not a believable series of hatches.  Re-baseline quietly
+  // instead of flooding a channel.  This intentionally favors no false alert
+  // over announcing an old inventory after a provider-format change.
+  const bulkRisk = htgCompactBulkGainRisk(currentRows, baseline.items, novelCandidates);
+  if (bulkRisk.risky) {
+    const nextState = htgV2CompletedState(state, {
+      checkedAt,
+      source,
+      baseline: htgV2BaselineFromRows(currentRows, checkedAt, source),
+      outcome: "bulk_rebaseline",
+      reason: "HTG inventory changed in a bulk pattern, so Luna saved a fresh baseline instead of posting possible old-item alerts.",
+      pending: null,
+      history_filter: historicalFilter,
+      bulk_risk: bulkRisk,
+      force_refresh_requested: forceRefreshRequested
+    });
+    await saveHtgV2Tracker(env, tracker, nextState, { checkedAt });
+    return {
+      posted: false,
+      reason: nextState.last_reason,
+      bulk_risk: bulkRisk,
+      history_filter: compactHatchHistoryFilterSummary(historicalFilter),
+      htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
+      source
+    };
+  }
+
+  const sourceFilter = await filterHatchSourceGains(env, userId, novelCandidates, period);
   const sourceRequired = htgRequireSourceFilter(env);
   // A unique owner-log is direct evidence that the item first appeared on this
   // Roblox account. Do not make that strong signal wait on optional Trade,
@@ -3259,7 +3321,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     ? sourceFilter.rows
     : sourceRequired
       ? sourceFilter.rows
-      : candidates;
+      : novelCandidates;
   if (!sourceFilter.available && sourceRequired && !eligible.length) {
     const nextState = htgV2CompletedState(state, {
       checkedAt,
@@ -3267,8 +3329,9 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       baseline,
       outcome: "source_verification_pending",
       reason: firstString(sourceFilter.reason, "HTG source verification is temporarily unavailable; the clean baseline was preserved."),
-      pending: htgV2PendingFromCandidates(state.pending, candidates, checkedAt, sourceFilter),
+      pending: htgV2PendingFromCandidates(state.pending, novelCandidates, checkedAt, sourceFilter),
       source_filter: sourceFilter,
+      history_filter: historicalFilter,
       force_refresh_requested: forceRefreshRequested
     });
     await saveHtgV2Tracker(env, tracker, nextState, { checkedAt });
@@ -3277,6 +3340,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       pending: true,
       reason: nextState.last_reason,
       source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      history_filter: compactHatchHistoryFilterSummary(historicalFilter),
       htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
       source
     };
@@ -3291,6 +3355,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       reason: "All observed HTG gains were verified as trade, booth, mail, or prior-owner transfers.",
       pending: null,
       source_filter: sourceFilter,
+      history_filter: historicalFilter,
       force_refresh_requested: forceRefreshRequested
     });
     await saveHtgV2Tracker(env, tracker, nextState, { checkedAt });
@@ -3298,24 +3363,27 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       posted: false,
       reason: nextState.last_reason,
       source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      history_filter: compactHatchHistoryFilterSummary(historicalFilter),
       htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
       source
     };
   }
 
-  // A unique first-owner log is already confirmation. Items without that log
-  // still require one later fresh revision so a source-history delay cannot
-  // turn a transfer into a hatch alert.
+  // Even a first-owner log is not enough by itself: inventory shapes and owner
+  // logs can arrive asynchronously.  Every candidate must still survive a
+  // second independent, fresh inventory revision before Luna can announce it.
   const pending = htgV2PendingFromCandidates(state.pending, eligible, checkedAt, sourceFilter);
-  if (htgV2CandidatesNeedConfirmation(eligible) && pending.observations < 2) {
+  const requiredObservations = htgV2RequiredConfirmationObservations(env);
+  if (htgV2CandidatesNeedConfirmation(eligible) && pending.observations < requiredObservations) {
     const nextState = htgV2CompletedState(state, {
       checkedAt,
       source,
       baseline,
       outcome: "confirmation_pending",
-      reason: "HTG gain observed; waiting for one later fresh inventory revision before posting.",
+      reason: `HTG gain observed; waiting for ${requiredObservations - pending.observations} later fresh inventory revision${requiredObservations - pending.observations === 1 ? "" : "s"} before posting.`,
       pending,
       source_filter: sourceFilter,
+      history_filter: historicalFilter,
       force_refresh_requested: forceRefreshRequested
     });
     await saveHtgV2Tracker(env, tracker, nextState, { checkedAt });
@@ -3324,6 +3392,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       pending: true,
       reason: nextState.last_reason,
       source_filter: compactHatchSourceFilterSummary(sourceFilter),
+      history_filter: compactHatchHistoryFilterSummary(historicalFilter),
       htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
       source
     };
@@ -3343,6 +3412,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
       last_alert_at: checkedAt,
       alerts_posted: postedAlerts.length,
       source_filter: sourceFilter,
+      history_filter: historicalFilter,
       force_refresh_requested: forceRefreshRequested
   });
   await saveHtgV2Tracker(env, tracker, nextState, { checkedAt, alert: postedAlerts.length > 0 });
@@ -3351,6 +3421,7 @@ async function postHtgGainAlertIfNeeded(env, user, tracker, options = {}) {
     alerts_posted: postedAlerts.length,
     items: postedAlerts.map(row => ({ tier: row.tier, item: row.display_name, variant: row.variant, delta: row.delta })),
     source_filter: compactHatchSourceFilterSummary(sourceFilter),
+    history_filter: compactHatchHistoryFilterSummary(historicalFilter),
     htg_v2: htgV2StateSummary({ ...tracker, metadata: htgV2Metadata(tracker.metadata, nextState) }),
     source
   };
@@ -3361,8 +3432,13 @@ function htgV2State(tracker) {
   const baseline = plainObject(raw.baseline);
   const pending = plainObject(raw.pending);
   return {
-    version: 2,
-    reset_required: raw.reset_required === true,
+    version: HTG_V2_BASELINE_SCHEMA_VERSION,
+    baseline_schema_version: Math.max(0, Number(raw.baseline_schema_version || 0)),
+    // A change in baseline identity rules must never compare new-format
+    // inventory rows to an old-format baseline.  The next fresh response is
+    // stored silently, after which normal two-observation confirmation resumes.
+    reset_required: raw.reset_required === true
+      || Number(raw.baseline_schema_version || 0) < HTG_V2_BASELINE_SCHEMA_VERSION,
     // An empty array is a valid baseline: a player with no HTGs must still be
     // armed so their very first Huge can be detected on the next fresh scan.
     baseline: Array.isArray(baseline.items) && firstString(baseline.captured_at) ? {
@@ -3390,6 +3466,8 @@ function htgV2State(tracker) {
     last_reason: firstString(raw.last_reason) || null,
     refresh_quota: plainObject(raw.refresh_quota),
     source: plainObject(raw.source),
+    history_filter: plainObject(raw.history_filter),
+    bulk_risk: plainObject(raw.bulk_risk),
     alerts_posted: Math.max(0, Number(raw.alerts_posted || 0)),
     scan_history: Array.isArray(raw.scan_history)
       ? raw.scan_history.filter(row => row && typeof row === "object").slice(0, DEFAULT_HTG_SCAN_HISTORY_LIMIT)
@@ -3408,7 +3486,8 @@ function htgV2Metadata(metadata, state) {
     ...base,
     htg_v2: {
       ...state,
-      version: 2,
+      version: HTG_V2_BASELINE_SCHEMA_VERSION,
+      baseline_schema_version: HTG_V2_BASELINE_SCHEMA_VERSION,
       updated_at: new Date().toISOString()
     }
   };
@@ -3419,7 +3498,8 @@ function hatchTrackerMetadataWithHtgV2Reset(metadata, reason) {
   return {
     ...base,
     htg_v2: {
-      version: 2,
+      version: HTG_V2_BASELINE_SCHEMA_VERSION,
+      baseline_schema_version: HTG_V2_BASELINE_SCHEMA_VERSION,
       reset_required: true,
       baseline: null,
       pending: null,
@@ -3464,7 +3544,8 @@ function htgV2CompletedState(state, patch = {}) {
   const refresh = plainObject(patch.source?.refresh);
   const completed = {
     ...state,
-    version: 2,
+    version: HTG_V2_BASELINE_SCHEMA_VERSION,
+    baseline_schema_version: HTG_V2_BASELINE_SCHEMA_VERSION,
     reset_required: false,
     baseline: patch.baseline || state.baseline || null,
     pending: patch.pending === undefined ? state.pending || null : patch.pending,
@@ -3491,7 +3572,11 @@ function htgV2CompletedState(state, patch = {}) {
       resets_at: refresh.resetsAt || null,
       next_refresh_eligible_at: refresh.nextRefreshEligibleAt || null,
       skipped: refresh.skipped === true
-    }
+    },
+    history_filter: patch.history_filter
+      ? compactHatchHistoryFilterSummary(patch.history_filter)
+      : plainObject(state.history_filter),
+    bulk_risk: patch.bulk_risk || plainObject(state.bulk_risk)
   };
   return {
     ...completed,
@@ -3507,6 +3592,8 @@ function htgV2CompletedState(state, patch = {}) {
       // Do not infer a debit merely because the scheduled request asked for one.
       provider_refresh_units_observed: htgProviderRefreshUnits(refresh),
       source_verification_requests: Array.isArray(patch.source_filter?.sources) ? patch.source_filter.sources.length : 0,
+      historical_echoes_suppressed: Array.isArray(patch.history_filter?.suppressed) ? patch.history_filter.suppressed.length : 0,
+      bulk_rebaseline: patch.bulk_risk?.risky === true,
       alerts_posted: completed.alerts_posted,
       reason: completed.last_reason
     })
@@ -3547,7 +3634,19 @@ function htgV2PendingFromCandidates(existing, candidates, checkedAt, sourceFilte
 }
 
 function htgV2CandidatesNeedConfirmation(candidates) {
-  return (candidates || []).some(candidate => firstString(candidate?.hatch_verification) !== "first_owner_log");
+  // A source log is useful evidence, but it is not an alert by itself. BIG
+  // Games can expose a newly enriched owner log for an item that was already
+  // owned. Requiring persistence across fresh inventory revisions is the one
+  // signal shared by all item types and prevents that replay from becoming a
+  // public acquisition alert.
+  return Array.isArray(candidates) && candidates.length > 0;
+}
+
+function htgV2RequiredConfirmationObservations(env) {
+  // Keep the existing operator setting as an optional way to demand more
+  // checks, but never permit a single observation: that was the source of the
+  // old inventory flood behaviour.
+  return Math.max(2, htgSourceConfirmationObservations(env));
 }
 
 function htgV2FreshnessDecision(baseline, source) {
@@ -3647,7 +3746,7 @@ async function markHtgV2ScanFailed(env, tracker, error, attemptedAt = new Date()
 function htgV2StateSummary(tracker) {
   const state = htgV2State(tracker);
   return {
-    version: 2,
+      version: HTG_V2_BASELINE_SCHEMA_VERSION,
     baseline_captured_at: state.baseline?.captured_at || null,
     baseline_item_count: state.baseline?.items?.length || 0,
     pending: state.pending ? { observations: state.pending.observations, first_seen_at: state.pending.first_seen_at, candidate_count: state.pending.candidates.length } : null,
@@ -3656,7 +3755,9 @@ function htgV2StateSummary(tracker) {
     last_outcome: state.last_outcome,
     last_error: state.last_error,
     consecutive_failures: state.consecutive_failures,
-    refresh_quota: state.refresh_quota
+    refresh_quota: state.refresh_quota,
+    history_filter: state.history_filter,
+    bulk_risk: state.bulk_risk
   };
 }
 
@@ -4459,7 +4560,11 @@ function htgCompactBulkGainRisk(currentRows, previousRows, candidates) {
   if (allCurrentRowsAppearNew) reasons.push("zero_baseline_overlap");
   if (candidateDistinct >= 12) reasons.push("too_many_distinct_gains");
   if (candidateTotal >= 20 && gainShare >= 0.5) reasons.push("implausible_inventory_share");
-  if (candidateDistinct >= 8 && overlapRatio < 0.25) reasons.push("low_baseline_overlap");
+  // Three unrelated HTGs all appearing while the old baseline no longer shares
+  // its normal identity keys is overwhelmingly a provider reconciliation, not
+  // a hatch streak.  The old threshold of eight let exactly this kind of spam
+  // reach Discord after a response-shape change.
+  if (candidateDistinct >= 3 && overlapRatio < 0.5) reasons.push("low_baseline_overlap");
 
   return {
     risky: reasons.length > 0,
@@ -5583,12 +5688,24 @@ function suppressHatchSourceMatches(rows, sourceItems) {
 }
 
 function hatchSourceMatchKey(row) {
-  const baseName = hatchSourceBaseName(firstString(row?.display_name, row?.item_id, row?.item_key));
+  const sourceName = firstString(row?.display_name, row?.item_id, row?.item_key);
+  const baseName = hatchSourceBaseName(sourceName);
   if (!baseName) return "";
   return [
     baseName,
-    normalizeVariantForMatch(row?.variant || getVariant(row?.raw || {}))
+    hatchVariantMatchKey(row, sourceName)
   ].join("|");
+}
+
+function hatchVariantMatchKey(row, sourceName = "") {
+  const reported = normalizeVariantForMatch(row?.variant || getVariant(row?.raw || {}));
+  const name = String(sourceName || "").toLowerCase();
+  const labels = ["golden", "rainbow", "shiny"].filter(label => new RegExp(`\\b${label}\\b`, "i").test(name));
+  // The Player API sometimes labels an item as Normal while its display name
+  // correctly says Rainbow/Shiny. Use that visible, stable qualifier so the
+  // same pet retains its identity across response formats.
+  if (reported === "normal" && labels.length) return labels.join(" ");
+  return reported;
 }
 
 function hatchSourceBaseName(value) {

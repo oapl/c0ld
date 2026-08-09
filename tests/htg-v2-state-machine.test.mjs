@@ -159,6 +159,16 @@ assert.deepEqual(
   "an empty HTG baseline must remain armed so a first Huge is not silently absorbed"
 );
 assert.equal(
+  htgV2State({ metadata: { htg_v2: { baseline: { captured_at: "2026-08-06T00:00:00.000Z", items: [] } } } }).reset_required,
+  true,
+  "a pre-confirmed-baseline tracker must take one silent fresh baseline after the rollout"
+);
+assert.equal(
+  htgV2State({ metadata: { htg_v2: { baseline_schema_version: 3, baseline: { captured_at: "2026-08-06T00:00:00.000Z", items: [] } } } }).reset_required,
+  false,
+  "a current confirmed-baseline tracker must remain armed after restart"
+);
+assert.equal(
   htgV2FreshnessDecision(baseline, { fetched_at: "2026-08-06T00:00:00.000Z" }).fresh,
   false,
   "an unchanged provider revision must never be compared again"
@@ -200,8 +210,8 @@ const confirmedPending = htgV2PendingFromCandidates(firstPending, firstCandidate
 assert.equal(confirmedPending.observations, 2, "the same retained gain must confirm on the next fresh scan");
 assert.equal(
   htgV2CandidatesNeedConfirmation([{ ...firstCandidates[0], hatch_verification: "first_owner_log" }]),
-  false,
-  "a unique first-owner log must be sufficient confirmation even when optional source-history scopes are unavailable"
+  true,
+  "even a unique first-owner log must survive a second fresh inventory revision before it can alert"
 );
 assert.equal(
   htgV2CandidatesNeedConfirmation(firstCandidates),

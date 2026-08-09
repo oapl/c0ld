@@ -239,6 +239,13 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `OFFLINE_ALERT_SCHEDULE_MINUTES` | Optional. Defaults to `5`; how often the clan Worker evaluates configured offline pings. Keep the Cloudflare cron at least this frequent. |
 | `OFFLINE_ALERT_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`; offset inside the offline alert schedule interval. |
 | `OFFLINE_LOOKBACK_BUFFER_MINUTES` | Optional. Defaults to `30`; extra history read beyond the guild threshold so downtime can be calculated from stored snapshots. |
+| `ROVER_API_KEY` | Secret. Optional RoVer Bot Developer key used to resolve direct-user and Clan-watch Roblox members to verified Discord members in that same server. |
+| `ROVER_CACHE_MINUTES` | Optional. Defaults to `720`; how long a successful RoVer member mapping is cached. |
+| `ROVER_NEGATIVE_CACHE_MINUTES` | Optional. Defaults to `30`; how long a missing/non-consented RoVer mapping is cached. |
+| `ROVER_ERROR_CACHE_MINUTES` | Optional. Defaults to `5`; retry delay after a temporary RoVer error. |
+| `BLOXLINK_GUILD_API_KEYS_JSON` | Secret. Optional JSON map of Discord server IDs to their Bloxlink Server API keys. Bloxlink keys are server-specific. Example: `{"1529193730022838392":"key-for-that-server"}`. |
+| `BLOXLINK_API_KEY` | Secret. Optional single-server fallback Bloxlink key. Use the JSON map above when Luna is installed in more than one Bloxlink-enabled server. |
+| `BLOXLINK_API_BASE` | Optional. Defaults to `https://api.blox.link/v4/public`. |
 | `INGEST_PS99_VERSION_HISTORY` | Optional. Defaults to `false`. For c0ld production, keep this `true` after running migration `021` so PS99 place version checks continue outside clan battles. |
 | `PS99_UNIVERSE_ID` | Optional. Defaults to `3317771874`. |
 | `PS99_ROOT_PLACE_ID` | Optional. Defaults to `8737899170`. |
@@ -1489,6 +1496,7 @@ supabase/migrations/040_discord_offline_ping.sql
 supabase/migrations/041_discord_offline_split_channels.sql
 supabase/migrations/042_discord_offline_user_channels.sql
 supabase/migrations/050_discord_offline_league_pings.sql
+supabase/migrations/055_discord_rover_member_links.sql
 ```
 
 Register `/offline` with `scripts/discord-search-command-admin.ps1`, or call
@@ -1506,8 +1514,8 @@ Commands:
 /offline league name:<league>
 /offline remove-clan name:<clan>
 /offline remove-league name:<league>
-/offline user username:<roblox username> discord:<Discord user> clan:<optional clan or League hint> source:<auto|clan|league>
-/offline users clan:<clan or League> user1:<roblox username> discord1:<Discord user>
+/offline user username:<roblox username> discord:<optional Discord override> clan:<optional clan or League hint> source:<auto|clan|league>
+/offline users clan:<clan or League> user1:<roblox username> discord1:<optional Discord override>
 /offline post-rate minutes:<minutes>
 /offline check
 /offline list
@@ -1516,8 +1524,14 @@ Commands:
 The Discord Worker needs `CLAN_API_ADMIN_TOKEN` and the `CLAN_API_WORKER`
 service binding, same as `/hourly`. The clan API Worker needs
 `DISCORD_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and
-`INGEST_OFFLINE_ALERTS=true` once you are ready for scheduled checks. Manual
-checks can be triggered with:
+`INGEST_OFFLINE_ALERTS=true` once you are ready for scheduled checks. Set
+`ROVER_API_KEY` and/or `BLOXLINK_GUILD_API_KEYS_JSON` as **secrets** on that
+clan API Worker to automatically resolve direct-user and Clan-watch Roblox
+members. A manually provided `discord:` input always wins. Luna tries RoVer
+first, then Bloxlink for any member RoVer cannot resolve. Bloxlink requires
+the Bloxlink bot and that server's own Server API key in each Discord server.
+League-wide watches remain non-pinging.
+Manual checks can be triggered with:
 
 League offline watches read from `ps99_league_current` and
 `ps99_league_snapshots`, so the League API Worker must still be collecting the
@@ -1550,10 +1564,10 @@ Invoke-RestMethod -Method Post `
 To preview in the assigned Discord channel instead of a webhook, send
 `guild_id` or `channel_id` in the body and omit `webhook_url`.
 
-Bloxlink note: Discord interaction payloads include Discord role IDs, but they
-do not include Bloxlink's Roblox-account mapping. To auto-map verified Roblox
-names later, add a Bloxlink API integration or continue using explicit
-`/offline user` mappings.
+Verification-provider note: cached mappings are scoped to a Discord server.
+Missing RoVer consent, RoVer/Bloxlink verification, or a Bloxlink key for that
+specific server simply leaves the offline alert unmentioned; it does not block
+the alert itself.
 
 ## Servers Worker
 

@@ -1,9 +1,11 @@
-name = "c0ld-clan-api"
+name = "c0ld-clan-api-worker"
 main = "c0ld-clan-api-worker.js"
 compatibility_date = "2026-06-16"
 
 [triggers]
-crons = ["*/5 * * * *", "* * * * *"]
+# Keep one per-minute wake-up. Individual jobs (including clan activity) use
+# their own configured cadence and offset below.
+crons = ["* * * * *"]
 
 [vars]
 CLAN_NAME = "c0ld"
@@ -84,9 +86,9 @@ REWARD_CUTOFFS_SCHEDULE_OFFSET_MINUTES = "0"
 INGEST_CLAN_ACTIVITY = "false"
 CLAN_ACTIVITY_TOP_N = "100"
 CLAN_ACTIVITY_CONCURRENCY = "8"
-CLAN_ACTIVITY_SCHEDULE_MINUTES = "30"
+CLAN_ACTIVITY_SCHEDULE_MINUTES = "5"
 CLAN_ACTIVITY_SCHEDULE_OFFSET_MINUTES = "0"
-CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = "25"
+CLAN_ACTIVITY_MIN_SNAPSHOT_INTERVAL_MINUTES = "5"
 CLAN_ACTIVITY_CLAN_DELAY_MS = "250"
 # Optional Discord no-gain/offline pings managed by /offline commands.
 INGEST_OFFLINE_ALERTS = "false"
@@ -95,6 +97,14 @@ OFFLINE_DEFAULT_POST_RATE_MINUTES = "30"
 OFFLINE_ALERT_SCHEDULE_MINUTES = "5"
 OFFLINE_ALERT_SCHEDULE_OFFSET_MINUTES = "0"
 OFFLINE_LOOKBACK_BUFFER_MINUTES = "30"
+# Optional RoVer cache timings for automatic Roblox-to-Discord resolution.
+# Add ROVER_API_KEY separately as a Worker secret; never place the key here.
+ROVER_CACHE_MINUTES = "720"
+ROVER_NEGATIVE_CACHE_MINUTES = "30"
+ROVER_ERROR_CACHE_MINUTES = "5"
+# Optional Bloxlink fallback. Add BLOXLINK_GUILD_API_KEYS_JSON as a Worker
+# secret; it maps each Discord guild ID to that guild's Bloxlink Server API key.
+# BLOXLINK_API_KEY is an optional fallback for a single guild only.
 # Optional PS99 place version catalog for ps99-version-history.html.
 INGEST_PS99_VERSION_HISTORY = "true"
 PS99_UNIVERSE_ID = "3317771874"
