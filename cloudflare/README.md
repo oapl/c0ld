@@ -193,8 +193,8 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `CLANS_SNAPSHOT_MIN_INTERVAL_MINUTES` | Optional. Defaults to `5`; prevents scheduled or accidental duplicate all-clans leaderboard snapshot writes for the same battle when the latest snapshot is newer than this. `force=1` bypasses it. |
 | `CLAN_BATTLES_SCAN_LIMIT` | Optional legacy fallback scan size for `/api/clans/battles?include_legacy=1`. Normal battle lists use `c0ld_battle_runs` metadata and do not scan raw leaderboard history. |
 | `INGEST_GLOBAL_RANKS` | Optional. Defaults to `false`. Set to `true` after running migrations `016` and `017`. |
-| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `30`; starts a new global scan on this interval boundary. Keep the Cloudflare cron at `*/5 * * * *` so running scans continue on the in-between ticks until finished. |
-| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Offset inside the schedule interval; keep `0` with the top-of-five-minute cron when you want all battle-data pulls aligned on `:00`, `:05`, `:10`, and so on. |
+| `GLOBAL_RANK_SCHEDULE_MINUTES` | Optional. Defaults to `20`; starts a new global scan on the `:00`, `:20`, and `:40` boundaries. Keep the Worker on its single every-minute cron so an in-progress scan resumes immediately if it needs another pass. |
+| `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES` | Optional. Defaults to `0`. Keep `0` for the predictable `:00`, `:20`, and `:40` global-rank cadence. |
 | `GLOBAL_RANK_CLAN_SCAN_LIMIT` | Optional. Defaults to `500`; number of ranked clans to inspect. Global ranks are calculated from every unique player found inside those scanned clans. |
 | `GLOBAL_RANK_CLAN_PAGE_SIZE` | Optional. Defaults to `100`; ranked clans requested per `/api/clans` page. |
 | `GLOBAL_RANK_CLANS_PER_RUN` | Optional. Defaults to `25`; fallback maximum clan detail pulls per Worker invocation when no per-shard value is set. |
@@ -391,18 +391,18 @@ old/new server diversity, transition span, and version result.
 
 ## Scheduled pulls
 
-The Wrangler example includes:
+The Wrangler example includes one cron trigger:
 
 ```toml
 [triggers]
-crons = ["*/5 * * * *", "* * * * *"]
+crons = ["* * * * *"]
 ```
 
-The five-minute grid continues the existing clan, activity, and global-rank jobs. The every-minute trigger owns the lightweight restart detector and dispatches PS99 versions, Roblox releases, public FFlags, and official BIG Games posts only when their configured schedule is due. In the Cloudflare dashboard, add both cron triggers under the Worker trigger settings if you are not using Wrangler.
+The per-minute wake-up runs each job only when its own cadence is due and immediately resumes an incomplete global scan. In the Cloudflare dashboard, keep this one every-minute trigger; a second five-minute trigger can race the same global scan and make its completion time less predictable.
 
 Each alert feed has its own webhook. The first successful FFlag and dev-blog poll stores a baseline without posting old items; only later changes create events and Discord messages. The FFlag collector watches publicly exposed Roblox client settings, so it can report client configuration changes but cannot see private PS99 server-side flags.
 
-Do not reduce the Cloudflare cron itself to only two runs per hour. If you set `GLOBAL_RANK_SCHEDULE_MINUTES=30` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=0`, fresh scans start at `:00` and `:30`. The intervening five-minute ticks remain available to resume a running scan after a transient failure without starting extra completed scans, and the battle-data cutoff guard prevents the `10:05` tick from queuing late battle pulls.
+Do not reduce the Cloudflare cron itself to only two or three runs per hour. With `GLOBAL_RANK_SCHEDULE_MINUTES=20` and `GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES=0`, fresh scans start at `:00`, `:20`, and `:40`; the minute ticks in between are reserved for completing that same run, never for starting an extra one.
 
 ## Manual test
 

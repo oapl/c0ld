@@ -65,7 +65,10 @@ const CLANS_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLAN_SCAN_LIMIT = 500;
 const DEFAULT_GLOBAL_RANK_CLAN_PAGE_SIZE = 100;
 const DEFAULT_GLOBAL_RANK_CLANS_PER_RUN = 25;
-const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 30;
+// Search responses are served from the completed global-rank pool. A full scan
+// is deliberately scheduled on the 00/20/40-minute cadence so `/search` has a
+// clear, predictable twenty-minute freshness contract.
+const DEFAULT_GLOBAL_RANK_SCHEDULE_MINUTES = 20;
 const DEFAULT_GLOBAL_RANK_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_PLAYER_REWARD_CUTOFF_RANKS = [3, 10, 100, 250, 500, 1000, 10000];
 const DEFAULT_CLAN_REWARD_CUTOFF_RANKS = [1, 3, 10, 30, 50, 250, 500];
@@ -598,7 +601,11 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
   const jobs = [];
 
   if (runBattleDataJobs) {
-    const configuredClans = clanNames(env);
+    // A Discord /clan tracker assignment is also an opt-in to the normal
+    // member-snapshot collector.  This keeps the tracker, its deltas, and
+    // its five-minute refresh on the same data source without requiring a
+    // separate CLAN_NAMES environment-variable edit for every new clan.
+    const configuredClans = await fetchTrackerAssignmentClanNames(env, clanNames(env));
     jobs.push(...configuredClans.map(clan => ({
       label: `members:${clan}`,
       run: () => handleIngest(env, "schedule", clan, force, jobRunOptions)
@@ -839,6 +846,38 @@ async function fetchHourlyAssignmentClanNames(env, configuredClans = []) {
 
     seen.add(key);
     clans.push(raw);
+  }
+
+  return clans;
+}
+
+async function fetchTrackerAssignmentClanNames(env, configuredClans = []) {
+  const clans = [...(configuredClans || [])];
+  const seen = new Set(clans.map(clan => normalizeText(clan)).filter(Boolean));
+
+  try {
+    const rows = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
+      select: "clan_name,enabled,updated_at",
+      enabled: "eq.true",
+      order: "updated_at.asc",
+      limit: "1000"
+    });
+
+    for (const row of rows) {
+      const raw = String(row?.clan_name || "").trim();
+      const lower = raw.toLowerCase();
+      if (!raw || lower.startsWith("user:") || lower.startsWith("league:")) continue;
+
+      const key = normalizeText(raw);
+      if (!key || seen.has(key)) continue;
+
+      seen.add(key);
+      clans.push(raw);
+    }
+  } catch (error) {
+    // A temporary Discord-tracker table failure must not stop the static
+    // CLAN_NAMES collector from running.
+    console.warn("scheduled clan tracker assignment lookup failed", error?.message || String(error));
   }
 
   return clans;
@@ -7242,16 +7281,47 @@ async function handleDiscordClanLogAssignments(request, env) {
   const assignmentKey = String(body.assignment_key || "").trim();
 
   if (request.method === "DELETE") {
-    if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+    if (assignmentKey) {
+      const assignments = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+        select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+        assignment_key: `eq.${assignmentKey}`,
+        limit: "1"
+      });
+      await supabaseDelete(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+        assignment_key: `eq.${assignmentKey}`
+      });
+      return noStoreJson({
+        ok: true,
+        removed: assignments.length > 0,
+        removed_count: assignments.length,
+        assignment: assignments[0] || null
+      });
+    }
+
+    const guildId = String(body.guild_id || "").trim();
+    const clanName = String(body.clan_name || "").trim();
+    const clanKey = normalizeText(clanName);
+    if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
+    if (!clanKey) throw httpError(400, "A clan name is required.");
+
+    const filters = {
+      guild_id: `eq.${guildId}`,
+      clan_key: `eq.${clanKey}`
+    };
     const assignments = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
       select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
-      assignment_key: `eq.${assignmentKey}`,
-      limit: "1"
+      ...filters,
+      limit: "1000"
     });
-    await supabaseDelete(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
-      assignment_key: `eq.${assignmentKey}`
+    if (assignments.length) {
+      await supabaseDelete(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, filters);
+    }
+    return noStoreJson({
+      ok: true,
+      removed: assignments.length > 0,
+      removed_count: assignments.length,
+      assignments
     });
-    return noStoreJson({ ok: true, removed: assignments.length > 0, assignment: assignments[0] || null });
   }
 
   if (request.method === "POST") {
@@ -7444,6 +7514,7 @@ async function handleClanActivityDetail(request, env) {
     "member_kicked",
     "member_promoted",
     "member_demoted",
+    "diamond_donation",
     "kick_available",
     "kick_used",
     "kick_available_changed"
@@ -16045,7 +16116,10 @@ function snapshotRecentGateResult({
 
 async function fetchClanActivityCurrentRows(env, battleKeyValue) {
   return supabaseSelectPaged(env, CLAN_ACTIVITY_CURRENT_TABLE, {
-    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count,member_capacity",
+    // Diamond donations live in the nested raw member/contribution payloads.
+    // Include them in the previous-state lookup so a cumulative delta can be
+    // turned into a real activity event.
+    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count,member_capacity,raw_member,raw_contribution",
     battle_key: `eq.${battleKeyValue}`,
     order: "clan_key.asc,user_id.asc"
   }, 20000);
@@ -16133,6 +16207,52 @@ function clanActivityRosterRow({
   };
 }
 
+function clanActivityDiamondDonationObservation(row) {
+  // BIG Games has used more than one spelling/nesting shape for this value.
+  // Inspect only fields whose key/path explicitly says both "diamond" and
+  // "donation" (or contribution), which prevents normal clan points from
+  // being mistaken for diamonds.  The largest matching cumulative value is
+  // the one we compare between snapshots.
+  const best = { total: null, path: null };
+  const visited = new Set();
+  const sources = [
+    ["member", row?.raw_member],
+    ["contribution", row?.raw_contribution]
+  ];
+
+  const hasDonationMeaning = pieces => {
+    const joined = pieces.join("_").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return joined.includes("diamond")
+      && (joined.includes("donat") || joined.includes("contribut"));
+  };
+
+  const visit = (value, path = [], depth = 0) => {
+    if (depth > 6 || value === null || value === undefined) return;
+    if (typeof value === "number" || typeof value === "string") {
+      const numeric = toNumber(value);
+      if (numeric !== null && numeric >= 0 && hasDonationMeaning(path)) {
+        if (best.total === null || numeric > best.total) {
+          best.total = numeric;
+          best.path = path.join(".");
+        }
+      }
+      return;
+    }
+    if (typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, String(index)], depth + 1));
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      visit(child, [...path, key], depth + 1);
+    }
+  };
+
+  for (const [label, value] of sources) visit(value, [label]);
+  return best;
+}
+
 function clanActivityIncrements({
   clanRow,
   currentByUser,
@@ -16176,6 +16296,33 @@ function clanActivityIncrements({
           currentValue: "joined"
         }));
         continue;
+      }
+
+      const previousDonation = clanActivityDiamondDonationObservation(previous);
+      const currentDonation = clanActivityDiamondDonationObservation(current);
+      if (
+        previousDonation.total !== null
+        && currentDonation.total !== null
+        && currentDonation.total > previousDonation.total
+      ) {
+        const amount = currentDonation.total - previousDonation.total;
+        events.push(clanActivityEvent({
+          fetchedAt,
+          source,
+          battleKey,
+          battleMeta,
+          clanRow,
+          eventType: "diamond_donation",
+          userRow: current,
+          previousValue: String(previousDonation.total),
+          currentValue: String(currentDonation.total),
+          details: {
+            diamond_donation_amount: amount,
+            diamond_donation_total: currentDonation.total,
+            previous_diamond_donation_total: previousDonation.total,
+            diamond_donation_source: currentDonation.path || previousDonation.path || null
+          }
+        }));
       }
 
       const change = memberRoleChange(previous, current);

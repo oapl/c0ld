@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Token,
   [string]$GuildId = "",
+  [string]$CleanupGuildId = "",
   [switch]$Global
 )
 
@@ -19,6 +20,13 @@ $query = if ($Global -or [string]::IsNullOrWhiteSpace($GuildId)) {
   "?scope=global"
 } else {
   "?scope=guild&guild_id=$([uri]::EscapeDataString($GuildId.Trim()))"
+}
+
+# A global command can be hidden by an older guild-scoped /offline command.
+# This removes only that stale command from the chosen guild; it does not
+# touch any saved offline watches, channels, or settings.
+if (($Global -or [string]::IsNullOrWhiteSpace($GuildId)) -and -not [string]::IsNullOrWhiteSpace($CleanupGuildId)) {
+  $query += "&cleanup_guild_id=$([uri]::EscapeDataString($CleanupGuildId.Trim()))"
 }
 
 Write-Host "Registering /offline..." -ForegroundColor Cyan

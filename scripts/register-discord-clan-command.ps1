@@ -1,9 +1,7 @@
 param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev/",
   [Parameter(Mandatory = $true)]
-  [string]$Token,
-  [string]$GuildId = "",
-  [switch]$Global
+  [string]$Token
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,15 +11,8 @@ $headers = @{
   "X-C0LD-Admin-Token" = $Token.Trim()
 }
 
-if ($GuildId.Trim()) {
-  $query = "?scope=guild&guild_id=$([uri]::EscapeDataString($GuildId.Trim()))"
-} else {
-  # Global is the intended default. Pass -GuildId only for an immediate, server-specific test registration.
-  $query = "?scope=global"
-}
-
-Write-Host "Registering /clan globally, including /clan log and /clan tracker..." -ForegroundColor Green
-$result = Invoke-RestMethod -Method Post -Uri "$base/admin/register-clan-command$query" -Headers $headers
+Write-Host "Registering /clan globally, including /clan log and /clan tracker, for every server Luna is installed in..." -ForegroundColor Green
+$result = Invoke-RestMethod -Method Post -Uri "$base/admin/register-clan-command?scope=global" -Headers $headers
 $result | ConvertTo-Json -Depth 12
 
-Write-Host "Discord may take up to an hour to refresh global commands. Use /clan tracker clan:<name> assign:<channel> for a persistent board, or /clan log clan:<name> assign:<channel> for activity posts." -ForegroundColor Green
+Write-Host "Discord can take up to an hour to refresh global command menus. Use /clan tracker assign clan:<name> channel:<channel> for a persistent board, /clan tracker remove clan:<name> to remove that board from this server, and /clan log remove clan:<name> to stop future activity posts in this server." -ForegroundColor Green
