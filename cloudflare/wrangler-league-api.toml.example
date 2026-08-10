@@ -4,15 +4,17 @@ compatibility_date = "2026-06-20"
 
 [vars]
 LEAGUE_NAME = "YAMO"
-# Master safety switch. Leave false until a League run should be collectible.
-# When true/auto, scheduled collection still obeys LEAGUE_RUN_START_AT and LEAGUE_RUN_END_AT.
+# Master safety switch. Leave false between League events.
+# Use auto for normal scheduled collection; auto requires LEAGUE_RUN_END_AT so
+# the Worker cannot keep pulling after an event. Use true only as a manual
+# override when you intentionally want collection without a configured end time.
 LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
 LEAGUE_RUN_KEY = "plants-vs-coins-part-2"
 LEAGUE_RUN_LABEL = "Plants VS Coins Part 2"
 # Optional current League start. If set, scheduled collection waits until this ISO time.
 LEAGUE_RUN_START_AT = ""
-# Current League end. Leave blank while the current League run is active.
+# Current League end. Required when LEAGUE_COLLECTION_ENABLED = "auto".
 LEAGUE_RUN_END_AT = ""
 # Optional minutes after LEAGUE_RUN_END_AT during which scheduled final pulls may still run.
 LEAGUE_COLLECTION_FINAL_PULL_GRACE_MINUTES = "0"

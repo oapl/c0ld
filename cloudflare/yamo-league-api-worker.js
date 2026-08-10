@@ -68,6 +68,7 @@ export default {
           ok: true,
           service: "ps99-league-api",
           league_collection_enabled: leagueCollectionEnabled(env),
+          league_collection_mode: leagueCollectionMode(env),
           scheduled_collection_enabled: scheduledCollection.enabled,
           scheduled_collection_reason: scheduledCollection.reason,
           scheduled_collection_phase: scheduledCollection.collection_phase,
@@ -91,7 +92,7 @@ export default {
           general_league_refresh_minutes: generalLeagueRefreshMinutes(env),
           general_league_refresh_batch_size: generalLeagueRefreshBatchSize(env),
           general_league_refresh_concurrency: generalLeagueRefreshConcurrency(env),
-          scheduled_rank_windows: leagueCollectionEnabled(env) && shouldRunTrackedRankWindowRefresh(env),
+          scheduled_rank_windows: scheduledCollection.enabled && shouldRunTrackedRankWindowRefresh(env),
           top_leagues: TOP_LEAGUES_NAME,
           top_leagues_limit: topLeaguesLimit(env),
           top_leagues_refresh_minutes: topLeaguesRefreshMinutes(env),
@@ -4491,7 +4492,41 @@ async function supabaseSelectAll(env, table, params = {}, options = {}) {
   return rows;
 }
 async function supabaseInsert(env, table, rows) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", body: rows, headers: { Prefer: "return=minimal" } }); }
-async function supabaseUpsert(env, table, rows, conflictColumns) { if (!rows.length) return []; return supabaseFetch(env, table, { method: "POST", params: { on_conflict: conflictColumns }, body: rows, headers: { Prefer: "resolution=merge-duplicates,return=minimal" } }); }
+async function supabaseUpsert(env, table, rows, conflictColumns) {
+  const dedupedRows = dedupeRowsByConflictColumns(rows || [], conflictColumns);
+  if (!dedupedRows.length) return [];
+  return supabaseFetch(env, table, {
+    method: "POST",
+    params: { on_conflict: conflictColumns },
+    body: dedupedRows,
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" }
+  });
+}
+
+function dedupeRowsByConflictColumns(rows, conflictColumns) {
+  if (!Array.isArray(rows) || rows.length < 2) return rows || [];
+
+  const columns = String(conflictColumns || "")
+    .split(",")
+    .map(column => column.trim())
+    .filter(Boolean);
+  if (!columns.length) return rows;
+
+  const byKey = new Map();
+  for (const row of rows) {
+    if (!row || typeof row !== "object") return rows;
+
+    const parts = [];
+    for (const column of columns) {
+      const value = row[column];
+      if (value === undefined || value === null || value === "") return rows;
+      parts.push(`${column}:${String(value)}`);
+    }
+    byKey.set(parts.join("\u001f"), row);
+  }
+
+  return [...byKey.values()];
+}
 async function supabaseInsertBatches(env, table, rows, batchSize = 500) {
   for (const batch of chunk(rows || [], clamp(Number(batchSize) || 500, 1, 1000))) {
     await supabaseInsert(env, table, batch);
@@ -4687,8 +4722,11 @@ function stableLeagueUserId(value) { let h = 2166136261; const text = String(val
 function requireSupabase(env) { if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw httpError(500, "SUPABASE_URL and SUPABASE_SERVICE_KEY are required"); }
 function requireAdmin(request, env) { const expected = String(env.INGEST_ADMIN_TOKEN || "").trim(); if (!expected) throw httpError(500, "INGEST_ADMIN_TOKEN is not configured"); const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim(); if (token !== expected) throw httpError(401, "Unauthorized"); }
 function leagueCollectionEnabled(env) { return leagueCollectionSwitchEnabled(env); }
+function leagueCollectionMode(env) {
+  return String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase() || "false";
+}
 function leagueCollectionSwitchEnabled(env) {
-  const raw = String(env.LEAGUE_COLLECTION_ENABLED || "false").trim().toLowerCase();
+  const raw = leagueCollectionMode(env);
   return raw !== "" && !FALSEY_ENV_VALUES.has(raw);
 }
 function requireLeagueCollectionEnabled(env) {
@@ -4710,9 +4748,11 @@ function leagueScheduledCollectionState(env, scheduledAt = null) {
   const endMs = endAt ? new Date(endAt).getTime() : NaN;
   const graceMinutes = leagueCollectionFinalPullGraceMinutes(env);
   const hardStopMs = Number.isFinite(endMs) ? endMs + graceMinutes * 60 * 1000 : NaN;
+  const mode = leagueCollectionMode(env);
 
   const base = {
     run_key: runKey,
+    mode,
     start_at: startAt,
     end_at: endAt,
     hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null,
@@ -4721,6 +4761,10 @@ function leagueScheduledCollectionState(env, scheduledAt = null) {
 
   if (!leagueCollectionSwitchEnabled(env)) {
     return { ...base, enabled: false, reason: "collection_disabled", collection_phase: "closed", in_grace_period: false };
+  }
+
+  if (mode === "auto" && !Number.isFinite(endMs)) {
+    return { ...base, enabled: false, reason: "league_window_not_configured", collection_phase: "closed", in_grace_period: false };
   }
 
   if (Number.isFinite(startMs) && nowMs < startMs) {

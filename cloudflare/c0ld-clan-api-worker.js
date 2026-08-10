@@ -21862,7 +21862,7 @@ function shouldRunRobloxReleaseSchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minutesUntilOffset < 5;
+  return minutesUntilOffset === 0;
 }
 
 function robloxFflagsSourceUrl(env) {
@@ -21949,7 +21949,7 @@ function shouldRunMinuteSchedule(interval, offset, scheduledAt = null) {
   const minuteOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
-  return minutesUntilOffset < 5;
+  return minutesUntilOffset === 0;
 }
 
 function ps99VersionScheduleMinutes(env) {
@@ -21987,7 +21987,7 @@ function shouldRunPs99VersionSchedule(env, scheduledAt = null) {
   const minuteInInterval = minuteOfDay % interval;
   const minutesUntilOffset = (offset - minuteInInterval + interval) % interval;
 
-  return minutesUntilOffset < 5;
+  return minutesUntilOffset === 0;
 }
 
 function normalizedScheduleOffset(value, interval) {
