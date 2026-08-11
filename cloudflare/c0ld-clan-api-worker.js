@@ -40,6 +40,7 @@ const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
 const DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE = "discord_clan_log_assignments";
 const DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE = "discord_clan_tracker_assignments";
+const DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE = "discord_clan_compare_assignments";
 const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
 const DISCORD_OFFLINE_PING_CLANS_TABLE = "discord_offline_ping_clans";
 const DISCORD_OFFLINE_PING_LEAGUES_TABLE = "discord_offline_ping_leagues";
@@ -49,6 +50,7 @@ const DISCORD_ROVER_MEMBER_LINKS_TABLE = "discord_rover_member_links";
 const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
 const DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,last_event_id,last_event_at,last_error,created_at,updated_at";
 const DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,message_id,last_updated_at,last_error,created_at,updated_at";
+const DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,message_id,last_updated_at,last_error,created_at,updated_at";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -230,6 +232,8 @@ export default {
           ps99_restart_config: ps99RestartRuntimeConfig(env),
           ps99_alert_config: ps99AlertRuntimeConfig(env)
         });
+      } else if (request.method === "GET" && url.pathname === "/api/big-games/health") {
+        response = await handleBigGamesApiHealth(env);
       } else if (request.method === "GET" && url.pathname === "/api/current") {
         response = await handleCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/home/awards") {
@@ -242,6 +246,8 @@ export default {
         response = await handleClansCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/history") {
         response = await handleClansHistory(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/clans/compare") {
+        response = await handleClansCompare(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/battles") {
         response = await handleClansBattles(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/top-clan-thresholds") {
@@ -280,6 +286,12 @@ export default {
       ) {
         requireAdmin(request, env);
         response = await handleDiscordClanTrackerAssignments(request, env);
+      } else if (
+        ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
+        && url.pathname === "/api/discord/clan-compare-assignments"
+      ) {
+        requireAdmin(request, env);
+        response = await handleDiscordClanCompareAssignments(request, env);
       } else if (
         ["GET", "POST", "PATCH"].includes(request.method)
         && url.pathname === "/api/offline/config"
@@ -518,6 +530,89 @@ export default {
     ctx.waitUntil(standaloneJobs.length ? Promise.allSettled([...standaloneJobs, mainJobs]) : mainJobs);
   }
 };
+
+async function handleBigGamesApiHealth(env) {
+  const checkedAt = new Date().toISOString();
+  const origins = await Promise.all([
+    probeBigGamesApiOrigin("https://biggamesapi.io", env),
+    probeBigGamesApiOrigin("https://ps99.biggamesapi.io", env)
+  ]);
+  const healthy = origins.filter(origin => origin.ok);
+  const ok = healthy.length > 0;
+
+  return noStoreJson({
+    ok,
+    service: "big-games-api",
+    status: !ok ? "unavailable" : healthy.length === origins.length ? "operational" : "degraded",
+    checked_at: checkedAt,
+    healthy_origins: healthy.length,
+    total_origins: origins.length,
+    origins
+  }, ok ? 200 : 503);
+}
+
+async function probeBigGamesApiOrigin(origin, env) {
+  const startedAt = Date.now();
+  const timeoutMs = clamp(Number(env.BIG_GAMES_HEALTH_TIMEOUT_MS || 5000), 1000, 15000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const url = new URL("/api/clans", origin);
+  url.searchParams.set("page", "1");
+  url.searchParams.set("pageSize", "1");
+  url.searchParams.set("sort", "Points");
+  url.searchParams.set("sortOrder", "desc");
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "c0ld-Big-Games-Health"
+      },
+      signal: controller.signal,
+      cf: { cacheTtl: 0, cacheEverything: false }
+    });
+    const text = await response.text();
+    let payload = null;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // The response body is intentionally summarized below.
+    }
+    const rows = payload ? (extractClanArrays(payload)[0] || []) : [];
+    const apiStatusOk = !payload?.status || String(payload.status).toLowerCase() === "ok";
+    const ok = response.ok && apiStatusOk && rows.length > 0;
+
+    return {
+      origin,
+      ok,
+      http_status: response.status,
+      latency_ms: Date.now() - startedAt,
+      sample_clan: rows[0] ? normalizeClanRankRow(rows[0], 1).clan_name || null : null,
+      error: ok
+        ? null
+        : !response.ok
+          ? `HTTP ${response.status}`
+          : !payload
+            ? "Response was not valid JSON."
+            : !apiStatusOk
+              ? `API status ${payload.status}`
+              : "No clan leaderboard rows were returned."
+    };
+  } catch (error) {
+    return {
+      origin,
+      ok: false,
+      http_status: null,
+      latency_ms: Date.now() - startedAt,
+      sample_clan: null,
+      error: error?.name === "AbortError"
+        ? `Timed out after ${timeoutMs}ms.`
+        : String(error?.message || error || "Unknown Big Games API error").slice(0, 300)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function isPs99RestartCron(value) {
   const cron = String(value || "").trim().replace(/\s+/g, " ");
@@ -3947,10 +4042,10 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
     display_name: result.row.display_name,
     avatar_url: result.row.avatar_url || null,
     points: toNumber(result.row.global_points ?? result.row.member_points) || 0,
-    gain_5m: null,
-    gain_1h: null,
-    gain_12h: null,
-    gain_24h: null,
+    gain_5m: toNumber(result.row.gain_5m),
+    gain_1h: toNumber(result.row.gain_1h),
+    gain_12h: toNumber(result.row.gain_12h),
+    gain_24h: toNumber(result.row.gain_24h),
     fetched_at: result.row.fetched_at || result.run?.finished_at || result.run?.updated_at || null
   };
 
@@ -4819,10 +4914,17 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
   }
 
   const userId = toNumber(candidate.user_id);
-  const [globalRank, memberRank, avatarMap] = await Promise.all([
+  const snapshotAt = candidate.fetched_at || run.finished_at || run.updated_at || run.started_at || null;
+  const [globalRank, memberRank, avatarMap, gainMaps] = await Promise.all([
     resolveGlobalCandidateRank(env, run.run_key, candidate),
     resolveGlobalCandidateMemberRank(env, run.run_key, candidate),
-    resolveRobloxAvatarHeadshots([userId], env).catch(() => new Map())
+    resolveRobloxAvatarHeadshots([userId], env).catch(() => new Map()),
+    buildGlobalLeaderboardGainMaps(env, {
+      clan,
+      battleKey: run.battle_key,
+      snapshotAt,
+      userIds: [userId]
+    }).catch(() => ({}))
   ]);
   const total = toNumber(run.total_global_players) ||
     toNumber(run.candidate_player_count) ||
@@ -4839,7 +4941,8 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
     totalGlobalPlayers: total,
     username,
     displayName: lookup.display_name,
-    avatarUrl: avatarMap.get(userId) || null
+    avatarUrl: avatarMap.get(String(userId)) || avatarMap.get(userId) || null,
+    gainMaps
   });
   const leaderboardName = globalRankLeaderboardLabel(env, run);
   row.leaderboard_name = leaderboardName;
@@ -6208,6 +6311,155 @@ async function handleClansCurrent(request, env) {
   });
 }
 
+async function handleClansCompare(request, env) {
+  const url = new URL(request.url);
+  const clan = String(url.searchParams.get("clan") || "").trim();
+  if (!clan) throw httpError(400, "Missing required clan.");
+
+  const currentUrl = new URL(request.url);
+  currentUrl.pathname = "/api/clans/current";
+  currentUrl.searchParams.set("limit", String(clamp(Number(url.searchParams.get("limit") || 500), 3, 500)));
+  currentUrl.searchParams.delete("clan");
+  const currentResponse = await handleClansCurrent(new Request(currentUrl.toString(), {
+    method: "GET",
+    headers: { Accept: "application/json" }
+  }), env);
+  const current = await currentResponse.json().catch(() => ({}));
+  if (!currentResponse.ok) {
+    throw httpError(currentResponse.status || 502, current.message || "Clan leaderboard lookup failed.");
+  }
+
+  return noStoreJson(buildClanComparisonPayload(current, clan));
+}
+
+function buildClanComparisonPayload(current, requestedClan, now = Date.now()) {
+  const rows = (Array.isArray(current?.rows) ? current.rows : [])
+    .map(normalizeClanCompareRow)
+    .filter(row => row.clan_name && row.rank)
+    .sort((a, b) => a.rank - b.rank || b.points - a.points);
+  const clanKey = normalizeText(requestedClan);
+  const clan = rows.find(row => normalizeText(row.clan_name) === clanKey) || null;
+
+  if (!clan) {
+    throw httpError(
+      404,
+      `Clan ${requestedClan} was not found in the latest ${rows.length || "stored"} leaderboard rows.`
+    );
+  }
+
+  const above = rows
+    .filter(row => row.rank < clan.rank)
+    .sort((a, b) => b.rank - a.rank)[0] || null;
+  const below = rows
+    .filter(row => row.rank > clan.rank)
+    .sort((a, b) => a.rank - b.rank)[0] || null;
+  const snapshotAt = current?.snapshot_at || clan.fetched_at || current?.generated_at || new Date(now).toISOString();
+  const battleEndAt = current?.battle_end_iso || null;
+  const snapshotMs = new Date(snapshotAt || 0).getTime();
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const battleEndMs = new Date(battleEndAt || 0).getTime();
+  const battleRemainingHours = Number.isFinite(battleEndMs) && battleEndMs > 0
+    ? Math.max(0, (battleEndMs - (Number.isFinite(snapshotMs) ? snapshotMs : nowMs)) / 3600000)
+    : null;
+
+  return {
+    ok: true,
+    generated_at: new Date(nowMs).toISOString(),
+    snapshot_at: snapshotAt,
+    data_age_minutes: Number.isFinite(snapshotMs)
+      ? Math.max(0, Math.round((nowMs - snapshotMs) / 60000))
+      : null,
+    battle: current?.battle || clan.battle_key || null,
+    display_name: current?.display_name || clan.battle_display_name || current?.battle || null,
+    battle_start_iso: current?.battle_start_iso || null,
+    battle_end_iso: battleEndAt,
+    battle_remaining_hours: battleRemainingHours,
+    available_rank_min: rows[0]?.rank || null,
+    available_rank_max: rows[rows.length - 1]?.rank || null,
+    above,
+    clan,
+    below,
+    race_to_above: above ? clanComparisonRace(clan, above, snapshotAt, battleEndAt) : null,
+    threat_from_below: below ? clanComparisonRace(below, clan, snapshotAt, battleEndAt) : null
+  };
+}
+
+function normalizeClanCompareRow(row) {
+  const rate = toNumber(row?.rate_per_hour);
+  const derivedRate = rate === null ? chooseClanProjectionRate(row || {}) : null;
+  return {
+    rank: toNumber(row?.rank),
+    clan_name: String(row?.clan_name || "").trim(),
+    points: toNumber(row?.points) || 0,
+    icon_id: row?.icon_id || null,
+    icon_url: row?.icon_url || null,
+    fetched_at: row?.fetched_at || null,
+    battle_key: row?.battle_key || null,
+    battle_display_name: row?.battle_display_name || null,
+    gain_5m: toNumber(row?.gain_5m),
+    gain_1h: toNumber(row?.gain_1h),
+    gain_12h: toNumber(row?.gain_12h),
+    gain_24h: toNumber(row?.gain_24h),
+    rate_per_hour: Math.max(0, rate ?? derivedRate?.rate_per_hour ?? 0),
+    rate_basis: row?.projection_basis || derivedRate?.basis || "none",
+    projected_points: toNumber(row?.projected_points),
+    projected_rank: toNumber(row?.projected_rank)
+  };
+}
+
+function clanComparisonRace(pursuer, target, snapshotAt, battleEndAt) {
+  const gapPoints = Math.max(0, (toNumber(target?.points) || 0) - (toNumber(pursuer?.points) || 0));
+  const pointsNeeded = gapPoints + 1;
+  const pursuerRate = Math.max(0, toNumber(pursuer?.rate_per_hour) || 0);
+  const targetRate = Math.max(0, toNumber(target?.rate_per_hour) || 0);
+  const closingRate = pursuerRate - targetRate;
+  const passHours = closingRate > 0 ? pointsNeeded / closingRate : null;
+  const snapshotMs = new Date(snapshotAt || 0).getTime();
+  const battleEndMs = new Date(battleEndAt || 0).getTime();
+  const passAtMs = passHours !== null && Number.isFinite(snapshotMs)
+    ? snapshotMs + passHours * 3600000
+    : null;
+  const remainingHours = Number.isFinite(snapshotMs) && Number.isFinite(battleEndMs) && battleEndMs > snapshotMs
+    ? (battleEndMs - snapshotMs) / 3600000
+    : null;
+  const minimumRateByEnd = remainingHours > 0
+    ? targetRate + pointsNeeded / remainingHours
+    : null;
+  const pursuerProjected = toNumber(pursuer?.projected_points) ?? (
+    remainingHours === null ? null : Math.round((toNumber(pursuer?.points) || 0) + pursuerRate * remainingHours)
+  );
+  const targetProjected = toNumber(target?.projected_points) ?? (
+    remainingHours === null ? null : Math.round((toNumber(target?.points) || 0) + targetRate * remainingHours)
+  );
+
+  return {
+    pursuer: pursuer?.clan_name || null,
+    target: target?.clan_name || null,
+    gap_points: gapPoints,
+    points_needed_to_pass: pointsNeeded,
+    pursuer_rate_per_hour: pursuerRate,
+    target_rate_per_hour: targetRate,
+    closing_rate_per_hour: closingRate,
+    status: closingRate > 0
+      ? "catching"
+      : closingRate < 0
+        ? "falling_behind"
+        : "holding",
+    hours_to_pass: passHours,
+    estimated_pass_at: passAtMs === null ? null : new Date(passAtMs).toISOString(),
+    passes_before_event_end: passAtMs === null || !Number.isFinite(battleEndMs) || battleEndMs <= 0
+      ? null
+      : passAtMs <= battleEndMs,
+    minimum_rate_to_pass_by_end: minimumRateByEnd,
+    additional_rate_needed_by_end: minimumRateByEnd === null
+      ? null
+      : Math.max(0, minimumRateByEnd - pursuerRate),
+    projected_margin_at_end: pursuerProjected === null || targetProjected === null
+      ? null
+      : pursuerProjected - targetProjected
+  };
+}
+
 async function handleClansHistory(request, env) {
   requireSupabase(env);
 
@@ -7471,6 +7723,109 @@ async function handleDiscordClanTrackerAssignments(request, env) {
   }, patch);
   const rows = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
     select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
+    assignment_key: `eq.${assignmentKey}`,
+    limit: "1"
+  });
+  return noStoreJson({ ok: true, updated: rows.length > 0, assignment: rows[0] || null });
+}
+
+function discordClanCompareAssignmentKey(guildId, channelId, clanName) {
+  const guild = String(guildId || "").trim();
+  const channel = String(channelId || "").trim();
+  const clan = normalizeText(clanName);
+  return guild && channel && clan ? `${guild}:${channel}:clan-compare:${clan}` : "";
+}
+
+async function handleDiscordClanCompareAssignments(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+
+  if (request.method === "GET") {
+    const params = {
+      select: DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS,
+      order: "created_at.asc",
+      limit: String(clamp(Number(url.searchParams.get("limit") || 1000), 1, 1000))
+    };
+    const guildId = String(url.searchParams.get("guild_id") || "").trim();
+    const channelId = String(url.searchParams.get("channel_id") || "").trim();
+    const clanKey = normalizeText(url.searchParams.get("clan") || "");
+    const assignmentKey = String(url.searchParams.get("assignment_key") || "").trim();
+    const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
+    if (guildId) params.guild_id = `eq.${guildId}`;
+    if (channelId) params.channel_id = `eq.${channelId}`;
+    if (clanKey) params.clan_key = `eq.${clanKey}`;
+    if (assignmentKey) params.assignment_key = `eq.${assignmentKey}`;
+    if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
+    if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
+    return noStoreJson({
+      ok: true,
+      assignments: await supabaseSelect(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, params)
+    });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const assignmentKey = String(body.assignment_key || "").trim();
+
+  if (request.method === "DELETE") {
+    if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+    const assignments = await supabaseSelect(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${assignmentKey}`,
+      limit: "1"
+    });
+    await supabaseDelete(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+      assignment_key: `eq.${assignmentKey}`
+    });
+    return noStoreJson({ ok: true, removed: assignments.length > 0, assignment: assignments[0] || null });
+  }
+
+  if (request.method === "POST") {
+    const guildId = String(body.guild_id || "").trim();
+    const channelId = String(body.channel_id || "").trim();
+    const clanNameValue = String(body.clan_name || "").trim();
+    if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
+    if (!/^\d{5,30}$/.test(channelId)) throw httpError(400, "A valid Discord channel or thread ID is required.");
+    if (!clanNameValue || clanNameValue.length > 100) throw httpError(400, "A clan name between 1 and 100 characters is required.");
+
+    const key = discordClanCompareAssignmentKey(guildId, channelId, clanNameValue);
+    const existing = await supabaseSelect(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${key}`,
+      limit: "1"
+    });
+    const prior = existing[0] || null;
+    await supabaseUpsert(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, [{
+      assignment_key: key,
+      guild_id: guildId,
+      channel_id: channelId,
+      channel_type: toNumber(body.channel_type),
+      clan_name: clanNameValue,
+      clan_key: normalizeText(clanNameValue),
+      assigned_by: stringOrNull(body.assigned_by),
+      enabled: body.enabled !== false,
+      message_id: stringOrNull(body.message_id) || prior?.message_id || null,
+      last_updated_at: stringOrNull(body.last_updated_at) || prior?.last_updated_at || null,
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }], "assignment_key");
+    const rows = await supabaseSelect(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+      select: DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS,
+      assignment_key: `eq.${key}`,
+      limit: "1"
+    });
+    return noStoreJson({ ok: true, assignment: rows[0] || null });
+  }
+
+  if (!assignmentKey) throw httpError(400, "assignment_key is required.");
+  const patch = { updated_at: new Date().toISOString() };
+  for (const key of ["enabled", "message_id", "last_updated_at", "last_error"]) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) patch[key] = body[key] === "" ? null : body[key];
+  }
+  await supabasePatch(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+    assignment_key: `eq.${assignmentKey}`
+  }, patch);
+  const rows = await supabaseSelect(env, DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE, {
+    select: DISCORD_CLAN_COMPARE_ASSIGNMENT_COLUMNS,
     assignment_key: `eq.${assignmentKey}`,
     limit: "1"
   });
@@ -20923,10 +21278,17 @@ function normalizeGlobalCandidateSearchOutput(row, {
   totalGlobalPlayers,
   username,
   displayName,
-  avatarUrl
+  avatarUrl,
+  gainMaps = {}
 }) {
   const userId = toNumber(row.user_id);
   const sourceClan = String(row.source_clan || "").trim();
+  const points = toNumber(row.points) || 0;
+  const previous = key => {
+    const map = gainMaps?.[key];
+    if (!map || !userId || !map.has(userId)) return null;
+    return points - (toNumber(map.get(userId)) || 0);
+  };
 
   return {
     clan_name: sourceClan,
@@ -20935,9 +21297,9 @@ function normalizeGlobalCandidateSearchOutput(row, {
     display_name: displayName || username || `user_${userId}`,
     avatar_url: avatarUrl || null,
     clan_rank: toNumber(memberRank),
-    clan_points: toNumber(row.points) || 0,
+    clan_points: points,
     member_rank: toNumber(memberRank),
-    member_points: toNumber(row.points) || 0,
+    member_points: points,
     join_time: globalCandidateJoinIso(row.raw_candidate),
     source_clan_rank: toNumber(row.source_clan_rank),
     source_clan_points: toNumber(row.source_clan_points) || 0,
@@ -20950,13 +21312,17 @@ function normalizeGlobalCandidateSearchOutput(row, {
     ),
     event_name: run?.event_name || row.battle_display_name || run?.battle_display_name || run?.battle_key || null,
     global_rank: toNumber(globalRank),
-    global_points: toNumber(row.points),
+    global_points: points,
     total_global_players: toNumber(totalGlobalPlayers),
     found: true,
     fetched_at: row.fetched_at || run?.finished_at || run?.updated_at || null,
     run_key: run?.run_key || null,
     updated_at: row.updated_at || run?.updated_at || null,
-    source_clan: sourceClan
+    source_clan: sourceClan,
+    gain_5m: previous("gain_5m"),
+    gain_1h: previous("gain_1h"),
+    gain_12h: previous("gain_12h"),
+    gain_24h: previous("gain_24h")
   };
 }
 

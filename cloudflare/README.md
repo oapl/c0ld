@@ -118,6 +118,7 @@ supabase/migrations/021_ps99_version_history.sql
 supabase/migrations/024_home_awards_rpc.sql
 supabase/migrations/028_roblox_release_version_history.sql
 supabase/migrations/044_hot_path_indexes.sql
+supabase/migrations/057_discord_clan_compare_assignments.sql
 ```
 
 `044_hot_path_indexes.sql` is a read-performance migration only. It adds targeted
@@ -424,11 +425,13 @@ Useful endpoints:
 | Endpoint | Purpose |
 |---|---|
 | `/api/health` | Quick Worker health check. |
+| `/api/big-games/health` | Live no-cache probe of both Big Games clan API origins. Returns `operational`, `degraded`, or HTTP 503 `unavailable`. |
 | `/api/ingest` | Manual protected ingest. `POST` only. |
 | `/api/current` | Latest c0ld member leaderboard from Supabase. |
 | `/api/history?hours=24` | Recent raw snapshot rows from the canonical table. Add `user_id=123&all_battles=true` to fetch one player's rows across every battle in one request. |
 | `/api/clans/ingest` | Manual protected all-clans ingest. `POST` only. |
 | `/api/clans/current` | Latest all-clans leaderboard from Supabase. |
+| `/api/clans/compare?clan=WMSY` | The requested clan, its immediate rank neighbors, recent rates, pass/threat ETAs, and event-end pace requirements. |
 | `/api/clans/history?hours=24` | Recent raw all-clans snapshot rows. |
 | `/api/global/ingest` | Manual protected global rank scan. `POST` only. Scans ranked clans in chunks and resumes a running scan unless `?force=1` is used. |
 | `/api/global/status` | Latest global-rank run plus shard progress. Useful for checking whether scheduled sharding is still resumable. |
@@ -1460,11 +1463,18 @@ Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
 c0ld-themed member progress image, posts a preview immediately, then refreshes
 hourly with the same scheduler as clan and user boards.
 
-Worker needs an hourly cron trigger:
+The Discord Worker needs an every-minute cron trigger:
 
 ```text
-0 * * * *
+* * * * *
 ```
+
+Hourly boards become due at `HOURLY_CLAN_POST_MINUTE` and then drain through a
+fair queue on later minute ticks. Different Discord channels can post in
+parallel, while multiple boards sharing one channel are serialized across
+ticks to avoid Discord's per-channel message limit. The default queue attempts
+up to two distinct channels per minute; set `HOURLY_SCHEDULED_BATCH_SIZE` to
+change that cap.
 
 Assignments are stored per Discord channel/thread and target. A clan board, user
 board, and league board can coexist in the same channel/thread because each
@@ -1477,11 +1487,36 @@ verify stored assignments, due state, the last Discord error, and whether the
 required bot/API tokens are present. If `/hourly clan`, `/hourly user`, or
 `/hourly league` works but no hourly post follows, make sure the worker
 receiving Discord interactions is the same deployed worker that has the
-`0 * * * *` cron trigger.
+`* * * * *` cron trigger.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for
 every configured destination with `scripts/test-discord-hourly-clans.ps1`.
+
+## Luna clan comparison posts
+
+`/clan compare` uses the stored all-clans leaderboard to compare the requested
+middle clan with the clan immediately above and below it. The embed includes
+point gaps, recent pace, projected finish, an ETA to pass the clan above, the
+minimum pace required to pass by event end, and the threat ETA from below.
+
+```text
+/clan compare view clan:WMSY
+/clan compare assign clan:WMSY channel:#clan-race
+/clan compare remove clan:WMSY
+```
+
+Run `supabase/migrations/057_discord_clan_compare_assignments.sql` before using
+`assign`. Persistent comparisons edit one Discord post in place every five
+minutes by default. Set `CLAN_COMPARE_POST_INTERVAL_MINUTES` on the Discord
+Worker to change that cadence. Use `GET /admin/clan-compare/status` or
+`POST /admin/clan-compare/run` with the Discord Worker admin token for checks
+and manual refreshes.
+
+The comparison is available only while the requested clan and both useful
+neighbors are present in the stored leaderboard range. Estimates are pace
+projections, not guarantees; the embed labels the rate basis and carries a
+warning because RNG and clan activity can change.
 
 ## Discord Offline Pings
 
