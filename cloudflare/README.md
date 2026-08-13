@@ -749,6 +749,7 @@ Required Worker variables:
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated League reward tiers used by `/league rewards`, League-mode `/leaderboard rewards`, and the persistent League player cutoffs. Defaults to `1,3,15,50,100,250,2000`. |
+| `CLAN_TRACKER_POST_INTERVAL_MINUTES` | Optional. Set to `20`. Persistent clan member and clan comparison posts are edited at UTC minutes `00`, `20`, and `40`; values below 20 are clamped to 20. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full legacy player rewards header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -1460,11 +1461,20 @@ Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
 c0ld-themed member progress image, posts a preview immediately, then refreshes
 hourly with the same scheduler as clan and user boards.
 
-Worker needs an hourly cron trigger:
+The Discord interactions Worker needs an every-minute cron trigger:
 
 ```text
-0 * * * *
+* * * * *
 ```
+
+The Worker does not post every minute. Clan and league delivery is gated to UTC
+minute `:00`, with `:01` and `:02` reserved as retries. User boards depend on
+the completed global-rank scan that begins at `:00`, so they may retry through
+`:05` while still rendering only the exact `:00` and prior-hour `:00` samples.
+User, clan, and league hourly boards all retry only during UTC minutes `0`, `1`, and `2`. User boards use the exact clan-member snapshots for their points and one-hour gain so they do not wait for the slower global-rank scan to finish.
+(default `6`, meaning minutes `:00` through `:05`). A board is claimed only
+after its exact data is ready, and a successful assignment is claimed once for
+that hour, so retry wakes cannot duplicate it.
 
 Assignments are stored per Discord channel/thread and target. A clan board, user
 board, and league board can coexist in the same channel/thread because each
@@ -1477,7 +1487,8 @@ verify stored assignments, due state, the last Discord error, and whether the
 required bot/API tokens are present. If `/hourly clan`, `/hourly user`, or
 `/hourly league` works but no hourly post follows, make sure the worker
 receiving Discord interactions is the same deployed worker that has the
-`0 * * * *` cron trigger.
+`* * * * *` cron trigger. An hourly-only trigger removes the readiness retries
+and can make user boards disappear while clan boards keep working.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for

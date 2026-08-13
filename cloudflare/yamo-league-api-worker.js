@@ -920,17 +920,49 @@ async function handleCurrent(request, env) {
   const url = new URL(request.url);
   const requested = String(url.searchParams.get("league") || leagueName(env)).trim() || leagueName(env);
   const runKey = requestedRunKey(url, env);
+  const hourlySlotMs = parseExactHourlySlot(url.searchParams.get("hour_slot"));
   if (isLeaguePubliclyHidden(env, requested)) {
     return cacheJson(hiddenLeaguePayload(env, runKey, requested), env);
   }
-  let rows = await selectLeagueCurrentRows(env, {
-    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
-    league_run_key: `eq.${runKey}`,
-    league_name: `eq.${requested}`,
-    order: "rank.asc",
-    limit: "500"
-  });
-  if (!rows.length) {
+  const select = "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time";
+  let exactPair = null;
+  let rows = [];
+  if (hourlySlotMs !== null) {
+    exactPair = await fetchExactHourlyLeaguePair(env, runKey, requested, hourlySlotMs, select);
+    if (!exactPair.current || !exactPair.baseline) {
+      return json({
+        ok: false,
+        message: `Exact hourly data is not ready for ${requested}.`,
+        league_run_key: runKey,
+        league_name: requested,
+        hourly_gain_mode: "exact_top_of_hour",
+        hourly_exact_ready: false,
+        hourly_slot_at: new Date(hourlySlotMs).toISOString(),
+        hourly_baseline_at: new Date(hourlySlotMs - 60 * 60 * 1000).toISOString(),
+        hourly_elapsed_minutes: 60
+      }, 409);
+    }
+    rows = exactPair.current.rows;
+  } else {
+    rows = await selectLeagueCurrentRows(env, {
+      select,
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${requested}`,
+      order: "rank.asc",
+      limit: "500"
+    });
+    if (!rows.length) {
+      rows = await selectLeagueCurrentRows(env, {
+        select,
+        league_run_key: `eq.${runKey}`,
+        league_name: `ilike.${requested}`,
+        order: "rank.asc",
+        limit: "500"
+      });
+    }
+  }
+
+  if (!rows.length && hourlySlotMs === null) {
     rows = await selectLeagueCurrentRows(env, {
       select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
       league_run_key: `eq.${runKey}`,
@@ -947,13 +979,16 @@ async function handleCurrent(request, env) {
     return cacheJson({ ok: true, generated_at: new Date().toISOString(), snapshot_at: null, league_run_key: runKey, league_run_label: leagueRunLabel(env, runKey), league_name: requested, rows: [] }, env);
   }
 
-  const [rowsWithGains, storedLeagueRank, liveLeagueRank] = await Promise.all([
-    addGainFields(env, rows, latest),
+  const [calculatedRows, storedLeagueRank, liveLeagueRank] = await Promise.all([
+    exactPair ? Promise.resolve(rows.map(addNullGains)) : addGainFields(env, rows, latest),
     fetchStoredLeagueRank(env, runKey, requested, latest.league_id).catch(() => null),
-    boolParam(url.searchParams.get("rank_lookup"), true) && !shouldNormalizeLeagueRunPoints(env, runKey)
+    hourlySlotMs === null && boolParam(url.searchParams.get("rank_lookup"), true) && !shouldNormalizeLeagueRunPoints(env, runKey)
       ? fetchLeagueRank(requested).catch(() => null)
       : Promise.resolve(null)
   ]);
+  const rowsWithGains = exactPair
+    ? applyExactHourlyLeagueGains(calculatedRows, exactPair)
+    : calculatedRows;
   const ids = rowsWithGains.map(row => row.user_id);
   const usernameMap = await resolveRobloxUsernames(ids, env).catch(() => new Map());
   const avatarMap = await resolveRobloxAvatarHeadshots(ids, env).catch(() => new Map());
@@ -965,7 +1000,16 @@ async function handleCurrent(request, env) {
   return cacheJson({
     ok: true,
     generated_at: new Date().toISOString(),
-    snapshot_at: latest.fetched_at,
+    snapshot_at: hourlySlotMs === null ? latest.fetched_at : new Date(hourlySlotMs).toISOString(),
+    ...(hourlySlotMs === null ? {} : {
+      hourly_gain_mode: "exact_top_of_hour",
+      hourly_exact_ready: true,
+      hourly_slot_at: new Date(hourlySlotMs).toISOString(),
+      hourly_observed_at: latest.fetched_at,
+      hourly_baseline_at: new Date(hourlySlotMs - 60 * 60 * 1000).toISOString(),
+      hourly_baseline_observed_at: exactPair.baseline.meta.fetched_at,
+      hourly_elapsed_minutes: 60
+    }),
     league_run_key: latest.league_run_key,
     league_run_label: leagueRunLabel(env, latest.league_run_key),
     baseline_run_key: leagueBaselineRunKey(env, latest.league_run_key) || null,
@@ -4101,6 +4145,86 @@ function projectGain1h(row) {
   const g12 = toNumber(row.gain_12h); if (g12 !== null) return g12 / 12;
   const g24 = toNumber(row.gain_24h); if (g24 !== null) return g24 / 24;
   return 0;
+}
+
+function parseExactHourlySlot(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const slotMs = new Date(raw).getTime();
+  if (!Number.isFinite(slotMs)) throw httpError(400, "hour_slot must be a valid timestamp.");
+  const slot = new Date(slotMs);
+  if (slot.getUTCMinutes() !== 0 || slot.getUTCSeconds() !== 0 || slot.getUTCMilliseconds() !== 0) {
+    throw httpError(400, "hour_slot must be an exact UTC hour such as 2026-08-12T15:00:00.000Z.");
+  }
+  return slotMs;
+}
+
+async function fetchExactHourlyLeaguePair(env, runKey, league, hourSlotMs, select) {
+  const hours = [0, 1, 6, 12, 24];
+  const entries = await Promise.all(hours.map(async hoursAgo => {
+    const slotMs = hourSlotMs - hoursAgo * 60 * 60 * 1000;
+    const snapshot = await fetchExactHourlyLeagueSnapshot(env, runKey, league, slotMs, select);
+    return [hoursAgo, snapshot];
+  }));
+  const anchors = new Map(entries);
+  return {
+    current: anchors.get(0) || null,
+    baseline: anchors.get(1) || null,
+    anchors
+  };
+}
+
+async function fetchExactHourlyLeagueSnapshot(env, runKey, league, slotMs, select) {
+  const endMs = slotMs + 3 * 60 * 1000;
+  const readMeta = leagueFilter => supabaseSelect(env, SNAPSHOT_TABLE, {
+    select: "snapshot_id,fetched_at",
+    league_run_key: `eq.${runKey}`,
+    league_name: leagueFilter,
+    fetched_at: `gte.${new Date(slotMs).toISOString()}`,
+    fetched_at_lt: `lt.${new Date(endMs).toISOString()}`,
+    order: "fetched_at.asc",
+    limit: "1"
+  }, { paramRename: { fetched_at_lt: "fetched_at" } });
+
+  let metaRows = await readMeta(`eq.${league}`);
+  if (!metaRows.length) metaRows = await readMeta(`ilike.${league}`);
+  const meta = metaRows[0] || null;
+  const snapshotId = String(meta?.snapshot_id || "").trim();
+  if (!snapshotId) return null;
+
+  const rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+    select,
+    snapshot_id: `eq.${snapshotId}`,
+    order: "rank.asc",
+    limit: "500"
+  });
+  if (!rows.length) return null;
+  return { meta: { ...latestMeta(rows), ...meta }, rows };
+}
+
+function applyExactHourlyLeagueGains(rows, exactPair) {
+  const pointMaps = new Map();
+  for (const hoursAgo of [1, 6, 12, 24]) {
+    const snapshotRows = exactPair?.anchors?.get(hoursAgo)?.rows || [];
+    pointMaps.set(hoursAgo, new Map(snapshotRows.map(row => [String(row.user_id), toNumber(row.points) || 0])));
+  }
+  return rows.map(row => {
+    const currentPoints = toNumber(row.points) || 0;
+    const gain = hoursAgo => {
+      const previous = pointMaps.get(hoursAgo)?.get(String(row.user_id));
+      return previous === undefined ? null : currentPoints - previous;
+    };
+    return {
+      ...row,
+      gain_5m: null,
+      gain_1h: gain(1),
+      gain_6h: gain(6),
+      gain_12h: gain(12),
+      gain_24h: gain(24),
+      previous_rank_5m: null,
+      rank_move_5m: null
+    };
+  });
 }
 
 async function addGainFields(env, rows, latest) {

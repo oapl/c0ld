@@ -48,7 +48,7 @@ const DISCORD_OFFLINE_PING_ALERT_STATE_TABLE = "discord_offline_ping_alert_state
 const DISCORD_ROVER_MEMBER_LINKS_TABLE = "discord_rover_member_links";
 const DISCORD_HOURLY_CLAN_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,assigned_by,enabled,alert_user_id,alert_set_by,alert_updated_at,last_posted_at,last_message_id,last_snapshot_at,last_error,created_at,updated_at";
 const DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,last_event_id,last_event_at,last_error,created_at,updated_at";
-const DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,assigned_by,enabled,message_id,last_updated_at,last_error,created_at,updated_at";
+const DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS = "assignment_key,channel_id,guild_id,channel_type,clan_name,clan_key,tracker_mode,assigned_by,enabled,message_id,last_updated_at,last_error,created_at,updated_at";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
@@ -274,6 +274,9 @@ export default {
       ) {
         requireAdmin(request, env);
         response = await handleDiscordClanLogAssignments(request, env);
+      } else if (request.method === "POST" && url.pathname === "/api/discord/clan-log-reset") {
+        requireAdmin(request, env);
+        response = await handleDiscordClanLogReset(request, env);
       } else if (
         ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
         && url.pathname === "/api/discord/clan-tracker-assignments"
@@ -378,7 +381,9 @@ export default {
         response = await handlePs99Ccu(request, env);
       } else if (request.method === "POST" && url.pathname === "/api/ingest") {
         requireAdmin(request, env);
-        response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url));
+        response = await handleIngest(env, "manual", url.searchParams.get("clan"), isForceRequest(url), {
+          bypassRecentGuard: isTruthyParam(url, "hourly_slot")
+        });
       } else if (request.method === "POST" && url.pathname === "/api/clans/ingest") {
         requireAdmin(request, env);
         response = await handleClansIngest(env, "manual", isForceRequest(url));
@@ -603,7 +608,7 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
   if (runBattleDataJobs) {
     // A Discord /clan tracker assignment is also an opt-in to the normal
     // member-snapshot collector.  This keeps the tracker, its deltas, and
-    // its five-minute refresh on the same data source without requiring a
+    // its twenty-minute refresh on the same data source without requiring a
     // separate CLAN_NAMES environment-variable edit for every new clan.
     const configuredClans = await fetchTrackerAssignmentClanNames(env, clanNames(env));
     jobs.push(...configuredClans.map(clan => ({
@@ -857,7 +862,8 @@ async function fetchTrackerAssignmentClanNames(env, configuredClans = []) {
 
   try {
     const rows = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
-      select: "clan_name,enabled,updated_at",
+      select: "clan_name,tracker_mode,enabled,updated_at",
+      tracker_mode: "eq.members",
       enabled: "eq.true",
       order: "updated_at.asc",
       limit: "1000"
@@ -1085,9 +1091,16 @@ async function handleIngest(env, source, requestedClan, force = false, options =
     });
   }
 
+  const bypassRecentGuard = runOptions.bypassRecentGuard === true;
   let recentGuardBattleKey = activeBattleMeta?.battleKey || null;
   if (recentGuardBattleKey) {
-    const recentGate = await memberSnapshotRecentGate(env, clan, recentGuardBattleKey, fetchedAt, force);
+    const recentGate = await memberSnapshotRecentGate(
+      env,
+      clan,
+      recentGuardBattleKey,
+      fetchedAt,
+      force || bypassRecentGuard
+    );
     if (!recentGate.allowed) {
       return skippedIngestResponse({
         scope: "members",
@@ -1147,7 +1160,13 @@ async function handleIngest(env, source, requestedClan, force = false, options =
   }
 
   if (normalizeText(recentGuardBattleKey) !== normalizeText(resolvedBattleKey)) {
-    const recentGate = await memberSnapshotRecentGate(env, clan, resolvedBattleKey, fetchedAt, force);
+    const recentGate = await memberSnapshotRecentGate(
+      env,
+      clan,
+      resolvedBattleKey,
+      fetchedAt,
+      force || bypassRecentGuard
+    );
     if (!recentGate.allowed) {
       return skippedIngestResponse({
         scope: "members",
@@ -1256,6 +1275,7 @@ async function handleCurrent(request, env) {
   const includeAvatars = !["0", "false", "no"].includes(String(url.searchParams.get("avatars") || "true").toLowerCase());
   const downtimeParam = String(url.searchParams.get("downtime") || "").toLowerCase();
   const includeDowntime = ["1", "true", "yes", "y"].includes(downtimeParam);
+  const hourlySlotMs = parseExactHourlySlot(url.searchParams.get("hour_slot"));
   const explicitBattle =
     requestedBattle &&
     !["current", "auto"].includes(String(requestedBattle).toLowerCase());
@@ -1290,7 +1310,52 @@ async function handleCurrent(request, env) {
     });
   }
 
-  const rowsWithGains = await addGainFields(env, rows, latest);
+  let hourlyMeta = null;
+  let hourlyBaselineRows = null;
+  if (hourlySlotMs !== null) {
+    const pair = await fetchExactHourlySnapshotPair(env, clan, latest.battle_key, hourlySlotMs);
+    if (!pair.current || !pair.baseline) {
+      throw httpError(
+        409,
+        `Exact hourly snapshots are not ready for ${clan}. Required slots: ${new Date(hourlySlotMs - 60 * 60 * 1000).toISOString()} and ${new Date(hourlySlotMs).toISOString()}.`
+      );
+    }
+
+    const [currentRows, baselineRows, currentStateRows] = await Promise.all([
+      fetchSnapshotRows(env, pair.current.snapshot_id),
+      fetchSnapshotRows(env, pair.baseline.snapshot_id),
+      fetchCurrentRows(env, clan).catch(() => [])
+    ]);
+    if (!currentRows.length || !baselineRows.length) {
+      throw httpError(409, `Exact hourly snapshot rows are incomplete for ${clan}.`);
+    }
+
+    const stateByUser = new Map(
+      currentStateRows
+        .filter(row => String(row.snapshot_id || "") === String(pair.current.snapshot_id || ""))
+        .map(row => [String(row.user_id), row])
+    );
+    rows = currentRows.map(row => ({
+      ...row,
+      last_gain_at: stateByUser.get(String(row.user_id))?.last_gain_at || null,
+      downtime_tracking_started_at: stateByUser.get(String(row.user_id))?.downtime_tracking_started_at || null
+    }));
+    hourlyBaselineRows = baselineRows;
+    latest = pair.current;
+    hourlyMeta = {
+      hourly_gain_mode: "exact_top_of_hour",
+      hourly_exact_ready: true,
+      hourly_slot_at: new Date(hourlySlotMs).toISOString(),
+      hourly_baseline_at: new Date(hourlySlotMs - 60 * 60 * 1000).toISOString(),
+      hourly_current_snapshot_at: pair.current.fetched_at,
+      hourly_baseline_snapshot_at: pair.baseline.fetched_at,
+      hourly_elapsed_minutes: 60
+    };
+  }
+
+  const rowsWithGains = hourlyMeta
+    ? addExactHourlyGainFields(rows, hourlyBaselineRows)
+    : await addGainFields(env, rows, latest);
   let downtimeError = null;
   let rowsWithDowntime = rowsWithGains.map(row => ({
     ...row,
@@ -1360,6 +1425,7 @@ async function handleCurrent(request, env) {
     icon_id: trackedClan?.icon_id || null,
     icon_url: trackedClan?.icon_url || null,
     source: "c0ld-clan-api-worker",
+    ...(hourlyMeta || {}),
     downtime_included: includeDowntime,
     downtime_error: downtimeError,
     avatars_included: includeAvatars,
@@ -1376,6 +1442,7 @@ async function handleCurrent(request, env) {
       last_gain_at: row.last_gain_at || null,
       downtime_minutes: row.downtime_minutes,
       gain_5m: row.gain_5m,
+      gain_20m: row.gain_20m,
       gain_1h: row.gain_1h,
       gain_12h: row.gain_12h,
       gain_24h: row.gain_24h
@@ -1451,7 +1518,7 @@ async function handleGlobalCurrent(request, env) {
   if (!rows.length && run?.run_key && normalizeText(clan) !== normalizeText(runClan)) {
     const memberRows = await fetchCurrentRows(env, clan).catch(() => []);
     if (memberRows.length) {
-      const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+      const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key, run.battle_key);
       const candidateById = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
       rows = buildGlobalRankCurrentRows({
         members: memberRows,
@@ -1531,7 +1598,7 @@ async function handleGlobalLeaderboard(request, env) {
     }, env);
   }
 
-  const rankedCandidates = await readGlobalRankLeaderboardCandidates(env, run.run_key, limit);
+  const rankedCandidates = await readGlobalRankLeaderboardCandidates(env, run.run_key, limit, run.battle_key);
   const rows = rankedCandidates.slice(0, limit);
   const userIds = rows.map(row => toNumber(row.user_id)).filter(Boolean);
   const userIdsNeedingLookup = rows
@@ -3068,7 +3135,7 @@ function persistentDiscordComponentPayload(title, sections, timestamp, options =
     discordSeparatorComponent(),
     {
       type: 10,
-      content: `-# **${DISCORD_ALERT_FOOTER_TEXT} Today at <t:${unix}:t>**`
+      content: `-# 🧞‍♀️ **Luna Pet Sim 99 Bot** 🏳️‍🌈 **∙ by Cinnamowopal | Last Updated: Today at <t:${unix}:t>**`
     }
   );
 
@@ -3245,7 +3312,7 @@ async function handleGlobalRankStatus(request, env) {
   });
 }
 
-async function readGlobalRankLeaderboardCandidates(env, runKey, limit) {
+async function readGlobalRankLeaderboardCandidates(env, runKey, limit, battleKeyValue = "") {
   const desired = clamp(Number(limit || 500), 1, 1000);
   const readLimit = Math.min(globalRankCandidateReadLimit(env), Math.max(1000, desired * 4));
   const pageSize = 1000;
@@ -3258,6 +3325,7 @@ async function readGlobalRankLeaderboardCandidates(env, runKey, limit) {
     const page = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
       select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
       run_key: `eq.${runKey}`,
+      battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
       order: "points.desc,user_id.asc",
       limit: String(pageLimit),
       offset: String(offset)
@@ -3317,18 +3385,23 @@ async function buildGlobalLeaderboardGainMaps(env, { clan, battleKey, snapshotAt
       }
     }
 
-    if (best?.run_key) selectedRuns.set(window.key, best.run_key);
+    if (best?.run_key) selectedRuns.set(window.key, best);
   }
 
-  const entries = await Promise.all([...selectedRuns.entries()].map(async ([key, runKey]) => [
+  const entries = await Promise.all([...selectedRuns.entries()].map(async ([key, selectedRun]) => [
     key,
-    await readGlobalRankCandidatePointsMap(env, runKey, userIds)
+    await readGlobalRankCandidatePointsMap(
+      env,
+      selectedRun.run_key,
+      userIds,
+      selectedRun.battle_key || battleKey
+    )
   ]));
 
   return Object.fromEntries(entries);
 }
 
-async function readGlobalRankCandidatePointsMap(env, runKey, userIds) {
+async function readGlobalRankCandidatePointsMap(env, runKey, userIds, battleKeyValue = "") {
   const map = new Map();
   const ids = [...new Set(userIds.map(Number).filter(Boolean))];
 
@@ -3336,6 +3409,7 @@ async function readGlobalRankCandidatePointsMap(env, runKey, userIds) {
     const rows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
       select: "user_id,points",
       run_key: `eq.${runKey}`,
+      battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
       user_id: `in.(${batch.join(",")})`,
       order: "points.desc,user_id.asc",
       limit: String(batch.length * 5)
@@ -3617,7 +3691,7 @@ async function overlayGlobalCurrentRowsFromCandidates(env, rows, run) {
   const alreadyCurrent = rows.every(row => row.run_key === run.run_key);
   if (alreadyCurrent) return rows;
 
-  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key, run.battle_key);
   if (!rankedCandidates.length) {
     return rows.map(row => ({
       ...row,
@@ -3682,8 +3756,17 @@ async function handleGlobalSearch(request, env) {
     throw httpError(400, "Missing search query. Use ?q=username.");
   }
 
-  if (String(url.searchParams.get("scope") || "").trim().toLowerCase() === "pool") {
-    return handleGlobalLeaderboardPoolSearch(url, env, clan, query);
+  const poolScope = String(url.searchParams.get("scope") || "").trim().toLowerCase() === "pool";
+  const poolSourceMode = poolScope
+    ? await globalLeaderboardSourceMode(url, env)
+    : null;
+
+  // League searches need the broader player pool. During a Clan Battle,
+  // prefer the already-finalized current table for tracked members; rebuilding
+  // their rank from raw candidate rows is both slower and vulnerable to
+  // duplicate candidate rows.
+  if (poolScope && poolSourceMode === "leagues") {
+    return handleGlobalLeaderboardPoolSearch(url, env, clan, query, poolSourceMode);
   }
 
   const rows = await supabaseSelect(env, GLOBAL_RANK_CURRENT_TABLE, {
@@ -3701,6 +3784,10 @@ async function handleGlobalSearch(request, env) {
   }
 
   if (!found) {
+    if (poolScope) {
+      return handleGlobalLeaderboardPoolSearch(url, env, clan, query, poolSourceMode);
+    }
+
     return cacheJson(await searchGlobalRankCandidates(env, globalRankRunClanForTrackedMember(env, clan), query, null, {
       historyHours: historyHoursValue,
       historyLimit
@@ -3709,15 +3796,16 @@ async function handleGlobalSearch(request, env) {
 
   const foundClan = String(found.clan_name || clan).trim() || clan;
   const runClan = globalRankRunClanForTrackedMember(env, foundClan);
-  const latestRun = await findLatestGlobalRankSearchRun(env, runClan);
-  const foundUsesLatestRun = Boolean(latestRun?.run_key && found.run_key === latestRun.run_key);
   const foundSourceClan = globalCurrentSourceClan(found);
   const foundSourceClanMismatch = Boolean(
     foundSourceClan &&
     normalizeText(foundSourceClan) !== normalizeText(foundClan)
   );
 
-  if (!foundUsesLatestRun || foundSourceClanMismatch || !(toNumber(found.global_rank) > 0)) {
+  // The current table is published only after a completed scan has been
+  // finalized. Treat it as authoritative even when a newer completed run is
+  // briefly visible before its current rows finish publishing.
+  if (foundSourceClanMismatch || !(toNumber(found.global_rank) > 0)) {
     const candidateResult = await searchGlobalRankCandidates(env, runClan, query, null, {
       historyHours: historyHoursValue,
       historyLimit
@@ -3765,21 +3853,23 @@ async function handleGlobalSearch(request, env) {
     return cacheJson(candidateResult, env);
   }
 
-  const history = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
-    select: "run_key,fetched_at,event_name,battle_key,battle_display_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
-    clan_name: `eq.${foundClan}`,
-    user_id: `eq.${found.user_id}`,
-    fetched_at: `gte.${globalSearchHistorySinceIso(found.fetched_at || found.updated_at || Date.now(), historyHoursValue)}`,
-    order: "fetched_at.desc",
-    limit: String(historyLimit)
-  });
-  const runRows = found.run_key
-    ? await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
-      select: "*",
-      run_key: `eq.${found.run_key}`,
-      limit: "1"
-    })
-    : [];
+  const [history, runRows] = await Promise.all([
+    supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
+      select: "run_key,fetched_at,event_name,battle_key,battle_display_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
+      clan_name: `eq.${foundClan}`,
+      user_id: `eq.${found.user_id}`,
+      fetched_at: `gte.${globalSearchHistorySinceIso(found.fetched_at || found.updated_at || Date.now(), historyHoursValue)}`,
+      order: "fetched_at.desc",
+      limit: String(historyLimit)
+    }),
+    found.run_key
+      ? supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+        select: "*",
+        run_key: `eq.${found.run_key}`,
+        limit: "1"
+      })
+      : Promise.resolve([])
+  ]);
 
   const run = runRows[0] || null;
   const historyRunKeys = [...new Set(history.map(row => String(row.run_key || "").trim()).filter(Boolean))];
@@ -3792,10 +3882,27 @@ async function handleGlobalSearch(request, env) {
     : [];
   const historyRunMap = new Map(historyRuns.map(row => [String(row.run_key), row]));
   const leaderboardName = globalRankLeaderboardLabel(env, run || found);
+  const normalizedHistory = history.map(row => {
+    const rowRun = historyRunMap.get(String(row.run_key || "")) || (String(row.run_key || "") === String(run?.run_key || "") ? run : null);
+    const rowLeaderboardName = globalRankLeaderboardLabel(env, rowRun || row);
+
+    return {
+      ...row,
+      leaderboard_name: rowLeaderboardName,
+      event_name: rowLeaderboardName,
+      global_rank: toNumber(row.global_rank),
+      global_points: toNumber(row.global_points),
+      total_global_players: toNumber(row.total_global_players),
+      clan_rank: toNumber(row.clan_rank),
+      clan_points: toNumber(row.clan_points)
+    };
+  });
 
   return cacheJson({
     ok: true,
     query,
+    source_mode: "clans",
+    source_label: "Clan Battle",
     clan_name: foundClan,
     row: {
       ...normalizeGlobalCurrentOutput(found),
@@ -3804,22 +3911,83 @@ async function handleGlobalSearch(request, env) {
       clan_member_count: toNumber(run?.clan_member_count) || null
     },
     run: run ? { ...run, leaderboard_name: leaderboardName, event_name: leaderboardName } : null,
-    history: history.map(row => {
-      const rowRun = historyRunMap.get(String(row.run_key || "")) || (String(row.run_key || "") === String(run?.run_key || "") ? run : null);
-      const rowLeaderboardName = globalRankLeaderboardLabel(env, rowRun || row);
-
-      return {
-        ...row,
-        leaderboard_name: rowLeaderboardName,
-        event_name: rowLeaderboardName,
-        global_rank: toNumber(row.global_rank),
-        global_points: toNumber(row.global_points),
-        total_global_players: toNumber(row.total_global_players),
-        clan_rank: toNumber(row.clan_rank),
-        clan_points: toNumber(row.clan_points)
-      };
-    })
+    history: stabilizeGlobalSearchRankHistory(normalizedHistory)
   }, env);
+}
+
+function stabilizeGlobalSearchRankHistory(rows) {
+  if (!Array.isArray(rows) || rows.length < 3) return rows || [];
+
+  const result = rows.map(row => ({ ...row }));
+  for (let pass = 0; pass < 3; pass += 1) {
+    const chronological = result
+      .map((row, index) => ({
+        index,
+        t: new Date(row?.fetched_at || 0).getTime(),
+        rank: toNumber(row?.global_rank)
+      }))
+      .filter(item => Number.isFinite(item.t) && item.t > 0)
+      .sort((a, b) => a.t - b.t);
+
+    const suspicious = new Set();
+    for (let index = 0; index < chronological.length; index += 1) {
+      const current = chronological[index];
+      if (!(current.rank > 0)) continue;
+
+      const nearbyRanks = chronological
+        .slice(Math.max(0, index - 3), Math.min(chronological.length, index + 4))
+        .filter(item => item !== current && item.rank > 0)
+        .map(item => item.rank)
+        .sort((a, b) => a - b);
+      if (nearbyRanks.length < 2) continue;
+
+      const middle = Math.floor(nearbyRanks.length / 2);
+      const neighborMedian = nearbyRanks.length % 2
+        ? nearbyRanks[middle]
+        : (nearbyRanks[middle - 1] + nearbyRanks[middle]) / 2;
+      const neighborTolerance = Math.max(50, neighborMedian * 0.25);
+      const supportingNeighbors = nearbyRanks.filter(rank => Math.abs(rank - neighborMedian) <= neighborTolerance).length;
+      const isWorseRankSpike = current.rank - neighborMedian >= Math.max(100, neighborMedian * 0.5) &&
+        current.rank / Math.max(1, neighborMedian) >= 1.7;
+      if (isWorseRankSpike && supportingNeighbors >= Math.min(3, nearbyRanks.length)) {
+        suspicious.add(index);
+      }
+    }
+
+    if (!suspicious.size) break;
+
+    for (let index = 0; index < chronological.length;) {
+      if (!suspicious.has(index)) {
+        index += 1;
+        continue;
+      }
+
+      const start = index;
+      while (index + 1 < chronological.length && suspicious.has(index + 1)) index += 1;
+      const end = index;
+      const previous = start > 0 ? chronological[start - 1] : null;
+      const next = end + 1 < chronological.length ? chronological[end + 1] : null;
+
+      for (let cursor = start; cursor <= end; cursor += 1) {
+        const current = chronological[cursor];
+        let correctedRank = previous?.rank || next?.rank || current.rank;
+        if (previous?.rank > 0 && next?.rank > 0) {
+          const span = next.t - previous.t;
+          const progress = span > 0 ? clamp((current.t - previous.t) / span, 0, 1) : 0.5;
+          correctedRank = previous.rank + (next.rank - previous.rank) * progress;
+        }
+        result[current.index] = {
+          ...result[current.index],
+          raw_global_rank: result[current.index].raw_global_rank || current.rank,
+          global_rank: Math.max(1, Math.round(correctedRank)),
+          global_rank_corrected: true
+        };
+      }
+      index += 1;
+    }
+  }
+
+  return result;
 }
 
 function findGlobalCurrentSearchMatch(rows, query, key) {
@@ -3863,8 +4031,8 @@ function globalRankRunClanForTrackedMember(env, clan) {
     : primaryClan;
 }
 
-async function handleGlobalLeaderboardPoolSearch(url, env, clan, query) {
-  const sourceMode = await globalLeaderboardSourceMode(url, env);
+async function handleGlobalLeaderboardPoolSearch(url, env, clan, query, sourceModeOverride = null) {
+  const sourceMode = sourceModeOverride || await globalLeaderboardSourceMode(url, env);
 
   if (sourceMode === "leagues") {
     const payload = await fetchLeagueSoloLeaderboard(env, 500, query);
@@ -4801,6 +4969,7 @@ async function searchGlobalRankCandidates(env, clan, query, battleKeyValue = nul
   const candidateRows = await supabaseSelect(env, GLOBAL_RANK_CANDIDATES_TABLE, {
     select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,fetched_at,raw_candidate,updated_at",
     run_key: `eq.${run.run_key}`,
+    battle_key: run.battle_key ? `eq.${run.battle_key}` : undefined,
     user_id: `eq.${lookup.user_id}`,
     order: "points.desc,user_id.asc",
     limit: "10"
@@ -4880,6 +5049,8 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
 
   if (!runs.length) return [];
 
+  const runByKey = new Map(runs.map(run => [String(run.run_key || "").trim(), run]));
+
   const rows = [];
   for (const runChunk of chunkValues(runs.map(run => run.run_key).filter(Boolean), 25)) {
     if (!runChunk.length) continue;
@@ -4898,6 +5069,11 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
   for (const row of rows) {
     const runKey = String(row.run_key || "").trim();
     if (!runKey) continue;
+
+    const expectedBattleKey = String(runByKey.get(runKey)?.battle_key || "").trim();
+    if (expectedBattleKey && normalizeText(row.battle_key) !== normalizeText(expectedBattleKey)) {
+      continue;
+    }
 
     const normalized = {
       ...row,
@@ -4966,7 +5142,8 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
         ...row,
         global_rank: await resolveGlobalCandidateRank(env, row.run_key, {
           user_id: userIdValue,
-          points
+          points,
+          battle_key: row.battle_key
         })
       };
     })));
@@ -4980,10 +5157,12 @@ async function searchGlobalRankCandidateHistory(env, clan, userId, currentRow = 
 async function countHigherSourceClanMembers(env, runKey, row) {
   const points = toNumber(row?.points);
   const sourceClan = String(row?.source_clan || "").trim();
+  const battleKeyValue = String(row?.battle_key || "").trim();
   if (!runKey || points === null || !sourceClan) return 0;
 
   return supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
     run_key: `eq.${runKey}`,
+    battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
     source_clan: `eq.${sourceClan}`,
     points: `gt.${points}`
   });
@@ -4993,10 +5172,12 @@ async function countTiedBeforeSourceClanMembers(env, runKey, row) {
   const points = toNumber(row?.points);
   const userId = toNumber(row?.user_id);
   const sourceClan = String(row?.source_clan || "").trim();
+  const battleKeyValue = String(row?.battle_key || "").trim();
   if (!runKey || points === null || !userId || !sourceClan) return 0;
 
   return supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
     run_key: `eq.${runKey}`,
+    battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
     source_clan: `eq.${sourceClan}`,
     points: `eq.${points}`,
     user_id: `lt.${userId}`
@@ -5006,31 +5187,34 @@ async function countTiedBeforeSourceClanMembers(env, runKey, row) {
 async function resolveGlobalCandidateRank(env, runKey, row) {
   const points = toNumber(row?.points);
   const userId = toNumber(row?.user_id);
+  const battleKeyValue = String(row?.battle_key || "").trim();
   if (!runKey || points === null || !userId) return null;
 
   const cacheMeta = {
     clan_name: "global-rank",
     battle_key: String(runKey),
-    snapshot_id: `${runKey}:${userId}:${points}`
+    snapshot_id: `${runKey}:${battleKeyValue || "all"}:${userId}:${points}`
   };
-  const cached = await readDerivedSnapshotCache(env, "global-candidate-rank-v1", cacheMeta);
+  const cached = await readDerivedSnapshotCache(env, "global-candidate-rank-v2", cacheMeta);
   const cachedRank = toNumber(cached?.rank);
   if (cachedRank !== null) return cachedRank;
 
   const [higherCount, tiedBeforeCount] = await Promise.all([
     supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
       run_key: `eq.${runKey}`,
+      battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
       points: `gt.${points}`
     }),
     supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
       run_key: `eq.${runKey}`,
+      battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
       points: `eq.${points}`,
       user_id: `lt.${userId}`
     })
   ]);
   const rank = higherCount + tiedBeforeCount + 1;
 
-  await writeDerivedSnapshotCache(env, "global-candidate-rank-v1", cacheMeta, { rank });
+  await writeDerivedSnapshotCache(env, "global-candidate-rank-v2", cacheMeta, { rank });
   return rank;
 }
 
@@ -5038,14 +5222,15 @@ async function resolveGlobalCandidateMemberRank(env, runKey, row) {
   const points = toNumber(row?.points);
   const userId = toNumber(row?.user_id);
   const sourceClan = String(row?.source_clan || "").trim();
+  const battleKeyValue = String(row?.battle_key || "").trim();
   if (!runKey || points === null || !userId || !sourceClan) return null;
 
   const cacheMeta = {
     clan_name: sourceClan,
     battle_key: String(runKey),
-    snapshot_id: `${runKey}:${sourceClan}:${userId}:${points}`
+    snapshot_id: `${runKey}:${battleKeyValue || "all"}:${sourceClan}:${userId}:${points}`
   };
-  const cached = await readDerivedSnapshotCache(env, "global-candidate-member-rank-v1", cacheMeta);
+  const cached = await readDerivedSnapshotCache(env, "global-candidate-member-rank-v2", cacheMeta);
   const cachedRank = toNumber(cached?.rank);
   if (cachedRank !== null) return cachedRank;
 
@@ -5055,7 +5240,7 @@ async function resolveGlobalCandidateMemberRank(env, runKey, row) {
   ]);
   const rank = higherCount + tiedBeforeCount + 1;
 
-  await writeDerivedSnapshotCache(env, "global-candidate-member-rank-v1", cacheMeta, { rank });
+  await writeDerivedSnapshotCache(env, "global-candidate-member-rank-v2", cacheMeta, { rank });
   return rank;
 }
 
@@ -5083,7 +5268,11 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
   }
 
   const latest = latestMetaFromRows(currentRows);
-  const configuredBattleKey = latest?.battle_key || battleKey(env);
+  const scanBattleKey = String(latest?.battle_key || "").trim();
+  if (!scanBattleKey) {
+    throw httpError(409, `The latest ${clan} member snapshot has no battle key. Run /api/ingest first.`);
+  }
+  const configuredBattleKey = scanBattleKey;
   const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
@@ -5237,8 +5426,7 @@ async function handleGlobalRankLinearIngest(env, source, requestedClan, force = 
         const candidateRows = await collectGlobalRankCandidatesForClan(env, {
           runKey,
           clanRow,
-          configuredBattleKey,
-          activeBattleKey: activeBattleMeta?.battleKey || "",
+          expectedBattleKey: scanBattleKey,
           fetchedAt
         });
 
@@ -5453,7 +5641,11 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
   }
 
   const latest = latestMetaFromRows(currentRows);
-  const configuredBattleKey = latest?.battle_key || battleKey(env);
+  const scanBattleKey = String(latest?.battle_key || "").trim();
+  if (!scanBattleKey) {
+    throw httpError(409, `The latest ${clan} member snapshot has no battle key. Run /api/ingest first.`);
+  }
+  const configuredBattleKey = scanBattleKey;
   const activeBattleMeta = runOptions.activeBattleMeta || await fetchActiveClanBattleMeta(env).catch(() => null);
   const eventName = globalRankEventName(env, latest);
   const battleDisplayName = cleanBattleDisplayName(latest?.battle_key, latest?.battle_display_name);
@@ -5599,8 +5791,7 @@ async function handleGlobalRankShardedIngest(env, source, requestedClan, force =
       shard,
       pageSize,
       clansPerShardRun,
-      configuredBattleKey,
-      activeBattleKey: activeBattleMeta?.battleKey || "",
+      expectedBattleKey: scanBattleKey,
       fetchedAt,
       leaderboardPageCache,
       ingestGateContext: {
@@ -7003,6 +7194,11 @@ async function handleClanActivityIngest(env, source, options = {}) {
   await supabaseInsertChunked(env, CLAN_ACTIVITY_ROSTER_TABLE, rosterRows, 500);
   const currentRows = rosterRows.map(row => ({
     ...row,
+    ...nextClanActivityDowntimeState(
+      row,
+      previousByClanUser.get(clanActivityMemberKey(row.clan_name, row.user_id)),
+      fetchedAt
+    ),
     updated_at: fetchedAt
   }));
   await supabaseDelete(env, CLAN_ACTIVITY_CURRENT_TABLE, {
@@ -7333,6 +7529,7 @@ async function handleDiscordClanLogAssignments(request, env) {
     if (!clanName || clanName.length > 100) throw httpError(400, "A clan name between 1 and 100 characters is required.");
 
     const key = discordClanLogAssignmentKey(guildId, channelId, clanName);
+    const assignedAt = new Date().toISOString();
     await supabaseUpsert(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, [{
       assignment_key: key,
       guild_id: guildId,
@@ -7343,9 +7540,11 @@ async function handleDiscordClanLogAssignments(request, env) {
       assigned_by: stringOrNull(body.assigned_by),
       enabled: body.enabled !== false,
       last_event_id: stringOrNull(body.last_event_id),
-      last_event_at: stringOrNull(body.last_event_at),
+      // Clan logs are forward-only. Reassigning a log establishes a fresh
+      // watermark and must never replay activity that predates setup.
+      last_event_at: assignedAt,
       last_error: null,
-      updated_at: new Date().toISOString()
+      updated_at: assignedAt
     }], "assignment_key");
 
     const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
@@ -7372,11 +7571,82 @@ async function handleDiscordClanLogAssignments(request, env) {
   return noStoreJson({ ok: true, updated: rows.length > 0, assignment: rows[0] || null });
 }
 
-function discordClanTrackerAssignmentKey(guildId, channelId, clanName) {
+async function handleDiscordClanLogReset(request, env) {
+  requireSupabase(env);
+  const body = await request.json().catch(() => ({}));
+  const guildId = String(body.guild_id || "").trim();
+  const clanName = String(body.clan_name || "").trim();
+  const clanKey = normalizeText(clanName);
+  if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
+  if (!clanName || clanName.length > 100 || !clanKey) {
+    throw httpError(400, "A clan name between 1 and 100 characters is required.");
+  }
+
+  const resetAt = new Date().toISOString();
+  const assignmentFilters = {
+    guild_id: `eq.${guildId}`,
+    clan_key: `eq.${clanKey}`
+  };
+  const assignments = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+    select: DISCORD_CLAN_LOG_ASSIGNMENT_COLUMNS,
+    ...assignmentFilters,
+    limit: "1000"
+  });
+
+  if (assignments.length) {
+    await supabasePatch(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, assignmentFilters, {
+      enabled: false,
+      last_event_id: null,
+      last_event_at: resetAt,
+      last_error: null,
+      updated_at: resetAt
+    });
+  }
+
+  const activityFilters = { clan_key: `eq.${clanKey}` };
+  const [eventCount, summaryCount, currentRowCount] = await Promise.all([
+    supabaseCount(env, CLAN_ACTIVITY_EVENTS_TABLE, activityFilters, "event_id"),
+    supabaseCount(env, CLAN_ACTIVITY_SUMMARY_TABLE, activityFilters, "battle_key"),
+    supabaseCount(env, CLAN_ACTIVITY_CURRENT_TABLE, activityFilters)
+  ]);
+
+  await Promise.all([
+    supabaseDelete(env, CLAN_ACTIVITY_EVENTS_TABLE, activityFilters),
+    supabaseDelete(env, CLAN_ACTIVITY_SUMMARY_TABLE, activityFilters),
+    supabaseDelete(env, CLAN_ACTIVITY_CURRENT_TABLE, activityFilters)
+  ]);
+
+  if (assignments.length) {
+    await supabaseDelete(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, assignmentFilters);
+  }
+
+  return noStoreJson({
+    ok: true,
+    clan_name: clanName,
+    clan_key: clanKey,
+    guild_id: guildId,
+    reset_at: resetAt,
+    removed_assignment_count: assignments.length,
+    removed_event_count: eventCount,
+    removed_summary_count: summaryCount,
+    removed_current_row_count: currentRowCount,
+    roster_snapshots_preserved: true,
+    next_observation_is_baseline: true,
+    logging_enabled: false
+  });
+}
+
+function normalizeDiscordClanTrackerMode(value) {
+  return String(value || "").trim().toLowerCase() === "compare" ? "compare" : "members";
+}
+
+function discordClanTrackerAssignmentKey(guildId, channelId, clanName, trackerMode = "members") {
   const guild = String(guildId || "").trim();
   const channel = String(channelId || "").trim();
   const clan = normalizeText(clanName);
-  return guild && channel && clan ? `${guild}:${channel}:clan-tracker:${clan}` : "";
+  const mode = normalizeDiscordClanTrackerMode(trackerMode);
+  const assignmentType = mode === "compare" ? "clan-compare" : "clan-tracker";
+  return guild && channel && clan ? `${guild}:${channel}:${assignmentType}:${clan}` : "";
 }
 
 async function handleDiscordClanTrackerAssignments(request, env) {
@@ -7394,10 +7664,12 @@ async function handleDiscordClanTrackerAssignments(request, env) {
     const clanKey = normalizeText(url.searchParams.get("clan") || "");
     const assignmentKey = String(url.searchParams.get("assignment_key") || "").trim();
     const enabled = String(url.searchParams.get("enabled") || "").trim().toLowerCase();
+    const trackerMode = String(url.searchParams.get("mode") || url.searchParams.get("tracker_mode") || "").trim();
     if (guildId) params.guild_id = `eq.${guildId}`;
     if (channelId) params.channel_id = `eq.${channelId}`;
     if (clanKey) params.clan_key = `eq.${clanKey}`;
     if (assignmentKey) params.assignment_key = `eq.${assignmentKey}`;
+    if (trackerMode) params.tracker_mode = `eq.${normalizeDiscordClanTrackerMode(trackerMode)}`;
     if (["1", "true", "yes"].includes(enabled)) params.enabled = "eq.true";
     if (["0", "false", "no"].includes(enabled)) params.enabled = "eq.false";
     return noStoreJson({
@@ -7426,11 +7698,12 @@ async function handleDiscordClanTrackerAssignments(request, env) {
     const guildId = String(body.guild_id || "").trim();
     const channelId = String(body.channel_id || "").trim();
     const clanName = String(body.clan_name || "").trim();
+    const trackerMode = normalizeDiscordClanTrackerMode(body.tracker_mode || body.mode);
     if (!/^\d{5,30}$/.test(guildId)) throw httpError(400, "A valid Discord guild ID is required.");
     if (!/^\d{5,30}$/.test(channelId)) throw httpError(400, "A valid Discord channel or thread ID is required.");
     if (!clanName || clanName.length > 100) throw httpError(400, "A clan name between 1 and 100 characters is required.");
 
-    const key = discordClanTrackerAssignmentKey(guildId, channelId, clanName);
+    const key = discordClanTrackerAssignmentKey(guildId, channelId, clanName, trackerMode);
     const existing = await supabaseSelect(env, DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE, {
       select: DISCORD_CLAN_TRACKER_ASSIGNMENT_COLUMNS,
       assignment_key: `eq.${key}`,
@@ -7444,6 +7717,7 @@ async function handleDiscordClanTrackerAssignments(request, env) {
       channel_type: toNumber(body.channel_type),
       clan_name: clanName,
       clan_key: normalizeText(clanName),
+      tracker_mode: trackerMode,
       assigned_by: stringOrNull(body.assigned_by),
       enabled: body.enabled !== false,
       // Re-assigning the same tracker should keep editing the existing post,
@@ -8371,7 +8645,7 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     const clanKey = normalizeText(clanNameValue);
     if (!clanKey) return null;
     if (!clanBundleCache.has(clanKey)) {
-      clanBundleCache.set(clanKey, fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes));
+      clanBundleCache.set(clanKey, fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes, checkedAt));
     }
     return clanBundleCache.get(clanKey);
   };
@@ -8383,13 +8657,13 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     const leagueKey = normalizeText(leagueNameValue);
     if (!leagueKey) return null;
     if (!leagueBundleCache.has(leagueKey)) {
-      leagueBundleCache.set(leagueKey, fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes));
+      leagueBundleCache.set(leagueKey, fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes, checkedAt));
     }
     return leagueBundleCache.get(leagueKey);
   };
 
   for (const watch of userWatches) {
-    const status = await findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, {
+    let status = await findOfflineMemberStatusForWatch(env, watch, getClanBundle, clanBundleCache, getLeagueBundle, leagueBundleCache, lookbackMinutes, {
       includeClan: true,
       includeLeague: true,
       allowDirectLookup: true
@@ -8417,6 +8691,8 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
       continue;
     }
 
+    const existingState = stateByKey.get(stateKey);
+    status = applyOfflineStateContinuity(status, existingState, checkedAt);
     const offline = status.offline_minutes >= thresholdMinutes;
     checkedRows.push(status);
     const update = offlineStateRow({
@@ -8429,7 +8705,6 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
       alertActive: offline,
       checkedAt
     });
-    const existingState = stateByKey.get(stateKey);
     if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
       dueAlerts.push({
         scope: "user",
@@ -8449,21 +8724,23 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     const subjectKey = normalizeText(watch.clan_name || watch.clan_key);
     if (!bundle) continue;
 
-    for (const status of bundle.statuses) {
-      const memberMapping = offlineMemberMappingForStatus(watch._member_mappings, status);
+    for (const rawStatus of bundle.statuses) {
+      const memberMapping = offlineMemberMappingForStatus(watch._member_mappings, rawStatus);
       if (watch._member_only === true && !memberMapping) continue;
       const alertWatch = memberMapping ? { ...watch, ...memberMapping } : watch;
       // Reuse the member's original user-state key when one exists. This
       // retains its alert cooldown while changing delivery to the clan post.
       const alertScope = memberMapping ? "user" : "clan";
       const alertSubjectKey = memberMapping ? offlineUserSubjectKey(memberMapping) : subjectKey;
-      const trackedKey = status.user_key;
+      const trackedKey = rawStatus.user_key;
       const stateKey = offlineStateMapKey({
         guild_id: guildId,
         scope: alertScope,
         subject_key: alertSubjectKey,
         tracked_user_key: trackedKey
       });
+      const existingState = stateByKey.get(stateKey);
+      const status = applyOfflineStateContinuity(rawStatus, existingState, checkedAt);
       const offline = status.offline_minutes >= thresholdMinutes;
       checkedRows.push(status);
       const update = offlineStateRow({
@@ -8476,8 +8753,6 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
         alertActive: offline,
         checkedAt
       });
-
-      const existingState = stateByKey.get(stateKey);
       if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
         dueAlerts.push({
           scope: alertScope,
@@ -8498,14 +8773,16 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
     const subjectKey = normalizeText(watch.league_name || watch.league_key);
     if (!bundle) continue;
 
-    for (const status of bundle.statuses) {
-      const trackedKey = status.user_key;
+    for (const rawStatus of bundle.statuses) {
+      const trackedKey = rawStatus.user_key;
       const stateKey = offlineStateMapKey({
         guild_id: guildId,
         scope: "league",
         subject_key: subjectKey,
         tracked_user_key: trackedKey
       });
+      const existingState = stateByKey.get(stateKey);
+      const status = applyOfflineStateContinuity(rawStatus, existingState, checkedAt);
       const offline = status.offline_minutes >= thresholdMinutes;
       checkedRows.push(status);
       const update = offlineStateRow({
@@ -8518,8 +8795,6 @@ async function runOfflinePingGuildCheck(env, config, checkedAt, options = {}) {
         alertActive: offline,
         checkedAt
       });
-
-      const existingState = stateByKey.get(stateKey);
       if (offline && offlineAlertDue(existingState, postRateMinutes, checkedAt)) {
         dueAlerts.push({
           scope: "league",
@@ -8769,7 +9044,7 @@ async function handleOfflineBloxlinkLookup(request, env) {
   });
 }
 
-async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes) {
+async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes, checkedAt = null) {
   const clanNameText = String(clanNameValue || "").trim();
   const clanKey = normalizeText(clanNameText);
   if (!clanKey) return null;
@@ -8777,13 +9052,13 @@ async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes) {
   const sinceIso = new Date(Date.now() - clamp(Number(lookbackMinutes || 60), 1, 1440 * 14) * 60 * 1000).toISOString();
   const [activityRows, memberRows] = await Promise.all([
     supabaseSelect(env, CLAN_ACTIVITY_CURRENT_TABLE, {
-      select: "battle_key,battle_display_name,clan_name,clan_key,clan_rank,member_rank,user_id,username,points,fetched_at,updated_at",
+      select: "battle_key,battle_display_name,clan_name,clan_key,clan_rank,member_rank,user_id,username,points,last_gain_at,downtime_tracking_started_at,fetched_at,updated_at",
       clan_key: `eq.${clanKey}`,
       order: "fetched_at.desc,member_rank.asc",
       limit: "150"
     }).catch(() => []),
     supabaseSelect(env, CURRENT_TABLE, {
-      select: "battle_key,battle_display_name,clan_name,rank,user_id,username,total_points,fetched_at,updated_at",
+      select: "battle_key,battle_display_name,clan_name,rank,user_id,username,total_points,last_gain_at,downtime_tracking_started_at,fetched_at,updated_at",
       clan_name: `ilike.${clanNameText}`,
       order: "fetched_at.desc,rank.asc",
       limit: "150"
@@ -8832,11 +9107,11 @@ async function fetchOfflineClanBundle(env, clanNameValue, lookbackMinutes) {
     clan_key: clanKey,
     battle_key: battle,
     battle_display_name: cleanBattleDisplayName(battle, displayName),
-    statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === battle), historyRows)
+    statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === battle), historyRows, checkedAt)
   };
 }
 
-async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
+async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes, checkedAt = null) {
   const leagueNameText = String(leagueNameValue || "").trim();
   const leagueKey = normalizeText(leagueNameText);
   if (!leagueKey) return null;
@@ -8910,7 +9185,7 @@ async function fetchOfflineLeagueBundle(env, leagueNameValue, lookbackMinutes) {
     league_key: leagueKey,
     battle_key: runKey,
     battle_display_name: runKey,
-    statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === runKey), normalizedHistory)
+    statuses: computeOfflineMemberStatuses(normalizedCurrent.filter(row => row.battle_key === runKey), normalizedHistory, checkedAt)
   };
 }
 
@@ -9011,13 +9286,13 @@ async function fetchOfflineCurrentRowsForUser(env, watch, options = {}) {
   const includeLeague = options.includeLeague !== false;
   const [activityRows, memberRows, leagueRows] = await Promise.all([
     includeClan ? supabaseSelect(env, CLAN_ACTIVITY_CURRENT_TABLE, {
-      select: "battle_key,battle_display_name,clan_name,clan_key,member_rank,user_id,username,points,fetched_at,updated_at",
+      select: "battle_key,battle_display_name,clan_name,clan_key,member_rank,user_id,username,points,last_gain_at,downtime_tracking_started_at,fetched_at,updated_at",
       ...clanFilters,
       order: "fetched_at.desc",
       limit: "10"
     }).catch(() => []) : Promise.resolve([]),
     includeClan ? supabaseSelect(env, CURRENT_TABLE, {
-      select: "battle_key,battle_display_name,clan_name,rank,user_id,username,total_points,fetched_at,updated_at",
+      select: "battle_key,battle_display_name,clan_name,rank,user_id,username,total_points,last_gain_at,downtime_tracking_started_at,fetched_at,updated_at",
       ...clanFilters,
       order: "fetched_at.desc",
       limit: "10"
@@ -9037,7 +9312,7 @@ async function fetchOfflineCurrentRowsForUser(env, watch, options = {}) {
   ]);
 }
 
-function computeOfflineMemberStatuses(currentRows, historyRows) {
+function computeOfflineMemberStatuses(currentRows, historyRows, checkedAt = null) {
   const historyByUser = groupRowsBy(historyRows, row => row.user_key);
   const statuses = [];
 
@@ -9049,26 +9324,28 @@ function computeOfflineMemberStatuses(currentRows, historyRows) {
     }
     timeline.sort((a, b) => (isoToMs(a.snapshot_at) || 0) - (isoToMs(b.snapshot_at) || 0));
 
-    const latestMs = isoToMs(current.snapshot_at) || Date.now();
-    let lastGainAt = null;
+    const latestSnapshotMs = isoToMs(current.snapshot_at) || Date.now();
+    const checkedMs = isoToMs(checkedAt) || Date.now();
+    const elapsedThroughMs = Math.max(latestSnapshotMs, checkedMs);
+    let lastGainAt = safeIso(current.last_gain_at);
     let previousPoints = null;
     let pointsOneHourAgo = null;
-    const hourAgoMs = latestMs - 60 * 60 * 1000;
+    const hourAgoMs = latestSnapshotMs - 60 * 60 * 1000;
 
     for (const row of timeline) {
       const rowMs = isoToMs(row.snapshot_at);
       if (rowMs !== null && rowMs <= hourAgoMs) pointsOneHourAgo = row.points;
       if (previousPoints !== null && row.points > previousPoints) {
-        lastGainAt = row.snapshot_at;
+        if (!lastGainAt || rowMs > (isoToMs(lastGainAt) || 0)) lastGainAt = row.snapshot_at;
       }
       previousPoints = row.points;
     }
 
     if (pointsOneHourAgo === null && timeline.length) pointsOneHourAgo = timeline[0].points;
-    const earliestAt = timeline[0]?.snapshot_at || current.snapshot_at;
+    const earliestAt = safeIso(current.downtime_tracking_started_at) || timeline[0]?.snapshot_at || current.snapshot_at;
     const offlineSince = lastGainAt || earliestAt || current.snapshot_at;
-    const offlineSinceMs = isoToMs(offlineSince) || latestMs;
-    const offlineMinutes = Math.max(0, Math.floor((latestMs - offlineSinceMs) / 60000));
+    const offlineSinceMs = isoToMs(offlineSince) || latestSnapshotMs;
+    const offlineMinutes = Math.max(0, Math.floor((elapsedThroughMs - offlineSinceMs) / 60000));
 
     statuses.push({
       ...current,
@@ -9745,6 +10022,34 @@ function offlineStateWithDeliveryState(row, existingState) {
   };
 }
 
+function applyOfflineStateContinuity(status, existingState, checkedAt) {
+  if (!status) return status;
+
+  const currentPoints = toNumber(status.points);
+  const previousPoints = toNumber(existingState?.last_points);
+  const pointsUnchanged = currentPoints !== null && previousPoints !== null && currentPoints === previousPoints;
+  const statusAnchor = safeIso(status.offline_since || status.last_gain_at || status.snapshot_at);
+  const savedAnchor = pointsUnchanged && !safeIso(status.last_gain_at)
+    ? safeIso(existingState?.offline_since || existingState?.last_gain_at)
+    : null;
+  const statusAnchorMs = isoToMs(statusAnchor);
+  const savedAnchorMs = isoToMs(savedAnchor);
+  const offlineSince = savedAnchorMs && (!statusAnchorMs || savedAnchorMs < statusAnchorMs)
+    ? savedAnchor
+    : statusAnchor;
+  const checkedMs = isoToMs(checkedAt) || Date.now();
+  const snapshotMs = isoToMs(status.snapshot_at) || checkedMs;
+  const elapsedThroughMs = Math.max(snapshotMs, checkedMs);
+  const offlineSinceMs = isoToMs(offlineSince) || snapshotMs;
+
+  return {
+    ...status,
+    last_gain_at: status.last_gain_at || (pointsUnchanged ? existingState?.last_gain_at : null) || null,
+    offline_since: offlineSince,
+    offline_minutes: Math.max(0, Math.floor((elapsedThroughMs - offlineSinceMs) / 60000))
+  };
+}
+
 function normalizeOfflineMemberRow(row, source) {
   const userId = toNumber(row.user_id);
   const sourceMode = String(source || "").startsWith("league") ? "league" : "clan";
@@ -9768,6 +10073,8 @@ function normalizeOfflineMemberRow(row, source) {
     user_key: userKey,
     username_key: normalizeText(username),
     points: Math.max(0, toNumber(row.points ?? row.total_points) || 0),
+    last_gain_at: safeIso(row.last_gain_at || row.last_contribution_at),
+    downtime_tracking_started_at: safeIso(row.downtime_tracking_started_at),
     snapshot_at: safeIso(row.fetched_at || row.updated_at) || new Date().toISOString()
   };
 }
@@ -9778,6 +10085,13 @@ function mergeOfflineCurrentRows(rows) {
     const existing = byUser.get(row.user_key);
     if (!existing || (isoToMs(row.snapshot_at) || 0) > (isoToMs(existing.snapshot_at) || 0)) {
       byUser.set(row.user_key, row);
+    } else if ((isoToMs(row.snapshot_at) || 0) === (isoToMs(existing.snapshot_at) || 0)) {
+      byUser.set(row.user_key, {
+        ...existing,
+        last_gain_at: existing.last_gain_at || row.last_gain_at || null,
+        downtime_tracking_started_at:
+          existing.downtime_tracking_started_at || row.downtime_tracking_started_at || null
+      });
     }
   }
   return [...byUser.values()];
@@ -16119,7 +16433,7 @@ async function fetchClanActivityCurrentRows(env, battleKeyValue) {
     // Diamond donations live in the nested raw member/contribution payloads.
     // Include them in the previous-state lookup so a cumulative delta can be
     // turned into a real activity event.
-    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,kick_available,member_count,member_capacity,raw_member,raw_contribution",
+    select: "battle_key,clan_name,clan_key,clan_rank,user_id,username,display_name,role,permission_level,join_time,points,last_gain_at,downtime_tracking_started_at,fetched_at,kick_available,member_count,member_capacity,raw_member,raw_contribution",
     battle_key: `eq.${battleKeyValue}`,
     order: "clan_key.asc,user_id.asc"
   }, 20000);
@@ -16325,7 +16639,14 @@ function clanActivityIncrements({
         }));
       }
 
-      const change = memberRoleChange(previous, current);
+      const previousRole = memberRoleState(previous);
+      const currentRole = memberRoleState(current);
+      const change = memberRoleChange(previousRole, currentRole);
+      const roleEventDetails = {
+        event_identity_anchor: safeIso(previous.fetched_at) || fetchedAt,
+        previous_role_key: normalizeText(previousRole.role),
+        current_role_key: normalizeText(currentRole.role)
+      };
       if (change > 0) {
         promotions += 1;
         events.push(clanActivityEvent({
@@ -16336,10 +16657,11 @@ function clanActivityIncrements({
           clanRow,
           eventType: "member_promoted",
           userRow: current,
-          previousValue: previous.role,
-          currentValue: current.role,
-          previousPermissionLevel: previous.permission_level,
-          currentPermissionLevel: current.permission_level
+          previousValue: previousRole.role,
+          currentValue: currentRole.role,
+          previousPermissionLevel: previousRole.permissionLevel,
+          currentPermissionLevel: currentRole.permissionLevel,
+          details: roleEventDetails
         }));
       } else if (change < 0) {
         demotions += 1;
@@ -16351,10 +16673,11 @@ function clanActivityIncrements({
           clanRow,
           eventType: "member_demoted",
           userRow: current,
-          previousValue: previous.role,
-          currentValue: current.role,
-          previousPermissionLevel: previous.permission_level,
-          currentPermissionLevel: current.permission_level
+          previousValue: previousRole.role,
+          currentValue: currentRole.role,
+          previousPermissionLevel: previousRole.permissionLevel,
+          currentPermissionLevel: currentRole.permissionLevel,
+          details: roleEventDetails
         }));
       }
     }
@@ -16493,6 +16816,7 @@ function clanActivityEvent({
 }
 
 function clanActivityEventId(event) {
+  const identityAnchor = event?.details?.event_identity_anchor || event.event_at;
   return [
     event.battle_key,
     event.clan_key,
@@ -16500,21 +16824,26 @@ function clanActivityEventId(event) {
     event.user_id || "clan",
     event.previous_value || event.previous_rank || "",
     event.current_value || event.current_rank || "",
-    event.event_at
+    identityAnchor
   ].map(value => encodeURIComponent(String(value))).join(":");
 }
 
-function memberRoleChange(previous, current) {
-  const previousPermission = toNumber(previous.permission_level);
-  const currentPermission = toNumber(current.permission_level);
+function memberRoleState(member) {
+  const permissionLevel = toNumber(member?.permissionLevel ?? member?.permission_level);
+  const role = clanRoleFromPermissionLevel(permissionLevel) || stringOrNull(member?.role);
+  const roleScore = memberRoleScore(role);
+  return {
+    permissionLevel,
+    role,
+    score: roleScore || permissionLevel || 0
+  };
+}
 
-  if (previousPermission !== null && currentPermission !== null && previousPermission !== currentPermission) {
-    return currentPermission - previousPermission;
-  }
-
-  const previousScore = memberRoleScore(previous.role);
-  const currentScore = memberRoleScore(current.role);
-  return currentScore - previousScore;
+function memberRoleChange(previousState, currentState) {
+  const previousRole = normalizeText(previousState?.role);
+  const currentRole = normalizeText(currentState?.role);
+  if (!previousRole || !currentRole || previousRole === currentRole) return 0;
+  return Number(currentState?.score || 0) - Number(previousState?.score || 0);
 }
 
 function memberPermissionLevel(rawMember) {
@@ -16537,11 +16866,15 @@ function memberRole(rawMember, permissionLevel) {
     rawMember.title
   ));
 
-  if (explicit) return explicit;
-  if (permissionLevel >= 100) return "Owner";
-  if (permissionLevel >= 90) return "Leader";
-  if (permissionLevel >= 50) return "Officer";
-  if (permissionLevel >= 1) return "Member";
+  return clanRoleFromPermissionLevel(permissionLevel) || explicit || null;
+}
+
+function clanRoleFromPermissionLevel(permissionLevel) {
+  const level = toNumber(permissionLevel);
+  if (level === 100) return "Leader";
+  if (level === 90) return "Officer";
+  if (level === 50) return "Member";
+  if (level !== null && level > 0) return `Unknown (${level})`;
   return null;
 }
 
@@ -16549,8 +16882,8 @@ function memberRoleScore(role) {
   const text = normalizeText(role);
   if (!text) return 0;
   if (text.includes("owner")) return 100;
-  if (text.includes("leader")) return 90;
-  if (text.includes("officer")) return 50;
+  if (text.includes("leader")) return 100;
+  if (text.includes("officer")) return 90;
   if (text.includes("admin")) return 50;
   if (text.includes("member")) return 1;
   return 0;
@@ -16611,6 +16944,35 @@ function groupRowsByNormalizedClan(rows) {
 
 function clanActivityMemberKey(clan, userId) {
   return `${normalizeText(clan)}:${String(userId || "").trim()}`;
+}
+
+function nextClanActivityDowntimeState(row, previous, fetchedAt) {
+  const currentPoints = Math.max(0, toNumber(row?.points) || 0);
+  const previousPoints = toNumber(previous?.points);
+  const previousTrackingStartedAt = safeIso(
+    previous?.downtime_tracking_started_at || previous?.fetched_at
+  );
+
+  if (previousPoints === null) {
+    return {
+      last_gain_at: null,
+      downtime_tracking_started_at: safeIso(fetchedAt)
+    };
+  }
+
+  if (currentPoints < previousPoints) {
+    return {
+      last_gain_at: null,
+      downtime_tracking_started_at: safeIso(fetchedAt)
+    };
+  }
+
+  return {
+    last_gain_at: currentPoints > previousPoints
+      ? safeIso(fetchedAt)
+      : safeIso(previous?.last_gain_at),
+    downtime_tracking_started_at: previousTrackingStartedAt || safeIso(fetchedAt)
+  };
 }
 
 function normalizeClanActivitySummaryOutput(row) {
@@ -16674,7 +17036,7 @@ function normalizeClanActivityRosterOutput(row) {
     username: row.username,
     display_name: row.display_name || null,
     avatar_url: row.avatar_url || null,
-    role: row.role || null,
+    role: clanRoleFromPermissionLevel(row.permission_level) || row.role || null,
     permission_level: toNumber(row.permission_level),
     join_time: row.join_time || null,
     points: toNumber(row.points) || 0,
@@ -16684,6 +17046,16 @@ function normalizeClanActivityRosterOutput(row) {
 }
 
 function normalizeClanActivityEventOutput(row) {
+  const previousPermissionLevel = toNumber(row.previous_permission_level);
+  const currentPermissionLevel = toNumber(row.current_permission_level);
+  const isMemberRoleEvent = ["member_promoted", "member_demoted"].includes(String(row.event_type || ""));
+  const previousMemberRole = isMemberRoleEvent
+    ? clanRoleFromPermissionLevel(previousPermissionLevel) || row.previous_member_role || row.previous_value || null
+    : row.previous_member_role || null;
+  const currentMemberRole = isMemberRoleEvent
+    ? clanRoleFromPermissionLevel(currentPermissionLevel) || row.current_member_role || row.current_value || null
+    : row.current_member_role || null;
+
   return {
     event_id: row.event_id,
     event_at: row.event_at,
@@ -16694,14 +17066,14 @@ function normalizeClanActivityEventOutput(row) {
     user_id: toNumber(row.user_id),
     username: row.username || null,
     display_name: row.display_name || null,
-    previous_value: row.previous_value || null,
-    current_value: row.current_value || null,
+    previous_value: isMemberRoleEvent ? previousMemberRole : row.previous_value || null,
+    current_value: isMemberRoleEvent ? currentMemberRole : row.current_value || null,
     previous_rank: toNumber(row.previous_rank),
     current_rank: toNumber(row.current_rank),
-    previous_member_role: row.previous_member_role || null,
-    current_member_role: row.current_member_role || null,
-    previous_permission_level: toNumber(row.previous_permission_level),
-    current_permission_level: toNumber(row.current_permission_level),
+    previous_member_role: previousMemberRole,
+    current_member_role: currentMemberRole,
+    previous_permission_level: previousPermissionLevel,
+    current_permission_level: currentPermissionLevel,
     details: row.details || {}
   };
 }
@@ -17091,14 +17463,13 @@ async function fetchClanApiWithRetry(env, clan) {
 async function collectGlobalRankCandidatesForClan(env, {
   runKey,
   clanRow,
-  configuredBattleKey,
-  activeBattleKey,
+  expectedBattleKey,
   fetchedAt
 }) {
   const api = await fetchClanApiWithRetry(env, clanRow.clan_name);
   const data = api.data || {};
   const battles = data.Battles || data.battles || {};
-  const resolvedBattleKey = resolveBattleKey(battles, configuredBattleKey, env, activeBattleKey);
+  const resolvedBattleKey = findBattleKey(battles, expectedBattleKey) || "";
   const battle = resolvedBattleKey ? battles[resolvedBattleKey] : null;
 
   if (!battle) {
@@ -17405,8 +17776,7 @@ async function processGlobalRankShard(env, {
   shard,
   pageSize,
   clansPerShardRun,
-  configuredBattleKey,
-  activeBattleKey,
+  expectedBattleKey,
   fetchedAt,
   leaderboardPageCache = null,
   ingestGateContext = null
@@ -17457,8 +17827,7 @@ async function processGlobalRankShard(env, {
         const candidateRows = await collectGlobalRankCandidatesForClan(env, {
           runKey,
           clanRow,
-          configuredBattleKey,
-          activeBattleKey,
+          expectedBattleKey,
           fetchedAt
         });
 
@@ -17671,11 +18040,12 @@ async function countGlobalRankMatchedClanMembers(env, runKey, clanMembers) {
   return new Set(rows.map(row => String(row.user_id || "").trim()).filter(Boolean)).size;
 }
 
-async function readGlobalRankRankedCandidates(env, runKey) {
+async function readGlobalRankRankedCandidates(env, runKey, battleKeyValue = "") {
   const readLimit = globalRankCandidateReadLimit(env);
   const rows = await supabaseSelectPaged(env, GLOBAL_RANK_CANDIDATES_TABLE, {
     select: "user_id,points,source_clan,source_clan_rank,source_clan_points,battle_key,battle_display_name,raw_candidate",
     run_key: `eq.${runKey}`,
+    battle_key: battleKeyValue ? `eq.${battleKeyValue}` : undefined,
     order: "points.desc,user_id.asc"
   }, readLimit);
 
@@ -17697,7 +18067,7 @@ async function attachClanActivityJoinGlobalRanks(env, eventRows, battleKeyValue 
   const run = await findLatestGlobalRankSearchRun(env, clanName(env), battleKeyValue).catch(() => null);
   if (!run?.run_key) return eventRows;
 
-  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key);
+  const rankedCandidates = await readGlobalRankRankedCandidates(env, run.run_key, run.battle_key);
   if (!rankedCandidates.length) return eventRows;
 
   const candidateByUserId = new Map(rankedCandidates.map(row => [String(row.user_id), row]));
@@ -17937,7 +18307,7 @@ async function finalizeGlobalRankRun(env, {
   candidatePlayerCount,
   publishCurrent = true
 }) {
-  const topCandidates = await readGlobalRankRankedCandidates(env, runKey);
+  const topCandidates = await readGlobalRankRankedCandidates(env, runKey, latest?.battle_key);
   const candidateById = new Map(topCandidates.map(row => [String(row.user_id), row]));
   const finalRows = buildGlobalRankCurrentRows({
     members: clanMembers,
@@ -18527,7 +18897,7 @@ async function resolveRobloxAvatarHeadshots(userIds, env) {
 async function addGainFields(env, rows, latest) {
   if (!rows.length) return [];
 
-  const cached = await readDerivedSnapshotCache(env, "member-gains-v2", latest);
+  const cached = await readDerivedSnapshotCache(env, "member-gains-v3", latest);
   if (Array.isArray(cached?.rows)) return cached.rows;
 
   const latestMs = new Date(latest.fetched_at).getTime();
@@ -18537,6 +18907,7 @@ async function addGainFields(env, rows, latest) {
 
   const windows = [
     { key: "gain_5m", minutes: 5, tolerance: 4 },
+    { key: "gain_20m", minutes: 20, tolerance: 10 },
     { key: "gain_1h", minutes: 60, tolerance: 35 },
     { key: "gain_6h", minutes: 6 * 60, tolerance: 20 },
     { key: "gain_12h", minutes: 12 * 60, tolerance: 25 },
@@ -18594,8 +18965,30 @@ async function addGainFields(env, rows, latest) {
     return out;
   });
 
-  await writeDerivedSnapshotCache(env, "member-gains-v2", latest, { rows: output });
+  await writeDerivedSnapshotCache(env, "member-gains-v3", latest, { rows: output });
   return output;
+}
+
+function addExactHourlyGainFields(rows, baselineRows) {
+  const baselineByUser = new Map(
+    (baselineRows || []).map(row => [String(row.user_id), toNumber(row.total_points) || 0])
+  );
+
+  return (rows || []).map(row => {
+    const currentPoints = toNumber(row.total_points) || 0;
+    const baselinePoints = baselineByUser.get(String(row.user_id));
+    return {
+      ...row,
+      gain_5m: null,
+      gain_20m: null,
+      gain_1h: baselinePoints === undefined
+        ? null
+        : Math.max(0, currentPoints - baselinePoints),
+      gain_6h: null,
+      gain_12h: null,
+      gain_24h: null
+    };
+  });
 }
 
 async function addDowntimeFields(env, rows, latest) {
@@ -18818,6 +19211,7 @@ function addNullGains(row) {
   return {
     ...row,
     gain_5m: null,
+    gain_20m: null,
     gain_1h: null,
     gain_6h: null,
     gain_12h: null,
@@ -18950,6 +19344,35 @@ async function fetchLatestSnapshotMeta(env, clan, battle) {
     });
   }
 
+  return rows[0] || null;
+}
+
+async function fetchExactHourlySnapshotPair(env, clan, battle, hourlySlotMs) {
+  const [current, baseline] = await Promise.all([
+    fetchSnapshotMetaForHourSlot(env, clan, battle, hourlySlotMs),
+    fetchSnapshotMetaForHourSlot(env, clan, battle, hourlySlotMs - 60 * 60 * 1000)
+  ]);
+  return { current, baseline };
+}
+
+async function fetchSnapshotMetaForHourSlot(env, clan, battle, slotMs) {
+  const startIso = new Date(slotMs).toISOString();
+  const endIso = new Date(slotMs + 3 * 60 * 1000).toISOString();
+  const params = {
+    select: "snapshot_id,fetched_at,clan_name,battle_key,battle_display_name,battle_started_at,battle_ended_at",
+    clan_name: `eq.${clan}`,
+    battle_key: `eq.${battle}`,
+    fetched_at: [`gte.${startIso}`, `lt.${endIso}`],
+    order: "fetched_at.asc",
+    limit: "1"
+  };
+  let rows = await supabaseSelect(env, SNAPSHOT_TABLE, params);
+  if (!rows.length) {
+    rows = await supabaseSelect(env, SNAPSHOT_TABLE, {
+      ...params,
+      clan_name: `ilike.${clan}`
+    });
+  }
   return rows[0] || null;
 }
 
@@ -20484,6 +20907,23 @@ function isTruthyParam(url, name) {
   return ["1", "true", "yes", "on"].includes(
     String(url.searchParams.get(name) || "").trim().toLowerCase()
   );
+}
+
+function parseExactHourlySlot(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const slotMs = new Date(raw).getTime();
+  const slot = new Date(slotMs);
+  if (
+    !Number.isFinite(slotMs) ||
+    slot.getUTCMinutes() !== 0 ||
+    slot.getUTCSeconds() !== 0 ||
+    slot.getUTCMilliseconds() !== 0
+  ) {
+    throw httpError(400, "hour_slot must be an exact UTC hour such as 2026-08-12T15:00:00.000Z.");
+  }
+  return slotMs;
 }
 
 function battleIngestGate({
