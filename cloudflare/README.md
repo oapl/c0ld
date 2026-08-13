@@ -441,6 +441,7 @@ Useful endpoints:
 | `/api/external-history/cwbot/archived-threads` | Protected paginated discovery of public archived threads under one Discord channel. Used automatically by the guild importer. |
 | `/api/external-history/cwbot/channel-scan` | Protected, read-only scanner for one page of Discord channel history. It classifies CW_Bot history responses by direct history markers or a preceding `!history username` command and returns a resumable `next_before_message_id` cursor. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
+| `/admin/discord-guilds` | Protected Discord interactions Worker endpoint that lists every server visible to Luna's configured bot token. Use `scripts/list-luna-guilds.ps1` rather than exposing the bot token locally. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/persistent-posts/post` | Protected `POST` endpoint that creates or edits the combined Cutoffs, Roblox Status, and Versions posts. Add `?force=1`, and optionally `&type=cutoffs`, `&type=roblox-status`, or `&type=versions`. |
 | `/api/persistent-posts/status` | Protected `GET` endpoint that reports the three stored message IDs, channel IDs, message existence, and active refresh schedule. |
@@ -512,6 +513,48 @@ threads, then gives each one a separate resumable checkpoint. After reviewing
 the checkpoint files, rerun the same command without `-ScanOnly` and `-Reset`
 to import the candidates. Channels the bot cannot read are reported and skipped
 without stopping the rest of the server scan.
+
+To scan the two configured Luna servers together, set these variables on
+`c0ld-clan-api-worker`:
+
+```text
+CW_BOT_IMPORT_ENABLED=true
+CW_BOT_IMPORT_GUILD_IDS=1457088639006670979,1418655634479644694
+CW_BOT_IMPORT_REQUIRE_ADMIN=true
+CW_BOT_IMPORT_AUTO_APPROVE=true
+CW_BOT_IMPORT_PREVENT_OVERWRITE=true
+```
+
+Delete `CW_BOT_IMPORT_CHANNEL_IDS` or leave it blank. First perform a read-only
+scan of both servers:
+
+```powershell
+cd "C:\Users\oaadmin\Documents\GitHub\c0ld"
+.\scripts\import-cwbot-guilds-history.ps1 -ScanOnly -Reset
+```
+
+After reviewing the checkpoint manifests, import from those checkpoints without
+resetting them:
+
+```powershell
+.\scripts\import-cwbot-guilds-history.ps1
+```
+
+The wrapper prompts once for the clan API Worker's `INGEST_ADMIN_TOKEN`, keeps
+separate resumable checkpoints for each server and channel, and preserves
+successful work if one server fails. Add `-IncludeArchivedThreads` only for a
+separate pass when Luna can read the applicable thread parents.
+
+After deploying the current Discord interactions Worker, list every server Luna
+can see with:
+
+```powershell
+.\scripts\list-luna-guilds.ps1
+```
+
+That script prompts for the Discord interactions Worker's
+`REGISTER_ADMIN_TOKEN`; it does not require the Discord bot token on the local
+computer.
 
 Archived public threads are intentionally a separate pass because Discord may
 deny archive enumeration even when ordinary channel discovery succeeds. Add

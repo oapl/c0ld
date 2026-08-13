@@ -72,7 +72,7 @@ const DEFAULT_SEARCH_CHART_INTERVAL_MINUTES = 20;
 const DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES = 0;
 const DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES = 8;
 const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
-const DISCORD_INTERACTION_BUILD_ID = "clan-tracker-20m-compare-refresh-2026-08-12d";
+const DISCORD_INTERACTION_BUILD_ID = "cwbot-multi-guild-tools-2026-08-13a";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -273,6 +273,11 @@ export default {
       if (request.method === "GET" && url.pathname === "/admin/discord-debug") {
         requireAdmin(request, env);
         return await discordDebug(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds") {
+        requireAdmin(request, env);
+        return await listDiscordGuilds(url, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/search-debug") {
@@ -13565,6 +13570,72 @@ async function discordDebug(url, env) {
       application: summarizeDiscordDebugResult(botApplication),
       guild: guildCheck ? summarizeDiscordDebugResult(guildCheck) : null
     }
+  });
+}
+
+async function listDiscordGuilds(url, env) {
+  const pageSize = Math.max(1, Math.min(200, Number(url.searchParams.get("page_size") || 200) || 200));
+  const maxPages = Math.max(1, Math.min(100, Number(url.searchParams.get("max_pages") || 100) || 100));
+  const guilds = [];
+  let after = "";
+  let pages = 0;
+
+  while (pages < maxPages) {
+    const endpoint = new URL(`${DISCORD_API_BASE}/users/@me/guilds`);
+    endpoint.searchParams.set("limit", String(pageSize));
+    endpoint.searchParams.set("with_counts", "true");
+    if (after) endpoint.searchParams.set("after", after);
+
+    let response;
+    let payload;
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      response = await fetch(endpoint, { headers: discordBotHeaders(env) });
+      payload = await response.json().catch(() => ({}));
+      if (response.status !== 429 || attempt === 6) break;
+
+      const retryAfterSeconds = Number(
+        payload?.retry_after ??
+        response.headers.get("retry-after") ??
+        1
+      );
+      await sleep(Math.max(500, Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 250));
+    }
+
+    if (!response?.ok || !Array.isArray(payload)) {
+      throw httpError(
+        response?.status === 429 ? 429 : 502,
+        discordApiErrorMessage(response?.status || 502, payload?.message || `Discord guild list failed (${response?.status || 502}).`)
+      );
+    }
+
+    pages += 1;
+    guilds.push(...payload.map(guild => ({
+      id: String(guild.id || ""),
+      name: String(guild.name || "Unnamed server"),
+      owner: Boolean(guild.owner),
+      permissions: String(guild.permissions || "0"),
+      approximate_member_count: Number.isFinite(Number(guild.approximate_member_count))
+        ? Number(guild.approximate_member_count)
+        : null,
+      approximate_presence_count: Number.isFinite(Number(guild.approximate_presence_count))
+        ? Number(guild.approximate_presence_count)
+        : null
+    })));
+
+    if (payload.length < pageSize) break;
+    const nextAfter = String(payload[payload.length - 1]?.id || "");
+    if (!nextAfter || nextAfter === after) break;
+    after = nextAfter;
+  }
+
+  guilds.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+  return json({
+    ok: true,
+    application_id: requiredEnv(env, "DISCORD_APPLICATION_ID"),
+    total: guilds.length,
+    pages,
+    truncated: pages >= maxPages && guilds.length === pages * pageSize,
+    guilds
   });
 }
 
