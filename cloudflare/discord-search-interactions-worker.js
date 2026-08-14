@@ -61,7 +61,9 @@ const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
-const HOURLY_CLAN_POST_WINDOW_MINUTES = 3;
+const HOURLY_DELIVERY_START_MINUTE = 0;
+const HOURLY_CLAN_POST_WINDOW_MINUTES = 4;
+const HOURLY_DELIVERY_CLAIM_LEASE_MS = 90 * 1000;
 const DEFAULT_HOURLY_CLAN_POST_CONCURRENCY = 6;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HOURLY_LEAGUE_ASSIGNMENT_PREFIX = "league:";
@@ -71,8 +73,11 @@ const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
 const DEFAULT_SEARCH_CHART_INTERVAL_MINUTES = 20;
 const DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES = 0;
 const DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES = 8;
+const DEFAULT_CLAN_LOG_POST_INTERVAL_MINUTES = 15;
+const DEFAULT_CLAN_LOG_POST_OFFSET_MINUTES = 5;
 const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
-const DISCORD_INTERACTION_BUILD_ID = "cwbot-multi-guild-tools-2026-08-13a";
+const DEFAULT_CLAN_TRACKER_POST_OFFSET_MINUTES = 11;
+const DISCORD_INTERACTION_BUILD_ID = "discord-ack-reliability-2026-08-14a";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -83,12 +88,23 @@ const TOP_COMMAND_PAGE_SIZE = 20;
 const CLAN_LOOKUP_PAGE_SIZE = 20;
 let chartDuckImagePromise = null;
 const historyRenderMemoryCache = new Map();
+let clanLogScheduledRunPromise = null;
+let clanTrackerScheduledRunPromise = null;
+const discordVerificationKeyPromises = new Map();
+const discordVerificationAlgorithmNames = new Map();
+const DISCORD_INTERACTION_ACK_WARNING_MS = 1500;
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     try {
+      // Discord only allows three seconds for the initial acknowledgement.
+      // Keep interactions ahead of the much larger administrative route table.
+      if (request.method === "POST" && url.pathname === "/discord/interactions") {
+        return await handleInteraction(request, env, ctx);
+      }
+
       if (request.method === "GET" && url.pathname === "/") {
         return json({
           ok: true,
@@ -280,6 +296,41 @@ export default {
         return await listDiscordGuilds(url, env);
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/channels") {
+        requireAdmin(request, env);
+        return await listDiscordGuildChannels(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/members") {
+        requireAdmin(request, env);
+        return await listDiscordGuildMembers(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/threads") {
+        requireAdmin(request, env);
+        return await listDiscordGuildThreads(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/messages") {
+        requireAdmin(request, env);
+        return await listDiscordGuildMessageHistory(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/channel-messages") {
+        requireAdmin(request, env);
+        return await listDiscordGuildChannelMessages(url, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds/archived-threads") {
+        requireAdmin(request, env);
+        return await listDiscordGuildArchivedThreads(url, env);
+      }
+
+      if ((request.method === "POST" || request.method === "DELETE") && url.pathname === "/admin/discord-guilds/leave") {
+        requireAdmin(request, env);
+        return await leaveDiscordGuild(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/search-debug") {
         requireAdmin(request, env);
         return await searchDebug(url, env);
@@ -298,10 +349,6 @@ export default {
       if (request.method === "POST" && url.pathname === "/internal/ps99/restart-review-message") {
         requireDiscordReviewInternalAuth(request, env);
         return await handleInternalPs99RestartReviewMessage(request, env);
-      }
-
-      if (request.method === "POST" && url.pathname === "/discord/interactions") {
-        return await handleInteraction(request, env, ctx);
       }
 
       return json({ ok: false, message: "Not found" }, 404);
@@ -354,13 +401,13 @@ export default {
     }
 
     if (shouldRunClanLogScheduledPosts(env, scheduledTime)) {
-      ctx.waitUntil(runClanLogAssignments(env, { scheduledTime }).catch(err => {
+      ctx.waitUntil(runScheduledClanLogAssignments(env, { scheduledTime }).catch(err => {
         console.error("Clan activity log delivery failed", err);
       }));
     }
 
     if (shouldRunClanTrackerScheduledPosts(env, scheduledTime)) {
-      ctx.waitUntil(runClanTrackerAssignments(env, { scheduledTime }).catch(err => {
+      ctx.waitUntil(runScheduledClanTrackerAssignments(env, { scheduledTime }).catch(err => {
         console.error("Persistent clan tracker delivery failed", err);
       }));
     }
@@ -537,14 +584,22 @@ function discordBotMessageError(action, result) {
 }
 
 async function handleInteraction(request, env, ctx) {
+  const handlerStartedAt = Date.now();
   const body = await request.text();
+  const verificationStartedAt = Date.now();
   const verified = await verifyDiscordRequest(request, env, body);
+  const verificationMs = Date.now() - verificationStartedAt;
 
   if (!verified) {
     return new Response("invalid request signature", { status: 401 });
   }
 
   const interaction = JSON.parse(body || "{}");
+  const acknowledgementMetrics = {
+    handlerStartedAt,
+    verificationMs,
+    interactionCreatedAt: discordSnowflakeCreatedAtMs(interaction.id)
+  };
 
   if (interaction.type === INTERACTION_TYPE_PING) {
     return interactionJson({ type: INTERACTION_RESPONSE_PONG });
@@ -1111,6 +1166,7 @@ async function handleInteraction(request, env, ctx) {
   }
 
   deferInteractionWork(ctx, "search", interaction, () => completeSearchInteraction(interaction, env, username));
+  logDiscordInteractionAcknowledgement(interaction, acknowledgementMetrics);
   return interactionJson({
     type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
     data: {
@@ -1181,9 +1237,7 @@ async function buildSearchResponse(query, env) {
       : null;
   const freshnessLines = isLeagueMode
     ? leagueSearchFreshnessLines(row, leaguePayload)
-    : eventState?.reason === "event_ended"
-      ? ["Clan battle has ended"]
-      : [`Last Update: ${discordTime(row.fetched_at)}`, "Updates every 20 minutes"];
+    : searchFreshnessLines(row.fetched_at, eventState?.reason === "event_ended" ? "Clan battle has ended" : null);
   const globalPlayerCountSuffix = displayRow.total_global_players
     ? ` of ${shortNumber(displayRow.total_global_players)}`
     : "";
@@ -1278,10 +1332,7 @@ async function buildSearchResponse(query, env) {
 function leagueSearchFreshnessLines(row, leaguePayload) {
   const leagueSnapshotAt = leaguePayload?.snapshot_at || null;
   const globalPoolSnapshotAt = row?.fetched_at || null;
-  const lines = [
-    `Last Update: ${discordTime(leagueSnapshotAt || globalPoolSnapshotAt)}`,
-    "Updates every 15 minutes"
-  ];
+  const lines = searchFreshnessLines(leagueSnapshotAt || globalPoolSnapshotAt);
 
   // Exact League points/rank and the expanded global-player rank come from
   // different collections. Keep the main freshness label tied to the exact
@@ -1297,6 +1348,14 @@ function leagueSearchFreshnessLines(row, leaguePayload) {
     lines.splice(1, 0, `Global Rank Pool: ${discordTime(globalPoolSnapshotAt)}`);
   }
   return lines;
+}
+
+function searchFreshnessLines(snapshotAt, endedLabel = null) {
+  if (endedLabel) return [endedLabel];
+  return [
+    `Last Update: ${discordTime(snapshotAt)}`,
+    "Updates every 20 minutes"
+  ];
 }
 
 function searchResponseSourceMode(payload, row) {
@@ -3805,13 +3864,12 @@ async function runHourlyClanAssignments(env, options = {}) {
           reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment, {
             eventState,
             hourSlotMs,
-            userClanSnapshotPromises
+            userClanSnapshotPromises,
+            allowIncompleteDowntime: true,
+            exactDataAttempts: 8
           }));
         }
         const report = await reportPromises.get(reportKey);
-        if (!force && !shouldRunHourlyScheduledPosts(env, Date.now(), targetType)) {
-          throw httpError(409, "The top-of-hour delivery window elapsed before this board was ready.");
-        }
         if (!force) {
           const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
           if (!claim.claimed) {
@@ -3908,9 +3966,10 @@ function hourlyPostConcurrency(env) {
 
 function hourlyAssignmentDeliveryPriority(assignment) {
   const targetType = hourlyAssignmentTargetType(assignment);
-  if (targetType === "user") return 0;
+  if (targetType === "clan" && hourlyNormalizeClanName(hourlyAssignmentTargetName(assignment)) === "c0ld") return 0;
   if (targetType === "clan") return 1;
-  return 2;
+  if (targetType === "user") return 2;
+  return 3;
 }
 
 async function runOneHourlyClanAssignment(url, env, options = {}) {
@@ -3960,11 +4019,25 @@ async function removeHourlyClanAssignment(url, env) {
 function hourlyAssignmentDue(assignment, now = Date.now(), options = {}) {
   const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
   if (!Number.isFinite(lastPosted) || lastPosted <= 0) return true;
-  return lastPosted < hourlyScheduledBucketMs(now, options.postMinute ?? DEFAULT_HOURLY_CLAN_POST_MINUTE);
+  if (lastPosted < hourlyScheduledBucketMs(now, options.postMinute ?? DEFAULT_HOURLY_CLAN_POST_MINUTE)) return true;
+  return hourlyAssignmentHasStaleClaim(assignment, now);
+}
+
+function hourlyAssignmentHasStaleClaim(assignment, now = Date.now()) {
+  const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
+  const posting = String(assignment?.last_error || "").startsWith("posting:");
+  return posting
+    && Number.isFinite(lastPosted)
+    && lastPosted > 0
+    && lastPosted <= Number(now || Date.now()) - HOURLY_DELIVERY_CLAIM_LEASE_MS;
 }
 
 function hourlyScheduledPostMinute(_env) {
   return DEFAULT_HOURLY_CLAN_POST_MINUTE;
+}
+
+function hourlyScheduledDeliveryStartMinute(_env) {
+  return HOURLY_DELIVERY_START_MINUTE;
 }
 
 function hourlyScheduledPostWindows(_env) {
@@ -3985,20 +4058,47 @@ function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now(), targetTy
   const date = new Date(scheduledTime || Date.now());
   if (Number.isNaN(date.getTime())) return false;
   const minute = date.getUTCMinutes();
-  const postMinute = hourlyScheduledPostMinute(env);
-  return minute >= postMinute && minute < postMinute + hourlyScheduledPostWindowMinutes(env, targetType);
+  const startMinute = hourlyScheduledDeliveryStartMinute(env);
+  return minute >= startMinute && minute < startMinute + hourlyScheduledPostWindowMinutes(env, targetType);
+}
+
+function hourlyIsFinalScheduledAttempt(env, scheduledTime = Date.now(), targetType = "all") {
+  const date = new Date(scheduledTime || Date.now());
+  if (Number.isNaN(date.getTime())) return false;
+  const startMinute = hourlyScheduledDeliveryStartMinute(env);
+  const finalMinute = startMinute + hourlyScheduledPostWindowMinutes(env, targetType) - 1;
+  return date.getUTCMinutes() === finalMinute;
 }
 
 function clanLogScheduledIntervalMinutes(env) {
-  const value = Number(env.CLAN_LOG_POST_INTERVAL_MINUTES ?? 1);
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(60, Math.round(value)));
+  const value = Number(env.CLAN_LOG_POST_INTERVAL_MINUTES ?? DEFAULT_CLAN_LOG_POST_INTERVAL_MINUTES);
+  if (!Number.isFinite(value)) return DEFAULT_CLAN_LOG_POST_INTERVAL_MINUTES;
+  return Math.max(DEFAULT_CLAN_LOG_POST_INTERVAL_MINUTES, Math.min(60, Math.round(value)));
+}
+
+function scheduledOffsetMinute(value, fallback) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(59, Math.round(parsed)));
+}
+
+function scheduledMinuteMatches(minute, interval, offset = 0) {
+  return ((minute - offset) % interval + interval) % interval === 0;
+}
+
+function clanLogScheduledOffsetMinutes(env) {
+  return scheduledOffsetMinute(env.CLAN_LOG_POST_OFFSET_MINUTES, DEFAULT_CLAN_LOG_POST_OFFSET_MINUTES);
 }
 
 function shouldRunClanLogScheduledPosts(env, scheduledTime = Date.now()) {
+  if (shouldRunHourlyScheduledPosts(env, scheduledTime)) return false;
   const date = new Date(scheduledTime || Date.now());
   if (Number.isNaN(date.getTime())) return false;
-  return date.getUTCMinutes() % clanLogScheduledIntervalMinutes(env) === 0;
+  return scheduledMinuteMatches(
+    date.getUTCMinutes(),
+    clanLogScheduledIntervalMinutes(env),
+    clanLogScheduledOffsetMinutes(env)
+  );
 }
 
 function clanTrackerScheduledIntervalMinutes(env) {
@@ -4007,10 +4107,19 @@ function clanTrackerScheduledIntervalMinutes(env) {
   return Math.max(DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES, Math.min(60, Math.round(value)));
 }
 
+function clanTrackerScheduledOffsetMinutes(env) {
+  return scheduledOffsetMinute(env.CLAN_TRACKER_POST_OFFSET_MINUTES, DEFAULT_CLAN_TRACKER_POST_OFFSET_MINUTES);
+}
+
 function shouldRunClanTrackerScheduledPosts(env, scheduledTime = Date.now()) {
+  if (shouldRunHourlyScheduledPosts(env, scheduledTime)) return false;
   const date = new Date(scheduledTime || Date.now());
   if (Number.isNaN(date.getTime())) return false;
-  return date.getUTCMinutes() % clanTrackerScheduledIntervalMinutes(env) === 0;
+  return scheduledMinuteMatches(
+    date.getUTCMinutes(),
+    clanTrackerScheduledIntervalMinutes(env),
+    clanTrackerScheduledOffsetMinutes(env)
+  );
 }
 
 function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MINUTE) {
@@ -4023,15 +4132,18 @@ function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MI
 function hourlyNextScheduledHourMs(lastPostedMs, now, env, targetType = "all") {
   const postMinute = hourlyScheduledPostMinute(env);
   const currentBucket = hourlyScheduledBucketMs(now, postMinute);
+  const currentDeliveryStart = currentBucket + hourlyScheduledDeliveryStartMinute(env) * 60 * 1000;
   const windowOpen = shouldRunHourlyScheduledPosts(env, now, targetType);
   if (!Number.isFinite(lastPostedMs) || lastPostedMs <= 0) {
-    return windowOpen ? Math.max(now, currentBucket) : currentBucket + 60 * 60 * 1000;
+    if (now < currentDeliveryStart) return currentDeliveryStart;
+    return windowOpen ? now : currentDeliveryStart + 60 * 60 * 1000;
   }
   if (lastPostedMs < currentBucket) {
-    return windowOpen ? Math.max(now, currentBucket) : currentBucket + 60 * 60 * 1000;
+    if (now < currentDeliveryStart) return currentDeliveryStart;
+    return windowOpen ? now : currentDeliveryStart + 60 * 60 * 1000;
   }
 
-  let next = currentBucket + 60 * 60 * 1000;
+  let next = currentDeliveryStart + 60 * 60 * 1000;
   while (next <= lastPostedMs) next += 60 * 60 * 1000;
   return next;
 }
@@ -4057,6 +4169,7 @@ async function hourlyClanAssignmentStatus(env) {
       postMinute: hourlyScheduledPostMinute(env)
     })).length,
     scheduled_post_minute: hourlyScheduledPostMinute(env),
+    scheduled_delivery_start_minute: hourlyScheduledDeliveryStartMinute(env),
     scheduled_post_window_minutes: hourlyScheduledPostWindowMinutes(env),
     scheduled_post_window_minutes_by_target: hourlyScheduledPostWindows(env),
     scheduled_window_open: shouldRunHourlyScheduledPosts(env, now),
@@ -4064,25 +4177,36 @@ async function hourlyClanAssignmentStatus(env) {
     clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
     clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
     cron_expected: "* * * * *",
-    cron_reason: "The Worker wakes every minute. Every hourly board is restricted to UTC minutes 0-2 and uses exact top-of-hour clan snapshots for member points.",
+    cron_compatible: "0 * * * *",
+    cron_reason: "Delivery opens at UTC :00 so an existing hourly trigger works. An every-minute trigger also supplies recovery attempts at :01-:03. Every board remains locked to exact :00 and :00-minus-one-hour snapshots.",
     retry_minutes_utc: {
-      clan: [0, 1, 2],
-      user: [0, 1, 2],
-      league: [0, 1, 2]
+      clan: [0, 1, 2, 3],
+      user: [0, 1, 2, 3],
+      league: [0, 1, 2, 3]
+    },
+    background_schedules: {
+      clan_logs: {
+        interval_minutes: clanLogScheduledIntervalMinutes(env),
+        offset_minute: clanLogScheduledOffsetMinutes(env),
+        window_open: shouldRunClanLogScheduledPosts(env, now)
+      },
+      clan_trackers: {
+        interval_minutes: clanTrackerScheduledIntervalMinutes(env),
+        offset_minute: clanTrackerScheduledOffsetMinutes(env),
+        window_open: shouldRunClanTrackerScheduledPosts(env, now)
+      }
     },
     assignments: assignments.map(assignment => {
       const lastPostedMs = new Date(assignment?.last_posted_at || 0).getTime();
       const hasLastPosted = Number.isFinite(lastPostedMs) && lastPostedMs > 0;
       const targetType = hourlyAssignmentTargetType(assignment);
-      const nextDueMs = hasLastPosted
-        ? hourlyNextScheduledHourMs(lastPostedMs, now, env, targetType)
-        : now;
+      const nextDueMs = hourlyNextScheduledHourMs(lastPostedMs, now, env, targetType);
       return {
         assignment_key: String(assignment.assignment_key || ""),
         guild_id: String(assignment.guild_id || ""),
         channel_id: String(assignment.channel_id || ""),
         channel_type: assignment.channel_type ?? null,
-        channel_type_name: discordChannelTypeName(assignment.channel_type),
+        channel_type_name: lunaDiscordChannelTypeName(assignment.channel_type),
         target_type: hourlyAssignmentTargetType(assignment),
         target_name: hourlyAssignmentTargetName(assignment),
         clan_name: hourlyAssignmentTargetType(assignment) === "clan" ? hourlyAssignmentTargetName(assignment) : null,
@@ -4092,6 +4216,8 @@ async function hourlyClanAssignmentStatus(env) {
         due: hourlyAssignmentDue(assignment, now, {
           postMinute: hourlyScheduledPostMinute(env)
         }),
+        claim_in_progress: String(assignment.last_error || "").startsWith("posting:"),
+        claim_stale: hourlyAssignmentHasStaleClaim(assignment, now),
         last_posted_at: assignment.last_posted_at || null,
         next_due_at: new Date(Math.max(now, nextDueMs)).toISOString(),
         last_snapshot_at: assignment.last_snapshot_at || null,
@@ -4109,13 +4235,16 @@ async function clanTrackerAssignmentStatus(env) {
   const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
   const now = Date.now();
   const interval = clanTrackerScheduledIntervalMinutes(env);
+  const offset = clanTrackerScheduledOffsetMinutes(env);
   return {
     ok: true,
     checked_at: new Date(now).toISOString(),
     configured: assignments.length,
     scheduled_interval_minutes: interval,
+    scheduled_offset_minute: offset,
     scheduled_window_open: shouldRunClanTrackerScheduledPosts(env, now),
-    cron_expected: `*/${interval} * * * *`,
+    cron_expected: "* * * * *",
+    cron_reason: `The shared minute trigger is gated in code; persistent trackers run every ${interval} minutes from UTC :${String(offset).padStart(2, "0")}.`,
     bot_token_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
     clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
     clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
@@ -4139,13 +4268,19 @@ async function clanTrackerAssignmentStatus(env) {
   };
 }
 
-function discordChannelTypeName(value) {
+function lunaDiscordChannelTypeName(value) {
   const type = Number(value);
   if (type === 0) return "text";
+  if (type === 2) return "voice";
+  if (type === 4) return "category";
   if (type === 5) return "announcement";
   if (type === 10) return "announcement_thread";
   if (type === 11) return "public_thread";
   if (type === 12) return "private_thread";
+  if (type === 13) return "stage_voice";
+  if (type === 14) return "directory";
+  if (type === 15) return "forum";
+  if (type === 16) return "media";
   return Number.isFinite(type) ? `type_${type}` : "unknown";
 }
 
@@ -4170,10 +4305,12 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
 
   let claimAcquired = false;
   try {
-    const report = await buildHourlyAssignmentReport(env, assignment, { eventState, hourSlotMs });
-    if (!force && !shouldRunHourlyScheduledPosts(env, Date.now(), targetType)) {
-      throw httpError(409, "The top-of-hour delivery window elapsed before this board was ready.");
-    }
+    const report = await buildHourlyAssignmentReport(env, assignment, {
+      eventState,
+      hourSlotMs,
+      allowIncompleteDowntime: true,
+      exactDataAttempts: 8
+    });
     if (!force) {
       const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
       if (!claim.claimed) {
@@ -4246,7 +4383,11 @@ async function buildHourlyAssignmentReport(env, assignment, options = {}) {
     });
   }
   if (targetType === "league") return buildHourlyLeagueReport(env, targetName, { hourSlotMs });
-  return buildHourlyClanReport(env, targetName, { hourSlotMs });
+  return buildHourlyClanReport(env, targetName, {
+    hourSlotMs,
+    allowIncompleteDowntime: options.allowIncompleteDowntime === true,
+    exactDataAttempts: options.exactDataAttempts
+  });
 }
 
 function requireExactHourlySlotMs(value) {
@@ -4393,7 +4534,11 @@ async function buildHourlyClanReport(env, clanNameValue, options = {}) {
     throw httpError(409, ingest.message || "No active clan battle is available for this hourly report.");
   }
 
-  const current = await fetchHourlyClanCurrentForReport(env, clan, { hourSlotMs });
+  const current = await fetchHourlyClanCurrentForReport(env, clan, {
+    hourSlotMs,
+    allowIncompleteDowntime: options.allowIncompleteDowntime === true,
+    attempts: options.exactDataAttempts
+  });
   if (!Array.isArray(current.rows) || !current.rows.length) {
     throw httpError(409, `No current battle rows were returned for clan ${clan}.`);
   }
@@ -4418,7 +4563,10 @@ async function buildHourlyClanReport(env, clanNameValue, options = {}) {
 }
 
 async function fetchHourlyClanCurrentForReport(env, clan, options = {}) {
-  const attempts = 3;
+  const requestedAttempts = Number(options.attempts ?? 3);
+  const attempts = Number.isFinite(requestedAttempts)
+    ? Math.max(1, Math.min(10, Math.round(requestedAttempts)))
+    : 3;
   const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
   let lastCurrent = null;
   let lastMissing = 0;
@@ -4437,7 +4585,7 @@ async function fetchHourlyClanCurrentForReport(env, clan, options = {}) {
       });
     } catch (err) {
       if (attempt < attempts && Number(err?.status || 0) === 409) {
-        await sleep(1000 * attempt);
+        await sleep(Math.min(2000, 500 * attempt));
         continue;
       }
       throw err;
@@ -4448,7 +4596,13 @@ async function fetchHourlyClanCurrentForReport(env, clan, options = {}) {
 
     lastCurrent = current;
     lastMissing = missing;
-    if (attempt < attempts) await sleep(1000 * attempt);
+    if (attempt < attempts) await sleep(Math.min(2000, 500 * attempt));
+  }
+
+  if (options.allowIncompleteDowntime === true && lastCurrent) {
+    lastCurrent.hourly_downtime_complete = false;
+    lastCurrent.hourly_downtime_missing_count = lastMissing;
+    return lastCurrent;
   }
 
   const sample = (lastCurrent?.rows || [])
@@ -6990,6 +7144,17 @@ async function updateClanLogAssignment(env, assignment, patch) {
   });
 }
 
+function runScheduledClanLogAssignments(env, options = {}) {
+  if (clanLogScheduledRunPromise) return clanLogScheduledRunPromise;
+
+  let guardedRun;
+  guardedRun = runClanLogAssignments(env, options).finally(() => {
+    if (clanLogScheduledRunPromise === guardedRun) clanLogScheduledRunPromise = null;
+  });
+  clanLogScheduledRunPromise = guardedRun;
+  return guardedRun;
+}
+
 async function runClanLogAssignments(env, options = {}) {
   const response = await hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
     query: { enabled: "true", limit: 1000 }
@@ -7520,6 +7685,17 @@ async function updateClanTrackerAssignment(env, assignment, patch) {
     method: "PATCH",
     body: { assignment_key: String(assignment?.assignment_key || ""), ...patch }
   });
+}
+
+function runScheduledClanTrackerAssignments(env, options = {}) {
+  if (clanTrackerScheduledRunPromise) return clanTrackerScheduledRunPromise;
+
+  let guardedRun;
+  guardedRun = runClanTrackerAssignments(env, options).finally(() => {
+    if (clanTrackerScheduledRunPromise === guardedRun) clanTrackerScheduledRunPromise = null;
+  });
+  clanTrackerScheduledRunPromise = guardedRun;
+  return guardedRun;
 }
 
 async function runClanTrackerAssignments(env, options = {}) {
@@ -9415,7 +9591,7 @@ function parseHistoryCustomId(value) {
 }
 
 async function loadHistoryCommandData(query, env) {
-  let search = await fetchGlobalSearchPayload(query, env);
+  let search = await fetchGlobalSearchPayload(query, env, { battleHistory: true });
   let globalPayload = search.payload?.row ? search.payload : null;
   let subject = globalPayload?.row ? {
     userId: positiveInteger(globalPayload.row.user_id),
@@ -9441,7 +9617,7 @@ async function loadHistoryCommandData(query, env) {
   }
 
   if (!globalPayload?.row || Number(globalPayload.row.user_id) !== Number(subject.userId)) {
-    search = await fetchGlobalSearchPayload(String(subject.userId), env);
+    search = await fetchGlobalSearchPayload(String(subject.userId), env, { battleHistory: true });
     globalPayload = search.payload?.row ? search.payload : null;
   }
 
@@ -9504,17 +9680,11 @@ async function loadHistoryCommandData(query, env) {
   for (const row of externalClanHistoryRows(cwHistory?.rows, "cw_bot")) mergeClanHistoryRecord(clanMap, row);
   for (const row of leaderboardRows) {
     const key = canonicalClanHistoryKey(row?.key || row?.battle_key || row?.name);
-    // A leaderboard observation may add the global placement/field size to a
-    // real clan-battle record, but it is not itself a Clan Battle History row.
-    // This keeps the removed Leaderboard History view from leaking back into
-    // the clan card as a standalone "Global Leaderboard" entry.
-    if (!key || !clanMap.has(key)) continue;
+    if (!key) continue;
     mergeClanHistoryRecord(clanMap, {
       ...row,
       key,
-      source: "site",
-      rank: null,
-      points: null
+      source: "site"
     });
   }
 
@@ -9716,15 +9886,18 @@ function staticClanHistoryRows(profile, defaultClan = null) {
 function externalClanHistoryRows(rows, source) {
   return (Array.isArray(rows) ? rows : []).map(row => {
     const isCwBot = source === "cw_bot";
+    const battleLabel = cleanExternalHistoryField(row.battle_name || row.battle_key, ["battle", "event"]);
+    const clanLabel = cleanExternalHistoryField(row.clan_name, ["clan"]);
     const clanRank = finiteHistoryNumber(row.clan_rank ?? (!isCwBot ? row.final_rank : null));
     const totalClanMembers = finiteHistoryNumber(row.total_clan_members ?? (!isCwBot ? row.total_ranked : null));
     const globalRank = finiteHistoryNumber(row.global_rank ?? (isCwBot ? row.final_rank : null));
     const totalGlobalPlayers = finiteHistoryNumber(row.total_global_players ?? (isCwBot ? row.total_ranked : null));
     return {
-      key: historyRecordKey(row.battle_key || row.battle_name),
-      name: historyRecordName(row.battle_name || row.battle_key),
+      key: canonicalClanHistoryKey(battleLabel),
+      name: historyRecordName(battleLabel),
+      battle_key: battleLabel || null,
       source,
-      clan_name: row.clan_name || null,
+      clan_name: clanLabel || null,
       rank: clanRank,
       total_ranked: totalClanMembers,
       global_rank: globalRank,
@@ -9738,10 +9911,32 @@ function externalClanHistoryRows(rows, source) {
   }).filter(row => row.key && (row.rank !== null || row.global_rank !== null || row.points !== null));
 }
 
+function cleanExternalHistoryField(value, labels = []) {
+  let text = String(value || "").trim();
+  if (!text) return "";
+
+  text = text
+    .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, " ")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/^[^A-Za-z0-9]+/, "")
+    .trim();
+
+  for (const label of labels) {
+    text = text.replace(new RegExp(`^${label}\\s*:\\s*`, "i"), "").trim();
+  }
+
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function summarizeGlobalHistory(payload) {
   if (!payload?.row) return [];
   const current = payload.row;
-  const rows = [...(Array.isArray(payload.history) ? payload.history : []), current];
+  const rows = [
+    ...(Array.isArray(payload.battle_history) ? payload.battle_history : []),
+    ...(Array.isArray(payload.history) ? payload.history : []),
+    current
+  ];
   const groups = new Map();
 
   for (const row of rows) {
@@ -9753,6 +9948,7 @@ function summarizeGlobalHistory(payload) {
     const candidate = {
       key,
       name,
+      battle_key: row.battle_key || null,
       clan_name: row.source_clan || row.clan_name || null,
       global_rank: finiteHistoryNumber(row.global_rank),
       total_global_players: finiteHistoryNumber(row.total_global_players),
@@ -9808,7 +10004,7 @@ function mergeHistorySummaryRows(...rowGroups) {
 }
 
 function mergeClanHistoryRecord(map, row) {
-  const key = canonicalClanHistoryKey(row?.key || row?.battle_key || row?.name);
+  const key = canonicalClanHistoryKey(row?.battle_key || row?.key || row?.name);
   if (!key) return;
   const normalizedRow = row.key === key ? row : { ...row, key };
   const existing = map.get(key);
@@ -9871,9 +10067,9 @@ const CLAN_BATTLE_HISTORY_TIMELINE = [
   { keys: ["Lucky Chest Battle", "Lucky Chest", "Clover Clan Battle", "Clover Battle"], first: "2026-03-14T00:00:00.000Z", last: "2026-03-28T23:59:59.000Z", update: 73 },
   { keys: ["Gingerbread Battle 2025", "GingerbreadBattle2025", "Christmas2025", "Christmas 2025", "Silver Clan Battle", "Silver Battle"], first: "2025-12-20T00:00:00.000Z", last: "2025-12-26T23:59:59.000Z", update: 72 },
   { keys: ["Thanksgiving 2025 Battle", "Thanksgiving 2025", "Thanksgiving2025Battle", "Turkey2025", "Turkey 2025", "Forged Battle"], first: "2025-11-29T00:00:00.000Z", last: "2025-12-05T23:59:59.000Z", update: 71 },
-  { keys: ["Block Party", "Sun Angelus Battle"], first: "2025-07-12T00:00:00.000Z", last: "2025-07-18T23:59:59.000Z", update: 68 },
-  { keys: ["Strength", "Scuba Dog Battle"], first: "2025-06-28T00:00:00.000Z", last: "2025-07-04T23:59:59.000Z", update: 66 },
-  { keys: ["Tower Defense", "Nightmare Cyclops Battle"], first: "2025-06-14T00:00:00.000Z", last: "2025-06-20T23:59:59.000Z", update: 64 },
+  { keys: ["Block Party Battle", "Block Party", "Sun Angelus Battle"], first: "2025-07-12T00:00:00.000Z", last: "2025-07-18T23:59:59.000Z", update: 68 },
+  { keys: ["Strength Battle", "Strength", "Scuba Dog Battle"], first: "2025-06-28T00:00:00.000Z", last: "2025-07-04T23:59:59.000Z", update: 66 },
+  { keys: ["Tower Battle", "Tower Defense", "Nightmare Cyclops Battle"], first: "2025-06-14T00:00:00.000Z", last: "2025-06-20T23:59:59.000Z", update: 64 },
   { keys: ["Basketball Battle", "Basketball", "BasketballBattle", "Junkyard Hound Battle"], first: "2025-05-31T00:00:00.000Z", last: "2025-06-06T23:59:59.000Z", update: 62 },
   { keys: ["Balloon Corgi Battle", "Balloon Corgi"], first: "2025-05-17T00:00:00.000Z", last: "2025-05-23T23:59:59.000Z", update: 60 },
   { keys: ["Poison Turtle Battle"], first: "2025-05-03T12:00:00.524Z", last: "2025-05-09T12:00:00.524Z", update: 58 },
@@ -13576,6 +13772,10 @@ async function discordDebug(url, env) {
 async function listDiscordGuilds(url, env) {
   const pageSize = Math.max(1, Math.min(200, Number(url.searchParams.get("page_size") || 200) || 200));
   const maxPages = Math.max(1, Math.min(100, Number(url.searchParams.get("max_pages") || 100) || 100));
+  const requestedGuildId = String(url.searchParams.get("guild_id") || "").trim();
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
   const guilds = [];
   let after = "";
   let pages = 0;
@@ -13586,20 +13786,8 @@ async function listDiscordGuilds(url, env) {
     endpoint.searchParams.set("with_counts", "true");
     if (after) endpoint.searchParams.set("after", after);
 
-    let response;
-    let payload;
-    for (let attempt = 1; attempt <= 6; attempt += 1) {
-      response = await fetch(endpoint, { headers: discordBotHeaders(env) });
-      payload = await response.json().catch(() => ({}));
-      if (response.status !== 429 || attempt === 6) break;
-
-      const retryAfterSeconds = Number(
-        payload?.retry_after ??
-        response.headers.get("retry-after") ??
-        1
-      );
-      await sleep(Math.max(500, Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 250));
-    }
+    const result = await fetchDiscordApiWithRetry(endpoint, env);
+    const { response, payload } = result;
 
     if (!response?.ok || !Array.isArray(payload)) {
       throw httpError(
@@ -13628,14 +13816,1132 @@ async function listDiscordGuilds(url, env) {
     after = nextAfter;
   }
 
-  guilds.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+  const matchingGuilds = requestedGuildId
+    ? guilds.filter(guild => guild.id === requestedGuildId)
+    : guilds;
+  const detailedGuilds = [];
+  for (let index = 0; index < matchingGuilds.length; index += 4) {
+    const batch = matchingGuilds.slice(index, index + 4);
+    detailedGuilds.push(...await Promise.all(
+      batch.map(guild => enrichDiscordGuild(guild, env, includeRaw))
+    ));
+  }
+
+  detailedGuilds.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
   return json({
     ok: true,
     application_id: requiredEnv(env, "DISCORD_APPLICATION_ID"),
-    total: guilds.length,
+    total: detailedGuilds.length,
     pages,
     truncated: pages >= maxPages && guilds.length === pages * pageSize,
-    guilds
+    guilds: detailedGuilds
+  });
+}
+
+async function enrichDiscordGuild(guild, env, includeRaw = false) {
+  const result = await fetchDiscordApiWithRetry(
+    `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guild.id)}?with_counts=true`,
+    env
+  );
+  if (!result.response?.ok || !result.payload || typeof result.payload !== "object") {
+    return {
+      ...guild,
+      server_url: `https://discord.com/channels/${guild.id}`,
+      details_available: false,
+      details_error: discordApiErrorMessage(
+        result.response?.status || 502,
+        result.payload?.message || "Discord guild detail lookup failed."
+      )
+    };
+  }
+
+  const detail = result.payload;
+  let widget = null;
+  if (detail.widget_enabled) {
+    const widgetResult = await fetchDiscordApiWithRetry(
+      `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guild.id)}/widget.json`,
+      env
+    );
+    if (widgetResult.response?.ok && widgetResult.payload && typeof widgetResult.payload === "object") {
+      widget = widgetResult.payload;
+    }
+  }
+
+  const vanityCode = String(detail.vanity_url_code || "").trim();
+  const widgetInvite = String(widget?.instant_invite || "").trim();
+  const normalized = {
+    id: guild.id,
+    name: String(detail.name || guild.name || "Unnamed server"),
+    description: detail.description || null,
+    created_at: discordSnowflakeTimestamp(guild.id),
+    server_url: `https://discord.com/channels/${guild.id}`,
+    invite_url: vanityCode ? `https://discord.gg/${vanityCode}` : (widgetInvite || null),
+    invite_source: vanityCode ? "vanity" : (widgetInvite ? "public_widget" : null),
+    vanity_url_code: vanityCode || null,
+    owner_id: detail.owner_id ? String(detail.owner_id) : null,
+    icon_url: discordGuildAssetUrl(guild.id, detail.icon, "icons"),
+    banner_url: discordGuildAssetUrl(guild.id, detail.banner, "banners"),
+    splash_url: discordGuildAssetUrl(guild.id, detail.splash, "splashes"),
+    discovery_splash_url: discordGuildAssetUrl(guild.id, detail.discovery_splash, "discovery-splashes"),
+    approximate_member_count: finiteDiscordNumber(detail.approximate_member_count ?? guild.approximate_member_count),
+    approximate_presence_count: finiteDiscordNumber(detail.approximate_presence_count ?? guild.approximate_presence_count),
+    premium_tier: finiteDiscordNumber(detail.premium_tier),
+    premium_subscription_count: finiteDiscordNumber(detail.premium_subscription_count),
+    preferred_locale: detail.preferred_locale || null,
+    verification_level: finiteDiscordNumber(detail.verification_level),
+    explicit_content_filter: finiteDiscordNumber(detail.explicit_content_filter),
+    nsfw_level: finiteDiscordNumber(detail.nsfw_level),
+    mfa_level: finiteDiscordNumber(detail.mfa_level),
+    max_members: finiteDiscordNumber(detail.max_members),
+    max_presences: finiteDiscordNumber(detail.max_presences),
+    features: Array.isArray(detail.features) ? detail.features : [],
+    widget_enabled: Boolean(detail.widget_enabled),
+    widget_channel_id: detail.widget_channel_id ? String(detail.widget_channel_id) : null,
+    system_channel_id: detail.system_channel_id ? String(detail.system_channel_id) : null,
+    rules_channel_id: detail.rules_channel_id ? String(detail.rules_channel_id) : null,
+    public_updates_channel_id: detail.public_updates_channel_id ? String(detail.public_updates_channel_id) : null,
+    safety_alerts_channel_id: detail.safety_alerts_channel_id ? String(detail.safety_alerts_channel_id) : null,
+    afk_channel_id: detail.afk_channel_id ? String(detail.afk_channel_id) : null,
+    afk_timeout_seconds: finiteDiscordNumber(detail.afk_timeout),
+    role_count: Array.isArray(detail.roles) ? detail.roles.length : null,
+    emoji_count: Array.isArray(detail.emojis) ? detail.emojis.length : null,
+    sticker_count: Array.isArray(detail.stickers) ? detail.stickers.length : null,
+    permissions: String(guild.permissions || "0"),
+    bot_permissions: discordPermissionSummary(guild.permissions),
+    details_available: true
+  };
+  if (includeRaw) normalized.raw = detail;
+  return normalized;
+}
+
+async function listDiscordGuildChannels(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+
+  const includeNonText = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_non_text") || "").trim().toLowerCase()
+  );
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+
+  const [guildResult, channelsResult, botUserResult] = await Promise.all([
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}?with_counts=true`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/channels`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/users/@me`, env)
+  ]);
+
+  for (const [label, result] of [
+    ["Discord guild lookup", guildResult],
+    ["Discord guild channel lookup", channelsResult],
+    ["Discord bot user lookup", botUserResult]
+  ]) {
+    if (!result.response?.ok) {
+      throw httpError(
+        [401, 403, 404, 429].includes(result.response?.status) ? result.response.status : 502,
+        discordApiErrorMessage(
+          result.response?.status || 502,
+          result.payload?.message || `${label} failed.`
+        )
+      );
+    }
+  }
+
+  const guild = guildResult.payload || {};
+  const rawChannels = Array.isArray(channelsResult.payload) ? channelsResult.payload : [];
+  const botUserId = String(botUserResult.payload?.id || "");
+  const botMemberResult = await fetchDiscordApiWithRetry(
+    `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`,
+    env
+  );
+  if (!botMemberResult.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(botMemberResult.response?.status) ? botMemberResult.response.status : 502,
+      discordApiErrorMessage(
+        botMemberResult.response?.status || 502,
+        botMemberResult.payload?.message || "Discord bot guild-member lookup failed."
+      )
+    );
+  }
+  const botRoleIds = new Set([
+    guildId,
+    ...(Array.isArray(botMemberResult.payload?.roles) ? botMemberResult.payload.roles.map(String) : [])
+  ]);
+  const guildRoles = Array.isArray(guild.roles) ? guild.roles : [];
+  const guildPermissions = guildRoles.reduce((permissions, role) => {
+    if (!botRoleIds.has(String(role?.id || ""))) return permissions;
+    return permissions | discordPermissionBigInt(role?.permissions);
+  }, 0n);
+
+  const categories = new Map(
+    rawChannels
+      .filter(channel => Number(channel?.type) === 4)
+      .map(channel => [String(channel.id || ""), String(channel.name || "Uncategorized")])
+  );
+  const textTypes = new Set([0, 5, 15, 16]);
+  const channels = rawChannels
+    .filter(channel => includeNonText || textTypes.has(Number(channel?.type)))
+    .map(channel => {
+      const effectivePermissions = discordChannelPermissions(
+        guildPermissions,
+        channel?.permission_overwrites,
+        guildId,
+        botUserId,
+        botRoleIds
+      );
+      const type = Number(channel?.type);
+      const normalized = {
+        id: String(channel?.id || ""),
+        name: String(channel?.name || "Unnamed channel"),
+        type,
+        type_name: lunaDiscordChannelTypeName(type),
+        category_id: channel?.parent_id ? String(channel.parent_id) : null,
+        category_name: channel?.parent_id ? (categories.get(String(channel.parent_id)) || null) : null,
+        position: finiteDiscordNumber(channel?.position),
+        topic: channel?.topic || null,
+        nsfw: Boolean(channel?.nsfw),
+        slowmode_seconds: finiteDiscordNumber(channel?.rate_limit_per_user),
+        default_auto_archive_minutes: finiteDiscordNumber(channel?.default_auto_archive_duration),
+        default_thread_slowmode_seconds: finiteDiscordNumber(channel?.default_thread_rate_limit_per_user),
+        direct_url: `https://discord.com/channels/${guildId}/${String(channel?.id || "")}`,
+        luna_permissions: discordChannelPermissionSummary(effectivePermissions)
+      };
+      if (includeRaw) normalized.raw = channel;
+      return normalized;
+    })
+    .sort((a, b) => {
+      const categoryA = String(a.category_name || "");
+      const categoryB = String(b.category_name || "");
+      return categoryA.localeCompare(categoryB, undefined, { sensitivity: "base" })
+        || Number(a.position || 0) - Number(b.position || 0)
+        || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    });
+
+  return json({
+    ok: true,
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      description: guild.description || null,
+      server_url: `https://discord.com/channels/${guildId}`,
+      icon_url: discordGuildAssetUrl(guildId, guild.icon, "icons")
+    },
+    bot: {
+      id: botUserId,
+      username: String(botUserResult.payload?.username || "Luna"),
+      guild_permissions: discordPermissionSummary(guildPermissions)
+    },
+    filter: includeNonText ? "all_guild_channels" : "text_announcement_forum_media",
+    total: channels.length,
+    channels
+  });
+}
+
+async function listDiscordGuildMembers(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+
+  const pageSizeValue = Number(url.searchParams.get("page_size") || 1000);
+  const pageSize = Math.max(1, Math.min(1000, Number.isFinite(pageSizeValue) ? Math.floor(pageSizeValue) : 1000));
+  const maxMembersValue = Number(url.searchParams.get("max_members") || 10000);
+  const maxMembers = Math.max(pageSize, Math.min(100000, Number.isFinite(maxMembersValue) ? Math.floor(maxMembersValue) : 10000));
+  const requestedAfter = String(url.searchParams.get("after") || "").trim();
+  if (requestedAfter && !/^\d{17,20}$/.test(requestedAfter)) {
+    throw httpError(400, "after must be a Discord user ID.");
+  }
+  const query = String(url.searchParams.get("query") || "").trim().toLowerCase();
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+
+  const guildResult = await fetchDiscordApiWithRetry(
+    `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}?with_counts=true`,
+    env
+  );
+  if (!guildResult.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(guildResult.response?.status) ? guildResult.response.status : 502,
+      discordApiErrorMessage(
+        guildResult.response?.status || 502,
+        guildResult.payload?.message || "Discord guild lookup failed."
+      )
+    );
+  }
+
+  const guild = guildResult.payload || {};
+  const rolesById = new Map(
+    (Array.isArray(guild.roles) ? guild.roles : []).map(role => [String(role?.id || ""), role])
+  );
+  const rawMembers = [];
+  let after = requestedAfter;
+  let pages = 0;
+  let lastPageWasFull = false;
+
+  while (rawMembers.length < maxMembers) {
+    const requestedLimit = Math.min(pageSize, maxMembers - rawMembers.length);
+    const endpoint = new URL(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members`);
+    endpoint.searchParams.set("limit", String(requestedLimit));
+    if (after) endpoint.searchParams.set("after", after);
+
+    const result = await fetchDiscordApiWithRetry(endpoint, env);
+    if (!result.response?.ok || !Array.isArray(result.payload)) {
+      const status = result.response?.status || 502;
+      const message = status === 403
+        ? "Discord denied the guild member roster. Enable Luna's Server Members Intent (GUILD_MEMBERS) in Discord Developer Portal > Bot."
+        : (result.payload?.message || `Discord guild member lookup failed (${status}).`);
+      throw httpError([401, 403, 404, 429].includes(status) ? status : 502, message);
+    }
+
+    pages += 1;
+    rawMembers.push(...result.payload);
+    lastPageWasFull = result.payload.length === requestedLimit;
+    if (result.payload.length < requestedLimit) break;
+    const nextAfter = String(result.payload[result.payload.length - 1]?.user?.id || "");
+    if (!nextAfter || nextAfter === after) break;
+    after = nextAfter;
+  }
+
+  const normalizedMembers = rawMembers.map(member => {
+    const user = member?.user || {};
+    const userId = String(user?.id || "");
+    const nickname = member?.nick || null;
+    const username = String(user?.username || "Unknown user");
+    const globalName = user?.global_name || null;
+    const roles = (Array.isArray(member?.roles) ? member.roles : [])
+      .map(roleId => rolesById.get(String(roleId)))
+      .filter(Boolean)
+      .sort((a, b) => Number(b?.position || 0) - Number(a?.position || 0))
+      .map(role => ({
+        id: String(role?.id || ""),
+        name: String(role?.name || "Unnamed role"),
+        position: finiteDiscordNumber(role?.position),
+        color: finiteDiscordNumber(role?.color)
+      }));
+    const normalized = {
+      id: userId,
+      username,
+      global_name: globalName,
+      nickname,
+      display_name: String(nickname || globalName || username),
+      mention: userId ? `<@${userId}>` : null,
+      bot: Boolean(user?.bot),
+      system: Boolean(user?.system),
+      pending: Boolean(member?.pending),
+      joined_at: member?.joined_at || null,
+      premium_since: member?.premium_since || null,
+      communication_disabled_until: member?.communication_disabled_until || null,
+      avatar_url: discordGuildMemberAvatarUrl(guildId, user, member?.avatar),
+      highest_role: roles[0] || null,
+      roles,
+      user_url: userId ? `https://discord.com/users/${userId}` : null
+    };
+    if (includeRaw) normalized.raw = member;
+    return normalized;
+  });
+  const members = query
+    ? normalizedMembers.filter(member => [
+      member.id,
+      member.username,
+      member.global_name,
+      member.nickname,
+      member.display_name
+    ].some(value => String(value || "").toLowerCase().includes(query)))
+    : normalizedMembers;
+  members.sort((a, b) => Number(a.bot) - Number(b.bot)
+    || a.display_name.localeCompare(b.display_name, undefined, { sensitivity: "base" })
+    || a.id.localeCompare(b.id));
+
+  return json({
+    ok: true,
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      description: guild.description || null,
+      server_url: `https://discord.com/channels/${guildId}`,
+      icon_url: discordGuildAssetUrl(guildId, guild.icon, "icons"),
+      approximate_member_count: finiteDiscordNumber(guild.approximate_member_count)
+    },
+    query: query || null,
+    fetched: rawMembers.length,
+    matched: members.length,
+    pages,
+    truncated: rawMembers.length >= maxMembers && lastPageWasFull,
+    next_after: rawMembers.length >= maxMembers && lastPageWasFull ? after : null,
+    members
+  });
+}
+
+async function listDiscordGuildThreads(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+
+  const includeArchived = !["0", "false", "no", "off"].includes(
+    String(url.searchParams.get("include_archived") || "1").trim().toLowerCase()
+  );
+  const includePrivate = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_private") || "").trim().toLowerCase()
+  );
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+  const pageSizeValue = Number(url.searchParams.get("archive_page_size") || 100);
+  const archivePageSize = Math.max(2, Math.min(100, Number.isFinite(pageSizeValue) ? Math.floor(pageSizeValue) : 100));
+  const maxPagesValue = Number(url.searchParams.get("archive_pages_per_channel") || 1);
+  const maxPagesPerChannel = Math.max(1, Math.min(100, Number.isFinite(maxPagesValue) ? Math.floor(maxPagesValue) : 1));
+
+  const [guildResult, channelsResult, activeResult] = await Promise.all([
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}?with_counts=true`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/channels`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/threads/active`, env)
+  ]);
+  for (const [label, result] of [
+    ["Discord guild lookup", guildResult],
+    ["Discord guild channel lookup", channelsResult],
+    ["Discord active-thread lookup", activeResult]
+  ]) {
+    if (!result.response?.ok) {
+      throw httpError(
+        [401, 403, 404, 429].includes(result.response?.status) ? result.response.status : 502,
+        discordApiErrorMessage(result.response?.status || 502, result.payload?.message || `${label} failed.`)
+      );
+    }
+  }
+
+  const guild = guildResult.payload || {};
+  const rawChannels = Array.isArray(channelsResult.payload) ? channelsResult.payload : [];
+  const channelsById = new Map(rawChannels.map(channel => [String(channel?.id || ""), channel]));
+  const categories = new Map(
+    rawChannels
+      .filter(channel => Number(channel?.type) === 4)
+      .map(channel => [String(channel.id || ""), String(channel.name || "Uncategorized")])
+  );
+  const threadParentTypes = new Set([0, 5, 15, 16]);
+  const parentChannels = rawChannels
+    .filter(channel => threadParentTypes.has(Number(channel?.type)))
+    .sort((a, b) => {
+      const categoryA = String(categories.get(String(a?.parent_id || "")) || "");
+      const categoryB = String(categories.get(String(b?.parent_id || "")) || "");
+      return categoryA.localeCompare(categoryB, undefined, { sensitivity: "base" })
+        || Number(a?.position || 0) - Number(b?.position || 0)
+        || String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" });
+    });
+  const threadRecords = new Map();
+  const scanErrors = [];
+  const archiveScans = [];
+
+  const addThreads = (values, source) => {
+    for (const thread of Array.isArray(values) ? values : []) {
+      const id = String(thread?.id || "");
+      if (!id) continue;
+      const existing = threadRecords.get(id);
+      if (existing) {
+        existing.sources = Array.from(new Set([...(existing.sources || []), source]));
+        if (source === "active") existing.source = "active";
+        continue;
+      }
+      const normalized = normalizeLunaDiscordThread(thread, guildId, channelsById, categories, source, includeRaw);
+      normalized.sources = [source];
+      threadRecords.set(id, normalized);
+    }
+  };
+  addThreads(activeResult.payload?.threads, "active");
+
+  if (includeArchived) {
+    for (const parent of parentChannels) {
+      const archiveScopes = includePrivate && Number(parent?.type) === 0
+        ? ["public", "private"]
+        : ["public"];
+      for (const scope of archiveScopes) {
+        let before = "";
+        let pages = 0;
+        let fetched = 0;
+        let hasMore = false;
+        let failed = false;
+        do {
+          const parentId = encodeURIComponent(String(parent.id || ""));
+          const archivePath = scope === "private"
+            ? `/channels/${parentId}/users/@me/threads/archived/private`
+            : `/channels/${parentId}/threads/archived/public`;
+          const endpoint = new URL(`${DISCORD_API_BASE}${archivePath}`);
+          endpoint.searchParams.set("limit", String(archivePageSize));
+          if (before) endpoint.searchParams.set("before", before);
+          const result = await fetchDiscordApiWithRetry(endpoint, env);
+          if (!result.response?.ok) {
+            failed = true;
+            scanErrors.push({
+              parent_id: String(parent.id || ""),
+              parent_name: String(parent.name || "Unnamed channel"),
+              scope,
+              status: result.response?.status || 502,
+              error: result.payload?.message || `Discord archived ${scope} thread lookup failed.`
+            });
+            break;
+          }
+
+          const values = Array.isArray(result.payload?.threads) ? result.payload.threads : [];
+          addThreads(values, `archived_${scope}`);
+          pages += 1;
+          fetched += values.length;
+          hasMore = Boolean(result.payload?.has_more);
+          const nextBefore = String(values[values.length - 1]?.thread_metadata?.archive_timestamp || "");
+          if (!hasMore || !nextBefore || nextBefore === before) break;
+          before = nextBefore;
+        } while (pages < maxPagesPerChannel);
+
+        archiveScans.push({
+          parent_id: String(parent.id || ""),
+          parent_name: String(parent.name || "Unnamed channel"),
+          scope,
+          pages,
+          fetched,
+          failed,
+          truncated: !failed && hasMore && pages >= maxPagesPerChannel,
+          next_before: !failed && hasMore && pages >= maxPagesPerChannel ? before : null
+        });
+      }
+    }
+  }
+
+  const threads = Array.from(threadRecords.values()).sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    const timestampA = Date.parse(a.archive_timestamp || a.created_at || "") || 0;
+    const timestampB = Date.parse(b.archive_timestamp || b.created_at || "") || 0;
+    return timestampB - timestampA
+      || String(a.category_name || "").localeCompare(String(b.category_name || ""), undefined, { sensitivity: "base" })
+      || String(a.parent_name || "").localeCompare(String(b.parent_name || ""), undefined, { sensitivity: "base" })
+      || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+
+  return json({
+    ok: scanErrors.length === 0,
+    partial: scanErrors.length > 0,
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      description: guild.description || null,
+      server_url: `https://discord.com/channels/${guildId}`,
+      icon_url: discordGuildAssetUrl(guildId, guild.icon, "icons")
+    },
+    include_archived: includeArchived,
+    include_private: includePrivate,
+    active_count: threads.filter(thread => thread.active).length,
+    archived_count: threads.filter(thread => !thread.active).length,
+    total: threads.length,
+    thread_capable_channels: parentChannels.map(channel => ({
+      id: String(channel?.id || ""),
+      name: String(channel?.name || "Unnamed channel"),
+      type: Number(channel?.type),
+      type_name: lunaDiscordChannelTypeName(channel?.type),
+      category_id: channel?.parent_id ? String(channel.parent_id) : null,
+      category_name: channel?.parent_id ? (categories.get(String(channel.parent_id)) || null) : null,
+      direct_url: `https://discord.com/channels/${guildId}/${String(channel?.id || "")}`
+    })),
+    archive_scans: archiveScans,
+    errors: scanErrors,
+    threads
+  });
+}
+
+function normalizeLunaDiscordThread(thread, guildId, channelsById, categories, source, includeRaw = false) {
+  const parentId = thread?.parent_id ? String(thread.parent_id) : null;
+  const parent = parentId ? channelsById.get(parentId) : null;
+  const categoryId = parent?.parent_id ? String(parent.parent_id) : null;
+  const metadata = thread?.thread_metadata || {};
+  const id = String(thread?.id || "");
+  const normalized = {
+    id,
+    name: String(thread?.name || "Unnamed thread"),
+    type: Number(thread?.type),
+    type_name: lunaDiscordChannelTypeName(thread?.type),
+    source,
+    active: !Boolean(metadata.archived),
+    parent_id: parentId,
+    parent_name: parent ? String(parent.name || "Unnamed channel") : null,
+    parent_type: parent ? Number(parent.type) : null,
+    parent_type_name: parent ? lunaDiscordChannelTypeName(parent.type) : null,
+    category_id: categoryId,
+    category_name: categoryId ? (categories.get(categoryId) || null) : null,
+    owner_id: thread?.owner_id ? String(thread.owner_id) : null,
+    created_at: discordSnowflakeTimestamp(id),
+    last_message_id: thread?.last_message_id ? String(thread.last_message_id) : null,
+    message_count: finiteDiscordNumber(thread?.message_count),
+    total_message_sent: finiteDiscordNumber(thread?.total_message_sent),
+    member_count: finiteDiscordNumber(thread?.member_count),
+    slowmode_seconds: finiteDiscordNumber(thread?.rate_limit_per_user),
+    applied_tags: Array.isArray(thread?.applied_tags) ? thread.applied_tags.map(String) : [],
+    archived: Boolean(metadata.archived),
+    archive_timestamp: metadata.archive_timestamp || null,
+    auto_archive_minutes: finiteDiscordNumber(metadata.auto_archive_duration),
+    locked: Boolean(metadata.locked),
+    invitable: metadata.invitable === undefined ? null : Boolean(metadata.invitable),
+    direct_url: `https://discord.com/channels/${guildId}/${id}`
+  };
+  if (includeRaw) normalized.raw = thread;
+  return normalized;
+}
+
+async function listDiscordGuildArchivedThreads(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  const parentChannelId = String(url.searchParams.get("parent_channel_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+  if (!/^\d{17,20}$/.test(parentChannelId)) {
+    throw httpError(400, "A valid parent_channel_id is required.");
+  }
+
+  const scope = String(url.searchParams.get("scope") || "public").trim().toLowerCase();
+  if (!["public", "private"].includes(scope)) {
+    throw httpError(400, "scope must be public or private.");
+  }
+  const limitValue = Number(url.searchParams.get("limit") || 100);
+  const limit = Math.max(2, Math.min(100, Number.isFinite(limitValue) ? Math.floor(limitValue) : 100));
+  const before = String(url.searchParams.get("before") || "").trim();
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+
+  const [guildResult, channelsResult] = await Promise.all([
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/channels`, env)
+  ]);
+  for (const [label, result] of [
+    ["Discord guild lookup", guildResult],
+    ["Discord guild channel lookup", channelsResult]
+  ]) {
+    if (!result.response?.ok) {
+      throw httpError(
+        [401, 403, 404, 429].includes(result.response?.status) ? result.response.status : 502,
+        discordApiErrorMessage(result.response?.status || 502, result.payload?.message || `${label} failed.`)
+      );
+    }
+  }
+
+  const guild = guildResult.payload || {};
+  const rawChannels = Array.isArray(channelsResult.payload) ? channelsResult.payload : [];
+  const parent = rawChannels.find(channel => String(channel?.id || "") === parentChannelId);
+  if (!parent || ![0, 5, 15, 16].includes(Number(parent?.type))) {
+    throw httpError(404, "The requested parent channel was not found in this guild or cannot contain threads.");
+  }
+  const categories = new Map(
+    rawChannels
+      .filter(channel => Number(channel?.type) === 4)
+      .map(channel => [String(channel.id || ""), String(channel.name || "Uncategorized")])
+  );
+  const channelsById = new Map(rawChannels.map(channel => [String(channel?.id || ""), channel]));
+  const encodedParentChannelId = encodeURIComponent(parentChannelId);
+  const archivePath = scope === "private"
+    ? `/channels/${encodedParentChannelId}/users/@me/threads/archived/private`
+    : `/channels/${encodedParentChannelId}/threads/archived/public`;
+  const endpoint = new URL(`${DISCORD_API_BASE}${archivePath}`);
+  endpoint.searchParams.set("limit", String(limit));
+  if (before) endpoint.searchParams.set("before", before);
+  const result = await fetchDiscordApiWithRetry(endpoint, env);
+  if (!result.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(result.response?.status) ? result.response.status : 502,
+      discordApiErrorMessage(
+        result.response?.status || 502,
+        result.payload?.message || `Discord archived ${scope} thread lookup failed.`
+      )
+    );
+  }
+
+  const values = Array.isArray(result.payload?.threads) ? result.payload.threads : [];
+  const threads = values.map(thread => normalizeLunaDiscordThread(
+    thread,
+    guildId,
+    channelsById,
+    categories,
+    `archived_${scope}`,
+    includeRaw
+  ));
+  const nextBefore = String(values[values.length - 1]?.thread_metadata?.archive_timestamp || "");
+  return json({
+    ok: true,
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      server_url: `https://discord.com/channels/${guildId}`
+    },
+    parent: {
+      id: parentChannelId,
+      name: String(parent?.name || "Unnamed channel"),
+      type: Number(parent?.type),
+      type_name: lunaDiscordChannelTypeName(parent?.type),
+      category_id: parent?.parent_id ? String(parent.parent_id) : null,
+      category_name: parent?.parent_id ? (categories.get(String(parent.parent_id)) || null) : null
+    },
+    scope,
+    before: before || null,
+    limit,
+    has_more: Boolean(result.payload?.has_more),
+    next_before: Boolean(result.payload?.has_more) && nextBefore ? nextBefore : null,
+    count: threads.length,
+    threads
+  });
+}
+
+async function listDiscordGuildChannelMessages(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  const channelId = String(url.searchParams.get("channel_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+  if (!/^\d{17,20}$/.test(channelId)) {
+    throw httpError(400, "A valid channel_id is required.");
+  }
+  const limitValue = Number(url.searchParams.get("limit") || 100);
+  const limit = Math.max(1, Math.min(100, Number.isFinite(limitValue) ? Math.floor(limitValue) : 100));
+  const before = String(url.searchParams.get("before") || "").trim();
+  if (before && !/^\d{17,20}$/.test(before)) {
+    throw httpError(400, "before must be a Discord message ID.");
+  }
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+
+  const [guildResult, channelResult] = await Promise.all([
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}`, env)
+  ]);
+  if (!guildResult.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(guildResult.response?.status) ? guildResult.response.status : 502,
+      discordApiErrorMessage(
+        guildResult.response?.status || 502,
+        guildResult.payload?.message || "Discord guild lookup failed."
+      )
+    );
+  }
+  if (!channelResult.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(channelResult.response?.status) ? channelResult.response.status : 502,
+      discordApiErrorMessage(
+        channelResult.response?.status || 502,
+        channelResult.payload?.message || "Discord channel lookup failed."
+      )
+    );
+  }
+
+  const guild = guildResult.payload || {};
+  const channel = channelResult.payload || {};
+  if (String(channel?.guild_id || "") !== guildId) {
+    throw httpError(403, "The requested channel does not belong to the requested guild.");
+  }
+  if (![0, 2, 5, 10, 11, 12, 13].includes(Number(channel?.type))) {
+    throw httpError(400, "The requested Discord channel type does not contain readable message history.");
+  }
+
+  const endpoint = new URL(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`);
+  endpoint.searchParams.set("limit", String(limit));
+  if (before) endpoint.searchParams.set("before", before);
+  const messageResult = await fetchDiscordApiWithRetry(endpoint, env);
+  if (!messageResult.response?.ok) {
+    throw httpError(
+      [401, 403, 404, 429].includes(messageResult.response?.status) ? messageResult.response.status : 502,
+      discordApiErrorMessage(
+        messageResult.response?.status || 502,
+        messageResult.payload?.message || "Discord message-history lookup failed."
+      )
+    );
+  }
+
+  const rawMessages = Array.isArray(messageResult.payload) ? messageResult.payload : [];
+  const messages = rawMessages
+    .map(message => normalizeLunaDiscordGuildMessage(message, guildId, channelId, includeRaw))
+    .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+  const nextBefore = String(rawMessages[rawMessages.length - 1]?.id || "");
+  return json({
+    ok: true,
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      server_url: `https://discord.com/channels/${guildId}`
+    },
+    channel: {
+      id: channelId,
+      name: String(channel?.name || "Unnamed channel"),
+      type: Number(channel?.type),
+      type_name: lunaDiscordChannelTypeName(channel?.type),
+      parent_id: channel?.parent_id ? String(channel.parent_id) : null,
+      archived: Boolean(channel?.thread_metadata?.archived),
+      direct_url: `https://discord.com/channels/${guildId}/${channelId}`
+    },
+    before: before || null,
+    limit,
+    count: messages.length,
+    has_more: rawMessages.length === limit && Boolean(nextBefore),
+    next_before: rawMessages.length === limit && nextBefore ? nextBefore : null,
+    messages
+  });
+}
+
+async function listDiscordGuildMessageHistory(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+
+  const requestedChannels = String(url.searchParams.get("channels") || "")
+    .split(",")
+    .map(value => value.trim().replace(/^#/, ""))
+    .filter(Boolean);
+  if (!requestedChannels.length) {
+    throw httpError(400, "Provide one or more comma-separated channel names or IDs in channels.");
+  }
+
+  const limitValue = Number(url.searchParams.get("limit") || 25);
+  const limit = Math.max(1, Math.min(100, Number.isFinite(limitValue) ? Math.floor(limitValue) : 25));
+  const before = String(url.searchParams.get("before") || "").trim();
+  if (before && !/^\d{17,20}$/.test(before)) {
+    throw httpError(400, "before must be a Discord message ID.");
+  }
+  const includeRaw = ["1", "true", "yes", "on"].includes(
+    String(url.searchParams.get("include_raw") || "").trim().toLowerCase()
+  );
+
+  const [guildResult, channelsResult] = await Promise.all([
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}`, env),
+    fetchDiscordApiWithRetry(`${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/channels`, env)
+  ]);
+  for (const [label, result] of [
+    ["Discord guild lookup", guildResult],
+    ["Discord guild channel lookup", channelsResult]
+  ]) {
+    if (!result.response?.ok) {
+      throw httpError(
+        [401, 403, 404, 429].includes(result.response?.status) ? result.response.status : 502,
+        discordApiErrorMessage(
+          result.response?.status || 502,
+          result.payload?.message || `${label} failed.`
+        )
+      );
+    }
+  }
+
+  const guild = guildResult.payload || {};
+  const rawChannels = Array.isArray(channelsResult.payload) ? channelsResult.payload : [];
+  const categories = new Map(
+    rawChannels
+      .filter(channel => Number(channel?.type) === 4)
+      .map(channel => [String(channel.id || ""), String(channel.name || "Uncategorized")])
+  );
+  const requestedIds = new Set(requestedChannels.filter(value => /^\d{17,20}$/.test(value)));
+  const requestedNames = new Set(
+    requestedChannels
+      .filter(value => !/^\d{17,20}$/.test(value))
+      .map(value => value.toLowerCase())
+  );
+  const selectedChannels = rawChannels
+    .filter(channel => {
+      const id = String(channel?.id || "");
+      const name = String(channel?.name || "").toLowerCase();
+      return requestedIds.has(id) || requestedNames.has(name);
+    })
+    .sort((a, b) => {
+      const categoryA = String(categories.get(String(a?.parent_id || "")) || "");
+      const categoryB = String(categories.get(String(b?.parent_id || "")) || "");
+      return categoryA.localeCompare(categoryB, undefined, { sensitivity: "base" })
+        || Number(a?.position || 0) - Number(b?.position || 0)
+        || String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" });
+    });
+
+  const foundIds = new Set(selectedChannels.map(channel => String(channel?.id || "")));
+  const foundNames = new Set(selectedChannels.map(channel => String(channel?.name || "").toLowerCase()));
+  const unresolved = requestedChannels.filter(value => {
+    return /^\d{17,20}$/.test(value)
+      ? !foundIds.has(value)
+      : !foundNames.has(value.toLowerCase());
+  });
+
+  const results = [];
+  for (const channel of selectedChannels) {
+    const channelId = String(channel?.id || "");
+    const endpoint = new URL(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`);
+    endpoint.searchParams.set("limit", String(limit));
+    if (before) endpoint.searchParams.set("before", before);
+    const messageResult = await fetchDiscordApiWithRetry(endpoint, env);
+    if (!messageResult.response?.ok) {
+      results.push({
+        id: channelId,
+        name: String(channel?.name || "Unnamed channel"),
+        type: Number(channel?.type),
+        type_name: lunaDiscordChannelTypeName(channel?.type),
+        category_id: channel?.parent_id ? String(channel.parent_id) : null,
+        category_name: channel?.parent_id ? (categories.get(String(channel.parent_id)) || null) : null,
+        direct_url: `https://discord.com/channels/${guildId}/${channelId}`,
+        ok: false,
+        status: Number(messageResult.response?.status || 502),
+        error: String(messageResult.payload?.message || "Discord message-history lookup failed."),
+        discord_code: messageResult.payload?.code ?? null,
+        messages: []
+      });
+      continue;
+    }
+
+    const messages = (Array.isArray(messageResult.payload) ? messageResult.payload : [])
+      .map(message => normalizeLunaDiscordGuildMessage(message, guildId, channelId, includeRaw))
+      .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+    results.push({
+      id: channelId,
+      name: String(channel?.name || "Unnamed channel"),
+      type: Number(channel?.type),
+      type_name: lunaDiscordChannelTypeName(channel?.type),
+      category_id: channel?.parent_id ? String(channel.parent_id) : null,
+      category_name: channel?.parent_id ? (categories.get(String(channel.parent_id)) || null) : null,
+      direct_url: `https://discord.com/channels/${guildId}/${channelId}`,
+      ok: true,
+      status: 200,
+      message_count: messages.length,
+      messages
+    });
+  }
+
+  return json({
+    ok: results.every(result => result.ok),
+    guild: {
+      id: guildId,
+      name: String(guild.name || "Unnamed server"),
+      description: guild.description || null,
+      server_url: `https://discord.com/channels/${guildId}`
+    },
+    requested_channels: requestedChannels,
+    unresolved_channels: unresolved,
+    limit_per_channel: limit,
+    before: before || null,
+    channel_count: results.length,
+    channels: results
+  });
+}
+
+function normalizeLunaDiscordGuildMessage(message, guildId, channelId, includeRaw = false) {
+  const author = message?.author || {};
+  const normalized = {
+    id: String(message?.id || ""),
+    timestamp: message?.timestamp || discordSnowflakeTimestamp(message?.id),
+    edited_timestamp: message?.edited_timestamp || null,
+    type: Number(message?.type || 0),
+    content: String(message?.content || ""),
+    author: {
+      id: String(author?.id || ""),
+      username: String(author?.username || "Unknown user"),
+      global_name: author?.global_name || null,
+      bot: Boolean(author?.bot),
+      avatar_url: discordUserAvatarUrl(author)
+    },
+    webhook_id: message?.webhook_id ? String(message.webhook_id) : null,
+    application_id: message?.application_id ? String(message.application_id) : null,
+    pinned: Boolean(message?.pinned),
+    mention_everyone: Boolean(message?.mention_everyone),
+    mentions: (Array.isArray(message?.mentions) ? message.mentions : []).map(value => ({
+      id: String(value?.id || ""),
+      username: String(value?.username || "Unknown user"),
+      global_name: value?.global_name || null,
+      bot: Boolean(value?.bot)
+    })),
+    role_mentions: (Array.isArray(message?.mention_roles) ? message.mention_roles : []).map(String),
+    attachments: (Array.isArray(message?.attachments) ? message.attachments : []).map(value => ({
+      id: String(value?.id || ""),
+      filename: String(value?.filename || "attachment"),
+      description: value?.description || null,
+      content_type: value?.content_type || null,
+      size: Number(value?.size || 0),
+      url: value?.url || null,
+      proxy_url: value?.proxy_url || null,
+      width: value?.width ?? null,
+      height: value?.height ?? null
+    })),
+    embeds: (Array.isArray(message?.embeds) ? message.embeds : []).map(normalizeLunaDiscordMessageEmbed),
+    stickers: (Array.isArray(message?.sticker_items) ? message.sticker_items : []).map(value => ({
+      id: String(value?.id || ""),
+      name: String(value?.name || "Sticker"),
+      format_type: Number(value?.format_type || 0)
+    })),
+    components: normalizeLunaDiscordMessageComponents(message?.components),
+    reactions: (Array.isArray(message?.reactions) ? message.reactions : []).map(value => ({
+      count: Number(value?.count || 0),
+      me: Boolean(value?.me),
+      emoji_id: value?.emoji?.id ? String(value.emoji.id) : null,
+      emoji_name: value?.emoji?.name || null
+    })),
+    referenced_message_id: message?.message_reference?.message_id
+      ? String(message.message_reference.message_id)
+      : null,
+    direct_url: `https://discord.com/channels/${guildId}/${channelId}/${String(message?.id || "")}`
+  };
+  if (includeRaw) normalized.raw = message;
+  return normalized;
+}
+
+function normalizeLunaDiscordMessageEmbed(embed) {
+  return {
+    type: embed?.type || null,
+    title: embed?.title || null,
+    description: embed?.description || null,
+    url: embed?.url || null,
+    timestamp: embed?.timestamp || null,
+    color: embed?.color ?? null,
+    author: embed?.author ? {
+      name: embed.author.name || null,
+      url: embed.author.url || null,
+      icon_url: embed.author.icon_url || null
+    } : null,
+    fields: (Array.isArray(embed?.fields) ? embed.fields : []).map(field => ({
+      name: String(field?.name || ""),
+      value: String(field?.value || ""),
+      inline: Boolean(field?.inline)
+    })),
+    image_url: embed?.image?.url || null,
+    thumbnail_url: embed?.thumbnail?.url || null,
+    video_url: embed?.video?.url || null,
+    footer: embed?.footer ? {
+      text: embed.footer.text || null,
+      icon_url: embed.footer.icon_url || null
+    } : null
+  };
+}
+
+function normalizeLunaDiscordMessageComponents(components) {
+  return (Array.isArray(components) ? components : []).map(component => ({
+    type: Number(component?.type || 0),
+    id: component?.id ?? null,
+    custom_id: component?.custom_id || null,
+    style: component?.style ?? null,
+    label: component?.label || null,
+    content: component?.content || null,
+    url: component?.url || null,
+    spoiler: Boolean(component?.spoiler),
+    accessory: component?.accessory
+      ? normalizeLunaDiscordMessageComponents([component.accessory])[0]
+      : null,
+    media: component?.media ? {
+      url: component.media.url || null,
+      proxy_url: component.media.proxy_url || null,
+      width: component.media.width ?? null,
+      height: component.media.height ?? null,
+      content_type: component.media.content_type || null
+    } : null,
+    items: (Array.isArray(component?.items) ? component.items : []).map(item => ({
+      media: item?.media ? {
+        url: item.media.url || null,
+        proxy_url: item.media.proxy_url || null,
+        width: item.media.width ?? null,
+        height: item.media.height ?? null,
+        content_type: item.media.content_type || null
+      } : null,
+      description: item?.description || null,
+      spoiler: Boolean(item?.spoiler)
+    })),
+    components: normalizeLunaDiscordMessageComponents(component?.components)
+  }));
+}
+
+function discordChannelPermissions(basePermissions, overwrites, guildId, botUserId, botRoleIds) {
+  const administrator = 1n << 3n;
+  if ((basePermissions & administrator) === administrator) return (1n << 53n) - 1n;
+
+  let permissions = basePermissions;
+  const values = Array.isArray(overwrites) ? overwrites : [];
+  const everyone = values.find(value => String(value?.id || "") === guildId && Number(value?.type) === 0);
+  if (everyone) {
+    permissions &= ~discordPermissionBigInt(everyone.deny);
+    permissions |= discordPermissionBigInt(everyone.allow);
+  }
+
+  let roleAllow = 0n;
+  let roleDeny = 0n;
+  for (const overwrite of values) {
+    if (Number(overwrite?.type) !== 0 || !botRoleIds.has(String(overwrite?.id || ""))) continue;
+    roleAllow |= discordPermissionBigInt(overwrite.allow);
+    roleDeny |= discordPermissionBigInt(overwrite.deny);
+  }
+  permissions &= ~roleDeny;
+  permissions |= roleAllow;
+
+  const member = values.find(value => String(value?.id || "") === botUserId && Number(value?.type) === 1);
+  if (member) {
+    permissions &= ~discordPermissionBigInt(member.deny);
+    permissions |= discordPermissionBigInt(member.allow);
+  }
+  return permissions;
+}
+
+function discordPermissionBigInt(value) {
+  try {
+    return BigInt(String(value || "0"));
+  } catch {
+    return 0n;
+  }
+}
+
+function discordChannelPermissionSummary(value) {
+  const permissions = discordPermissionBigInt(value);
+  const has = bit => (permissions & (1n << BigInt(bit))) !== 0n;
+  return {
+    view_channel: has(10),
+    send_messages: has(11),
+    manage_messages: has(13),
+    read_message_history: has(16),
+    manage_channels: has(4),
+    manage_threads: has(34),
+    create_public_threads: has(35),
+    create_private_threads: has(36),
+    send_messages_in_threads: has(38)
+  };
+}
+
+async function leaveDiscordGuild(url, env) {
+  const guildId = String(url.searchParams.get("guild_id") || "").trim();
+  const confirmation = String(url.searchParams.get("confirm") || "").trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw httpError(400, "A valid Discord guild_id is required.");
+  }
+  if (confirmation !== guildId) {
+    throw httpError(400, "The confirm value must exactly match guild_id.");
+  }
+
+  const detailResult = await fetchDiscordApiWithRetry(
+    `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}?with_counts=true`,
+    env
+  );
+  if (!detailResult.response?.ok) {
+    throw httpError(
+      detailResult.response?.status === 404 ? 404 : 502,
+      discordApiErrorMessage(
+        detailResult.response?.status || 502,
+        detailResult.payload?.message || "Luna cannot access that Discord server."
+      )
+    );
+  }
+
+  const guildName = String(detailResult.payload?.name || "Unnamed server");
+  const leaveResult = await fetchDiscordApiWithRetry(
+    `${DISCORD_API_BASE}/users/@me/guilds/${encodeURIComponent(guildId)}`,
+    env,
+    { method: "DELETE" }
+  );
+  if (!leaveResult.response?.ok) {
+    throw httpError(
+      502,
+      discordApiErrorMessage(
+        leaveResult.response?.status || 502,
+        leaveResult.payload?.message || "Discord rejected Luna's request to leave the server."
+      )
+    );
+  }
+
+  return json({
+    ok: true,
+    left: true,
+    guild: { id: guildId, name: guildName },
+    message: `Luna left ${guildName} (${guildId}). Stored configuration and history were not deleted.`
   });
 }
 
@@ -13694,7 +15000,7 @@ async function lgDebug(url, env) {
   });
 }
 
-async function fetchGlobalSearchPayload(query, env) {
+async function fetchGlobalSearchPayload(query, env, options = {}) {
   const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/global/search", apiBase);
@@ -13705,6 +15011,9 @@ async function fetchGlobalSearchPayload(query, env) {
   apiUrl.searchParams.set("avatars", "1");
   apiUrl.searchParams.set("history_hours", String(searchChartHistoryHours(env)));
   apiUrl.searchParams.set("history_limit", String(searchChartHistoryLimit(env)));
+  if (options.battleHistory === true) {
+    apiUrl.searchParams.set("battle_history", "1");
+  }
 
   const res = await fetchClanApi(env, apiUrl, {
     headers: {
@@ -14145,6 +15454,101 @@ function discordApiErrorMessage(status, message) {
   }
 
   return message;
+}
+
+async function fetchDiscordApiWithRetry(endpoint, env, options = {}) {
+  let response;
+  let payload = {};
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    response = await fetch(endpoint, {
+      ...options,
+      headers: discordBotHeaders(env, options.headers || {})
+    });
+    const text = await response.text();
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = { message: text.slice(0, 1000) };
+      }
+    } else {
+      payload = {};
+    }
+    if (response.status !== 429 || attempt === 6) break;
+
+    const retryAfterSeconds = Number(payload?.retry_after ?? response.headers.get("retry-after") ?? 1);
+    await sleep(Math.max(500, Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 250));
+  }
+  return { response, payload };
+}
+
+function discordGuildAssetUrl(guildId, hash, assetType) {
+  const assetHash = String(hash || "").trim();
+  if (!assetHash) return null;
+  const extension = assetHash.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/${assetType}/${guildId}/${assetHash}.${extension}?size=1024`;
+}
+
+function discordUserAvatarUrl(user) {
+  const userId = String(user?.id || "").trim();
+  const avatarHash = String(user?.avatar || "").trim();
+  if (userId && avatarHash) {
+    const extension = avatarHash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${extension}?size=256`;
+  }
+
+  const discriminator = String(user?.discriminator || "0").trim();
+  let defaultIndex = 0;
+  try {
+    defaultIndex = discriminator && discriminator !== "0"
+      ? Math.abs(Number.parseInt(discriminator, 10) || 0) % 5
+      : Number((BigInt(userId || "0") >> 22n) % 6n);
+  } catch {
+    defaultIndex = 0;
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${defaultIndex}.png`;
+}
+
+function discordGuildMemberAvatarUrl(guildId, user, memberAvatarHash) {
+  const userId = String(user?.id || "").trim();
+  const avatarHash = String(memberAvatarHash || "").trim();
+  if (guildId && userId && avatarHash) {
+    const extension = avatarHash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/avatars/${avatarHash}.${extension}?size=256`;
+  }
+  return discordUserAvatarUrl(user);
+}
+
+function discordSnowflakeTimestamp(value) {
+  try {
+    const milliseconds = Number((BigInt(String(value)) >> 22n) + 1420070400000n);
+    return new Date(milliseconds).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function discordPermissionSummary(value) {
+  try {
+    const permissions = BigInt(String(value || "0"));
+    return {
+      administrator: Boolean(permissions & 8n),
+      manage_guild: Boolean(permissions & 32n),
+      create_instant_invite: Boolean(permissions & 1n)
+    };
+  } catch {
+    return {
+      administrator: false,
+      manage_guild: false,
+      create_instant_invite: false
+    };
+  }
+}
+
+function finiteDiscordNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function discordFormErrorMessage(payload) {
@@ -15388,30 +16792,80 @@ async function verifyDiscordRequest(request, env, body) {
   if (!publicKey || !signature || !timestamp) return false;
 
   const signatureBytes = hexToBytes(signature);
-  const publicKeyBytes = hexToBytes(publicKey);
   const message = new TextEncoder().encode(timestamp + body);
-  const algorithms = [
-    { name: "Ed25519" },
-    { name: "NODE-ED25519", namedCurve: "NODE-ED25519" }
-  ];
+  const algorithms = discordVerificationAlgorithms(publicKey);
 
   for (const algorithm of algorithms) {
     try {
-      const key = await crypto.subtle.importKey(
-        "raw",
-        publicKeyBytes,
-        algorithm,
-        false,
-        ["verify"]
-      );
+      const key = await discordVerificationKey(publicKey, algorithm);
       const valid = await crypto.subtle.verify(algorithm, key, signatureBytes, message);
-      if (valid) return true;
+      if (valid) {
+        discordVerificationAlgorithmNames.set(publicKey, algorithm.name);
+        return true;
+      }
     } catch {
       // Try the next supported Ed25519 flavor.
     }
   }
 
   return false;
+}
+
+function discordVerificationAlgorithms(publicKey) {
+  const algorithms = [
+    { name: "Ed25519" },
+    { name: "NODE-ED25519", namedCurve: "NODE-ED25519" }
+  ];
+  const preferred = discordVerificationAlgorithmNames.get(publicKey);
+  if (!preferred) return algorithms;
+  return algorithms.sort((left, right) => Number(right.name === preferred) - Number(left.name === preferred));
+}
+
+async function discordVerificationKey(publicKey, algorithm) {
+  const cacheKey = `${publicKey}:${algorithm.name}`;
+  let keyPromise = discordVerificationKeyPromises.get(cacheKey);
+  if (!keyPromise) {
+    keyPromise = crypto.subtle.importKey(
+      "raw",
+      hexToBytes(publicKey),
+      algorithm,
+      false,
+      ["verify"]
+    );
+    discordVerificationKeyPromises.set(cacheKey, keyPromise);
+    keyPromise.catch(() => discordVerificationKeyPromises.delete(cacheKey));
+  }
+  return await keyPromise;
+}
+
+function discordSnowflakeCreatedAtMs(value) {
+  try {
+    const snowflake = BigInt(String(value || "0"));
+    if (snowflake <= 0n) return null;
+    return Number((snowflake >> 22n) + 1420070400000n);
+  } catch {
+    return null;
+  }
+}
+
+function logDiscordInteractionAcknowledgement(interaction, metrics = {}) {
+  const acknowledgedAt = Date.now();
+  const handlerMs = acknowledgedAt - Number(metrics.handlerStartedAt || acknowledgedAt);
+  const interactionCreatedAt = Number(metrics.interactionCreatedAt || 0);
+  const interactionAgeMs = interactionCreatedAt > 0 ? acknowledgedAt - interactionCreatedAt : null;
+  const details = {
+    build_id: DISCORD_INTERACTION_BUILD_ID,
+    command: String(interaction?.data?.name || "").toLowerCase(),
+    interaction_id: String(interaction?.id || ""),
+    handler_ms: handlerMs,
+    verification_ms: Number(metrics.verificationMs || 0),
+    interaction_age_ms: interactionAgeMs
+  };
+  if (interactionAgeMs !== null && interactionAgeMs >= DISCORD_INTERACTION_ACK_WARNING_MS) {
+    console.warn("Discord interaction acknowledgement was slow", details);
+  } else {
+    console.log("Discord interaction acknowledged", details);
+  }
 }
 
 function getCommandBooleanOption(interaction, name) {

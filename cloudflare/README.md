@@ -131,6 +131,7 @@ It creates:
 | `c0ld_clan_snapshots` | table | Append-only c0ld member history, separated by `battle_key`. |
 | `c0ld_clan_current` | table | Latest c0ld member snapshot only. Replaced every Worker pull. |
 | `c0ld_battle_runs` | table | Battle metadata. New API battle keys are tracked here automatically. |
+| `c0ld_battle_windows` | table | Manually confirmed battle start/end dates. Enabled rows hard-override API timing. |
 | `c0ld_clans_snapshots` | table | Append-only all-clans leaderboard history. |
 | `c0ld_clans_current` | table | Latest all-clans leaderboard only. Replaced every clans pull. |
 | `c0ld_clan_activity_roster_snapshots` | table | Append-only roster snapshots for top-clan activity tracking. |
@@ -174,7 +175,10 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `SKIP_ENDED_BATTLE_INGEST` | Optional. Defaults to `true`; cron and normal manual ingests skip without writing snapshot rows when the active battle is ended or not started. |
 | `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES` | Optional. Defaults to `0`; when positive, scheduled battle-data pulls may continue until battle end plus this many minutes for a final capture. |
 | `CURRENT_BATTLE_DISPLAY_NAME` | Optional override. If blank, the Worker uses the API battle name or prettifies the battle key. |
-| `CURRENT_BATTLE_END_ISO` | Optional override. If blank, the Worker reads the API end timestamp when present. |
+| `CURRENT_BATTLE_START_ISO` | Optional emergency start-time override. Normal battle windows belong in the Supabase `c0ld_battle_windows` table. |
+| `CURRENT_BATTLE_END_ISO` | Optional emergency end-time override. Use a past ISO timestamp to immediately stop scheduled battle snapshots/global ranks and make Discord hourly delivery recognize the battle as ended. |
+| `CURRENT_BATTLE_WINDOW_KEY` | Optional safety scope shared by the emergency start/end overrides, for example `NinjaBattle2026`. |
+| `CURRENT_BATTLE_END_KEY` | Backwards-compatible alias for `CURRENT_BATTLE_WINDOW_KEY`. |
 | `SITE_ORIGINS` | `https://oapl.github.io,https://c0ld-clan.com,https://www.c0ld-clan.com` |
 | `SUPABASE_URL` | `https://YOUR-PROJECT.supabase.co` |
 | `PUBLIC_CACHE_SECONDS` | `30` |
@@ -183,7 +187,7 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 | `GLOBAL_CURRENT_CACHE_SECONDS` | Optional. Recommended `120`; cache `/api/global/current`. |
 | `GLOBAL_LEADERBOARD_FAST_CACHE_SECONDS` | Optional. Recommended `120`; cache the first fast `/api/global/leaderboard?gains=false` response. |
 | `GLOBAL_LEADERBOARD_CACHE_SECONDS` | Optional. Recommended `300`; cache the heavier global leaderboard response with gain columns. |
-| `GLOBAL_LEADERBOARD_SOURCE` | Optional. Defaults to `auto`: use the clan-derived global scan during an active Clan Battle, otherwise use the live BIG Games League-player Top 500. Set `clans` or `leagues` only to force a source while testing. The public League-player endpoint exposes 500 players, so the response marks that pool as partial rather than claiming it is the full 35–40K. |
+| `GLOBAL_LEADERBOARD_SOURCE` | Optional. Defaults to `auto`: use the clan-derived global scan during an active Clan Battle; switch to the League-player leaderboard only while the League Worker reports a bounded active event with valid start and end times; otherwise retain the latest Clan Battle's final snapshot. Set `clans` or `leagues` only to force a source while testing. The public League-player endpoint exposes 500 players, so the response marks that pool as partial rather than claiming it is the full 35–40K. |
 | `SNAPSHOT_RETENTION_HOURS` | Optional. Leave blank/omit to preserve archived battle snapshots. Set a positive hour count only if you intentionally want rolling pruning. |
 | `HISTORY_MAX_HOURS` | Optional. Defaults to `100000`; caps `/api/history` and `/api/clans/history` lookback requests. |
 | `ROBLOX_USERNAME_LOOKUPS` | `true` |
@@ -313,9 +317,39 @@ Use `wrangler-clan-api.toml.example` as the variable reference if deploying thro
 
 Battle start/end values from the Big Games API can be ISO strings, Unix seconds, Unix milliseconds, or numeric strings. The Worker stores them as `timestamptz` ISO values in Supabase. If `AUTO_DETECT_BATTLE=true`, the Worker first matches the active battle key or display name reported by the API, then falls back to the latest active-looking battle object from the clan response, and stores that resolved key in `battle_key`.
 
+Confirmed event windows live in the Supabase `c0ld_battle_windows` table created by migration `059_authoritative_battle_windows.sql`. Add one enabled row with `battle_key`, `display_name`, `started_at`, and `ended_at` for each battle. These are manually maintained hard overrides, not copies of API timing. A matching enabled row is authoritative: both dates replace API timing in metadata storage, scheduled collection gating, global-rank collection, clan activity, command metadata, and health output. The Worker caches the registry for at most 60 seconds. Cloudflare timing variables remain an emergency fallback and do not need to change for every battle.
+
+Use this idempotent pattern to add or correct a battle. Keep `lookup_key` lowercase:
+
+```sql
+insert into public.c0ld_battle_windows (
+  lookup_key, battle_key, display_name, started_at, ended_at, enabled, notes, updated_at
+)
+values (
+  'examplebattle2026',
+  'ExampleBattle2026',
+  'ExampleBattle2026',
+  '2026-08-20T16:00:00Z',
+  '2026-08-27T16:00:00Z',
+  true,
+  'Manually confirmed event window.',
+  now()
+)
+on conflict (lookup_key) do update set
+  battle_key = excluded.battle_key,
+  display_name = excluded.display_name,
+  started_at = excluded.started_at,
+  ended_at = excluded.ended_at,
+  enabled = excluded.enabled,
+  notes = excluded.notes,
+  updated_at = now();
+```
+
 When `SKIP_ENDED_BATTLE_INGEST=true`, scheduled pulls can stay enabled permanently. The Worker checks active battle metadata before writing; ended/not-started battles return `skipped: true` and `rows_inserted: 0`. For deliberate backfills, add `?force=1` to a protected manual ingest URL.
 
-The stop day and time come from the active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls once the API battle end time is reached; the last kept pull is the latest one before the cutoff. With a positive grace value, scheduled pulls can continue until battle end plus that grace window so a final after-end snapshot can land. PS99 version scans, PS99 restart detection, and Roblox released-version checks are not battle data and continue after the battle gate closes.
+The stop day and time come from `c0ld_battle_windows` when the battle is registered there, otherwise from active battle metadata returned by the Big Games API. With `BATTLE_INGEST_FINAL_PULL_GRACE_MINUTES=0`, the Worker blocks member, clans, global-rank, and clan-activity pulls after the battle end time; the pull stamped exactly at the cutoff is allowed and later pulls are rejected. With a positive grace value, scheduled pulls can continue until battle end plus that grace window. PS99 version scans, PS99 restart detection, and Roblox released-version checks are not battle data and continue after the battle gate closes.
+
+`NinjaBattle2026` is registered from `2026-08-08T16:00:45.688Z` through the confirmed cutoff `2026-08-14T16:00:00.000Z` (`10:00 AM MDT`). This protects collection when the upstream API reports a later end.
 
 ### Secrets
 
@@ -441,7 +475,14 @@ Useful endpoints:
 | `/api/external-history/cwbot/archived-threads` | Protected paginated discovery of public archived threads under one Discord channel. Used automatically by the guild importer. |
 | `/api/external-history/cwbot/channel-scan` | Protected, read-only scanner for one page of Discord channel history. It classifies CW_Bot history responses by direct history markers or a preceding `!history username` command and returns a resumable `next_before_message_id` cursor. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
-| `/admin/discord-guilds` | Protected Discord interactions Worker endpoint that lists every server visible to Luna's configured bot token. Use `scripts/list-luna-guilds.ps1` rather than exposing the bot token locally. |
+| `/admin/discord-guilds` | Protected Discord interactions Worker endpoint that lists every server visible to Luna, including readable guild metadata, counts, artwork, a direct server URL, and an existing vanity/widget invite when Discord exposes one. |
+| `/admin/discord-guilds/channels` | Protected, read-only Discord interactions Worker endpoint that lists one server's text, announcement, forum, and media channels plus Luna's effective view/send/history permissions. Add `include_non_text=1` for every guild channel type. |
+| `/admin/discord-guilds/messages` | Protected, read-only endpoint that returns recent text, embeds, attachments, reactions, authors, timestamps, and direct links from explicitly requested guild channels. |
+| `/admin/discord-guilds/members` | Protected, read-only paginated member roster for one server. Discord requires Luna's Server Members privileged intent for complete enumeration. |
+| `/admin/discord-guilds/threads` | Protected, read-only inventory of active threads and accessible public archived threads. Optional private-archive scanning and per-parent partial-error reporting are supported. |
+| `/admin/discord-guilds/channel-messages` | Protected, read-only paginated message history for one validated guild channel or thread ID. Used by the full guild export script. |
+| `/admin/discord-guilds/archived-threads` | Protected, read-only paginated public or private archived-thread discovery under one validated parent channel. Used by the full guild export script. |
+| `/admin/discord-guilds/leave` | Protected, explicitly confirmed endpoint that makes Luna leave one guild. It does not delete stored configuration or history. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/persistent-posts/post` | Protected `POST` endpoint that creates or edits the combined Cutoffs, Roblox Status, and Versions posts. Add `?force=1`, and optionally `&type=cutoffs`, `&type=roblox-status`, or `&type=versions`. |
 | `/api/persistent-posts/status` | Protected `GET` endpoint that reports the three stored message IDs, channel IDs, message existence, and active refresh schedule. |
@@ -554,7 +595,91 @@ can see with:
 
 That script prompts for the Discord interactions Worker's
 `REGISTER_ADMIN_TOKEN`; it does not require the Discord bot token on the local
-computer.
+computer. Use `-Detailed` for all normalized metadata, `-AsJson` for a complete
+machine-readable response, or `-IncludeRaw -AsJson` to include Discord's raw
+guild object. A `server_url` opens the server for a Discord user who is already
+a member. `invite_url` is only present when the server exposes a vanity URL or
+public widget invite.
+
+After deploying the current Discord interactions Worker, list Bunker's
+text-capable channels and Luna's effective access to each one with:
+
+```powershell
+.\scripts\list-luna-guild-channels.ps1
+```
+
+The script defaults to Bunker (`1502628142894809211`). Pass another `-GuildId`
+to inspect a different server, `-IncludeNonText` to include categories and
+voice/stage channels, or `-AsJson` for the complete channel metadata. Discord
+evaluates Luna's bot roles and channel overwrites for this lookup; a human
+administrator's permissions are not inherited by Luna.
+
+After deploying that Worker, read Bunker's recent `#av`, `#ae`, `#commands`,
+and `#c0ld` posts with:
+
+```powershell
+.\scripts\read-luna-guild-messages.ps1
+```
+
+It returns the latest 25 messages per channel and prints them oldest-to-newest.
+Use `-Limit 100`, pass a different `-Channels @("name", "channel-id")` list,
+or add `-AsJson` for the complete structured response. Luna needs View Channel
+and Read Message History in each channel. Ordinary message text also requires
+Discord's Message Content privileged intent to be enabled for Luna.
+
+After deploying that Worker, list Bunker's Discord members with:
+
+```powershell
+.\scripts\list-luna-guild-members.ps1
+```
+
+The script defaults to Bunker (`1502628142894809211`), omits bot accounts from
+the formatted table, and shows usernames, nicknames, join times, and guild
+roles. Use `-IncludeBots`, `-Query "name"`, or `-AsJson` as needed. Discord must
+have Luna's **Server Members Intent** (`GUILD_MEMBERS`) enabled; human server
+administrator access does not grant that intent to the bot.
+
+List Bunker's active and accessible archived threads with:
+
+```powershell
+.\scripts\list-luna-guild-threads.ps1
+```
+
+The default pass includes all active threads plus the newest 100 public
+archives under each text, announcement, forum, or media parent channel. Use
+`-ActiveOnly` for the lightest request, `-IncludePrivate` to attempt private
+archives Luna can access, increase `-ArchivePagesPerChannel` for a deeper pass,
+or use `-AsJson` for continuation cursors and complete metadata. A denied
+parent archive is reported as a partial result and does not discard threads
+discovered elsewhere.
+
+After deploying the current Discord interactions Worker, export every post
+Luna can read in Bunker, including ordinary text channels, voice/stage text
+chats, active threads, and accessible public and private archived threads, with:
+
+```powershell
+.\scripts\export-luna-guild-posts.ps1
+```
+
+The script prompts for `REGISTER_ADMIN_TOKEN` and writes a timestamped archive
+under `Documents\Luna-Discord-Exports`. Every message page retains Discord's
+raw message object, including text, embeds, components, attachment URLs,
+authors, reactions, and timestamps. Add `-DownloadMedia` to also download
+attachment and embed media bytes. Use `-SkipPrivateThreads` only when private
+archive discovery is not wanted. A denied or inaccessible channel remains in
+`manifest.json` as a partial failure, and rerunning with the same
+`-OutputDirectory` resumes incomplete targets without deleting completed data.
+
+To make Luna leave one server, run:
+
+```powershell
+.\scripts\remove-luna-from-guild.ps1 `
+  -GuildId "1457088639006670979"
+```
+
+The script displays the target server and requires the exact Guild ID a second
+time before removal. It removes Luna from Discord only; it does not erase the
+server's stored configuration or historical data.
 
 Archived public threads are intentionally a separate pass because Discord may
 deny archive enumeration even when ordinary channel discovery succeeds. Add
@@ -792,7 +917,10 @@ Required Worker variables:
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated League reward tiers used by `/league rewards`, League-mode `/leaderboard rewards`, and the persistent League player cutoffs. Defaults to `1,3,15,50,100,250,2000`. |
-| `CLAN_TRACKER_POST_INTERVAL_MINUTES` | Optional. Set to `20`. Persistent clan member and clan comparison posts are edited at UTC minutes `00`, `20`, and `40`; values below 20 are clamped to 20. |
+| `CLAN_LOG_POST_INTERVAL_MINUTES` | Optional clan-activity log cadence. Defaults to `15`; lower legacy values are clamped to 15. |
+| `CLAN_LOG_POST_OFFSET_MINUTES` | Optional UTC minute offset for clan-activity logs. Defaults to `5`, so the 15-minute cadence runs at `:05`, `:20`, `:35`, and `:50`. |
+| `CLAN_TRACKER_POST_INTERVAL_MINUTES` | Optional persistent clan member/comparison cadence. Defaults to `20`; values below 20 are clamped to 20. |
+| `CLAN_TRACKER_POST_OFFSET_MINUTES` | Optional UTC minute offset for persistent clan trackers. Defaults to `11`, so the 20-minute cadence runs at `:11`, `:31`, and `:51`. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full legacy player rewards header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -1504,20 +1632,40 @@ Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
 c0ld-themed member progress image, posts a preview immediately, then refreshes
 hourly with the same scheduler as clan and user boards.
 
-The Discord interactions Worker needs an every-minute cron trigger:
+The Discord interactions Worker supports the existing top-of-hour cron trigger:
+
+```text
+0 * * * *
+```
+
+For automatic recovery attempts after a transient API or Discord failure, use
+the recommended every-minute trigger:
 
 ```text
 * * * * *
 ```
 
-The Worker does not post every minute. Clan and league delivery is gated to UTC
-minute `:00`, with `:01` and `:02` reserved as retries. User boards depend on
-the completed global-rank scan that begins at `:00`, so they may retry through
-`:05` while still rendering only the exact `:00` and prior-hour `:00` samples.
-User, clan, and league hourly boards all retry only during UTC minutes `0`, `1`, and `2`. User boards use the exact clan-member snapshots for their points and one-hour gain so they do not wait for the slower global-rank scan to finish.
-(default `6`, meaning minutes `:00` through `:05`). A board is claimed only
-after its exact data is ready, and a successful assignment is claimed once for
-that hour, so retry wakes cannot duplicate it.
+The Worker opens delivery at UTC minute `:00`. The top-of-hour invocation waits
+through bounded readiness retries and may finish posting one to three minutes
+later, but every board still renders only the exact `:00` and prior-hour `:00`
+samples. A late Discord post therefore never changes the one-hour calculation.
+With the every-minute trigger, unclaimed or failed assignments can retry at
+`:01`, `:02`, and `:03`. Clan boards run before user and league boards, with
+c0ld first because its 75-member image is the heaviest assignment. A board is
+claimed only after its exact score and rank data are ready; failed or abandoned
+claims are released or expire, while a successful claim prevents duplicate
+posts for that hour. Missing downtime enrichment is shown as unavailable rather
+than suppressing an otherwise exact board.
+
+The same every-minute trigger also wakes clan logs and persistent clan trackers,
+but those jobs are independently gated and staggered away from the hourly retry
+window. The Worker always suppresses both jobs during UTC `:00` through `:03`,
+even if an older interval or offset variable would otherwise place them there.
+Clan logs default to every 15 minutes from UTC `:05`; persistent clan trackers
+default to every 20 minutes from UTC `:11`. An in-isolate run guard prevents a
+slow invocation of either subsystem from starting another copy of itself on the
+next cron wake-up. `CLAN_LOG_POST_INTERVAL_MINUTES` defaults to 15 and older
+lower values are clamped to that safe minimum.
 
 Assignments are stored per Discord channel/thread and target. A clan board, user
 board, and league board can coexist in the same channel/thread because each
@@ -1529,9 +1677,10 @@ Use `GET /admin/hourly/status` with the Luna Discord Worker's admin token to
 verify stored assignments, due state, the last Discord error, and whether the
 required bot/API tokens are present. If `/hourly clan`, `/hourly user`, or
 `/hourly league` works but no hourly post follows, make sure the worker
-receiving Discord interactions is the same deployed worker that has the
-`* * * * *` cron trigger. An hourly-only trigger removes the readiness retries
-and can make user boards disappear while clan boards keep working.
+receiving Discord interactions is the same deployed worker that owns the cron
+trigger. `0 * * * *` is compatible and performs one bounded delivery run;
+`* * * * *` is recommended because it also provides recovery invocations at
+`:01`, `:02`, and `:03`.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for

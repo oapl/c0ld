@@ -2,6 +2,8 @@ const SNAPSHOT_TABLE = "c0ld_clan_snapshots";
 const SNAPSHOT_ARCHIVE_TABLE = "c0ld_clan_snapshots_archive";
 const CURRENT_TABLE = "c0ld_clan_current";
 const BATTLE_RUNS_TABLE = "c0ld_battle_runs";
+const BATTLE_WINDOWS_TABLE = "c0ld_battle_windows";
+const BATTLE_WINDOW_COLUMNS = "lookup_key,battle_key,display_name,started_at,ended_at,enabled,notes,updated_at";
 const CLANS_SNAPSHOT_TABLE = "c0ld_clans_snapshots";
 const CLANS_SNAPSHOT_ARCHIVE_TABLE = "c0ld_clans_snapshots_archive";
 const CLANS_CURRENT_TABLE = "c0ld_clans_current";
@@ -122,6 +124,8 @@ const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_MINUTES = 15;
 const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCHEDULE_OFFSET_MINUTES = 0;
 const DEFAULT_HOURLY_ASSIGNMENT_CLAN_SCAN_LIMIT = 50;
 const DEFAULT_BATTLE_FINAL_PULL_GRACE_MINUTES = 0;
+const BATTLE_WINDOWS_CACHE_TTL_MS = 60 * 1000;
+let battleWindowsCache = { key: null, expiresAt: 0, rows: [] };
 const TOP_CLAN_REBIRTH_POINTS = 120;
 const DEFAULT_PS99_UNIVERSE_ID = 3317771874;
 const DEFAULT_PS99_ROOT_PLACE_ID = 8737899170;
@@ -196,6 +200,11 @@ export default {
           env,
           force: false
         });
+        const battleWindow = activeBattleMeta?.battleWindow || configuredBattleWindow(
+          env,
+          activeBattleMeta?.battleKey || battleKey(env),
+          activeBattleMeta?.displayName
+        );
 
         response = json({
           ok: true,
@@ -211,8 +220,25 @@ export default {
           ingest_skip_reason: gate.allowed ? null : gate.reason,
           collection_phase: gate.collection_phase || (gate.allowed ? "active_event" : "closed"),
           in_grace_period: gate.in_grace_period === true,
+          battle_end_override: {
+            configured: battleWindow.configured,
+            scoped_battle_key: battleWindow.scopedBattleKey,
+            ended_at: battleWindow.endedAt,
+            applied: battleWindow.endApplied,
+            source: battleWindow.endSource
+          },
+          battle_window: {
+            configured: battleWindow.configured,
+            scoped_battle_key: battleWindow.scopedBattleKey,
+            started_at: battleWindow.startedAt,
+            ended_at: battleWindow.endedAt,
+            start_source: battleWindow.startSource,
+            end_source: battleWindow.endSource
+          },
           battle_data_cutoff: {
-            source: "active_battle_ended_at",
+            source: battleWindow.endApplied
+              ? battleWindow.endSource || "current_battle_end_override"
+              : "active_battle_ended_at",
             final_pull_grace_minutes: battleFinalPullGraceMinutes(env),
             cutoff_at: gate.battle_cutoff_at || activeBattleMeta?.endedAt || null,
             hard_stop_at: gate.hard_stop_at || null,
@@ -570,32 +596,47 @@ async function runScheduledIngests(env, force = false, scheduledAt = null, optio
   let runBattleDataJobs = true;
 
   if (!force) {
-    const activeBattleMeta = await fetchActiveClanBattleMeta(env).catch(() => null);
-    const configuredBattleKey = activeBattleMeta?.battleKey || battleKey(env);
-    const scheduleBattleMeta = mergeBattleMeta(
-      extractBattleMeta({}, configuredBattleKey, env, {
-        allowEnvDisplayName: false,
-        allowEnvTiming: true
-      }),
-      activeBattleMeta,
-      configuredBattleKey,
-      { allowMismatch: true }
+    const scheduleTimeMs = runOptions.scheduledAt?.getTime() ?? runOptions.now.getTime();
+    const authoritativeWindows = await loadBattleWindowOverrides(env);
+    const authoritativeWindow = preferredBattleWindowOverride(
+      authoritativeWindows,
+      battleKey(env),
+      null,
+      scheduleTimeMs
     );
-    const scheduleGate = battleIngestGate({
-      activeBattleMeta,
-      battleMeta: scheduleBattleMeta,
-      battleKey: configuredBattleKey,
-      env,
-      force,
-      scheduledAt: runOptions.scheduledAt,
-      now: runOptions.now
-    });
+    let activeBattleMeta = battleWindowMeta(authoritativeWindow);
+    let configuredBattleKey = activeBattleMeta?.battleKey || battleKey(env);
+    let scheduleBattleMeta = activeBattleMeta;
 
-    if (!scheduleGate.allowed) {
+    // Supabase event windows are the scheduler's complete source of truth.
+    // Fail closed when the table is missing, empty, or unavailable so a cold
+    // Worker cannot fall back to BIG Games and resume an ended battle pull.
+    if (!authoritativeWindow) {
       runBattleDataJobs = false;
-      results.push(scheduledBattleDataSkippedResult(scheduleGate, runOptions.fetchedAt));
-    } else {
-      runOptions.activeBattleMeta = activeBattleMeta;
+      results.push(scheduledBattleDataSkippedResult({
+        reason: "battle_window_unavailable",
+        battle_key: configuredBattleKey,
+        message: "No authoritative Supabase battle window is available; scheduled battle API pulls were skipped."
+      }, runOptions.fetchedAt));
+    }
+
+    if (runBattleDataJobs) {
+      const scheduleGate = battleIngestGate({
+        activeBattleMeta,
+        battleMeta: scheduleBattleMeta,
+        battleKey: configuredBattleKey,
+        env,
+        force,
+        scheduledAt: runOptions.scheduledAt,
+        now: runOptions.now
+      });
+
+      if (!scheduleGate.allowed) {
+        runBattleDataJobs = false;
+        results.push(scheduledBattleDataSkippedResult(scheduleGate, runOptions.fetchedAt));
+      } else {
+        runOptions.activeBattleMeta = activeBattleMeta;
+      }
     }
   }
 
@@ -1129,7 +1170,7 @@ async function handleIngest(env, source, requestedClan, force = false, options =
   }
 
   const battleMeta = mergeBattleMeta(
-    extractBattleMeta(battle, resolvedBattleKey, env, {
+    await extractBattleMetaWithOverrides(battle, resolvedBattleKey, env, {
       allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
       allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
     }),
@@ -1658,14 +1699,23 @@ async function globalLeaderboardSourceMode(url, env) {
   if (["clan", "clans", "battle", "clan-battle"].includes(requested)) return "clans";
 
   const activeBattle = await fetchActiveClanBattleMeta(env).catch(() => null);
-  if (!activeBattle) return "leagues";
 
   const now = Date.now();
-  const startsAt = new Date(activeBattle.startedAt || 0).getTime();
-  const endsAt = new Date(activeBattle.endedAt || 0).getTime();
-  const hasStarted = !Number.isFinite(startsAt) || startsAt <= 0 || startsAt <= now;
-  const hasNotEnded = !Number.isFinite(endsAt) || endsAt <= 0 || endsAt > now;
-  return hasStarted && hasNotEnded ? "clans" : "leagues";
+  if (activeBattle) {
+    const startsAt = new Date(activeBattle.startedAt || 0).getTime();
+    const endsAt = new Date(activeBattle.endedAt || 0).getTime();
+    const hasStarted = !Number.isFinite(startsAt) || startsAt <= 0 || startsAt <= now;
+    const hasNotEnded = !Number.isFinite(endsAt) || endsAt <= 0 || endsAt > now;
+    if (hasStarted && hasNotEnded) return "clans";
+  }
+
+  const leagueState = await fetchLeagueScheduledCollectionState(env).catch(() => null);
+  if (leagueState?.active === true) return "leagues";
+
+  // With no live event, retain the latest Clan Battle's final snapshot. An
+  // ended League must never become the automatic fallback merely because the
+  // Clan Battle has also ended.
+  return "clans";
 }
 
 async function handleLeagueGlobalLeaderboard(url, env) {
@@ -3751,6 +3801,7 @@ async function handleGlobalSearch(request, env) {
   const query = String(url.searchParams.get("q") || url.searchParams.get("username") || "").trim();
   const historyHoursValue = globalSearchHistoryHours(env, url.searchParams.get("history_hours") || url.searchParams.get("hours"));
   const historyLimit = globalSearchHistoryLimit(env, url.searchParams.get("history_limit"));
+  const includeBattleHistory = url.searchParams.get("battle_history") === "1";
 
   if (!query) {
     throw httpError(400, "Missing search query. Use ?q=username.");
@@ -3788,10 +3839,12 @@ async function handleGlobalSearch(request, env) {
       return handleGlobalLeaderboardPoolSearch(url, env, clan, query, poolSourceMode);
     }
 
-    return cacheJson(await searchGlobalRankCandidates(env, globalRankRunClanForTrackedMember(env, clan), query, null, {
+    const runClan = globalRankRunClanForTrackedMember(env, clan);
+    const candidateResult = await searchGlobalRankCandidates(env, runClan, query, null, {
       historyHours: historyHoursValue,
       historyLimit
-    }), env);
+    });
+    return cacheJson(await attachRetainedGlobalBattleHistory(env, candidateResult, runClan, includeBattleHistory), env);
   }
 
   const foundClan = String(found.clan_name || clan).trim() || clan;
@@ -3822,7 +3875,7 @@ async function handleGlobalSearch(request, env) {
         normalizeText(candidateClan) === normalizeText(foundClan)
       );
       const displayClan = candidateClan || foundClan;
-      return cacheJson({
+      const mergedCandidateResult = {
         ...candidateResult,
         clan_name: displayClan,
         row: {
@@ -3847,13 +3900,19 @@ async function handleGlobalSearch(request, env) {
           source_clan: displayClan
         },
         run
-      }, env);
+      };
+      return cacheJson(await attachRetainedGlobalBattleHistory(
+        env,
+        mergedCandidateResult,
+        runClan,
+        includeBattleHistory
+      ), env);
     }
 
-    return cacheJson(candidateResult, env);
+    return cacheJson(await attachRetainedGlobalBattleHistory(env, candidateResult, runClan, includeBattleHistory), env);
   }
 
-  const [history, runRows] = await Promise.all([
+  const [history, runRows, battleHistory] = await Promise.all([
     supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
       select: "run_key,fetched_at,event_name,battle_key,battle_display_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
       clan_name: `eq.${foundClan}`,
@@ -3868,6 +3927,9 @@ async function handleGlobalSearch(request, env) {
         run_key: `eq.${found.run_key}`,
         limit: "1"
       })
+      : Promise.resolve([]),
+    includeBattleHistory
+      ? loadRetainedGlobalBattleHistory(env, foundClan, found.user_id)
       : Promise.resolve([])
   ]);
 
@@ -3911,8 +3973,138 @@ async function handleGlobalSearch(request, env) {
       clan_member_count: toNumber(run?.clan_member_count) || null
     },
     run: run ? { ...run, leaderboard_name: leaderboardName, event_name: leaderboardName } : null,
-    history: stabilizeGlobalSearchRankHistory(normalizedHistory)
+    history: stabilizeGlobalSearchRankHistory(normalizedHistory),
+    battle_history: battleHistory
   }, env);
+}
+
+async function attachRetainedGlobalBattleHistory(env, result, runClan, includeBattleHistory) {
+  if (!includeBattleHistory || !result?.row?.user_id) return result;
+
+  return {
+    ...result,
+    battle_history: await loadRetainedGlobalBattleHistory(env, runClan, result.row.user_id)
+  };
+}
+
+async function loadRetainedGlobalBattleHistory(env, clan, userId) {
+  let rows;
+  try {
+    rows = await supabaseRpc(env, "get_c0ld_retained_global_battle_history", {
+      p_clan_name: clan,
+      p_user_id: Math.trunc(toNumber(userId))
+    });
+  } catch (error) {
+    const message = String(error?.message || error || "");
+    if (!/(PGRST202|Could not find the function|Supabase RPC failed[^\n]*\(404\))/i.test(message)) {
+      throw error;
+    }
+    rows = await supabaseSelect(env, GLOBAL_RANK_HISTORY_TABLE, {
+      select: "run_key,fetched_at,event_name,battle_key,battle_display_name,clan_name,global_rank,global_points,total_global_players,clan_rank,clan_points,found",
+      user_id: `eq.${userId}`,
+      order: "fetched_at.desc",
+      limit: "2500"
+    });
+  }
+  if (!rows.length) return [];
+
+  const runKeys = [...new Set(rows
+    .filter(row => !String(row.battle_key || "").trim() && !String(row.battle_display_name || "").trim())
+    .map(row => String(row.run_key || "").trim())
+    .filter(Boolean))];
+  const runRows = [];
+  for (const batch of chunkValues(runKeys, 100)) {
+    runRows.push(...await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "run_key,battle_key,battle_display_name,event_name,total_global_players,candidate_player_count,finished_at,updated_at,started_at,status",
+      run_key: batch.length === 1 ? `eq.${batch[0]}` : postgrestInFilter(batch),
+      limit: String(batch.length)
+    }));
+  }
+  const runByKey = new Map(runRows.map(row => [String(row.run_key || ""), row]));
+  const byBattle = new Map();
+
+  for (const row of rows) {
+    const run = runByKey.get(String(row.run_key || "")) || null;
+    const battleKey = String(row.battle_key || run?.battle_key || "").trim();
+    const battleName = cleanBattleDisplayName(
+      battleKey,
+      row.battle_display_name || run?.battle_display_name || row.event_name || run?.event_name
+    );
+    const identity = normalizeText(battleKey || battleName);
+    if (!identity) continue;
+
+    const candidate = {
+      ...row,
+      leaderboard_name: globalRankLeaderboardLabel(env, run || row),
+      event_name: globalRankLeaderboardLabel(env, run || row),
+      battle_key: battleKey || null,
+      battle_display_name: battleName,
+      global_rank: toNumber(row.global_rank),
+      global_points: toNumber(row.global_points),
+      total_global_players: toNumber(row.total_global_players) ||
+        toNumber(run?.total_global_players) ||
+        toNumber(run?.candidate_player_count),
+      clan_rank: toNumber(row.clan_rank),
+      clan_points: toNumber(row.clan_points)
+    };
+    const existing = byBattle.get(identity);
+    const candidateHasRank = candidate.global_rank > 0;
+    const existingHasRank = existing?.global_rank > 0;
+    if (!existing || (candidateHasRank && !existingHasRank) ||
+      (candidateHasRank === existingHasRank && Date.parse(candidate.fetched_at || 0) > Date.parse(existing.fetched_at || 0))) {
+      byBattle.set(identity, candidate);
+    }
+  }
+
+  return [...byBattle.values()];
+}
+
+async function fetchLeagueScheduledCollectionState(env) {
+  const externalBase = String(env.LEAGUE_API_BASE || DEFAULT_LEAGUE_API_BASE).replace(/\/$/, "");
+  const attempts = [];
+  if (env.LEAGUE_API_WORKER && typeof env.LEAGUE_API_WORKER.fetch === "function") {
+    attempts.push({
+      url: "https://league-api-worker.service/api/health",
+      fetcher: request => env.LEAGUE_API_WORKER.fetch(request)
+    });
+  }
+  attempts.push({
+    url: `${externalBase}/api/health`,
+    fetcher: request => fetch(request)
+  });
+
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.fetcher(new Request(attempt.url, {
+        headers: { Accept: "application/json" }
+      }));
+      const payload = parseJsonObject(await response.text()) || {};
+      if (!response.ok || payload.ok === false) continue;
+      const startAt = safeIso(payload.scheduled_collection_start_at);
+      const endAt = safeIso(payload.scheduled_collection_end_at);
+      const startMs = startAt ? new Date(startAt).getTime() : NaN;
+      const endMs = endAt ? new Date(endAt).getTime() : NaN;
+      const nowMs = Date.now();
+      const hasDetectedEventWindow = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+      return {
+        active: payload.scheduled_collection_enabled === true &&
+          payload.scheduled_collection_phase === "active_event" &&
+          hasDetectedEventWindow &&
+          nowMs >= startMs &&
+          nowMs <= endMs,
+        phase: String(payload.scheduled_collection_phase || "").trim() || null,
+        reason: String(payload.scheduled_collection_reason || "").trim() || null,
+        run_key: String(payload.league_run_key || "").trim() || null,
+        run_label: String(payload.league_run_label || "").trim() || null,
+        start_at: startAt,
+        end_at: endAt,
+        detected_event_window: hasDetectedEventWindow
+      };
+    } catch {
+      // Try the public endpoint when the service binding is unavailable.
+    }
+  }
+  return null;
 }
 
 function stabilizeGlobalSearchRankHistory(rows) {
@@ -6173,7 +6365,7 @@ async function handleClansIngest(env, source, force = false, options = {}) {
   }
 
   const battleMeta = mergeBattleMeta(
-    extractBattleMeta(battle || {}, resolvedBattleKey, env, {
+    await extractBattleMetaWithOverrides(battle || {}, resolvedBattleKey, env, {
       allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
       allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
     }),
@@ -6592,7 +6784,7 @@ async function handleTopClanThresholds(request, env) {
       }
 
       const battleMeta = mergeBattleMeta(
-        extractBattleMeta(battle, resolvedBattleKey, env, {
+        await extractBattleMetaWithOverrides(battle, resolvedBattleKey, env, {
           allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
           allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
         }),
@@ -6993,7 +7185,7 @@ async function handleClanActivityIngest(env, source, options = {}) {
   );
   const trackedBattle = resolvedBattleKey ? trackedBattles[resolvedBattleKey] : null;
   const battleMeta = mergeBattleMeta(
-    extractBattleMeta(trackedBattle || {}, resolvedBattleKey, env, {
+    await extractBattleMetaWithOverrides(trackedBattle || {}, resolvedBattleKey, env, {
       allowEnvDisplayName: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey),
       allowEnvTiming: shouldUseBattleMetaOverride(env, configuredBattleKey, resolvedBattleKey)
     }),
@@ -17210,8 +17402,23 @@ async function fetchClanApi(clan) {
 }
 
 async function fetchActiveClanBattleMeta(env) {
+  const battleWindows = await loadBattleWindowOverrides(env);
+  const configuredWindow = preferredBattleWindowOverride(
+    battleWindows,
+    battleKey(env),
+    env.CURRENT_BATTLE_DISPLAY_NAME
+  );
+
+  // Once a battle has an authoritative Supabase window, never consult BIG
+  // Games for its timing again. This applies to health/read callers as well as
+  // scheduled ingestion, so an incorrect upstream end date cannot revive an
+  // event that the database says has ended.
+  if (configuredWindow) {
+    return battleWindowMeta(configuredWindow);
+  }
+
   if (String(env.ACTIVE_BATTLE_LOOKUP || "true").toLowerCase() === "false") {
-    return null;
+    return battleWindowMeta(configuredWindow);
   }
 
   const urls = [
@@ -17263,9 +17470,21 @@ async function fetchActiveClanBattleMeta(env) {
         configData._id,
         data._id
       ) || "").trim();
-      const meta = extractBattleMeta(merged, activeKey || battleKey(env), env, {
+      const matchingWindow = findBattleWindowOverride(battleWindows, activeKey);
+      const nowMs = Date.now();
+      const activeWindow = battleWindows.find(row => {
+        const startMs = isoToMs(row?.startedAt);
+        const endMs = isoToMs(row?.endedAt);
+        return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= nowMs && nowMs <= endMs;
+      }) || null;
+      const authoritativeWindow = activeWindow || matchingWindow;
+      const resolvedActiveKey = authoritativeWindow?.battleKey || activeKey || battleKey(env);
+      const meta = extractBattleMeta(merged, resolvedActiveKey, env, {
         allowEnvDisplayName: false,
-        allowEnvTiming: false
+        // A scoped manual end must be visible to health consumers as well as
+        // the ingest scheduler. Discord hourly delivery reads this metadata.
+        allowEnvTiming: true,
+        battleWindows
       });
       const createdAt = safeIso(firstDefined(
         data.dateCreated,
@@ -17283,12 +17502,18 @@ async function fetchActiveClanBattleMeta(env) {
         createdMs - startedMs > 24 * 60 * 60 * 1000;
 
       return {
-        battleKey: activeKey || meta.displayName || null,
+        battleKey: meta.battleKey || activeKey || meta.displayName || null,
         displayName: meta.displayName,
         // BIG Games occasionally publishes a stale StartTime from the preceding update.
         // The API record creation time is the safer boundary when that happens.
-        startedAt: startPredatesRecordByOverADay ? createdAt : (meta.startedAt || createdAt),
+        startedAt: startPredatesRecordByOverADay && !meta.startOverrideApplied
+          ? createdAt
+          : (meta.startedAt || createdAt),
         endedAt: meta.endedAt,
+        startOverrideApplied: meta.startOverrideApplied,
+        endOverrideApplied: meta.endOverrideApplied,
+        endOverrideKey: meta.endOverrideKey,
+        battleWindow: meta.battleWindow,
         raw: data
       };
     } catch (err) {
@@ -17300,7 +17525,7 @@ async function fetchActiveClanBattleMeta(env) {
     throw httpError(502, `Active clan battle API failed: ${lastError?.message || "unknown error"}`);
   }
 
-  return null;
+  return battleWindowMeta(configuredWindow);
 }
 
 async function fetchTopClans(env, requestedTopN = null) {
@@ -17476,7 +17701,7 @@ async function collectGlobalRankCandidatesForClan(env, {
     return [];
   }
 
-  const battleMeta = extractBattleMeta(battle, resolvedBattleKey, env, {
+  const battleMeta = await extractBattleMetaWithOverrides(battle, resolvedBattleKey, env, {
     allowEnvDisplayName: false,
     allowEnvTiming: false
   });
@@ -20939,13 +21164,28 @@ function battleIngestGate({
     return { allowed: true, reason: "forced", collection_phase: "forced", in_grace_period: false };
   }
 
-  if (String(env.SKIP_ENDED_BATTLE_INGEST || "true").toLowerCase() === "false") {
+  const meta = battleMeta || activeBattleMeta || {};
+  const resolvedBattleKey = battleKey || activeBattleMeta?.battleKey || null;
+  const battleWindow = meta.battleWindow || activeBattleMeta?.battleWindow || configuredBattleWindow(
+    env,
+    resolvedBattleKey,
+    meta.displayName || activeBattleMeta?.displayName
+  );
+
+  // Operator-confirmed database windows are absolute. The legacy environment
+  // switch may only disable API/config-derived end gating.
+  if (
+    !battleWindow.hardOverride &&
+    String(env.SKIP_ENDED_BATTLE_INGEST || "true").toLowerCase() === "false"
+  ) {
     return { allowed: true, reason: "disabled", collection_phase: "unrestricted", in_grace_period: false };
   }
-
-  const meta = battleMeta || activeBattleMeta || {};
-  const startedAt = meta.startedAt || activeBattleMeta?.startedAt || null;
-  const endedAt = meta.endedAt || activeBattleMeta?.endedAt || null;
+  const startedAt = battleWindow.startApplied
+    ? battleWindow.startedAt
+    : (meta.startedAt || activeBattleMeta?.startedAt || null);
+  const endedAt = battleWindow.endApplied
+    ? battleWindow.endedAt
+    : (meta.endedAt || activeBattleMeta?.endedAt || null);
   const startMs = isoToMs(startedAt);
   const cutoff = effectiveBattleIngestCutoff(env, endedAt);
   const endMs = cutoff.ms;
@@ -20955,7 +21195,11 @@ function battleIngestGate({
   const scheduledMs = scheduledAt instanceof Date && !Number.isNaN(scheduledAt.getTime())
     ? scheduledAt.getTime()
     : null;
-  const graceMinutes = battleFinalPullGraceMinutes(env);
+  // A Supabase battle-window row is an operator-confirmed hard boundary.
+  // Grace pulls are only appropriate for upstream/API-derived end times.
+  const graceMinutes = battleWindow.hardOverride
+    ? 0
+    : battleFinalPullGraceMinutes(env);
   const hardStopMs = Number.isFinite(endMs)
     ? endMs + graceMinutes * 60 * 1000
     : NaN;
@@ -20974,11 +21218,12 @@ function battleIngestGate({
       battle_started_at: startedAt,
       battle_ended_at: endedAt,
       battle_cutoff_at: cutoff.iso,
-      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
+      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null,
+      battle_end_override_applied: battleWindow.endApplied
     };
   }
 
-  if (Number.isFinite(hardStopMs) && nowMs >= hardStopMs) {
+  if (Number.isFinite(hardStopMs) && scheduledMs === null && nowMs >= hardStopMs) {
     return {
       allowed: false,
       reason: "battle_final_pull_hard_stop",
@@ -20990,7 +21235,8 @@ function battleIngestGate({
       battle_started_at: startedAt,
       battle_ended_at: endedAt,
       battle_cutoff_at: cutoff.iso,
-      hard_stop_at: new Date(hardStopMs).toISOString()
+      hard_stop_at: new Date(hardStopMs).toISOString(),
+      battle_end_override_applied: battleWindow.endApplied
     };
   }
 
@@ -21006,7 +21252,8 @@ function battleIngestGate({
       battle_started_at: startedAt,
       battle_ended_at: endedAt,
       battle_cutoff_at: cutoff.iso,
-      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
+      hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null,
+      battle_end_override_applied: battleWindow.endApplied
     };
   }
 
@@ -21037,7 +21284,8 @@ function battleIngestGate({
     battle_started_at: startedAt,
     battle_ended_at: endedAt,
     battle_cutoff_at: cutoff.iso,
-    hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null
+    hard_stop_at: Number.isFinite(hardStopMs) ? new Date(hardStopMs).toISOString() : null,
+    battle_end_override_applied: battleWindow.endApplied
   };
 }
 
@@ -22552,8 +22800,196 @@ function activeBattleMatches(activeMeta, battleKeyValue, displayName) {
   return activeKeys.some(activeKey => localKeys.includes(activeKey));
 }
 
+function normalizeBattleWindowRow(row) {
+  const battleKeyValue = String(row?.battle_key || "").trim();
+  const displayName = String(row?.display_name || battleKeyValue).trim();
+  const lookupKey = normalizeText(row?.lookup_key || battleKeyValue || displayName);
+  const startedAt = safeIso(row?.started_at);
+  const endedAt = safeIso(row?.ended_at);
+
+  if (!lookupKey || !battleKeyValue || !startedAt || !endedAt || row?.enabled === false) {
+    return null;
+  }
+
+  return {
+    lookupKey,
+    battleKey: battleKeyValue,
+    displayName: displayName || battleKeyValue,
+    startedAt,
+    endedAt,
+    enabled: true,
+    notes: row?.notes || null,
+    updatedAt: safeIso(row?.updated_at),
+    source: "supabase_battle_windows"
+  };
+}
+
+async function loadBattleWindowOverrides(env, options = {}) {
+  if (!env?.SUPABASE_URL || !env?.SUPABASE_SERVICE_KEY) return [];
+
+  const cacheKey = String(env.SUPABASE_URL).replace(/\/$/, "");
+  const now = Date.now();
+  if (
+    options.force !== true &&
+    battleWindowsCache.key === cacheKey &&
+    battleWindowsCache.expiresAt > now
+  ) {
+    return battleWindowsCache.rows;
+  }
+
+  try {
+    const rows = await supabaseSelect(env, BATTLE_WINDOWS_TABLE, {
+      select: BATTLE_WINDOW_COLUMNS,
+      enabled: "eq.true",
+      order: "started_at.desc",
+      limit: "500"
+    });
+    const normalized = (Array.isArray(rows) ? rows : [])
+      .map(normalizeBattleWindowRow)
+      .filter(Boolean);
+    battleWindowsCache = {
+      key: cacheKey,
+      expiresAt: now + BATTLE_WINDOWS_CACHE_TTL_MS,
+      rows: normalized
+    };
+    return normalized;
+  } catch (err) {
+    const staleRows = battleWindowsCache.key === cacheKey
+      ? battleWindowsCache.rows
+      : [];
+    console.warn("battle window override lookup failed", err?.message || String(err));
+    return staleRows;
+  }
+}
+
+function findBattleWindowOverride(rows, battleKeyValue, displayName = null) {
+  const candidateKeys = [battleKeyValue, displayName]
+    .map(normalizeText)
+    .filter(Boolean);
+  if (!candidateKeys.length) return null;
+
+  return (Array.isArray(rows) ? rows : []).find(row => {
+    const rowKeys = [row?.lookupKey, row?.battleKey, row?.displayName]
+      .map(normalizeText)
+      .filter(Boolean);
+    return candidateKeys.some(key => rowKeys.includes(key));
+  }) || null;
+}
+
+function preferredBattleWindowOverride(rows, battleKeyValue = null, displayName = null, nowMs = Date.now()) {
+  const windows = (Array.isArray(rows) ? rows : [])
+    .map(row => ({
+      row,
+      startMs: isoToMs(row?.startedAt),
+      endMs: isoToMs(row?.endedAt)
+    }))
+    .filter(item => Number.isFinite(item.startMs) && Number.isFinite(item.endMs));
+
+  const active = windows
+    .filter(item => item.startMs <= nowMs && nowMs <= item.endMs)
+    .sort((a, b) => b.startMs - a.startMs)[0];
+  if (active) return active.row;
+
+  const direct = findBattleWindowOverride(rows, battleKeyValue, displayName);
+  if (direct) return direct;
+
+  const latestEnded = windows
+    .filter(item => item.endMs < nowMs)
+    .sort((a, b) => b.endMs - a.endMs)[0];
+  if (latestEnded) return latestEnded.row;
+
+  const next = windows
+    .filter(item => item.startMs > nowMs)
+    .sort((a, b) => a.startMs - b.startMs)[0];
+  return next?.row || null;
+}
+
+function battleWindowMeta(row) {
+  if (!row) return null;
+  return {
+    battleKey: row.battleKey,
+    displayName: row.displayName || row.battleKey,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    startOverrideApplied: true,
+    endOverrideApplied: true,
+    endOverrideKey: row.lookupKey || row.battleKey,
+    battleWindow: {
+      configured: true,
+      hardOverride: true,
+      scopedBattleKey: row.battleKey,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      startApplied: true,
+      endApplied: true,
+      startSource: row.source || "supabase_battle_windows",
+      endSource: row.source || "supabase_battle_windows",
+      row
+    },
+    raw: null
+  };
+}
+
+function configuredBattleWindow(env, battleKeyValue, displayName = null, options = {}) {
+  const databaseWindow = findBattleWindowOverride(
+    options.battleWindows,
+    battleKeyValue,
+    displayName
+  );
+  if (databaseWindow) {
+    return battleWindowMeta(databaseWindow).battleWindow;
+  }
+
+  const allowEnvironment = options.allowEnvironment !== false;
+  const configuredStartedAt = allowEnvironment ? safeIso(env.CURRENT_BATTLE_START_ISO) : null;
+  const configuredEndedAt = allowEnvironment ? safeIso(env.CURRENT_BATTLE_END_ISO) : null;
+  const scopedBattleKey = String(
+    env.CURRENT_BATTLE_WINDOW_KEY || env.CURRENT_BATTLE_END_KEY || ""
+  ).trim() || null;
+  const normalizedScope = normalizeText(scopedBattleKey);
+  const candidateKeys = [battleKeyValue, displayName]
+    .map(normalizeText)
+    .filter(Boolean);
+  const scopeMatches = !normalizedScope || candidateKeys.includes(normalizedScope);
+  const environmentStartApplied = Boolean(configuredStartedAt && scopeMatches);
+  const environmentEndApplied = Boolean(configuredEndedAt && scopeMatches);
+  const startedAt = environmentStartApplied ? configuredStartedAt : null;
+  const endedAt = environmentEndApplied ? configuredEndedAt : null;
+
+  return {
+    configured: Boolean(startedAt || endedAt),
+    hardOverride: false,
+    scopedBattleKey: (environmentStartApplied || environmentEndApplied)
+      ? (scopedBattleKey || battleKeyValue || displayName || null)
+      : null,
+    startedAt,
+    endedAt,
+    startApplied: Boolean(startedAt),
+    endApplied: Boolean(endedAt),
+    startSource: startedAt ? "environment" : null,
+    endSource: endedAt ? "environment" : null,
+    row: null
+  };
+}
+
 function mergeBattleMeta(meta, activeMeta, battleKeyValue, options = {}) {
   if (!activeMeta) return meta;
+
+  if (meta?.battleWindow?.hardOverride) return meta;
+
+  if (activeMeta?.battleWindow?.hardOverride) {
+    return {
+      ...meta,
+      battleKey: activeMeta.battleKey || battleKeyValue || meta?.battleKey,
+      displayName: activeMeta.displayName || meta?.displayName,
+      startedAt: activeMeta.startedAt,
+      endedAt: activeMeta.endedAt,
+      startOverrideApplied: true,
+      endOverrideApplied: true,
+      endOverrideKey: activeMeta.endOverrideKey || activeMeta.battleKey,
+      battleWindow: activeMeta.battleWindow
+    };
+  }
 
   const canUseActive =
     options.allowMismatch ||
@@ -22565,12 +23001,24 @@ function mergeBattleMeta(meta, activeMeta, battleKeyValue, options = {}) {
     ...meta,
     displayName: activeMeta.displayName || meta?.displayName,
     startedAt: meta?.startedAt || activeMeta.startedAt,
-    endedAt: meta?.endedAt || activeMeta.endedAt
+    endedAt: meta?.endedAt || activeMeta.endedAt,
+    battleWindow: meta?.battleWindow || activeMeta?.battleWindow || null
   };
 }
 
 function mergeLatestMeta(latest, activeMeta, options = {}) {
   if (!latest || !activeMeta) return latest;
+
+  if (activeMeta?.battleWindow?.hardOverride) {
+    return {
+      ...latest,
+      battle_key: activeMeta.battleKey || latest.battle_key,
+      battle_display_name: activeMeta.displayName || latest.battle_display_name,
+      battle_started_at: activeMeta.startedAt,
+      battle_ended_at: activeMeta.endedAt,
+      battle_window: activeMeta.battleWindow
+    };
+  }
 
   const canUseActive =
     options.allowMismatch ||
@@ -22582,7 +23030,8 @@ function mergeLatestMeta(latest, activeMeta, options = {}) {
     ...latest,
     battle_display_name: activeMeta.displayName || latest.battle_display_name,
     battle_started_at: activeMeta.startedAt || latest.battle_started_at,
-    battle_ended_at: activeMeta.endedAt || latest.battle_ended_at
+    battle_ended_at: activeMeta.endedAt || latest.battle_ended_at,
+    battle_window: latest.battle_window || activeMeta.battleWindow || null
   };
 }
 
@@ -22606,10 +23055,7 @@ function extractBattleMeta(battle, resolvedBattleKey, env, options = {}) {
   const displayOverride = options.allowEnvDisplayName === false
     ? null
     : env.CURRENT_BATTLE_DISPLAY_NAME;
-  const endOverride = options.allowEnvTiming === false
-    ? null
-    : env.CURRENT_BATTLE_END_ISO;
-  const displayName = String(firstDefined(
+  const discoveredDisplayName = String(firstDefined(
     displayOverride,
     getFirstValue(battle, [
       "ConfigName",
@@ -22628,28 +23074,38 @@ function extractBattleMeta(battle, resolvedBattleKey, env, options = {}) {
     prettifyBattleKey(resolvedBattleKey),
     resolvedBattleKey
   ));
+  const battleWindow = configuredBattleWindow(env, resolvedBattleKey, discoveredDisplayName, {
+    allowEnvironment: options.allowEnvTiming !== false,
+    battleWindows: options.battleWindows
+  });
+  const displayName = battleWindow.hardOverride
+    ? (battleWindow.row?.displayName || battleWindow.row?.battleKey || discoveredDisplayName)
+    : discoveredDisplayName;
 
-  const startedAt = safeIso(getFirstValue(battle, [
-    "StartedAt",
-    "startedAt",
-    "started_at",
-    "StartTime",
-    "startTime",
-    "start_time",
-    "Started",
-    "started",
-    "Start",
-    "start",
-    "BeginTime",
-    "beginTime",
-    "begin_time",
-    "BeganAt",
-    "beganAt",
-    "began_at"
-  ]));
+  const startedAt = safeIso(firstDefined(
+    battleWindow.startApplied ? battleWindow.startedAt : null,
+    getFirstValue(battle, [
+      "StartedAt",
+      "startedAt",
+      "started_at",
+      "StartTime",
+      "startTime",
+      "start_time",
+      "Started",
+      "started",
+      "Start",
+      "start",
+      "BeginTime",
+      "beginTime",
+      "begin_time",
+      "BeganAt",
+      "beganAt",
+      "began_at"
+    ])
+  ));
 
   const endedAt = safeIso(firstDefined(
-    endOverride,
+    battleWindow.endApplied ? battleWindow.endedAt : null,
     getFirstValue(battle, [
       "EndedAt",
       "endedAt",
@@ -22672,10 +23128,25 @@ function extractBattleMeta(battle, resolvedBattleKey, env, options = {}) {
   ));
 
   return {
+    battleKey: battleWindow.hardOverride
+      ? (battleWindow.row?.battleKey || resolvedBattleKey)
+      : resolvedBattleKey,
     displayName,
     startedAt,
-    endedAt
+    endedAt,
+    startOverrideApplied: battleWindow.startApplied,
+    endOverrideApplied: battleWindow.endApplied,
+    endOverrideKey: battleWindow.scopedBattleKey,
+    battleWindow
   };
+}
+
+async function extractBattleMetaWithOverrides(battle, resolvedBattleKey, env, options = {}) {
+  const battleWindows = options.battleWindows || await loadBattleWindowOverrides(env);
+  return extractBattleMeta(battle, resolvedBattleKey, env, {
+    ...options,
+    battleWindows
+  });
 }
 
 function getFirstValue(source, keys) {
