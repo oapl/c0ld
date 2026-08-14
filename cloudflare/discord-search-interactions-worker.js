@@ -9934,21 +9934,20 @@ function summarizeGlobalHistory(payload) {
   const current = payload.row;
   const rows = [
     ...(Array.isArray(payload.battle_history) ? payload.battle_history : []),
-    ...(Array.isArray(payload.history) ? payload.history : []),
     current
   ];
   const groups = new Map();
 
   for (const row of rows) {
-    const name = historyRecordName(
-      row.leaderboard_name || row.event_name || row.battle_display_name || row.battle_key || "Global Leaderboard"
-    );
-    const key = historyRecordKey(row.battle_key || name);
+    const identity = globalHistoryBattleIdentity(row);
+    if (!identity) continue;
+    const key = canonicalClanHistoryKey(identity);
     if (!key) continue;
+    const name = historyRecordName(globalHistoryBattleName(row, identity));
     const candidate = {
       key,
       name,
-      battle_key: row.battle_key || null,
+      battle_key: String(row.battle_key || identity).trim() || null,
       clan_name: row.source_clan || row.clan_name || null,
       global_rank: finiteHistoryNumber(row.global_rank),
       total_global_players: finiteHistoryNumber(row.total_global_players),
@@ -9962,6 +9961,34 @@ function summarizeGlobalHistory(payload) {
   }
 
   return [...groups.values()].filter(row => row.global_rank !== null || row.points !== null);
+}
+
+function globalHistoryBattleIdentity(row) {
+  const battleKey = String(row?.battle_key || "").trim();
+  if (battleKey && !isGenericGlobalHistoryLabel(battleKey)) return battleKey;
+
+  for (const value of [row?.battle_display_name, row?.event_name, row?.leaderboard_name]) {
+    const text = String(value || "").trim();
+    if (text && !isGenericGlobalHistoryLabel(text)) return text;
+  }
+  return "";
+}
+
+function globalHistoryBattleName(row, fallback) {
+  for (const value of [row?.battle_display_name, row?.battle_key, row?.event_name, fallback]) {
+    const text = String(value || "").trim();
+    if (text && !isGenericGlobalHistoryLabel(text)) return text;
+  }
+  return fallback;
+}
+
+function isGenericGlobalHistoryLabel(value) {
+  const key = historyRecordKey(value);
+  return key === "globalleaderboard"
+    || key === "globalrank"
+    || key === "globalranks"
+    || key === "clanbattleleaderboard"
+    || key === "playerleaderboard";
 }
 
 function normalizeLeagueHistoryRows(rows) {
@@ -10004,9 +10031,18 @@ function mergeHistorySummaryRows(...rowGroups) {
 }
 
 function mergeClanHistoryRecord(map, row) {
-  const key = canonicalClanHistoryKey(row?.battle_key || row?.key || row?.name);
+  const identity = row?.battle_key || row?.key || row?.name;
+  if (isGenericGlobalHistoryLabel(identity)) return;
+  const key = canonicalClanHistoryKey(identity);
   if (!key) return;
-  const normalizedRow = row.key === key ? row : { ...row, key };
+  const normalizedName = isGenericGlobalHistoryLabel(row?.name)
+    ? historyRecordName(identity)
+    : row?.name;
+  const normalizedRow = {
+    ...row,
+    key,
+    name: normalizedName || historyRecordName(identity)
+  };
   const existing = map.get(key);
   if (!existing) {
     map.set(key, normalizedRow);

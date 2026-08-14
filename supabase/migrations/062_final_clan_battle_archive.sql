@@ -116,6 +116,7 @@ language plpgsql
 security invoker
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_battle_key text;
   v_display_name text;
@@ -136,19 +137,24 @@ begin
     coalesce(window_row.ended_at, run_row.battle_ended_at)
   into v_battle_key, v_display_name, v_started_at, v_ended_at
   from (
-    select battle_key, display_name, started_at, ended_at
-    from public.c0ld_battle_windows
-    where enabled
-      and (lower(battle_key) = lower(p_battle_key) or lookup_key = lower(p_battle_key))
-    order by updated_at desc
+    select battle_window.battle_key, battle_window.display_name,
+      battle_window.started_at, battle_window.ended_at
+    from public.c0ld_battle_windows battle_window
+    where battle_window.enabled
+      and (
+        lower(battle_window.battle_key) = lower(p_battle_key)
+        or battle_window.lookup_key = lower(p_battle_key)
+      )
+    order by battle_window.updated_at desc
     limit 1
   ) window_row
   full join (
-    select battle_key, battle_display_name, battle_started_at, battle_ended_at
-    from public.c0ld_battle_runs
-    where lower(battle_key) = lower(p_battle_key)
-      and battle_ended_at is not null
-    order by updated_at desc
+    select battle_run.battle_key, battle_run.battle_display_name,
+      battle_run.battle_started_at, battle_run.battle_ended_at
+    from public.c0ld_battle_runs battle_run
+    where lower(battle_run.battle_key) = lower(p_battle_key)
+      and battle_run.battle_ended_at is not null
+    order by battle_run.updated_at desc
     limit 1
   ) run_row on true;
 
@@ -166,15 +172,15 @@ begin
   order by coalesce(rank_run.finished_at, rank_run.started_at) desc, rank_run.run_key desc
   limit 1;
 
-  select max(fetched_at) into v_member_at
-  from public.c0ld_clan_snapshots
-  where lower(battle_key) = lower(v_battle_key)
-    and fetched_at <= v_ended_at;
+  select max(member_snapshot.fetched_at) into v_member_at
+  from public.c0ld_clan_snapshots member_snapshot
+  where lower(member_snapshot.battle_key) = lower(v_battle_key)
+    and member_snapshot.fetched_at <= v_ended_at;
 
-  select max(fetched_at) into v_clan_at
-  from public.c0ld_clans_snapshots
-  where lower(battle_key) = lower(v_battle_key)
-    and fetched_at <= v_ended_at;
+  select max(clan_snapshot.fetched_at) into v_clan_at
+  from public.c0ld_clans_snapshots clan_snapshot
+  where lower(clan_snapshot.battle_key) = lower(v_battle_key)
+    and clan_snapshot.fetched_at <= v_ended_at;
 
   insert into public.c0ld_battle_final_runs (
     battle_key, battle_display_name, battle_started_at, battle_ended_at,
@@ -347,16 +353,17 @@ begin
     updated_at = now();
 
   select count(*) into v_global_count
-  from public.c0ld_battle_player_finals
-  where battle_key = v_battle_key and source_kind = 'global_candidate';
+  from public.c0ld_battle_player_finals player_final
+  where player_final.battle_key = v_battle_key
+    and player_final.source_kind = 'global_candidate';
 
   select count(*) into v_player_count
-  from public.c0ld_battle_player_finals
-  where battle_key = v_battle_key;
+  from public.c0ld_battle_player_finals player_final
+  where player_final.battle_key = v_battle_key;
 
   select count(*) into v_clan_count
-  from public.c0ld_battle_clan_finals
-  where battle_key = v_battle_key;
+  from public.c0ld_battle_clan_finals clan_final
+  where clan_final.battle_key = v_battle_key;
 
   update public.c0ld_battle_final_runs archive_run set
     global_player_count = v_global_count,
@@ -393,6 +400,70 @@ as $$
 declare
   v_rows integer;
 begin
+  with parsed_imports as (
+    select
+      import.*,
+      nullif(substring(import.battle_name from '\*\*([^*]+)\*\*'), '') as emphasized_battle_name,
+      lower(regexp_replace(coalesce(
+        nullif(substring(import.battle_name from '\*\*([^*]+)\*\*'), ''),
+        nullif(import.battle_key, ''),
+        nullif(import.battle_name, '')
+      ), '[^a-zA-Z0-9]+', '', 'g')) as parsed_identity,
+      lower(regexp_replace(coalesce(nullif(import.battle_key, ''), nullif(import.battle_name, '')),
+        '[^a-zA-Z0-9]+', '', 'g')) as key_identity
+    from public.c0ld_cwbot_history_imports import
+    where import.status = 'approved'
+      and import.user_id is not null
+  ), canonical_imports as (
+    select
+      parsed.*,
+      case
+        when parsed.emphasized_battle_name is not null then parsed.parsed_identity
+        when parsed.key_identity like 'battle%'
+          and exists (
+            select 1
+            from parsed_imports counterpart
+            where counterpart.key_identity = substring(parsed.key_identity from 7)
+          )
+          then substring(parsed.key_identity from 7)
+        else parsed.parsed_identity
+      end as canonical_identity
+    from parsed_imports parsed
+  ), resolved_imports as (
+    select
+      canonical.*,
+      coalesce(native_run.battle_key, battle_window.battle_key, canonical.canonical_identity) as resolved_battle_key,
+      coalesce(
+        native_run.battle_display_name,
+        battle_window.display_name,
+        canonical.emphasized_battle_name,
+        nullif(canonical.battle_name, ''),
+        canonical.battle_key
+      ) as resolved_battle_name,
+      coalesce(native_run.battle_started_at, battle_window.started_at) as resolved_started_at,
+      coalesce(native_run.battle_ended_at, battle_window.ended_at) as resolved_ended_at,
+      row_number() over (
+        partition by canonical.canonical_identity, canonical.user_id
+        order by canonical.created_at asc, canonical.id asc
+      ) as duplicate_order
+    from canonical_imports canonical
+    left join lateral (
+      select final_run.*
+      from public.c0ld_battle_final_runs final_run
+      where lower(regexp_replace(final_run.battle_key, '[^a-zA-Z0-9]+', '', 'g')) = canonical.canonical_identity
+      order by final_run.battle_ended_at desc
+      limit 1
+    ) native_run on true
+    left join lateral (
+      select configured_window.*
+      from public.c0ld_battle_windows configured_window
+      where lower(regexp_replace(configured_window.battle_key, '[^a-zA-Z0-9]+', '', 'g')) = canonical.canonical_identity
+      order by configured_window.ended_at desc
+      limit 1
+    ) battle_window on true
+    where canonical.canonical_identity is not null
+      and canonical.canonical_identity <> ''
+  )
   insert into public.c0ld_battle_player_finals (
     battle_key, user_id, battle_display_name, battle_started_at, battle_ended_at,
     final_snapshot_at, username, clan_name, member_rank, clan_points,
@@ -400,12 +471,12 @@ begin
     source_kind, source_priority, updated_at
   )
   select
-    import.battle_key,
+    import.resolved_battle_key,
     import.user_id,
-    coalesce(nullif(import.battle_name, ''), import.battle_key),
-    coalesce(window_row.started_at, import.final_snapshot_at, import.created_at),
-    coalesce(window_row.ended_at, import.final_snapshot_at, import.created_at),
-    coalesce(import.final_snapshot_at, window_row.ended_at, import.created_at),
+    import.resolved_battle_name,
+    coalesce(import.resolved_started_at, import.final_snapshot_at, import.created_at),
+    coalesce(import.resolved_ended_at, import.final_snapshot_at, import.created_at),
+    coalesce(import.final_snapshot_at, import.resolved_ended_at, import.created_at),
     import.username,
     import.clan_name,
     import.clan_rank,
@@ -416,11 +487,8 @@ begin
     'cw_bot',
     100,
     now()
-  from public.c0ld_cwbot_history_imports import
-  left join public.c0ld_battle_windows window_row
-    on lower(window_row.battle_key) = lower(import.battle_key)
-   and window_row.enabled
-  where import.status = 'approved'
+  from resolved_imports import
+  where import.duplicate_order = 1
   on conflict (battle_key, user_id) do update set
     username = coalesce(public.c0ld_battle_player_finals.username, excluded.username),
     clan_name = coalesce(public.c0ld_battle_player_finals.clan_name, excluded.clan_name),
@@ -432,6 +500,37 @@ begin
     updated_at = now();
 
   get diagnostics v_rows = row_count;
+
+  insert into public.c0ld_battle_final_runs (
+    battle_key, battle_display_name, battle_started_at, battle_ended_at,
+    archived_player_count, status, last_error, archived_at, updated_at
+  )
+  select
+    final.battle_key,
+    min(final.battle_display_name),
+    min(final.battle_started_at),
+    max(final.battle_ended_at),
+    count(*)::integer,
+    'complete',
+    'Supplementary CW-Bot import only; no native final source was retained.',
+    now(),
+    now()
+  from public.c0ld_battle_player_finals final
+  where final.source_kind = 'cw_bot'
+  group by final.battle_key
+  on conflict (battle_key) do nothing;
+
+  update public.c0ld_battle_final_runs final_run set
+    archived_player_count = counts.player_count,
+    updated_at = now()
+  from (
+    select final.battle_key, count(*)::integer as player_count
+    from public.c0ld_battle_player_finals final
+    group by final.battle_key
+  ) counts
+  where final_run.battle_key = counts.battle_key
+    and final_run.archived_player_count is distinct from counts.player_count;
+
   return v_rows;
 end;
 $$;
