@@ -444,6 +444,7 @@ Useful endpoints:
 | `/api/external-history/cwbot/archived-threads` | Protected paginated discovery of public archived threads under one Discord channel. Used automatically by the guild importer. |
 | `/api/external-history/cwbot/channel-scan` | Protected, read-only scanner for one page of Discord channel history. It classifies CW_Bot history responses by direct history markers or a preceding `!history username` command and returns a resumable `next_before_message_id` cursor. |
 | `/api/external-history/bigbot/import` | Imports the current page of an official Big Bot Clan Battle History message. For paginated results, advance the Discord message and submit the same link again; known battles are skipped. |
+| `/admin/discord-guilds` | Protected Discord interactions Worker endpoint that lists every server visible to Luna's configured bot token. Use `scripts/list-luna-guilds.ps1` rather than exposing the bot token locally. |
 | `/api/reward-cutoffs?type=players` | Current reward cutoff points for configured player or clan tiers. Use `type=clans` for clan reward ranks. |
 | `/api/persistent-posts/post` | Protected `POST` endpoint that creates or edits the combined Cutoffs, Roblox Status, and Versions posts. Add `?force=1`, and optionally `&type=cutoffs`, `&type=roblox-status`, or `&type=versions`. |
 | `/api/persistent-posts/status` | Protected `GET` endpoint that reports the three stored message IDs, channel IDs, message existence, and active refresh schedule. |
@@ -515,6 +516,48 @@ threads, then gives each one a separate resumable checkpoint. After reviewing
 the checkpoint files, rerun the same command without `-ScanOnly` and `-Reset`
 to import the candidates. Channels the bot cannot read are reported and skipped
 without stopping the rest of the server scan.
+
+To scan the two configured Luna servers together, set these variables on
+`c0ld-clan-api-worker`:
+
+```text
+CW_BOT_IMPORT_ENABLED=true
+CW_BOT_IMPORT_GUILD_IDS=1457088639006670979,1418655634479644694
+CW_BOT_IMPORT_REQUIRE_ADMIN=true
+CW_BOT_IMPORT_AUTO_APPROVE=true
+CW_BOT_IMPORT_PREVENT_OVERWRITE=true
+```
+
+Delete `CW_BOT_IMPORT_CHANNEL_IDS` or leave it blank. First perform a read-only
+scan of both servers:
+
+```powershell
+cd "C:\Users\oaadmin\Documents\GitHub\c0ld"
+.\scripts\import-cwbot-guilds-history.ps1 -ScanOnly -Reset
+```
+
+After reviewing the checkpoint manifests, import from those checkpoints without
+resetting them:
+
+```powershell
+.\scripts\import-cwbot-guilds-history.ps1
+```
+
+The wrapper prompts once for the clan API Worker's `INGEST_ADMIN_TOKEN`, keeps
+separate resumable checkpoints for each server and channel, and preserves
+successful work if one server fails. Add `-IncludeArchivedThreads` only for a
+separate pass when Luna can read the applicable thread parents.
+
+After deploying the current Discord interactions Worker, list every server Luna
+can see with:
+
+```powershell
+.\scripts\list-luna-guilds.ps1
+```
+
+That script prompts for the Discord interactions Worker's
+`REGISTER_ADMIN_TOKEN`; it does not require the Discord bot token on the local
+computer.
 
 Archived public threads are intentionally a separate pass because Discord may
 deny archive enumeration even when ordinary channel discovery succeeds. Add
@@ -752,6 +795,7 @@ Required Worker variables:
 | `PLAYER_REWARD_CUTOFF_RANKS` | Optional comma-separated legacy player reward tiers. Defaults to `3,10,100,250,500,1000,10000`. |
 | `CLAN_REWARD_CUTOFF_RANKS` | Fallback comma-separated `/clan rewards` ranks. The Clan API Worker supplies the current battle's category labels from BIG Games. |
 | `LEAGUE_REWARD_CUTOFF_RANKS` | Optional comma-separated League reward tiers used by `/league rewards`, League-mode `/leaderboard rewards`, and the persistent League player cutoffs. Defaults to `1,3,15,50,100,250,2000`. |
+| `CLAN_TRACKER_POST_INTERVAL_MINUTES` | Optional. Set to `20`. Persistent clan member and clan comparison posts are edited at UTC minutes `00`, `20`, and `40`; values below 20 are clamped to 20. |
 | `PLAYER_REWARD_LEADERBOARD_LABEL` | Optional full legacy player rewards header, such as `Update 88 Leaderboard`. |
 | `PS99_UPDATE_LABEL` | Optional shorter player rewards header source, such as `Update 88`; the Worker appends `Leaderboard`. |
 | `PS99_UPDATE_NUMBER` | Optional numeric fallback for the player rewards header, such as `88`. |
@@ -1463,11 +1507,17 @@ Worker uses `LEAGUE_API_WORKER` or `LEAGUE_API_BASE` for `/hourly league`.
 c0ld-themed member progress image, posts a preview immediately, then refreshes
 hourly with the same scheduler as clan and user boards.
 
-The Discord Worker needs an every-minute cron trigger:
+The Discord interactions Worker needs an every-minute cron trigger:
 
 ```text
 * * * * *
 ```
+
+The Worker does not post every minute. Clan and league delivery is gated to UTC
+minute `:00`, with `:01` and `:02` reserved as retries. User boards depend on
+the completed global-rank scan that begins at `:00`, so they may retry through
+`:05` while still rendering only the exact `:00` and prior-hour `:00` samples.
+User, clan, and league hourly boards all retry only during UTC minutes `0`, `1`, and `2`. User boards use the exact clan-member snapshots for their points and one-hour gain so they do not wait for the slower global-rank scan to finish.
 
 Hourly boards become due at `HOURLY_CLAN_POST_MINUTE` and then drain through a
 fair queue on later minute ticks. Different Discord channels can post in
@@ -1487,7 +1537,8 @@ verify stored assignments, due state, the last Discord error, and whether the
 required bot/API tokens are present. If `/hourly clan`, `/hourly user`, or
 `/hourly league` works but no hourly post follows, make sure the worker
 receiving Discord interactions is the same deployed worker that has the
-`* * * * *` cron trigger.
+`* * * * *` cron trigger. An hourly-only trigger removes the readiness retries
+and can make user boards disappear while clan boards keep working.
 
 Register the command globally with
 `scripts/register-discord-hourly-command.ps1`. Force an immediate post for

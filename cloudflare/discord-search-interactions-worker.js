@@ -60,13 +60,19 @@ const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
 const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
-const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
+const HOURLY_CLAN_POST_WINDOW_MINUTES = 3;
+const DEFAULT_HOURLY_CLAN_POST_CONCURRENCY = 6;
 const HOURLY_USER_ASSIGNMENT_PREFIX = "user:";
 const HOURLY_LEAGUE_ASSIGNMENT_PREFIX = "league:";
 const HTG_BUILD_ID = "luna-auto-mode-history-rewards-2026-08-03a";
 const DEFAULT_HTG_SETUP_STEP_IMAGE_URLS = ["https://i.imgur.com/AxIccNZ.png", "https://i.imgur.com/AT959cP.png"];
 const SEARCH_CHART_MAX_OBSERVED_GAP_MS = 90 * 60 * 1000;
+const DEFAULT_SEARCH_CHART_INTERVAL_MINUTES = 20;
+const DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES = 0;
+const DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES = 8;
+const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
+const DISCORD_INTERACTION_BUILD_ID = "cwbot-multi-guild-tools-2026-08-13a";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -87,6 +93,7 @@ export default {
         return json({
           ok: true,
           service: "c0ld-discord-search",
+          build_id: DISCORD_INTERACTION_BUILD_ID,
           interactions_endpoint: "/discord/interactions"
         });
       }
@@ -281,6 +288,11 @@ export default {
         return await discordDebug(url, env);
       }
 
+      if (request.method === "GET" && url.pathname === "/admin/discord-guilds") {
+        requireAdmin(request, env);
+        return await listDiscordGuilds(url, env);
+      }
+
       if (request.method === "GET" && url.pathname === "/admin/search-debug") {
         requireAdmin(request, env);
         return await searchDebug(url, env);
@@ -307,6 +319,18 @@ export default {
 
       return json({ ok: false, message: "Not found" }, 404);
     } catch (err) {
+      if (request.method === "POST" && url.pathname === "/discord/interactions") {
+        console.error("Discord interaction failed before acknowledgement", {
+          build_id: DISCORD_INTERACTION_BUILD_ID,
+          message: err?.message || String(err),
+          stack: err?.stack || null
+        });
+        return interactionJson(messageResponse(
+          "Luna could not start this command. Please try again in a moment.",
+          true
+        ));
+      }
+
       return json({
         ok: false,
         message: err?.message || String(err),
@@ -320,9 +344,25 @@ export default {
     if (shouldRunHourlyScheduledPosts(env, scheduledTime)) {
       ctx.waitUntil(runHourlyClanAssignments(env, {
         scheduledTime,
-        alignToHour: true
+        now: scheduledTime
+      }).then(result => {
+        const failed = Array.isArray(result?.results)
+          ? result.results.filter(item => item?.ok === false)
+          : [];
+        if (failed.length) {
+          console.warn("Hourly assignment delivery incomplete", {
+            scheduled_at: new Date(scheduledTime).toISOString(),
+            failed: failed.map(item => ({
+              assignment_key: item.assignment_key || null,
+              target_type: item.target_type || null,
+              target_name: item.target_name || null,
+              channel_id: item.channel_id || null,
+              error: item.error || null
+            }))
+          });
+        }
       }).catch(err => {
-        console.error("Hourly clan delivery failed", err);
+        console.error("Hourly assignment delivery failed", err);
       }));
     }
 
@@ -651,7 +691,7 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(messageResponse("Use `/lb player:<roblox username>`.", true));
     }
 
-    ctx.waitUntil(completeSearchInteraction(interaction, env, player));
+    deferInteractionWork(ctx, "lb-search", interaction, () => completeSearchInteraction(interaction, env, player));
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
       data: {
@@ -733,22 +773,32 @@ async function handleInteraction(request, env, ctx) {
   if (commandName === "clan") {
     const clanPath = getOfflineSubcommandPath(interaction);
     const subcommand = clanPath.subcommand;
-    if (clanPath.group === "log") {
+    const legacyDirectLog = !clanPath.group && subcommand === "log";
+    if (clanPath.group === "log" || legacyDirectLog) {
       const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
       if (!clanName) {
-        return interactionJson(messageResponse("Use `/clan log view clan:<name>` to view activity, `/clan log view clan:<name> assign:<channel>` to send future posts, or `/clan log remove clan:<name>` to stop them.", true));
+        return interactionJson(messageResponse("Use `/clan log view clan:<name>` to view activity, `/clan log assign clan:<name> channel:<channel>` to send future posts, `/clan log remove clan:<name>` to stop them, or `/clan log reset clan:<name>` to erase the generated log and start clean.", true));
       }
 
       const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
-      const action = subcommand === "remove" ? "remove" : assignmentChannelId ? "assign" : "view";
-      if (subcommand !== "view" && subcommand !== "remove") {
-        return interactionJson(messageResponse("Use `/clan log view` or `/clan log remove`.", true));
+      const action = subcommand === "reset"
+        ? "reset"
+        : subcommand === "remove"
+        ? "remove"
+        : subcommand === "assign" || assignmentChannelId
+          ? "assign"
+          : "view";
+      if (!legacyDirectLog && !["view", "assign", "remove", "reset"].includes(subcommand)) {
+        return interactionJson(messageResponse("Use `/clan log view`, `/clan log assign`, `/clan log remove`, or `/clan log reset`.", true));
       }
-      if (action === "remove" && assignmentChannelId) {
-        return interactionJson(messageResponse("`/clan log remove` only needs the clan name.", true));
+      if (action === "assign" && !assignmentChannelId) {
+        return interactionJson(messageResponse("Choose a text channel or thread with `channel:<channel>`.", true));
+      }
+      if (["remove", "reset"].includes(action) && assignmentChannelId) {
+        return interactionJson(messageResponse(`\`/clan log ${action}\` only needs the clan name.`, true));
       }
 
-      if (action === "assign" || action === "remove") {
+      if (["assign", "remove", "reset"].includes(action)) {
         if (!interaction.guild_id) {
           return interactionJson(messageResponse("Clan activity log setup must be run inside the Discord server that should receive the posts.", true));
         }
@@ -765,15 +815,58 @@ async function handleInteraction(request, env, ctx) {
       });
     }
 
+    if (clanPath.group === "compare") {
+      const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
+      const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
+      if (!clanName) {
+        return interactionJson(messageResponse("Use `/clan compare view clan:<name>` to preview a comparison, `/clan compare assign clan:<name> channel:<channel>` to keep one updated, or `/clan compare remove clan:<name>` to remove it.", true));
+      }
+      const action = subcommand === "remove"
+        ? "remove"
+        : subcommand === "assign"
+          ? "assign"
+          : "view";
+      if (!["view", "assign", "remove"].includes(subcommand)) {
+        return interactionJson(messageResponse("Use `/clan compare view`, `/clan compare assign`, or `/clan compare remove`.", true));
+      }
+      if (action === "assign" && !assignmentChannelId) {
+        return interactionJson(messageResponse("Choose a text channel or thread with `channel:<channel>`.", true));
+      }
+      if (action === "remove" && assignmentChannelId) {
+        return interactionJson(messageResponse("`/clan compare remove` only needs the clan name.", true));
+      }
+      if (action === "assign" || action === "remove") {
+        if (!interaction.guild_id) {
+          return interactionJson(messageResponse("Persistent clan comparisons must be managed from inside the Discord server that receives them.", true));
+        }
+        const permitted = await memberCanManageServerTracker(interaction, env, { allowDiscordManage: false });
+        if (!permitted) {
+          return interactionJson(messageResponse("You need the configured Luna administrator role to change a persistent clan comparison.", true));
+        }
+      }
+
+      ctx.waitUntil(completeClanTrackerInteraction(interaction, env, action, clanName, "compare"));
+      return interactionJson({
+        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+        data: {
+          flags: action !== "view" || ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
+        }
+      });
+    }
+
     if (clanPath.group === "tracker") {
       const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
       if (!clanName) {
-        return interactionJson(messageResponse("Use `/clan tracker view clan:<name>` to preview a tracker, `/clan tracker assign clan:<name> channel:<channel>` to keep one updated there, or `/clan tracker remove clan:<name>` to remove it.", true));
+        return interactionJson(messageResponse("Use `/clan tracker view clan:<name>` to preview a tracker or `/clan tracker assign clan:<name> channel:<channel>` to keep one updated there.", true));
       }
 
       const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
-      const action = subcommand === "remove" ? "remove" : subcommand === "assign" ? "assign" : "view";
-      if (!["view", "assign", "remove"].includes(action)) {
+      const action = subcommand === "remove"
+        ? "remove"
+        : subcommand === "assign"
+          ? "assign"
+          : "view";
+      if (!["view", "assign", "remove"].includes(subcommand)) {
         return interactionJson(messageResponse("Use `/clan tracker view`, `/clan tracker assign`, or `/clan tracker remove`.", true));
       }
       if (action === "assign" && !assignmentChannelId) {
@@ -792,7 +885,7 @@ async function handleInteraction(request, env, ctx) {
         }
       }
 
-      ctx.waitUntil(completeClanTrackerInteraction(interaction, env, action, clanName));
+      ctx.waitUntil(completeClanTrackerInteraction(interaction, env, action, clanName, "members"));
       return interactionJson({
         type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
         data: {
@@ -921,7 +1014,7 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(messageResponse("Use `/player info player:<roblox username>`.", true));
     }
 
-    ctx.waitUntil(completeSearchInteraction(interaction, env, player));
+    deferInteractionWork(ctx, "player-search", interaction, () => completeSearchInteraction(interaction, env, player));
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
       data: {
@@ -1072,7 +1165,7 @@ async function handleInteraction(request, env, ctx) {
     return interactionJson(messageResponse("Use `/search username:<roblox username>`.", true));
   }
 
-  ctx.waitUntil(completeSearchInteraction(interaction, env, username));
+  deferInteractionWork(ctx, "search", interaction, () => completeSearchInteraction(interaction, env, username));
   return interactionJson({
     type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
     data: {
@@ -1118,16 +1211,21 @@ async function buildSearchResponse(query, env) {
   row.clan_points ??= displayRow.clan_points;
   row.clan_rank ??= displayRow.clan_rank;
   row.total_global_players ??= displayRow.total_global_players;
-  const avatarUrl = await searchAvatarUrl(displayRow, env);
   const resultClan = String(displayRow.source_clan || displayRow.clan_name || scanClan).trim();
   const sourceMode = searchResponseSourceMode(payload, displayRow);
   const isLeagueMode = sourceMode === "leagues";
-  const leaguePayload = isLeagueMode && resultClan
-    ? await fetchLeagueCurrentPayload(resultClan, env).catch(() => null)
-    : null;
-  const leagueRankPayload = isLeagueMode && !positiveInteger(displayRow.global_rank)
-    ? await fetchLeaguePlayerPoolRank(query, displayRow.user_id, env).catch(() => null)
-    : null;
+  const [avatarUrl, leaguePayload, leagueRankPayload, eventState] = await Promise.all([
+    searchAvatarUrl(displayRow, env),
+    isLeagueMode && resultClan
+      ? fetchLeagueCurrentPayload(resultClan, env).catch(() => null)
+      : Promise.resolve(null),
+    isLeagueMode && !positiveInteger(displayRow.global_rank)
+      ? fetchLeaguePlayerPoolRank(query, displayRow.user_id, env).catch(() => null)
+      : Promise.resolve(null),
+    isLeagueMode
+      ? Promise.resolve(null)
+      : hourlyClanDeliveryEventState(env).catch(() => null)
+  ]);
   const primaryClanName = String(scanClan).toLowerCase();
   const isPrimaryClanMember = String(resultClan || "").toLowerCase() === primaryClanName;
   const clanRankText = formatClanRank(displayRow, payload.run);
@@ -1136,7 +1234,6 @@ async function buildSearchResponse(query, env) {
     : displayRow.clan_rank
       ? `🔰 Clan Leaderboard Rank: **${rank(row.clan_rank)}**`
       : null;
-  const eventState = isLeagueMode ? null : await hourlyClanDeliveryEventState(env).catch(() => null);
   const freshnessLines = isLeagueMode
     ? leagueSearchFreshnessLines(row, leaguePayload)
     : eventState?.reason === "event_ended"
@@ -1149,7 +1246,7 @@ async function buildSearchResponse(query, env) {
     title: "Global Search Results",
     color: 0x58a6ff,
     description: [
-      `🧑 Name: **${displayName(row)}**`,
+      `🧑 Name: **${searchUsername(row)}**`,
       `🏰 Clan: **${resultClan.toUpperCase()}**`,
       clanRankLine,
       "",
@@ -1188,7 +1285,7 @@ async function buildSearchResponse(query, env) {
 
     embed.title = "League Global Search Results";
     embed.description = [
-      `\u{1F9D1} Name: **${displayName(row)}**`,
+      `\u{1F9D1} Name: **${searchUsername(row)}**`,
       `\u{1F3C6} League: **${resultClan || "Unknown"}**`,
       leaguePayload?.league_rank ? `\u{1F4CA} League Rank: **${rank(leaguePayload.league_rank)}**` : null,
       "",
@@ -1348,14 +1445,15 @@ async function loadRobloxProfileAvatar(row, env, extraUrls = []) {
   addCandidate(row?.thumbnail_url);
   addCandidate(row?.thumbnailUrl);
 
+  for (const url of candidates) {
+    const avatar = await loadHistoryAvatar(url).catch(() => null);
+    if (avatar) return avatar;
+  }
+
   const userId = positiveInteger(row?.user_id || row?.roblox_user_id || row?.robloxUserId || row?.id);
   if (userId) {
     const freshUrl = await searchAvatarUrl({ user_id: userId }, env).catch(() => null);
-    addCandidate(freshUrl);
-  }
-
-  for (const url of candidates) {
-    const avatar = await loadHistoryAvatar(url).catch(() => null);
+    const avatar = freshUrl ? await loadHistoryAvatar(freshUrl).catch(() => null) : null;
     if (avatar) return avatar;
   }
   return null;
@@ -1371,19 +1469,19 @@ function searchChartHistoryHours(env) {
 }
 
 function searchChartHistoryLimit(env) {
-  const configured = Number(env.SEARCH_CHART_HISTORY_LIMIT || 300);
-  return Math.max(24, Math.min(1000, Math.round(Number.isFinite(configured) ? configured : 300)));
+  const configured = Number(env.SEARCH_CHART_HISTORY_LIMIT || 96);
+  return Math.max(24, Math.min(1000, Math.round(Number.isFinite(configured) ? configured : 96)));
 }
 
-async function buildSearchChartAttachment(payload, row, env, avatarUrl = null) {
-  const samples = searchChartSamples(payload, row);
+async function buildSearchChartAttachment(payload, row, env, avatarUrl = null, options = {}) {
+  const samples = Array.isArray(options.samples) ? options.samples : searchChartSamples(payload, row);
   if (!samples.length) return null;
 
   const minT = Math.min(...samples.map(item => item.t));
   const maxT = Math.max(...samples.map(item => item.t));
   const markers = await fetchSearchChartMarkers(env, minT, maxT).catch(() => ({ updates: [], restarts: [] }));
   const bytes = await renderSearchProfileChartPng(payload, row, samples, markers, avatarUrl || row.avatar_url || row.avatarUrl || null, env);
-  const filename = `global-search-${chartFilenamePart(displayName(row))}-${chartFilenamePart(row.event_name || row.battle_key || "current")}.png`;
+  const filename = `global-search-${chartFilenamePart(searchUsername(row))}-${chartFilenamePart(row.event_name || row.battle_key || "current")}.png`;
   return { filename, bytes };
 }
 
@@ -1406,6 +1504,8 @@ function searchChartSamples(payload, row) {
     byTime.set(String(t), {
       t,
       rawT: new Date(t).toISOString(),
+      scheduleT: searchChartRunScheduleTime(item?.run_key),
+      runKey: String(item?.run_key || "").trim() || null,
       points,
       rank: rankValue
     });
@@ -1414,10 +1514,97 @@ function searchChartSamples(payload, row) {
   return [...byTime.values()].sort((a, b) => a.t - b.t);
 }
 
+function searchChartRunScheduleTime(runKey) {
+  const match = String(runKey || "").trim().match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)$/i);
+  if (!match) return null;
+  const t = new Date(match[1]).getTime();
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+function searchChartIntervalMinutes(env = {}) {
+  const configured = Number(env.SEARCH_CHART_INTERVAL_MINUTES || DEFAULT_SEARCH_CHART_INTERVAL_MINUTES);
+  return Math.max(5, Math.min(60, Number.isFinite(configured) ? Math.round(configured) : DEFAULT_SEARCH_CHART_INTERVAL_MINUTES));
+}
+
+function searchChartIntervalOffsetMinutes(env = {}, intervalMinutes = DEFAULT_SEARCH_CHART_INTERVAL_MINUTES) {
+  const configured = Number(env.SEARCH_CHART_INTERVAL_OFFSET_MINUTES ?? DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES);
+  const offset = Number.isFinite(configured) ? Math.round(configured) : DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES;
+  return ((offset % intervalMinutes) + intervalMinutes) % intervalMinutes;
+}
+
+function searchChartAlignedSamples(samples, env = {}) {
+  const intervalMinutes = searchChartIntervalMinutes(env);
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const offsetMs = searchChartIntervalOffsetMinutes(env, intervalMinutes) * 60 * 1000;
+  const configuredDrift = Number(env.SEARCH_CHART_SCHEDULE_DRIFT_MINUTES || DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES);
+  const driftMs = Math.min(
+    intervalMs / 2,
+    Math.max(60 * 1000, (Number.isFinite(configuredDrift) ? configuredDrift : DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES) * 60 * 1000)
+  );
+  const bySlot = new Map();
+
+  for (const sample of samples || []) {
+    const sourceT = Number.isFinite(sample?.scheduleT) ? sample.scheduleT : sample?.t;
+    if (!Number.isFinite(sourceT)) continue;
+    const slotT = Math.round((sourceT - offsetMs) / intervalMs) * intervalMs + offsetMs;
+    const scheduleDriftMs = Math.abs(sourceT - slotT);
+    if (scheduleDriftMs > driftMs) continue;
+
+    const candidate = {
+      ...sample,
+      observedT: sample.t,
+      t: slotT,
+      scheduleDriftMs
+    };
+    const existing = bySlot.get(String(slotT));
+    const candidateObservedDrift = Math.abs((candidate.observedT || slotT) - slotT);
+    const existingObservedDrift = Math.abs((existing?.observedT || slotT) - slotT);
+    const shouldReplace = !existing ||
+      scheduleDriftMs < existing.scheduleDriftMs ||
+      (scheduleDriftMs === existing.scheduleDriftMs && candidateObservedDrift < existingObservedDrift) ||
+      (scheduleDriftMs === existing.scheduleDriftMs && candidateObservedDrift === existingObservedDrift && (candidate.observedT || 0) > (existing.observedT || 0));
+    if (shouldReplace) bySlot.set(String(slotT), candidate);
+  }
+
+  return [...bySlot.values()].sort((a, b) => a.t - b.t);
+}
+
 async function fetchSearchChartMarkers(env, minT, maxT) {
-  const updates = await fetchSearchChartVersionMarkers(env, minT, maxT).catch(() => []);
-  const restarts = await fetchSearchChartRestartMarkers(env, minT, maxT).catch(() => []);
+  const [updates, restarts] = await Promise.all([
+    fetchSearchChartVersionMarkers(env, minT, maxT).catch(() => []),
+    fetchSearchChartRestartMarkers(env, minT, maxT).catch(() => [])
+  ]);
   return { updates, restarts };
+}
+
+function deferInteractionWork(ctx, label, interaction, task) {
+  const acknowledgedAt = Date.now();
+  const work = (async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const startedAt = Date.now();
+    try {
+      await task();
+      console.log("Deferred Discord interaction completed", {
+        build_id: DISCORD_INTERACTION_BUILD_ID,
+        label,
+        interaction_id: String(interaction?.id || ""),
+        start_delay_ms: startedAt - acknowledgedAt,
+        duration_ms: Date.now() - startedAt
+      });
+    } catch (err) {
+      console.error("Deferred Discord interaction failed", {
+        build_id: DISCORD_INTERACTION_BUILD_ID,
+        label,
+        interaction_id: String(interaction?.id || ""),
+        start_delay_ms: startedAt - acknowledgedAt,
+        duration_ms: Date.now() - startedAt,
+        message: err?.message || String(err),
+        stack: err?.stack || null
+      });
+    }
+  })();
+
+  ctx.waitUntil(work);
 }
 
 async function fetchSearchChartVersionMarkers(env, minT, maxT) {
@@ -1498,18 +1685,21 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}, 
   const unknownColor = color.zero;
   const updateColor = color.cyan;
   const restartColor = color.orange;
-  const name = row.username || row.display_name || `user_${row.user_id}`;
+  const name = searchUsername(row);
   const eventName = row.event_name || row.battle_display_name || row.battle_key || "Current Event";
   const clan = String(row.source_clan || row.clan_name || payload?.clan_name || "Clan").toUpperCase();
   const updatedAt = row.fetched_at || row.updated_at || payload?.run?.finished_at;
-  const latest = samples[samples.length - 1] || {};
+  const intervalMinutes = searchChartIntervalMinutes(env);
+  const alignedSamples = searchChartAlignedSamples(samples, env);
+  const timelineSamples = alignedSamples.length ? alignedSamples : samples;
+  const latest = timelineSamples[timelineSamples.length - 1] || {};
 
-  const rawMinT = Math.min(...samples.map(item => item.t));
-  const rawMaxT = Math.max(...samples.map(item => item.t));
+  const rawMinT = Math.min(...timelineSamples.map(item => item.t));
+  const rawMaxT = Math.max(...timelineSamples.map(item => item.t));
   const singleSample = rawMaxT === rawMinT;
   const chartMaxT = singleSample ? rawMaxT + 60 * 60 * 1000 : rawMaxT;
   const chartMinT = chartMaxT - 24 * 60 * 60 * 1000;
-  const visibleSamples = samples.filter(item => item.t >= chartMinT && item.t <= chartMaxT);
+  const visibleSamples = timelineSamples.filter(item => item.t >= chartMinT && item.t <= chartMaxT);
   const chartMetrics = searchChartMetrics(visibleSamples, chartMinT, chartMaxT);
   const pointGain1h = searchChartGainMetric(payload, row, visibleSamples, 60, "gain_1h");
   const pointGain6h = searchChartGain(visibleSamples, 360);
@@ -1542,10 +1732,10 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}, 
     ["Points", shortNumber(currentPoints), pointColor],
     ["Clan", clan, color.green],
     ["Clan Rank", clanRank ? rank(clanRank) : "-", color.yellow],
-    ["1 Hour", `+${shortNumber(pointGain1h)}`, pointGain1h > 0 ? color.green : color.zeroText],
-    ["6 Hours", `+${shortNumber(pointGain6h)}`, pointGain6h > 0 ? color.green : color.zeroText],
-    ["12 Hours", `+${shortNumber(pointGain12h)}`, pointGain12h > 0 ? color.green : color.zeroText],
-    ["24 Hours", `+${shortNumber(pointGain24h)}`, pointGain24h > 0 ? color.green : color.zeroText],
+    ["1 Hour", searchChartGainLabel(pointGain1h), pointGain1h > 0 ? color.green : color.zeroText],
+    ["6 Hours", searchChartGainLabel(pointGain6h), pointGain6h > 0 ? color.green : color.zeroText],
+    ["12 Hours", searchChartGainLabel(pointGain12h), pointGain12h > 0 ? color.green : color.zeroText],
+    ["24 Hours", searchChartGainLabel(pointGain24h), pointGain24h > 0 ? color.green : color.zeroText],
     ["Uptime", searchChartDurationLabel(chartMetrics.activeMs), activeColor],
     ["Downtime", searchChartDurationLabel(chartMetrics.downtimeMs), downtimeColor],
     ["Unknown", searchChartDurationLabel(chartMetrics.unknownMs), color.zeroText],
@@ -1554,14 +1744,14 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}, 
 
   const metricTop = leftPanel.y + 66;
   const metricRowHeight = 38;
-  const metricMaxGain = Math.max(1, pointGain1h, pointGain6h, pointGain12h, pointGain24h);
+  const metricMaxGain = Math.max(1, ...[pointGain1h, pointGain6h, pointGain12h, pointGain24h].filter(Number.isFinite));
   metricRows.forEach((metric, index) => {
     const gainValue = index >= 4 && index <= 7 ? [pointGain1h, pointGain6h, pointGain12h, pointGain24h][index - 4] : null;
     searchChartDrawMetricRow(canvas, fonts, leftPanel.x + 12, metricTop + index * metricRowHeight, leftPanel.w - 24, metricRowHeight - 4, {
       label: metric[0],
       value: metric[1],
       tone: metric[2],
-      barFraction: gainValue === null ? null : Math.max(0.04, gainValue / metricMaxGain)
+      barFraction: !Number.isFinite(gainValue) ? null : Math.max(0.04, gainValue / metricMaxGain)
     }, index, color);
   });
 
@@ -1652,7 +1842,7 @@ async function renderSearchProfileChartPng(payload, row, samples, markers = {}, 
     chartLegendX += Math.min(170, labelWidth + 78);
   }
 
-  const recentRows = searchChartIntervalRows(visibleSamples).slice(-4);
+  const recentRows = searchChartIntervalRows(visibleSamples, intervalMinutes).slice(-4);
   const recentTop = chartPanelArea.y + chartPanelArea.h - 66;
   for (let index = 0; index < 4; index += 1) {
     const recent = recentRows[index];
@@ -1767,12 +1957,14 @@ function searchChartDrawMetricRow(canvas, fonts, x, y, width, height, metric, in
   hourlyDrawRightText(canvas, rowFont, metric.value, x + width - 14, textY, 16, metric.tone, width - 190);
 }
 
-function searchChartIntervalRows(samples) {
+function searchChartIntervalRows(samples, intervalMinutes = DEFAULT_SEARCH_CHART_INTERVAL_MINUTES) {
   const rows = [];
+  const intervalMs = intervalMinutes * 60 * 1000;
   for (let index = 1; index < samples.length; index += 1) {
     const previous = samples[index - 1];
     const current = samples[index];
     if (previous.points === null || current.points === null) continue;
+    if (current.t - previous.t !== intervalMs) continue;
     rows.push({
       time: current.t,
       gain: Math.max(0, current.points - previous.points),
@@ -1906,17 +2098,18 @@ function searchChartMetrics(samples, rangeStart = null, rangeEnd = null) {
 }
 
 function searchChartGain(samples, minutes) {
-  if (!samples.length) return 0;
-  const latest = samples[samples.length - 1];
-  if (latest.points === null) return 0;
+  if (!samples.length) return null;
+  const latest = [...samples].reverse().find(sample => sample.points !== null);
+  if (!latest) return null;
 
   const target = latest.t - minutes * 60 * 1000;
-  let baseline = null;
-  for (const sample of samples) {
-    if (sample.t <= target && sample.points !== null) baseline = sample;
-  }
-  if (!baseline) baseline = samples.find(sample => sample.points !== null) || null;
-  return Math.max(0, latest.points - (baseline?.points ?? latest.points));
+  const baseline = samples.find(sample => sample.t === target && sample.points !== null) || null;
+  if (!baseline) return null;
+  return Math.max(0, latest.points - baseline.points);
+}
+
+function searchChartGainLabel(value) {
+  return Number.isFinite(value) ? `+${shortNumber(value)}` : "N/A";
 }
 
 function searchChartGainMetric(payload, row, samples, minutes, key) {
@@ -2746,30 +2939,14 @@ async function completeHourlyClanInteraction(interaction, env) {
         enabled: true
       }
     });
-    const assignment = assignmentPayload.assignment || {
-      guild_id: guildId,
-      channel_id: requestedChannelId,
-      channel_type: Number(channel.type),
-      clan_name: hourlyStoredAssignmentTarget(targetType, targetName),
-      assigned_by: actorId,
-      enabled: true
-    };
-
-    let preview;
-    try {
-      preview = await deliverHourlyClanAssignment(env, assignment, { force: true });
-    } catch (err) {
-      preview = { ok: false, error: err?.message || String(err) };
+    if (!assignmentPayload.assignment) {
+      throw httpError(502, "Luna saved the hourly assignment but could not read it back.");
     }
 
     const destination = `<#${requestedChannelId}>`;
     const targetLabel = targetType === "user" ? "user" : targetType === "league" ? "league" : "clan";
     await editOriginalInteraction(interaction, {
-      content: preview.ok && preview.skipped
-        ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but posting is paused: ${escapeDiscordMarkdown(preview.message || preview.reason || "no recognized event is active")}`
-        : preview.ok
-          ? `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}. The first image was posted and Luna will refresh it hourly.`
-          : `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}, but the first image could not be posted: ${escapeDiscordMarkdown(preview.error || "unknown error")}`,
+      content: `Hourly ${targetLabel} picture for **${escapeDiscordMarkdown(targetName)}** is assigned to ${destination}. Luna will post it during the next top-of-hour delivery window.`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] }
@@ -3649,33 +3826,137 @@ function interactionSourceChannelId(interaction) {
 
 async function runHourlyClanAssignments(env, options = {}) {
   const force = options.force === true;
-  const alignToHour = options.alignToHour === true;
   const postMinute = hourlyScheduledPostMinute(env);
+  const now = Number(options.now || options.scheduledTime || Date.now());
+  const hourSlotMs = hourlyScheduledBucketMs(now, postMinute);
+  if (!force && !shouldRunHourlyScheduledPosts(env, now)) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "outside_top_of_hour_window",
+      checked_at: new Date(now).toISOString(),
+      scheduled_at: new Date(Number(options.scheduledTime || now)).toISOString(),
+      schedule_aligned: true,
+      post_minute: postMinute,
+      post_window_minutes: hourlyScheduledPostWindowMinutes(env),
+      post_window_minutes_by_target: hourlyScheduledPostWindows(env),
+      configured: 0,
+      due: 0,
+      results: []
+    };
+  }
+
   const response = await hourlyClanApiRequest(env, "/api/discord/hourly-assignments", {
     query: { enabled: "true", limit: 1000 }
   });
   const assignments = Array.isArray(response.assignments) ? response.assignments : [];
-  const now = Number(options.scheduledTime || Date.now());
-  const eligible = assignments.filter(assignment => (
-    force || hourlyAssignmentDue(assignment, now, { alignToHour, postMinute })
-  ));
-  const scheduledBatchSize = hourlyScheduledBatchSize(env);
-  const selected = force
-    ? eligible
-    : hourlySelectScheduledBatch(eligible, scheduledBatchSize);
+  const eligible = assignments
+    .filter(assignment => (
+      force || (
+        shouldRunHourlyScheduledPosts(env, now, hourlyAssignmentTargetType(assignment))
+        && hourlyAssignmentDue(assignment, now, { postMinute })
+      )
+    ))
+    .sort((left, right) => hourlyAssignmentDeliveryPriority(left) - hourlyAssignmentDeliveryPriority(right));
   const reportPromises = new Map();
   const eventStatePromises = new Map();
-  const results = await runHourlyDeliveryLanes(selected, assignment => runHourlyScheduledAssignment(
-    env,
-    assignment,
-    { force, now, reportPromises, eventStatePromises }
-  ));
+  const userClanSnapshotPromises = new Map();
+  const results = await mapWithConcurrency(
+    eligible,
+    hourlyPostConcurrency(env),
+    async assignment => {
+      const targetType = hourlyAssignmentTargetType(assignment);
+      const targetName = hourlyAssignmentTargetName(assignment);
+      let claimAcquired = false;
+
+      try {
+        const eventKind = targetType === "league" ? "league" : "clan_battle";
+        if (!eventStatePromises.has(eventKind)) {
+          eventStatePromises.set(eventKind, hourlyDeliveryEventState(env, targetType, now));
+        }
+        const eventState = await eventStatePromises.get(eventKind);
+        if (!eventState.active) {
+          return hourlyInactiveEventResult(assignment, eventState);
+        }
+
+        const reportKey = `${targetType}:${normalizeSearchKey(targetName)}`;
+        if (!reportPromises.has(reportKey)) {
+          reportPromises.set(reportKey, buildHourlyAssignmentReport(env, assignment, {
+            eventState,
+            hourSlotMs,
+            userClanSnapshotPromises
+          }));
+        }
+        const report = await reportPromises.get(reportKey);
+        if (!force && !shouldRunHourlyScheduledPosts(env, Date.now(), targetType)) {
+          throw httpError(409, "The top-of-hour delivery window elapsed before this board was ready.");
+        }
+        if (!force) {
+          const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
+          if (!claim.claimed) {
+            return {
+              ok: true,
+              skipped: true,
+              reason: claim.reason || "already_claimed",
+              target_type: targetType,
+              target_name: targetName,
+              clan_name: targetType === "clan" ? targetName : null,
+              username: targetType === "user" ? targetName : null,
+              league_name: targetType === "league" ? targetName : null,
+              channel_id: assignment.channel_id,
+              assignment_key: String(assignment.assignment_key || "")
+            };
+          }
+          claimAcquired = true;
+        }
+        const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
+        await updateHourlyClanAssignmentDelivery(env, assignment, {
+          last_posted_at: new Date().toISOString(),
+          last_message_id: posted.id || null,
+          last_snapshot_at: hourlyReportSnapshotAt(report),
+          last_error: null
+        });
+        return {
+          ok: true,
+          target_type: targetType,
+          target_name: targetName,
+          clan_name: targetType === "clan" ? targetName : null,
+          username: targetType === "user" ? targetName : null,
+          league_name: targetType === "league" ? targetName : null,
+          channel_id: assignment.channel_id,
+          message_id: posted.id || null
+        };
+      } catch (err) {
+        const message = String(err?.message || err || "Unknown hourly clan delivery error").slice(0, 1000);
+        if (claimAcquired) {
+          await updateHourlyClanAssignmentDelivery(env, assignment, {
+            last_posted_at: assignment?.last_posted_at || null,
+            last_error: message
+          }).catch(() => null);
+        }
+        return {
+          ok: false,
+          target_type: targetType,
+          target_name: targetName,
+          clan_name: targetType === "clan" ? targetName : null,
+          username: targetType === "user" ? targetName : null,
+          league_name: targetType === "league" ? targetName : null,
+          channel_id: assignment.channel_id,
+          error: message
+        };
+      }
+    }
+  );
 
   return {
     ok: results.every(result => result.ok),
     scheduled_at: new Date(now).toISOString(),
-    schedule_aligned: alignToHour,
-    post_minute: alignToHour ? postMinute : null,
+    schedule_aligned: true,
+    post_minute: postMinute,
+    post_window_minutes: hourlyScheduledPostWindowMinutes(env),
+    post_window_minutes_by_target: hourlyScheduledPostWindows(env),
+    hour_slot_at: new Date(hourSlotMs).toISOString(),
+    concurrency: hourlyPostConcurrency(env),
     configured: assignments.length,
     due: eligible.length,
     selected: selected.length,
@@ -3683,6 +3964,35 @@ async function runHourlyClanAssignments(env, options = {}) {
     scheduled_batch_size: force ? null : scheduledBatchSize,
     results
   };
+}
+
+async function mapWithConcurrency(items, concurrency, callback) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), Math.max(1, items.length));
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await callback(items[index], index);
+    }
+  }));
+
+  return results;
+}
+
+function hourlyPostConcurrency(env) {
+  const value = Number(env.HOURLY_CLAN_POST_CONCURRENCY ?? DEFAULT_HOURLY_CLAN_POST_CONCURRENCY);
+  if (!Number.isFinite(value)) return DEFAULT_HOURLY_CLAN_POST_CONCURRENCY;
+  return Math.max(1, Math.min(12, Math.round(value)));
+}
+
+function hourlyAssignmentDeliveryPriority(assignment) {
+  const targetType = hourlyAssignmentTargetType(assignment);
+  if (targetType === "user") return 0;
+  if (targetType === "clan") return 1;
+  return 2;
 }
 
 async function runHourlyScheduledAssignment(env, assignment, context) {
@@ -3791,6 +4101,8 @@ async function runHourlyDeliveryLanes(assignments, deliver) {
     .map(item => item.result);
 }
 
+}
+
 async function runOneHourlyClanAssignment(url, env, options = {}) {
   const channelId = String(url.searchParams.get("channel_id") || "").trim();
   if (!/^\d{5,30}$/.test(channelId)) {
@@ -3884,14 +4196,32 @@ function hourlySelectScheduledBatch(assignments, limit) {
 }
 
 function hourlyScheduledPostMinute(env) {
-  const value = Number(env.HOURLY_CLAN_POST_MINUTE ?? DEFAULT_HOURLY_CLAN_POST_MINUTE);
+  const value = Number(env.HOURLY_CLAN_POST_MINUTE ?? DEFAULT_HOURLLY_CLAN_POST_MINUTE);
   if (!Number.isFinite(value)) return DEFAULT_HOURLY_CLAN_POST_MINUTE;
   return Math.max(0, Math.min(59, Math.round(value)));
 }
+}
 
-function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now()) {
+function hourlyScheduledPostWindows(_env) {
+  return {
+    clan: HOURLY_CLAN_POST_WINDOW_MINUTES,
+    user: HOURLY_CLAN_POST_WINDOW_MINUTES,
+    league: HOURLY_CLAN_POST_WINDOW_MINUTES
+  };
+}
+
+function hourlyScheduledPostWindowMinutes(env, targetType = "all") {
+  const windows = hourlyScheduledPostWindows(env);
+  if (Object.prototype.hasOwnProperty.call(windows, targetType)) return windows[targetType];
+  return Math.max(...Object.values(windows));
+}
+
+function shouldRunHourlyScheduledPosts(env, scheduledTime = Date.now(), targetType = "all") {
   const date = new Date(scheduledTime || Date.now());
-  return !Number.isNaN(date.getTime());
+  if (Number.isNaN(date.getTime())) return false;
+  const minute = date.getUTCMinutes();
+  const postMinute = hourlyScheduledPostMinute(env);
+  return minute >= postMinute && minute < postMinute + hourlyScheduledPostWindowMinutes(env, targetType);
 }
 
 function clanLogScheduledIntervalMinutes(env) {
@@ -3907,9 +4237,9 @@ function shouldRunClanLogScheduledPosts(env, scheduledTime = Date.now()) {
 }
 
 function clanTrackerScheduledIntervalMinutes(env) {
-  const value = Number(env.CLAN_TRACKER_POST_INTERVAL_MINUTES ?? 5);
-  if (!Number.isFinite(value)) return 5;
-  return Math.max(1, Math.min(60, Math.round(value)));
+  const value = Number(env.CLAN_TRACKER_POST_INTERVAL_MINUTES ?? DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES);
+  if (!Number.isFinite(value)) return DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES;
+  return Math.max(DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES, Math.min(60, Math.round(value)));
 }
 
 function shouldRunClanTrackerScheduledPosts(env, scheduledTime = Date.now()) {
@@ -3939,12 +4269,17 @@ function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MI
   return date.getTime();
 }
 
-function hourlyNextScheduledHourMs(lastPostedMs, now, env) {
+function hourlyNextScheduledHourMs(lastPostedMs, now, env, targetType = "all") {
   const postMinute = hourlyScheduledPostMinute(env);
   const currentBucket = hourlyScheduledBucketMs(now, postMinute);
-  if (!Number.isFinite(lastPostedMs) || lastPostedMs <= 0) return currentBucket;
+  const windowOpen = shouldRunHourlyScheduledPosts(env, now, targetType);
+  if (!Number.isFinite(lastPostedMs) || lastPostedMs <= 0) {
+    return windowOpen ? Math.max(now, currentBucket) : currentBucket + 60 * 60 * 1000;
+  }
   const minimumIntervalAt = lastPostedMs + HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000;
-  if (lastPostedMs < currentBucket) return Math.max(now, currentBucket, minimumIntervalAt);
+  if (lastPostedMs < currentBucket) {
+    return windowOpen ? Math.max(now, currentBucket, minimumIntervalAt) : currentBucket + 60 * 60 * 1000;
+  }
 
   let next = currentBucket + 60 * 60 * 1000;
   while (next <= lastPostedMs) next += 60 * 60 * 1000;
@@ -3957,6 +4292,12 @@ async function hourlyClanAssignmentStatus(env) {
   });
   const assignments = Array.isArray(response.assignments) ? response.assignments : [];
   const now = Date.now();
+  const configuredByTarget = assignments.reduce((counts, assignment) => {
+    const targetType = hourlyAssignmentTargetType(assignment);
+    counts[targetType] = (counts[targetType] || 0) + 1;
+    return counts;
+  }, { clan: 0, user: 0, league: 0 });
+
   const dueAssignments = assignments.filter(assignment => hourlyAssignmentDue(assignment, now, {
     alignToHour: true,
     postMinute: hourlyScheduledPostMinute(env)
@@ -3964,24 +4305,35 @@ async function hourlyClanAssignmentStatus(env) {
   const selectedAssignments = hourlySelectScheduledBatch(dueAssignments, hourlyScheduledBatchSize(env));
   return {
     ok: true,
+    build_id: DISCORD_INTERACTION_BUILD_ID,
     checked_at: new Date(now).toISOString(),
     configured: assignments.length,
+    configured_by_target: configuredByTarget,
     due: dueAssignments.length,
     selected_next_tick: selectedAssignments.length,
     queued: Math.max(0, dueAssignments.length - selectedAssignments.length),
     scheduled_batch_size: hourlyScheduledBatchSize(env),
     min_post_interval_minutes: HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES,
     scheduled_post_minute: hourlyScheduledPostMinute(env),
+    scheduled_post_window_minutes: hourlyScheduledPostWindowMinutes(env),
+    scheduled_post_window_minutes_by_target: hourlyScheduledPostWindows(env),
     scheduled_window_open: shouldRunHourlyScheduledPosts(env, now),
     bot_token_configured: Boolean(String(env.DISCORD_BOT_TOKEN || "").trim()),
     clan_api_token_configured: Boolean(String(env.CLAN_API_ADMIN_TOKEN || env.HOURLY_CLAN_API_TOKEN || "").trim()),
     clan_api_service_binding_enabled: hasClanApiServiceBinding(env),
-    cron_expected: "* * * * * with a fair overdue-assignment queue",
+    cron_expected: "* * * * *",
+    cron_reason: "The Worker wakes every minute. Every hourly board is restricted to UTC minutes 0-2 and uses exact top-of-hour clan snapshots for member points.",
+    retry_minutes_utc: {
+      clan: [0, 1, 2],
+      user: [0, 1, 2],
+      league: [0, 1, 2]
+    },
     assignments: assignments.map(assignment => {
       const lastPostedMs = new Date(assignment?.last_posted_at || 0).getTime();
       const hasLastPosted = Number.isFinite(lastPostedMs) && lastPostedMs > 0;
+      const targetType = hourlyAssignmentTargetType(assignment);
       const nextDueMs = hasLastPosted
-        ? hourlyNextScheduledHourMs(lastPostedMs, now, env)
+        ? hourlyNextScheduledHourMs(lastPostedMs, now, env, targetType)
         : now;
       return {
         assignment_key: String(assignment.assignment_key || ""),
@@ -3996,7 +4348,6 @@ async function hourlyClanAssignmentStatus(env) {
         league_name: hourlyAssignmentTargetType(assignment) === "league" ? hourlyAssignmentTargetName(assignment) : null,
         enabled: assignment.enabled !== false,
         due: hourlyAssignmentDue(assignment, now, {
-          alignToHour: true,
           postMinute: hourlyScheduledPostMinute(env)
         }),
         last_posted_at: assignment.last_posted_at || null,
@@ -4030,6 +4381,7 @@ async function clanTrackerAssignmentStatus(env) {
       const lastUpdatedMs = new Date(assignment?.last_updated_at || 0).getTime();
       return {
         assignment_key: String(assignment?.assignment_key || ""),
+        tracker_mode: assignment?.tracker_mode === "compare" ? "compare" : "members",
         guild_id: String(assignment?.guild_id || ""),
         channel_id: String(assignment?.channel_id || ""),
         clan_name: String(assignment?.clan_name || ""),
@@ -4057,19 +4409,29 @@ function discordChannelTypeName(value) {
 
 async function deliverHourlyClanAssignment(env, assignment, options = {}) {
   const force = options.force === true;
-  const now = Date.now();
-  if (!force && !hourlyAssignmentDue(assignment, now)) {
+  const now = Number(options.now || Date.now());
+  const hourSlotMs = hourlyScheduledBucketMs(now, hourlyScheduledPostMinute(env));
+  const targetType = hourlyAssignmentTargetType(assignment);
+  if (!force && !shouldRunHourlyScheduledPosts(env, now, targetType)) {
+    return { ok: true, skipped: true, reason: "outside_top_of_hour_window" };
+  }
+  if (!force && !hourlyAssignmentDue(assignment, now, {
+    postMinute: hourlyScheduledPostMinute(env)
+  })) {
     return { ok: true, skipped: true, reason: "not_due" };
   }
 
-  const targetType = hourlyAssignmentTargetType(assignment);
   const eventState = await hourlyDeliveryEventState(env, targetType, now);
   if (!eventState.active) {
     return hourlyInactiveEventResult(assignment, eventState);
   }
 
-  let claimAcquired = force;
+  let claimAcquired = false;
   try {
+    const report = await buildHourlyAssignmentReport(env, assignment, { eventState, hourSlotMs });
+    if (!force && !shouldRunHourlyScheduledPosts(env, Date.now(), targetType)) {
+      throw httpError(409, "The top-of-hour delivery window elapsed before this board was ready.");
+    }
     if (!force) {
       const claim = await claimHourlyClanAssignmentDelivery(env, assignment, now);
       if (!claim.claimed) {
@@ -4077,11 +4439,9 @@ async function deliverHourlyClanAssignment(env, assignment, options = {}) {
       }
       claimAcquired = true;
     }
-
-    const report = await buildHourlyAssignmentReport(env, assignment, { eventState });
     const posted = await postHourlyClanReport(env, assignment.channel_id, report, assignment);
     await updateHourlyClanAssignmentDelivery(env, assignment, {
-      last_posted_at: new Date(now).toISOString(),
+      last_posted_at: new Date().toISOString(),
       last_message_id: posted.id || null,
       last_snapshot_at: hourlyReportSnapshotAt(report),
       last_error: null
@@ -4135,7 +4495,7 @@ function hourlyStoredAssignmentTarget(targetType, targetName) {
 }
 
 function hourlyReportSnapshotAt(report) {
-  return report?.snapshot_at || report?.current?.snapshot_at || null;
+  return report?.hourly_slot_at || report?.current?.hourly_slot_at || report?.snapshot_at || report?.current?.snapshot_at || null;
 }
 
 async function buildHourlyAssignmentReport(env, assignment, options = {}) {
@@ -4145,9 +4505,24 @@ async function buildHourlyAssignmentReport(env, assignment, options = {}) {
   if (!eventState.active) {
     throw httpError(409, hourlyInactiveEventMessage(eventState));
   }
-  if (targetType === "user") return buildHourlyUserReport(env, targetName);
-  if (targetType === "league") return buildHourlyLeagueReport(env, targetName);
-  return buildHourlyClanReport(env, targetName);
+  const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
+  if (targetType === "user") {
+    return buildHourlyUserReport(env, targetName, {
+      hourSlotMs,
+      clanSnapshotPromises: options.userClanSnapshotPromises
+    });
+  }
+  if (targetType === "league") return buildHourlyLeagueReport(env, targetName, { hourSlotMs });
+  return buildHourlyClanReport(env, targetName, { hourSlotMs });
+}
+
+function requireExactHourlySlotMs(value) {
+  const slotMs = Number(value);
+  const date = new Date(slotMs);
+  if (!Number.isFinite(slotMs) || Number.isNaN(date.getTime()) || date.getUTCMinutes() !== 0 || date.getUTCSeconds() !== 0 || date.getUTCMilliseconds() !== 0) {
+    throw httpError(500, "Hourly report generation requires an exact top-of-hour slot.");
+  }
+  return slotMs;
 }
 
 async function hourlyDeliveryEventState(env, targetType, now = Date.now()) {
@@ -4271,19 +4646,21 @@ function hourlyInactiveEventMessage(eventState) {
   return eventState?.message || `No active, recognized ${name} period is available; hourly Discord posting is paused.`;
 }
 
-async function buildHourlyClanReport(env, clanNameValue) {
+async function buildHourlyClanReport(env, clanNameValue, options = {}) {
   const clan = String(clanNameValue || "").trim();
   if (!clan) throw httpError(400, "The hourly clan assignment has no clan name.");
+  const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
+  const hourSlotAt = new Date(hourSlotMs).toISOString();
 
   const ingest = await hourlyClanApiRequest(env, "/api/ingest", {
     method: "POST",
-    query: { clan }
+    query: { clan, hourly_slot: 1 }
   });
   if (ingest.skipped && !ingest.battle_key && !ingest.resolved_battle_key) {
     throw httpError(409, ingest.message || "No active clan battle is available for this hourly report.");
   }
 
-  const current = await fetchHourlyClanCurrentForReport(env, clan);
+  const current = await fetchHourlyClanCurrentForReport(env, clan, { hourSlotMs });
   if (!Array.isArray(current.rows) || !current.rows.length) {
     throw httpError(409, `No current battle rows were returned for clan ${clan}.`);
   }
@@ -4297,26 +4674,42 @@ async function buildHourlyClanReport(env, clanNameValue) {
 
   return {
     current,
-    snapshot_at: current.snapshot_at || null,
+    snapshot_at: hourSlotAt,
+    hourly_slot_at: hourSlotAt,
+    hourly_baseline_at: new Date(hourSlotMs - 60 * 60 * 1000).toISOString(),
+    hourly_elapsed_minutes: 60,
+    hourly_gain_mode: "exact_top_of_hour",
     filename: `luna-hourly-${hourlyFilenamePart(clan)}-${Date.now()}.png`,
     bytes: await renderHourlyClanBoardPng(current)
   };
 }
 
-async function fetchHourlyClanCurrentForReport(env, clan) {
+async function fetchHourlyClanCurrentForReport(env, clan, options = {}) {
   const attempts = 3;
+  const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
   let lastCurrent = null;
   let lastMissing = 0;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const current = await hourlyClanApiRequest(env, "/api/current", {
-      query: {
-        clan,
-        avatars: 0,
-        downtime: 1,
-        fresh: 1
+    let current = null;
+    try {
+      current = await hourlyClanApiRequest(env, "/api/current", {
+        query: {
+          clan,
+          avatars: 0,
+          downtime: 1,
+          fresh: 1,
+          hour_slot: new Date(hourSlotMs).toISOString()
+        }
+      });
+    } catch (err) {
+      if (attempt < attempts && Number(err?.status || 0) === 409) {
+        await sleep(1000 * attempt);
+        continue;
       }
-    });
+      throw err;
+    }
+    assertExactHourlyPayload(current, hourSlotMs, `clan ${clan}`);
     const missing = hourlyMissingDowntimeCount(current);
     if (!missing) return current;
 
@@ -4336,6 +4729,19 @@ async function fetchHourlyClanCurrentForReport(env, clan) {
     502,
     `Clan API returned ${lastMissing} inactive ${clan} row(s) without downtime_minutes${sample ? ` (${sample})` : ""}; refusing to post a stale offline board.${apiHint}`
   );
+}
+
+function assertExactHourlyPayload(payload, hourSlotMs, label) {
+  const slotMs = new Date(payload?.hourly_slot_at || 0).getTime();
+  const baselineMs = new Date(payload?.hourly_baseline_at || 0).getTime();
+  const exact = payload?.hourly_exact_ready === true
+    && payload?.hourly_gain_mode === "exact_top_of_hour"
+    && Number(payload?.hourly_elapsed_minutes) === 60
+    && slotMs === hourSlotMs
+    && baselineMs === hourSlotMs - 60 * 60 * 1000;
+  if (!exact) {
+    throw httpError(409, `Exact hourly data is not ready for ${label}; required ${new Date(hourSlotMs).toISOString()} and ${new Date(hourSlotMs - 60 * 60 * 1000).toISOString()}.`);
+  }
 }
 
 function hourlyClanReportHasReliableGains(current) {
@@ -4358,35 +4764,201 @@ function hourlyInactiveRowMissingDowntime(row) {
   return hourlyDowntimeMinutes(row) === null;
 }
 
-async function buildHourlyUserReport(env, usernameValue) {
+async function buildHourlyUserReport(env, usernameValue, options = {}) {
   const query = String(usernameValue || "").trim();
   if (!query) throw httpError(400, "The hourly user assignment has no Roblox username.");
+  const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
 
   const { payload, status, ok } = await fetchGlobalSearchPayload(query, env);
   if (!ok || payload.ok === false || !payload.row) {
     throw httpError(404, payload.message || `No global-rank result found for ${query}. ${status ? `(API ${status})` : ""}`.trim());
   }
 
-  const row = payload.row;
+  const exact = await exactHourlyUserContext(payload, payload.row, env, hourSlotMs, query, {
+    clanSnapshotPromises: options.clanSnapshotPromises
+  });
+  const row = exact.row;
   const avatarUrl = await searchAvatarUrl(row, env);
-  const chart = await buildSearchChartAttachment(payload, row, env, avatarUrl);
+  const chart = await buildSearchChartAttachment(payload, row, env, avatarUrl, { samples: exact.samples });
   if (!chart?.bytes?.byteLength) {
     throw httpError(502, `No hourly user picture could be rendered for ${query}.`);
   }
 
-  const username = displayName(row) || query;
+  const username = searchUsername(row);
   return {
-    snapshot_at: row.fetched_at || row.updated_at || payload?.run?.finished_at || payload?.generated_at || null,
+    snapshot_at: new Date(hourSlotMs).toISOString(),
+    hourly_slot_at: new Date(hourSlotMs).toISOString(),
+    hourly_baseline_at: new Date(hourSlotMs - 60 * 60 * 1000).toISOString(),
+    hourly_elapsed_minutes: 60,
+    hourly_gain_mode: "exact_top_of_hour",
     filename: `luna-hourly-user-${hourlyFilenamePart(username)}-${Date.now()}.png`,
     bytes: chart.bytes
   };
 }
 
-async function buildHourlyLeagueReport(env, leagueNameValue) {
+async function exactHourlyUserContext(payload, row, env, hourSlotMs, label, options = {}) {
+  const sourceClan = String(
+    row?.source_clan ||
+    row?.clan_name ||
+    payload?.clan_name ||
+    ""
+  ).trim();
+  if (!sourceClan) {
+    return exactHourlySearchContext(payload, row, env, hourSlotMs, label);
+  }
+
+  const snapshotKey = `${normalizeSearchKey(sourceClan)}:${hourSlotMs}`;
+  const snapshotPromises = options.clanSnapshotPromises instanceof Map
+    ? options.clanSnapshotPromises
+    : new Map();
+  if (!snapshotPromises.has(snapshotKey)) {
+    snapshotPromises.set(snapshotKey, fetchExactHourlyUserClanSnapshot(env, sourceClan, hourSlotMs));
+  }
+
+  let current;
+  try {
+    current = await snapshotPromises.get(snapshotKey);
+  } catch (err) {
+    try {
+      return exactHourlySearchContext(payload, row, env, hourSlotMs, label);
+    } catch {
+      throw err;
+    }
+  }
+
+  const userId = String(row?.user_id || "").trim();
+  const usernameKey = normalizeSearchKey(searchUsername(row) || label);
+  const member = (current.rows || []).find(candidate => (
+    (userId && String(candidate?.user_id || "").trim() === userId) ||
+    normalizeSearchKey(candidate?.username) === usernameKey
+  ));
+  if (!member) {
+    throw httpError(409, `${searchUsername(row) || label} was not present in the exact ${sourceClan} hourly snapshot.`);
+  }
+
+  const currentPoints = finiteNumber(member.total_points ?? member.points);
+  const gain1h = finiteNumber(member.gain_1h);
+  if (currentPoints === null || gain1h === null) {
+    throw httpError(409, `Exact hourly points are not ready for ${searchUsername(row) || label}.`);
+  }
+
+  const aligned = searchChartAlignedSamples(searchChartSamples(payload, row), env)
+    .filter(sample => sample.t <= hourSlotMs);
+  const rankAtOrBefore = targetMs => {
+    for (let index = aligned.length - 1; index >= 0; index -= 1) {
+      const sample = aligned[index];
+      if (sample.t <= targetMs && finiteNumber(sample.rank) !== null) return finiteNumber(sample.rank);
+    }
+    return null;
+  };
+  const currentRank = rankAtOrBefore(hourSlotMs) ?? finiteNumber(row.global_rank);
+  const baselineRank = rankAtOrBefore(hourSlotMs - 60 * 60 * 1000) ?? currentRank;
+  const baselinePoints = Math.max(0, currentPoints - Math.max(0, gain1h));
+  const exactSlots = new Set([hourSlotMs - 60 * 60 * 1000, hourSlotMs]);
+  const samples = aligned.filter(sample => !exactSlots.has(sample.t));
+  samples.push({
+    t: hourSlotMs - 60 * 60 * 1000,
+    rawT: new Date(hourSlotMs - 60 * 60 * 1000).toISOString(),
+    scheduleT: hourSlotMs - 60 * 60 * 1000,
+    runKey: null,
+    points: baselinePoints,
+    rank: baselineRank
+  });
+  samples.push({
+    t: hourSlotMs,
+    rawT: new Date(hourSlotMs).toISOString(),
+    scheduleT: hourSlotMs,
+    runKey: null,
+    points: currentPoints,
+    rank: currentRank
+  });
+  samples.sort((left, right) => left.t - right.t);
+
+  return {
+    samples,
+    row: {
+      ...row,
+      username: member.username || row.username,
+      fetched_at: new Date(hourSlotMs).toISOString(),
+      updated_at: new Date(hourSlotMs).toISOString(),
+      event_name: current.display_name || current.battle || row.event_name,
+      battle_display_name: current.display_name || row.battle_display_name,
+      battle_key: current.battle || row.battle_key,
+      source_clan: current.clan_name || sourceClan,
+      clan_name: current.clan_name || sourceClan,
+      member_rank: positiveInteger(member.rank) || row.member_rank,
+      clan_rank: positiveInteger(member.rank) || row.clan_rank,
+      global_points: currentPoints,
+      clan_points: currentPoints,
+      global_rank: currentRank,
+      gain_1h: Math.max(0, gain1h)
+    }
+  };
+}
+
+async function fetchExactHourlyUserClanSnapshot(env, clan, hourSlotMs) {
+  await hourlyClanApiRequest(env, "/api/ingest", {
+    method: "POST",
+    query: { clan, hourly_slot: 1 }
+  });
+
+  const attempts = 3;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const current = await hourlyClanApiRequest(env, "/api/current", {
+        query: {
+          clan,
+          avatars: 0,
+          downtime: 0,
+          fresh: 1,
+          hour_slot: new Date(hourSlotMs).toISOString()
+        }
+      });
+      assertExactHourlyPayload(current, hourSlotMs, `clan ${clan}`);
+      if (!Array.isArray(current.rows) || !current.rows.length) {
+        throw httpError(409, `No exact hourly member rows were returned for clan ${clan}.`);
+      }
+      return current;
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts && Number(err?.status || 0) === 409) {
+        await sleep(750 * attempt);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError || httpError(409, `Exact hourly data is not ready for clan ${clan}.`);
+}
+
+function exactHourlySearchContext(payload, row, env, hourSlotMs, label) {
+  const samples = searchChartAlignedSamples(searchChartSamples(payload, row), env);
+  const current = samples.find(sample => sample.t === hourSlotMs && sample.points !== null) || null;
+  const baseline = samples.find(sample => sample.t === hourSlotMs - 60 * 60 * 1000 && sample.points !== null) || null;
+  if (!current || !baseline) {
+    throw httpError(409, `Exact hourly data is not ready for ${label}; required ${new Date(hourSlotMs).toISOString()} and ${new Date(hourSlotMs - 60 * 60 * 1000).toISOString()}.`);
+  }
+  return {
+    samples: samples.filter(sample => sample.t <= hourSlotMs),
+    row: {
+      ...row,
+      fetched_at: new Date(hourSlotMs).toISOString(),
+      updated_at: new Date(hourSlotMs).toISOString(),
+      global_points: current.points,
+      global_rank: current.rank,
+      gain_1h: Math.max(0, current.points - baseline.points)
+    }
+  };
+}
+
+async function buildHourlyLeagueReport(env, leagueNameValue, options = {}) {
   const leagueName = String(leagueNameValue || "").trim();
   if (!leagueName) throw httpError(400, "The hourly league assignment has no league name.");
+  const hourSlotMs = requireExactHourlySlotMs(options.hourSlotMs);
 
-  const payload = await fetchLeagueCurrentPayload(leagueName, env);
+  const payload = await fetchLeagueCurrentPayload(leagueName, env, { hourSlotMs });
+  assertExactHourlyPayload(payload, hourSlotMs, `league ${leagueName}`);
   if (!Array.isArray(payload.rows) || !payload.rows.length) {
     throw httpError(409, `No current league member rows were returned for ${leagueName}.`);
   }
@@ -4402,9 +4974,13 @@ async function buildHourlyLeagueReport(env, leagueNameValue) {
 
   return {
     current: payload,
-    snapshot_at: hourlyLeagueSnapshotAt(payload),
+    snapshot_at: new Date(hourSlotMs).toISOString(),
+    hourly_slot_at: new Date(hourSlotMs).toISOString(),
+    hourly_baseline_at: new Date(hourSlotMs - 60 * 60 * 1000).toISOString(),
+    hourly_elapsed_minutes: 60,
+    hourly_gain_mode: "exact_top_of_hour",
     filename: `luna-hourly-league-${hourlyFilenamePart(displayLeagueName)}-${Date.now()}.png`,
-    bytes: await renderHourlyLeagueBoardPng(payload, historyRows)
+    bytes: await renderHourlyLeagueBoardPng(payload, historyRows, { endAt: hourSlotMs })
   };
 }
 
@@ -4459,7 +5035,8 @@ async function renderHourlyLeagueBoardPng(payload, historyRows, options = {}) {
     y: 190,
     w: 1492,
     h: 350,
-    hours: chartHours
+    hours: chartHours,
+    endAt: options.endAt
   }, color);
 
   hourlyDrawLeagueRosterTable(canvas, fonts, rows, {
@@ -4512,7 +5089,7 @@ function hourlyDrawLeagueGrowthPanel(canvas, fonts, payload, historyRows, area, 
   canvas.drawFontText(fonts.regular, "Points at 15-minute intervals", area.x + 22, area.y + 52, 14, color.muted, 520);
 
   const members = leagueChartMembers(payload).slice(0, 4);
-  const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
+  const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours, endAt: area.endAt });
   const legendY = area.y + 28;
   const legendW = Math.floor((area.w - 540) / 4);
   series.slice(0, 4).forEach((item, index) => {
@@ -6072,10 +6649,10 @@ async function fetchTopClansCommandData(env) {
   };
 }
 
-async function fetchTopClansPayloadForCommand(env, battle = "") {
+async function fetchTopClansPayloadForCommand(env, battle = "", limit = TOP_COMMAND_LIMIT) {
   const apiBase = String(env.CLAN_API_BASE || "https://c0ld-clan-api-worker.opal-dde.workers.dev").replace(/\/$/, "");
   const apiUrl = clanApiUrl(env, "/api/clans/current", apiBase);
-  apiUrl.searchParams.set("limit", String(TOP_COMMAND_LIMIT));
+  apiUrl.searchParams.set("limit", String(Math.max(1, Math.min(500, Number(limit) || TOP_COMMAND_LIMIT))));
   if (battle) apiUrl.searchParams.set("battle", battle);
   const response = await fetchClanApi(env, apiUrl, {
     headers: { Accept: "application/json", "User-Agent": "Luna-Top-Clans-Command" },
@@ -6300,6 +6877,29 @@ function handleClanLogComponent(interaction, env, ctx) {
 
 async function completeClanLogInteraction(interaction, env, action, clanName, page = 0, ownerId = "") {
   try {
+    if (action === "reset") {
+      if (!interaction.guild_id) {
+        throw httpError(400, "Clan activity log reset must be run inside the Discord server that owns the activity posts.");
+      }
+      const reset = await hourlyClanApiRequest(env, "/api/discord/clan-log-reset", {
+        method: "POST",
+        body: {
+          guild_id: interaction.guild_id,
+          clan_name: clanName
+        }
+      });
+      const eventCount = Number(reset?.removed_event_count || 0);
+      const summaryCount = Number(reset?.removed_summary_count || 0);
+      await editOriginalInteraction(interaction, {
+        content: `Clan activity logging for **${escapeDiscordMarkdown(reset?.clan_name || clanName)}** has been reset and disabled. Removed ${eventCount} generated event${eventCount === 1 ? "" : "s"} and ${summaryCount} accumulated summar${summaryCount === 1 ? "y" : "ies"}. Raw snapshots were preserved, but the derived comparison state was cleared so the next observation becomes a silent baseline. Nothing from before this reset can post when you assign it again.`,
+        allowed_mentions: { parse: [] },
+        embeds: [],
+        components: [],
+        attachments: []
+      });
+      return reset;
+    }
+
     if (action === "remove") {
       if (!interaction.guild_id) {
         throw httpError(400, "Clan activity log removal must be run inside the Discord server that owns the activity posts.");
@@ -6325,7 +6925,7 @@ async function completeClanLogInteraction(interaction, env, action, clanName, pa
     }
 
     if (action === "assign") {
-      const channelId = getCommandOption(interaction, "assign");
+      const channelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
       if (!channelId) throw httpError(400, "Choose the text channel or thread that should receive the activity posts.");
       const channel = await resolveHourlyClanChannel(interaction, env, channelId);
       if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel?.type))) {
@@ -6334,6 +6934,7 @@ async function completeClanLogInteraction(interaction, env, action, clanName, pa
 
       const activity = await fetchClanActivityDetailPayloadForCommand(clanName, env);
       const newest = newestClanActivityEvent(activity);
+      const baselineAt = new Date().toISOString();
       const assignment = await hourlyClanApiRequest(env, "/api/discord/clan-log-assignments", {
         method: "POST",
         body: {
@@ -6342,10 +6943,11 @@ async function completeClanLogInteraction(interaction, env, action, clanName, pa
           channel_type: Number(channel?.type),
           clan_name: activity.clan_name || clanName,
           assigned_by: interactionUserId(interaction),
-          // Assignment deliberately starts from the latest stored event. It does
-          // not flood the channel with historic activity that happened before setup.
+          // The event ID is a useful cursor, but the timestamp watermark must be
+          // the assignment time. Stored events can be rebuilt with different IDs,
+          // so using their old timestamps here can replay the whole activity log.
           last_event_id: clanActivityEventFingerprint(newest),
-          last_event_at: newest?.event_at || newest?.detected_at || null
+          last_event_at: baselineAt
         }
       });
       await editOriginalInteraction(interaction, {
@@ -6375,12 +6977,30 @@ function clanActivityEvents(payload) {
   const events = [
     ...(Array.isArray(payload?.clan_events) ? payload.clan_events : []),
     ...(Array.isArray(payload?.rank_events) ? payload.rank_events : [])
-  ];
+  ].sort((a, b) => clanActivityEventTime(a) - clanActivityEventTime(b));
   const seen = new Set();
+  const roleStateByMember = new Map();
   return events.filter(event => {
     const key = clanActivityEventFingerprint(event);
     if (seen.has(key)) return false;
     seen.add(key);
+
+    const eventType = String(event?.event_type || "").trim().toLowerCase();
+    if (eventType === "member_promoted" || eventType === "member_demoted") {
+      const memberKey = [
+        String(event?.battle_key || "").trim().toLowerCase(),
+        String(event?.clan_name || event?.clan_key || "").trim().toLowerCase(),
+        String(event?.user_id || event?.username || "").trim().toLowerCase()
+      ].join("|");
+      const currentRole = String(
+        event?.current_member_role
+        ?? event?.current_value
+        ?? event?.details?.current_role_key
+        ?? ""
+      ).trim().toLowerCase();
+      if (currentRole && roleStateByMember.get(memberKey) === currentRole) return false;
+      if (currentRole) roleStateByMember.set(memberKey, currentRole);
+    }
     return true;
   });
 }
@@ -6390,7 +7010,12 @@ function clanActivityEvents(payload) {
 // an assignment never replays an old event merely because its API ID changed.
 function clanActivityEventFingerprint(event) {
   const type = String(event?.event_type || "").trim().toLowerCase();
-  const timestamp = String(event?.event_at || event?.detected_at || "").trim();
+  const timestamp = String(
+    event?.details?.event_identity_anchor
+    || event?.event_at
+    || event?.detected_at
+    || ""
+  ).trim();
   const clan = String(event?.clan_name || "").trim().toLowerCase();
   const member = String(event?.user_id || event?.username || event?.display_name || "").trim().toLowerCase();
   const before = String(event?.previous_rank ?? event?.previous_value ?? event?.previous_member_role ?? "").trim().toLowerCase();
@@ -6605,7 +7230,7 @@ function buildClanActivityLogViewMessage(payload, fallbackClan, options = {}) {
         totalPages > 1 ? `\nPage ${page + 1}/${totalPages} · ${fullNumber(allEvents.length)} recorded events` : ""
       ].filter(Boolean).join("\n"),
       ...(summary.icon_url ? { thumbnail: { url: summary.icon_url } } : {}),
-    footer: { text: "Use /clan log view clan:<name> assign:<channel> to post future activity." }
+    footer: { text: "Use /clan log assign clan:<name> channel:<channel> to post future activity." }
     }],
     allowed_mentions: { parse: [] },
     components,
@@ -6620,10 +7245,12 @@ function clanLogEventsSince(payload, assignment) {
   if (!all.length) return { all, events: [], newest: null };
   const lastId = String(assignment?.last_event_id || "").trim();
   const lastIndex = lastId ? all.findIndex(event => clanActivityEventFingerprint(event) === lastId) : -1;
+  const lastEventAt = new Date(assignment?.last_event_at || 0).getTime();
+  const hasLastEventAt = Number.isFinite(lastEventAt) && lastEventAt > 0;
   const after = lastIndex >= 0
-    ? all.slice(lastIndex + 1)
-    : assignment?.last_event_at
-      ? all.filter(event => clanActivityEventTime(event) > new Date(assignment.last_event_at).getTime())
+    ? all.slice(lastIndex + 1).filter(event => !hasLastEventAt || clanActivityEventTime(event) >= lastEventAt)
+    : hasLastEventAt
+      ? all.filter(event => clanActivityEventTime(event) > lastEventAt)
       : [];
   return {
     all,
@@ -6670,17 +7297,39 @@ async function runClanLogAssignments(env, options = {}) {
         results.push({ assignment_key: assignment.assignment_key, skipped: true, reason: "no_activity" });
         continue;
       }
-      for (const event of delta.events.slice(0, 25)) {
-        await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name, {
-          clanIconUrl: payload?.summary?.icon_url || payload?.icon_url || null
-        });
+      const pendingEvents = delta.events.slice(0, 25);
+      let lastPosted = null;
+      try {
+        for (const event of pendingEvents) {
+          await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name, {
+            clanIconUrl: payload?.summary?.icon_url || payload?.icon_url || null
+          });
+          lastPosted = event;
+        }
+      } catch (err) {
+        if (lastPosted) {
+          await updateClanLogAssignment(env, assignment, {
+            last_event_id: clanActivityEventFingerprint(lastPosted),
+            last_event_at: lastPosted.event_at || lastPosted.detected_at,
+            last_error: String(err?.message || err).slice(0, 500)
+          }).catch(() => null);
+        }
+        throw err;
       }
-      await updateClanLogAssignment(env, assignment, {
-        last_event_id: clanActivityEventFingerprint(delta.newest),
-        last_event_at: delta.newest.event_at || delta.newest.detected_at || new Date(options.scheduledTime || Date.now()).toISOString(),
-        last_error: null
-      });
-      results.push({ assignment_key: assignment.assignment_key, posted: delta.events.length });
+
+      const cursorEvent = lastPosted || (delta.events.length === 0 ? delta.newest : null);
+      const currentCursorTime = new Date(assignment?.last_event_at || 0).getTime();
+      const nextCursorTime = cursorEvent ? clanActivityEventTime(cursorEvent) : 0;
+      if (cursorEvent && (!Number.isFinite(currentCursorTime) || currentCursorTime <= 0 || nextCursorTime >= currentCursorTime)) {
+        await updateClanLogAssignment(env, assignment, {
+          last_event_id: clanActivityEventFingerprint(cursorEvent),
+          last_event_at: cursorEvent.event_at || cursorEvent.detected_at || new Date(options.scheduledTime || Date.now()).toISOString(),
+          last_error: null
+        });
+      } else {
+        await updateClanLogAssignment(env, assignment, { last_error: null });
+      }
+      results.push({ assignment_key: assignment.assignment_key, posted: pendingEvents.length });
     } catch (err) {
       await updateClanLogAssignment(env, assignment, { last_error: String(err?.message || err).slice(0, 500) }).catch(() => null);
       results.push({ assignment_key: assignment.assignment_key, posted: false, error: err?.message || String(err) });
@@ -6689,13 +7338,15 @@ async function runClanLogAssignments(env, options = {}) {
   return { ok: true, assignments: assignments.length, results };
 }
 
-async function completeClanTrackerInteraction(interaction, env, action, clanName) {
+async function completeClanTrackerInteraction(interaction, env, action, clanName, trackerMode = "members") {
+  const mode = trackerMode === "compare" ? "compare" : "members";
   try {
     if (action === "remove") {
       const response = await hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
         query: {
           guild_id: interaction.guild_id,
           clan: clanName,
+          mode,
           limit: 1000
         }
       });
@@ -6723,8 +7374,8 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
 
       await editOriginalInteraction(interaction, {
         content: assignments.length
-          ? `Removed the persistent tracker for **${escapeDiscordMarkdown(clanName)}** from ${assignments.length} channel${assignments.length === 1 ? "" : "s"} and deleted ${deletedMessages} tracker post${deletedMessages === 1 ? "" : "s"}.`
-          : `No persistent tracker for **${escapeDiscordMarkdown(clanName)}** is configured in this server.`,
+          ? `Removed the persistent ${mode === "compare" ? "comparison" : "tracker"} for **${escapeDiscordMarkdown(clanName)}** from ${assignments.length} channel${assignments.length === 1 ? "" : "s"} and deleted ${deletedMessages} post${deletedMessages === 1 ? "" : "s"}.`
+          : `No persistent ${mode === "compare" ? "comparison" : "tracker"} for **${escapeDiscordMarkdown(clanName)}** is configured in this server.`,
         allowed_mentions: { parse: [] },
         embeds: [],
         components: [],
@@ -6733,8 +7384,12 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
       return;
     }
 
-    const current = await fetchClanTrackerCurrent(env, clanName);
-    const messages = buildClanTrackerMessages(current, clanName, env);
+    const current = mode === "compare"
+      ? await fetchClanCompareCurrent(env, clanName)
+      : await fetchClanTrackerCurrent(env, clanName);
+    const messages = mode === "compare"
+      ? [buildClanCompareMessage(current)]
+      : buildClanTrackerMessages(current, clanName, env);
 
     if (action !== "assign") {
       await editOriginalInteraction(interaction, messages[0]);
@@ -6754,7 +7409,8 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
         guild_id: interaction.guild_id,
         channel_id: channelId,
         channel_type: Number(channel?.type),
-        clan_name: current.clan_name || clanName,
+        clan_name: current.clan_name || current.target?.clan_name || clanName,
+        tracker_mode: mode,
         assigned_by: interactionUserId(interaction),
         message_id: null,
         last_updated_at: null,
@@ -6770,7 +7426,7 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
     });
 
     await editOriginalInteraction(interaction, {
-      content: `Persistent tracking is now enabled for **${escapeDiscordMarkdown(current.clan_name || clanName)}** in <#${channelId}>. Luna will edit ${messages.length} tracker post${messages.length === 1 ? "" : "s"} there every ${clanTrackerScheduledIntervalMinutes(env)} minutes.`,
+      content: `Persistent ${mode === "compare" ? "clan comparison" : "tracking"} is now enabled for **${escapeDiscordMarkdown(current.clan_name || current.target?.clan_name || clanName)}** in <#${channelId}>. Luna will edit ${messages.length} post${messages.length === 1 ? "" : "s"} there every ${clanTrackerScheduledIntervalMinutes(env)} minutes.`,
       allowed_mentions: { parse: [] },
       embeds: [],
       components: [],
@@ -6779,6 +7435,144 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
   } catch (err) {
     await editOriginalInteraction(interaction, commandErrorMessage("Clan tracker failed", err, env)).catch(() => null);
   }
+}
+
+async function fetchClanCompareCurrent(env, clanNameValue) {
+  const clan = String(clanNameValue || "").trim();
+  if (!clan) throw httpError(400, "A clan name is required.");
+
+  let payload = await fetchTopClansPayloadForCommand(env, "", 500);
+  if (!Array.isArray(payload.rows) || !payload.rows.length || payload.waiting_for_first_snapshot) {
+    const latestBattle = await fetchLatestClanBattleForCommand(env);
+    if (latestBattle?.battle) payload = await fetchTopClansPayloadForCommand(env, latestBattle.battle, 500);
+  }
+
+  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .map(row => ({
+      ...row,
+      rank: positiveInteger(row?.rank ?? row?.clan_rank),
+      clan_name: String(row?.clan_name || row?.name || "").trim(),
+      points: finiteNumber(row?.points ?? row?.clan_points) || 0,
+      gain_1h: finiteNumber(row?.gain_1h ?? row?.rate_per_hour),
+      gain_24h: finiteNumber(row?.gain_24h),
+      projected_rank: positiveInteger(row?.projected_rank),
+      projected_points: finiteNumber(row?.projected_points)
+    }))
+    .filter(row => row.clan_name && row.rank)
+    .sort((a, b) => a.rank - b.rank || b.points - a.points);
+  const targetIndex = rows.findIndex(row => row.clan_name.toLowerCase() === clan.toLowerCase());
+  if (targetIndex < 0) throw httpError(404, `${clan} was not found in the current Top ${rows.length || 500} Clans snapshot.`);
+
+  return {
+    clan_name: rows[targetIndex].clan_name,
+    target: rows[targetIndex],
+    above: targetIndex > 0 ? rows[targetIndex - 1] : null,
+    below: targetIndex + 1 < rows.length ? rows[targetIndex + 1] : null,
+    snapshot_at: payload.snapshot_at || payload.generated_at || null,
+    battle_name: payload.display_name || payload.battle || "Current Clan Battle",
+    battle_end_iso: payload.battle_end_iso || null
+  };
+}
+
+function clanCompareRate(row) {
+  const direct = finiteNumber(row?.gain_1h ?? row?.rate_per_hour);
+  if (direct !== null) return direct;
+  const daily = finiteNumber(row?.gain_24h);
+  return daily !== null ? daily / 24 : 0;
+}
+
+function clanCompareSigned(value) {
+  const number = finiteNumber(value) || 0;
+  return `${number >= 0 ? "+" : ""}${shortNumber(number)}`;
+}
+
+function clanCompareBlock(marker, row, relation, current) {
+  if (!row) return null;
+  const rate = clanCompareRate(row);
+  const daily = finiteNumber(row?.gain_24h) ?? rate * 24;
+  const projectedRank = positiveInteger(row?.projected_rank) || row.rank;
+  const projectedPoints = finiteNumber(row?.projected_points);
+  const lines = [
+    `${marker} **[${escapeDiscordMarkdown(String(row.clan_name || "Clan").toUpperCase())}] #${fullNumber(row.rank)}**`,
+    `**Points:** ${shortNumber(row.points)} stars`,
+    `**Pace:** ${clanCompareSigned(rate)}/h | ${clanCompareSigned(daily)}/24h`
+  ];
+  if (projectedPoints !== null) {
+    lines.push(`**Projected Finish:** #${fullNumber(projectedRank)} at ${shortNumber(projectedPoints)} stars`);
+  }
+
+  if (relation === "target" && current?.above) {
+    const gap = Math.max(0, Number(current.above.points || 0) - Number(row.points || 0));
+    const rateDifference = rate - clanCompareRate(current.above);
+    lines.push(`**Time-To-Pass:** ${rateDifference > 0 && gap > 0 ? `${formatRewardProjectionDuration(gap / rateDifference)} at current pace` : "Not catching at current pace"}`);
+    const endAt = new Date(current?.battle_end_iso || 0).getTime();
+    const snapshotAt = new Date(current?.snapshot_at || Date.now()).getTime();
+    const remainingHours = Math.max(0, (endAt - snapshotAt) / (60 * 60 * 1000));
+    if (remainingHours > 0 && gap > 0) {
+      const needed = clanCompareRate(current.above) + gap / remainingHours;
+      lines.push(`**Passing Pace:** ${shortNumber(needed)}/h is needed to pass by CB end (**${clanCompareSigned(needed - rate)}/h** above current pace).`);
+    }
+  } else if (relation === "above" && current?.target) {
+    lines.push(`**Point Gap:** ${shortNumber(Math.max(0, Number(row.points || 0) - Number(current.target.points || 0)))} stars`);
+  } else if (relation === "below" && current?.target) {
+    lines.push(`**Point Gap:** ${shortNumber(Math.max(0, Number(current.target.points || 0) - Number(row.points || 0)))} stars`);
+  }
+  return lines.join("\n");
+}
+
+function buildClanCompareMessage(current) {
+  const target = current?.target;
+  if (!target) throw httpError(409, "No current clan comparison was returned.");
+  const sections = [
+    clanCompareBlock("⬆️", current.above, "above", current),
+    clanCompareBlock("☀️", target, "target", current),
+    clanCompareBlock("⬇️", current.below, "below", current)
+  ].filter(Boolean);
+  const projectedRank = positiveInteger(target.projected_rank) || target.rank;
+  const aboveName = current?.above?.clan_name ? `[${String(current.above.clan_name).toUpperCase()}]` : "the clan above";
+  const belowName = current?.below?.clan_name ? `[${String(current.below.clan_name).toUpperCase()}]` : "the clan below";
+  sections.push(`**Outlook:** Current pace projects **[${String(target.clan_name).toUpperCase()}]** at #${fullNumber(projectedRank)}, between **${escapeDiscordMarkdown(aboveName)}** and **${escapeDiscordMarkdown(belowName)}** through CB end.`);
+
+  const updatedAt = new Date(current.snapshot_at || Date.now());
+  const updatedUnix = Math.floor((Number.isFinite(updatedAt.getTime()) ? updatedAt.getTime() : Date.now()) / 1000);
+  const iconUrl = String(target.icon_url || target.clan_icon_url || "").trim();
+  const comparisonText = {
+    type: COMPONENT_TYPE_TEXT_DISPLAY,
+    content: sections.join("\n\n").slice(0, 4000)
+  };
+  const comparisonBody = [
+    iconUrl
+      ? {
+          type: COMPONENT_TYPE_SECTION,
+          components: [comparisonText],
+          accessory: {
+            type: COMPONENT_TYPE_THUMBNAIL,
+            media: { url: iconUrl },
+            description: `${String(target.clan_name || "Clan").toUpperCase()} icon`
+          }
+        }
+      : comparisonText,
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `-# **Updated <t:${updatedUnix}:R>**`
+    },
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `-# 🧞‍♀️ **Luna Pet Sim 99 Bot** 🏳️‍🌈 **∙ by Cinnamowopal | Last Updated: Today at <t:${updatedUnix}:t>**`
+    }
+  ];
+  return {
+    flags: MESSAGE_FLAG_COMPONENTS_V2,
+    allowed_mentions: { parse: [] },
+    components: [{
+      type: COMPONENT_TYPE_CONTAINER,
+      accent_color: 0xf1c40f,
+      components: comparisonBody
+    }],
+    attachments: []
+  };
 }
 
 async function fetchClanTrackerCurrent(env, clanNameValue) {
@@ -6815,7 +7609,7 @@ function clanTrackerRows(current) {
       tracker_rank: positiveInteger(row?.rank ?? row?.member_rank ?? row?.clan_rank) || index + 1,
       tracker_username: String(row?.username || row?.display_name || row?.user_id || "Unknown").trim(),
       tracker_points: finiteNumber(row?.total_points ?? row?.member_points ?? row?.points ?? row?.total) || 0,
-      tracker_gain_5m: finiteNumber(row?.gain_5m ?? row?.last_5m ?? row?.five_minute_gain),
+      tracker_gain_20m: finiteNumber(row?.gain_20m ?? row?.last_20m ?? row?.twenty_minute_gain),
       tracker_gain_1h: finiteNumber(row?.gain_1h ?? row?.one_hour_gain ?? row?.hourly_points ?? row?.projected_gain_1h),
       tracker_downtime: hourlyDowntimeMinutes(row)
     }))
@@ -6837,11 +7631,6 @@ const CLAN_TRACKER_PAGE_SIZE = CLAN_TRACKER_COLUMNS * CLAN_TRACKER_ROWS_PER_COLU
 // Keep rank and name on one inline-field line. A final period indicates a
 // shortened name without letting it wrap into the next row.
 const CLAN_TRACKER_USERNAME_MAXIMUM = 12;
-// Discord makes a normal embed only as wide as its measured content. A run of
-// braille-blank glyphs is visually empty but has width, so every tracker page
-// keeps the same full card width even when its final page has only a few rows.
-const CLAN_TRACKER_EMBED_WIDTH_RESERVE = "\u2800".repeat(120);
-
 function chunkClanTrackerRows(rows, chunkSize = CLAN_TRACKER_PAGE_SIZE) {
   const chunks = [];
   for (let index = 0; index < rows.length; index += chunkSize) {
@@ -6859,7 +7648,7 @@ function clanTrackerMemberField(row) {
   return [
     `#${fullNumber(row.tracker_rank)} · ${escapeDiscordMarkdown(clanTrackerUsername(row.tracker_username))}`,
     `:star: ${shortNumber(row.tracker_points)}`,
-    `-# · 5m ${clanTrackerDelta(row.tracker_gain_5m)}`,
+    `-# · 20m ${clanTrackerDelta(row.tracker_gain_20m)}`,
     `-# · 1h ${clanTrackerDelta(row.tracker_gain_1h)}`
   ].join("\n");
 }
@@ -6891,7 +7680,6 @@ function buildClanTrackerMessages(current, fallbackClan = "", env = {}) {
   return pages.map((pageRows, pageIndex) => {
     const embed = {
       color: 0x9b59f6,
-      footer: { text: CLAN_TRACKER_EMBED_WIDTH_RESERVE },
       fields: pageRows.length
         ? clanTrackerEmbedFields(pageRows)
         : [{ name: "Members", value: "No current members were returned yet.", inline: false }]
@@ -7036,15 +7824,21 @@ async function runClanTrackerAssignments(env, options = {}) {
   const results = [];
 
   for (const assignment of assignments) {
+    const trackerMode = assignment?.tracker_mode === "compare" ? "compare" : "members";
     const clanKey = String(assignment?.clan_name || "").trim().toLowerCase();
+    const reportKey = `${trackerMode}:${clanKey}`;
     try {
-      let current = reports.get(clanKey);
+      let current = reports.get(reportKey);
       if (!current) {
-        current = await fetchClanTrackerCurrent(env, assignment.clan_name);
-        reports.set(clanKey, current);
+        current = trackerMode === "compare"
+          ? await fetchClanCompareCurrent(env, assignment.clan_name)
+          : await fetchClanTrackerCurrent(env, assignment.clan_name);
+        reports.set(reportKey, current);
       }
       const refreshedAt = new Date(options.scheduledTime || Date.now()).toISOString();
-      const messages = buildClanTrackerMessages(current, assignment.clan_name, env);
+      const messages = trackerMode === "compare"
+        ? [buildClanCompareMessage(current)]
+        : buildClanTrackerMessages(current, assignment.clan_name, env);
       const delivery = await postOrUpdateClanTrackerMessages(env, assignment, messages);
       await updateClanTrackerAssignment(env, assignment, {
         message_id: JSON.stringify(delivery?.ids || []),
@@ -8256,8 +9050,22 @@ function handleLeagueChartComponent(interaction, env, ctx) {
 const leagueRefreshesInFlight = new Map();
 
 async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
-  const initial = await readStoredLeaguePayload(leagueName, env);
+  const hourSlotMs = Number(options.hourSlotMs);
+  const strictHourly = Number.isFinite(hourSlotMs) && hourSlotMs > 0;
+  const initial = await readStoredLeaguePayload(leagueName, env, { hourSlotMs: strictHourly ? hourSlotMs : null });
   const cached = initial.payload;
+  if (strictHourly) {
+    if (cached) {
+      return options.debug
+        ? { payload: cached, attempts: initial.attempts, refresh: null, cache_status: "exact_hourly" }
+        : cached;
+    }
+    const last = initial.attempts[initial.attempts.length - 1] || {};
+    const err = httpError(last.status || 409, last.message || `Exact hourly data is not ready for League ${leagueName}.`);
+    err.attempts = initial.attempts.map(attempt => leagueAttemptSummary(attempt));
+    if (options.debug) return { payload: null, attempts: initial.attempts, refresh: null, cache_status: "exact_hourly_miss", error: err };
+    throw err;
+  }
   const needsRefresh = !cached || leaguePayloadAgeSeconds(cached) > leagueOnDemandMaxAgeSeconds(env);
 
   if (!needsRefresh) {
@@ -8310,7 +9118,7 @@ async function fetchLeagueCurrentPayload(leagueName, env, options = {}) {
   throw err;
 }
 
-async function readStoredLeaguePayload(leagueName, env) {
+async function readStoredLeaguePayload(leagueName, env, options = {}) {
   const attempts = [];
 
   for (const target of leagueApiTargets(env)) {
@@ -8318,6 +9126,9 @@ async function readStoredLeaguePayload(leagueName, env) {
     apiUrl.searchParams.set("league", leagueName);
     apiUrl.searchParams.set("rank_lookup", "false");
     apiUrl.searchParams.set("fresh", "1");
+    if (Number.isFinite(Number(options.hourSlotMs)) && Number(options.hourSlotMs) > 0) {
+      apiUrl.searchParams.set("hour_slot", new Date(Number(options.hourSlotMs)).toISOString());
+    }
 
     const result = await fetchLeagueCurrentAttempt(target, apiUrl);
     attempts.push(result);
@@ -8743,10 +9554,12 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const hours = leagueChartHours(options.hours);
   const windowMs = hours * 60 * 60 * 1000;
   const history = Array.isArray(historyRows) ? historyRows : [];
-  const currentAt = leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
+  const requestedEndAt = Number(options.endAt);
+  const currentAt = Number.isFinite(requestedEndAt) && requestedEndAt > 0
+    ? requestedEndAt
+    : leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
   const historyTimes = history.map(row => leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at)).filter(Number.isFinite);
-  const latest = Math.max(currentAt, ...historyTimes);
-  const end = latest;
+  const end = currentAt;
   const start = end - windowMs;
   const byUser = new Map();
 
@@ -13379,6 +14192,72 @@ async function discordDebug(url, env) {
   });
 }
 
+async function listDiscordGuilds(url, env) {
+  const pageSize = Math.max(1, Math.min(200, Number(url.searchParams.get("page_size") || 200) || 200));
+  const maxPages = Math.max(1, Math.min(100, Number(url.searchParams.get("max_pages") || 100) || 100));
+  const guilds = [];
+  let after = "";
+  let pages = 0;
+
+  while (pages < maxPages) {
+    const endpoint = new URL(`${DISCORD_API_BASE}/users/@me/guilds`);
+    endpoint.searchParams.set("limit", String(pageSize));
+    endpoint.searchParams.set("with_counts", "true");
+    if (after) endpoint.searchParams.set("after", after);
+
+    let response;
+    let payload;
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      response = await fetch(endpoint, { headers: discordBotHeaders(env) });
+      payload = await response.json().catch(() => ({}));
+      if (response.status !== 429 || attempt === 6) break;
+
+      const retryAfterSeconds = Number(
+        payload?.retry_after ??
+        response.headers.get("retry-after") ??
+        1
+      );
+      await sleep(Math.max(500, Math.ceil((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000) + 250));
+    }
+
+    if (!response?.ok || !Array.isArray(payload)) {
+      throw httpError(
+        response?.status === 429 ? 429 : 502,
+        discordApiErrorMessage(response?.status || 502, payload?.message || `Discord guild list failed (${response?.status || 502}).`)
+      );
+    }
+
+    pages += 1;
+    guilds.push(...payload.map(guild => ({
+      id: String(guild.id || ""),
+      name: String(guild.name || "Unnamed server"),
+      owner: Boolean(guild.owner),
+      permissions: String(guild.permissions || "0"),
+      approximate_member_count: Number.isFinite(Number(guild.approximate_member_count))
+        ? Number(guild.approximate_member_count)
+        : null,
+      approximate_presence_count: Number.isFinite(Number(guild.approximate_presence_count))
+        ? Number(guild.approximate_presence_count)
+        : null
+    })));
+
+    if (payload.length < pageSize) break;
+    const nextAfter = String(payload[payload.length - 1]?.id || "");
+    if (!nextAfter || nextAfter === after) break;
+    after = nextAfter;
+  }
+
+  guilds.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+  return json({
+    ok: true,
+    application_id: requiredEnv(env, "DISCORD_APPLICATION_ID"),
+    total: guilds.length,
+    pages,
+    truncated: pages >= maxPages && guilds.length === pages * pageSize,
+    guilds
+  });
+}
+
 async function searchDebug(url, env) {
   const query = String(url.searchParams.get("q") || url.searchParams.get("username") || "").trim();
   if (!query) {
@@ -14085,12 +14964,27 @@ function clanCommandPayload() {
       },
       {
         name: "log",
-        description: "View, assign, or remove clan activity logging.",
+        description: "View, assign, remove, or reset clan activity logging.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
         options: [
           {
             name: "view",
-            description: "View activity or assign a channel for future activity posts.",
+            description: "View recent clan activity.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "clan",
+                description: "Clan name, for example COLD or c0ld",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 32
+              }
+            ]
+          },
+          {
+            name: "assign",
+            description: "Assign a channel for future clan activity posts.",
             type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
             options: [
               {
@@ -14102,10 +14996,10 @@ function clanCommandPayload() {
                 max_length: 32
               },
               {
-                name: "assign",
-                description: "Optional text channel or thread for future activity posts",
+                name: "channel",
+                description: "Text channel or thread for future activity posts",
                 type: APPLICATION_COMMAND_OPTION_CHANNEL,
-                required: false,
+                required: true,
                 channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
               }
             ]
@@ -14124,12 +15018,86 @@ function clanCommandPayload() {
                 max_length: 32
               }
             ]
+          },
+          {
+            name: "reset",
+            description: "Erase generated activity and disable logging until reassigned.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "clan",
+                description: "Clan name, for example COLD or c0ld",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 32
+              }
+            ]
+          }
+        ]
+      },
+      {
+        name: "compare",
+        description: "Preview or manage persistent adjacent-clan comparisons.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
+        options: [
+          {
+            name: "view",
+            description: "Preview an adjacent-clan comparison without posting it.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "clan",
+                description: "Clan name to compare with the clans directly above and below it",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 32
+              }
+            ]
+          },
+          {
+            name: "assign",
+            description: "Post and keep an adjacent-clan comparison updated.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "clan",
+                description: "Clan name to compare with the clans directly above and below it",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 32
+              },
+              {
+                name: "channel",
+                description: "Text channel or thread for the persistent comparison",
+                type: APPLICATION_COMMAND_OPTION_CHANNEL,
+                required: true,
+                channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
+              }
+            ]
+          },
+          {
+            name: "remove",
+            description: "Remove a persistent clan comparison from this server.",
+            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+            options: [
+              {
+                name: "clan",
+                description: "Clan name used by the comparison",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 32
+              }
+            ]
           }
         ]
       },
       {
         name: "tracker",
-        description: "Preview, assign, or remove a persistent live clan tracker.",
+        description: "Preview or manage persistent clan trackers.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
         options: [
           {
@@ -15193,6 +16161,14 @@ function messageResponse(content, forceEphemeral = false) {
 
 function displayName(row) {
   return row.display_name || row.username || `user_${row.user_id}`;
+}
+
+function searchUsername(row) {
+  const username = String(row?.username || "").trim();
+  if (username) return username;
+
+  const userId = String(row?.user_id || "").trim();
+  return userId ? `user_${userId}` : "Unknown";
 }
 
 function rank(value) {
