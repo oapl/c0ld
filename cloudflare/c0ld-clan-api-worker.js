@@ -41,6 +41,7 @@ const PS99_DEV_BLOG_EVENTS_TABLE = "c0ld_ps99_dev_blog_events";
 const REWARD_CUTOFF_ALERT_STATE_TABLE = "c0ld_reward_cutoff_alert_state";
 const DISCORD_HOURLY_CLAN_ASSIGNMENTS_TABLE = "discord_hourly_clan_assignments";
 const DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE = "discord_clan_log_assignments";
+const DISCORD_CLAN_LOG_DELIVERIES_TABLE = "discord_clan_log_deliveries";
 const DISCORD_CLAN_TRACKER_ASSIGNMENTS_TABLE = "discord_clan_tracker_assignments";
 const DISCORD_CLAN_COMPARE_ASSIGNMENTS_TABLE = "discord_clan_compare_assignments";
 const DISCORD_OFFLINE_PING_GUILDS_TABLE = "discord_offline_ping_guilds";
@@ -309,6 +310,9 @@ export default {
       } else if (request.method === "POST" && url.pathname === "/api/discord/clan-log-reset") {
         requireAdmin(request, env);
         response = await handleDiscordClanLogReset(request, env);
+      } else if (["POST", "PATCH"].includes(request.method) && url.pathname === "/api/discord/clan-log-deliveries") {
+        requireAdmin(request, env);
+        response = await handleDiscordClanLogDelivery(request, env);
       } else if (
         ["GET", "POST", "PATCH", "DELETE"].includes(request.method)
         && url.pathname === "/api/discord/clan-tracker-assignments"
@@ -1807,10 +1811,52 @@ async function globalLeaderboardSourceMode(url, env) {
   const leagueState = await fetchLeagueScheduledCollectionState(env).catch(() => null);
   if (leagueState?.active === true) return "leagues";
 
+  // Collection scheduling is intentionally strict and may be disabled when an
+  // operator has not configured the event window. That must not make Discord
+  // pretend there is no League while the League API is publishing a fresh
+  // current-run leaderboard. A fresh rank-1 milestone is the same underlying
+  // data that powers /top leagues and the League reward cutoffs.
+  const liveLeagueState = await fetchFreshLeagueLeaderboardState(env, now).catch(() => null);
+  if (liveLeagueState?.active === true) return "leagues";
+
   // With no live event, retain the latest Clan Battle's final snapshot. An
   // ended League must never become the automatic fallback merely because the
   // Clan Battle has also ended.
   return "clans";
+}
+
+async function fetchFreshLeagueLeaderboardState(env, now = Date.now()) {
+  const result = await fetchLeagueMilestones(env, [1]);
+  const payload = result?.payload || {};
+  return {
+    active: leagueLeaderboardSnapshotIsActive(payload, env, now),
+    run_key: String(payload.league_run_key || "").trim() || null,
+    run_label: String(payload.league_run_label || payload.league_run_key || "").trim() || null,
+    snapshot_at: safeIso(payload.snapshot_at),
+    end_at: safeIso(payload.league_end_at || payload.league_run_end_at)
+  };
+}
+
+function leagueLeaderboardSnapshotIsActive(payload, env = {}, now = Date.now()) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const runKey = String(payload?.league_run_key || "").trim();
+  const snapshotAt = safeIso(payload?.snapshot_at);
+  const snapshotMs = snapshotAt ? new Date(snapshotAt).getTime() : NaN;
+  const endAt = safeIso(payload?.league_end_at || payload?.league_run_end_at);
+  const endMs = endAt ? new Date(endAt).getTime() : NaN;
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const hasCurrentRank = rows.some(row =>
+    toNumber(row?.rank) === 1 &&
+    row?.available !== false &&
+    toNumber(row?.points ?? row?.total_points) !== null
+  );
+  const freshnessMinutes = clamp(Number(env.LEAGUE_ACTIVE_SNAPSHOT_MAX_AGE_MINUTES || 90), 15, 1440);
+  const isFresh = Number.isFinite(snapshotMs) &&
+    snapshotMs <= nowMs + 10 * 60 * 1000 &&
+    nowMs - snapshotMs <= freshnessMinutes * 60 * 1000;
+
+  if (Number.isFinite(endMs) && nowMs >= endMs) return false;
+  return Boolean(runKey && hasCurrentRank && isFresh);
 }
 
 async function handleLeagueGlobalLeaderboard(url, env) {
@@ -3219,7 +3265,7 @@ function rewardCutoffDiscordPayload(dashboard) {
     ].filter(Boolean).join("\n");
 
   return persistentDiscordComponentPayload("🏅 Reward Cutoffs", [
-    [`## Global Leaderboard (${eventMode === "clans" ? "Clan Battle" : "Leagues"})`, ...globalLines].join("\n"),
+    [`## Global Leaderboard (${eventMode === "clans" ? "Clan Battle" : "League"})`, ...globalLines].join("\n"),
     ["## Clan Rewards", ...clanLines].join("\n"),
     ["## League Rewards", ...leagueLines].join("\n")
   ], snapshotAt, { headerSummary });
@@ -4352,7 +4398,7 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query, sourceMo
       fetched_at: safeIso(row.fetched_at || payload.snapshot_at || payload.generated_at)
     }));
 
-    return cacheJson({
+    const responsePayload = {
       ok: rows.length > 0,
       message: rows.length
         ? null
@@ -4367,7 +4413,21 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query, sourceMo
       rank_is_estimated: rows.some(row => toNumber(row.global_rank) !== null && row.global_rank_estimated === true),
       rows,
       row: rows[0] || null
-    }, env, 30);
+    };
+
+    // `battle_history=1` is used by Discord's /history command and must remain
+    // independent of whichever leaderboard is currently active. During a
+    // League, the pool search used to return here before consulting the
+    // permanent c0ld_battle_global_final_snapshots archive, leaving recent Clan Battles
+    // without their preserved final global ranks.
+    const includeBattleHistory = url.searchParams.get("battle_history") === "1";
+    const historyClan = globalRankRunClanForTrackedMember(env, clan);
+    return cacheJson(await attachRetainedGlobalBattleHistory(
+      env,
+      responsePayload,
+      historyClan,
+      includeBattleHistory
+    ), env, 30);
   }
 
   const historyHoursValue = globalSearchHistoryHours(env, url.searchParams.get("history_hours") || url.searchParams.get("hours"));
@@ -8078,6 +8138,70 @@ async function handleDiscordClanLogReset(request, env) {
     next_observation_is_baseline: true,
     logging_enabled: false
   });
+}
+
+async function handleDiscordClanLogDelivery(request, env) {
+  requireSupabase(env);
+  const body = await request.json().catch(() => ({}));
+  const assignmentKey = String(body.assignment_key || "").trim();
+  const eventId = String(body.event_id || "").trim();
+  const claimToken = String(body.claim_token || "").trim();
+  if (!assignmentKey || assignmentKey.length > 300) throw httpError(400, "A valid assignment_key is required.");
+  if (!eventId || eventId.length > 1000) throw httpError(400, "A valid event_id is required.");
+  if (!claimToken || claimToken.length > 100) throw httpError(400, "A valid claim_token is required.");
+
+  if (request.method === "POST") {
+    const assignments = await supabaseSelect(env, DISCORD_CLAN_LOG_ASSIGNMENTS_TABLE, {
+      select: "assignment_key,enabled",
+      assignment_key: `eq.${assignmentKey}`,
+      limit: "1"
+    });
+    if (!assignments[0]?.enabled) return noStoreJson({ ok: true, claimed: false, delivered: false, reason: "assignment_disabled" });
+
+    const claimed = Boolean(await supabaseRpc(env, "claim_discord_clan_log_delivery", {
+      p_assignment_key: assignmentKey,
+      p_event_id: eventId,
+      p_event_at: safeIso(body.event_at),
+      p_claim_token: claimToken,
+      p_lease_seconds: clamp(Number(body.lease_seconds || 300), 30, 900)
+    }));
+    const rows = await supabaseSelect(env, DISCORD_CLAN_LOG_DELIVERIES_TABLE, {
+      select: "assignment_key,event_id,claim_token,claimed_until,delivered_at,discord_message_id,last_error",
+      assignment_key: `eq.${assignmentKey}`,
+      event_id: `eq.${eventId}`,
+      limit: "1"
+    });
+    const receipt = rows[0] || null;
+    return noStoreJson({
+      ok: true,
+      claimed,
+      delivered: Boolean(receipt?.delivered_at),
+      claimed_until: receipt?.claimed_until || null,
+      discord_message_id: receipt?.discord_message_id || null
+    });
+  }
+
+  const action = String(body.action || "").trim().toLowerCase();
+  if (!['delivered', 'release'].includes(action)) throw httpError(400, "action must be delivered or release.");
+  const now = new Date().toISOString();
+  const patch = action === "delivered"
+    ? {
+        delivered_at: now,
+        claimed_until: now,
+        discord_message_id: stringOrNull(body.discord_message_id),
+        last_error: null
+      }
+    : {
+        claimed_until: now,
+        last_error: String(body.last_error || "Delivery failed before completion.").slice(0, 500)
+      };
+  await supabasePatch(env, DISCORD_CLAN_LOG_DELIVERIES_TABLE, {
+    assignment_key: `eq.${assignmentKey}`,
+    event_id: `eq.${eventId}`,
+    claim_token: `eq.${claimToken}`,
+    delivered_at: "is.null"
+  }, patch);
+  return noStoreJson({ ok: true, action });
 }
 
 function normalizeDiscordClanTrackerMode(value) {

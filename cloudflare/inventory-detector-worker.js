@@ -238,6 +238,9 @@ export default {
       } else if (request.method === "GET" && url.pathname === "/api/hatch/tracker/status") {
         requireAdmin(request, env);
         response = await handleHatchTrackerStatus(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/hatch/report") {
+        requireAdmin(request, env);
+        response = await handleHatchReport(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/hatch/diagnostics") {
         requireAdmin(request, env);
         response = await handleHatchDiagnostics(request, env);
@@ -767,6 +770,132 @@ async function handleHatchTrackerStatus(request, env) {
   const url = new URL(request.url);
   const discordUserId = requiredDiscordSnowflake(url.searchParams.get("discord_user_id"), "discord_user_id");
   return json({ ok: true, tracker: await hatchTrackerStatus(env, discordUserId) });
+}
+
+async function handleHatchReport(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const discordUserId = requiredDiscordSnowflake(url.searchParams.get("discord_user_id"), "discord_user_id");
+  const period = hatchReportPeriod(url.searchParams.get("timeframe"));
+  const rows = await supabaseSelectAll(env, HATCH_ALERTS_TABLE, {
+    select: "id,tracker_id,discord_user_id,roblox_user_id,roblox_username,period_start,period_end,tier,item_key,item_class,item_id,display_name,variant,delta,rap,icon,image_url,created_at",
+    discord_user_id: `eq.${discordUserId}`,
+    period_end: `gte.${period.start_at}`,
+    order: "period_end.desc,created_at.desc"
+  }, 20000);
+
+  return json({
+    ok: true,
+    ...buildHatchReportSummary(rows, period)
+  });
+}
+
+function hatchReportPeriod(value, nowValue = Date.now()) {
+  const timeframe = String(value || "week").trim().toLowerCase();
+  const definitions = {
+    day: { days: 1, label: "Day", window_label: "Last 24 Hours" },
+    week: { days: 7, label: "Week", window_label: "Last 7 Days" },
+    month: { days: 30, label: "Month", window_label: "Last 30 Days" }
+  };
+  const definition = definitions[timeframe];
+  if (!definition) throw httpError(400, "timeframe must be day, week, or month.");
+  const endMs = new Date(nowValue).getTime();
+  if (!Number.isFinite(endMs)) throw httpError(400, "The HTG report end time is invalid.");
+  const startMs = endMs - definition.days * 24 * 60 * 60 * 1000;
+  return {
+    timeframe,
+    label: definition.label,
+    window_label: definition.window_label,
+    days: definition.days,
+    start_at: new Date(startMs).toISOString(),
+    end_at: new Date(endMs).toISOString()
+  };
+}
+
+function buildHatchReportSummary(rows, period) {
+  const groups = new Map();
+  const accounts = new Map();
+  const tiers = { huge: 0, titanic: 0, gargantuan: 0 };
+  let acquisitionCount = 0;
+  let totalQuantity = 0;
+  let totalRap = 0;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tier = String(row?.tier || "").trim().toLowerCase();
+    const quantity = Math.max(0, Number(row?.delta) || 0);
+    if (!quantity || !Object.prototype.hasOwnProperty.call(tiers, tier)) continue;
+    const robloxUserId = firstString(row.roblox_user_id);
+    const robloxUsername = firstString(row.roblox_username, robloxUserId, "Unknown account");
+    const itemKey = firstString(row.item_key, row.item_id, row.display_name, "unknown-item");
+    const variant = firstString(row.variant, "Normal");
+    const groupKey = [tier, robloxUserId, itemKey, variant].map(value => String(value).toLowerCase()).join("|");
+    const observedAt = firstString(row.period_end, row.created_at);
+    const observedMs = new Date(observedAt || 0).getTime() || 0;
+    const rap = Math.max(0, Number(row.rap) || 0);
+    const existing = groups.get(groupKey);
+    const candidate = existing || {
+      tier,
+      item_key: itemKey,
+      item_id: row.item_id || null,
+      display_name: hatchFullDisplayItemName(row),
+      variant,
+      roblox_user_id: robloxUserId || null,
+      roblox_username: robloxUsername,
+      quantity: 0,
+      acquisition_count: 0,
+      estimated_rap: 0,
+      latest_rap: rap,
+      latest_at: observedAt || null,
+      image_url: row.image_url || null
+    };
+    candidate.quantity += quantity;
+    candidate.acquisition_count += 1;
+    candidate.estimated_rap += rap * quantity;
+    if (!existing || observedMs > (new Date(candidate.latest_at || 0).getTime() || 0)) {
+      candidate.latest_at = observedAt || candidate.latest_at;
+      candidate.latest_rap = rap;
+      candidate.image_url = row.image_url || candidate.image_url;
+      candidate.display_name = hatchFullDisplayItemName(row);
+      candidate.roblox_username = robloxUsername;
+    }
+    groups.set(groupKey, candidate);
+
+    const accountKey = robloxUserId || robloxUsername.toLowerCase();
+    const account = accounts.get(accountKey) || {
+      roblox_user_id: robloxUserId || null,
+      roblox_username: robloxUsername,
+      quantity: 0,
+      acquisition_count: 0
+    };
+    account.quantity += quantity;
+    account.acquisition_count += 1;
+    accounts.set(accountKey, account);
+    tiers[tier] += quantity;
+    acquisitionCount += 1;
+    totalQuantity += quantity;
+    totalRap += rap * quantity;
+  }
+
+  const items = [...groups.values()].sort((left, right) =>
+    (new Date(right.latest_at || 0).getTime() || 0) - (new Date(left.latest_at || 0).getTime() || 0) ||
+    String(left.display_name).localeCompare(String(right.display_name))
+  );
+
+  return {
+    timeframe: period.timeframe,
+    label: period.label,
+    window_label: period.window_label,
+    days: period.days,
+    period_start: period.start_at,
+    period_end: period.end_at,
+    acquisition_count: acquisitionCount,
+    total_quantity: totalQuantity,
+    total_estimated_rap: totalRap,
+    unique_item_count: items.length,
+    tier_totals: tiers,
+    accounts: [...accounts.values()].sort((left, right) => right.quantity - left.quantity || left.roblox_username.localeCompare(right.roblox_username)),
+    items
+  };
 }
 
 async function handleHatchGuildConfigStatus(request, env) {

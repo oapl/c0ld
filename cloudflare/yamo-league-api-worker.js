@@ -1,15 +1,28 @@
 const SNAPSHOT_TABLE = "ps99_league_snapshots";
 const CURRENT_TABLE = "ps99_league_current";
+const FINAL_RAW_SNAPSHOT_TABLE = "ps99_league_final_raw_snapshots";
+const GENERAL_LEAGUE_WATCHLIST_TABLE = "ps99_league_refresh_watchlist";
 const DEFAULT_LEAGUE_NAME = "YAMO";
 const DEFAULT_LEAGUE_RUN_KEY = "plants-vs-coins-part-2";
-const DEFAULT_LEAGUE_RUN_LABEL = "Plants VS Coins Part 2";
+const DEFAULT_LEAGUE_RUN_LABEL = "Fiesta Part 2";
 const DEFAULT_LEAGUE_RUN_END_AT = "";
+const DEFAULT_LEAGUE_EVENTS = Object.freeze([
+  { key: "basketball-2025", name: "Basketball", update_number: 63, start_at: "2025-06-07T16:00:00.000Z", end_at: "2025-06-14T16:00:00.000Z" },
+  { key: "time-trials-2026", name: "Time Trials", update_number: 77, start_at: "2026-05-02T16:00:00.000Z", end_at: "2026-05-04T16:00:00.000Z" },
+  { key: "rng-2026", name: "RNG", update_number: 79, start_at: "2026-05-16T16:00:00.000Z", end_at: "2026-05-30T16:00:00.000Z" },
+  { key: "deep-backrooms-2026", name: "Deep Backrooms", update_number: 81, start_at: "2026-06-20T16:00:00.000Z", end_at: "2026-06-27T16:00:00.000Z" },
+  { key: "soccer-2026", name: "Soccer", update_number: 83, start_at: "2026-07-04T16:00:00.000Z", end_at: "2026-07-11T16:00:00.000Z" },
+  { key: "tap-2026", name: "Tap", update_number: 85, start_at: "2026-07-18T16:00:00.000Z", end_at: "2026-08-01T16:00:00.000Z" },
+  { key: "garden-2026", name: "Garden League", update_number: 87, start_at: "2026-08-01T16:00:00.000Z", end_at: "2026-08-15T16:00:00.000Z" },
+  { key: "fiesta-part-2-2026", name: "Fiesta Part 2", update_number: 89, start_at: "2026-08-15T16:00:00.000Z", end_at: null }
+]);
 const DEFAULT_LEAGUE_BASELINE_RUN_KEY = "active";
 const DEFAULT_PUBLIC_CACHE_SECONDS = 5;
 const DEFAULT_TRACKED_LEAGUE_REFRESH_MINUTES = 15;
 const DEFAULT_GENERAL_LEAGUE_REFRESH_MINUTES = 15;
 const DEFAULT_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 100;
 const DEFAULT_GENERAL_LEAGUE_REFRESH_CONCURRENCY = 4;
+const DEFAULT_GENERAL_LEAGUE_WATCH_HOURS = 48;
 const MAX_GENERAL_LEAGUE_REFRESH_BATCH_SIZE = 500;
 const TOP_LEAGUES_NAME = "GLOBAL_TOP_1000_LEAGUES";
 const ALL_TOP_LEAGUES_NAME = "GLOBAL_TOP_10000_LEAGUES";
@@ -92,6 +105,7 @@ export default {
           general_league_refresh_minutes: generalLeagueRefreshMinutes(env),
           general_league_refresh_batch_size: generalLeagueRefreshBatchSize(env),
           general_league_refresh_concurrency: generalLeagueRefreshConcurrency(env),
+          general_league_watch_hours: generalLeagueWatchHours(env),
           scheduled_rank_windows: scheduledCollection.enabled && shouldRunTrackedRankWindowRefresh(env),
           top_leagues: TOP_LEAGUES_NAME,
           top_leagues_limit: topLeaguesLimit(env),
@@ -214,10 +228,12 @@ export default {
         }
 
         if (generalLeagueRefreshEnabled(env) && isScheduledCadenceDue(scheduledAt, generalLeagueRefreshMinutes(env))) {
-          const names = await generalLeagueNamesDueForRefresh(env, runKey, scheduledAt);
-          if (names.length) {
+          const watches = await generalLeagueWatchesDueForRefresh(env, runKey, scheduledAt);
+          if (watches.length) {
+            await markGeneralLeagueRefreshAttempts(env, watches, scheduledAt);
             await handleTrackedLeaguesIngest(env, scheduledSource("schedule:general"), runKey, {
-              names,
+              names: watches.map(item => item.league_name),
+              watchRows: watches,
               concurrency: generalLeagueRefreshConcurrency(env),
               allowApiFallback: false
             })
@@ -295,6 +311,18 @@ async function handleIngest(env, source, requestedLeague, requestedRunKey) {
     }
   }
 
+  if (source.startsWith("manual") && !leagueNames(env).some(name => key(name) === key(summary.league_name))) {
+    await upsertGeneralLeagueWatch(env, {
+      league_run_key: runKey,
+      league_name: summary.league_name,
+      requested_at: fetchedAt,
+      last_attempt_at: fetchedAt,
+      last_success_at: fetchedAt,
+      failure_count: 0,
+      last_error: null
+    }).catch(err => console.error("general league watch registration failed", err?.message || String(err)));
+  }
+
   return json({ ok: true, league_run_key: runKey, league_name: summary.league_name, league_id: summary.league_id, snapshot_id: snapshotId, fetched_at: fetchedAt, rows_inserted: dbRows.length, published_current: publishCurrent, snapshot_retention: "permanent" }, 202);
 }
 
@@ -351,6 +379,11 @@ async function handleTrackedLeaguesIngest(env, source, requestedRunKey, options 
       await supabaseUpsert(env, CURRENT_TABLE, dbRows.map(row => ({ ...row, updated_at: fetchedAt })), "league_run_key,league_name,user_id");
       await deleteStaleCurrentLeagueRows(env, runKey, leagueNamesWritten, fetchedAt);
     }
+  }
+
+  if (Array.isArray(options.watchRows) && options.watchRows.length) {
+    await updateGeneralLeagueWatchResults(env, runKey, fetchedAt, options.watchRows, results)
+      .catch(err => console.error("general league watch result update failed", err?.message || String(err)));
   }
 
   return json({
@@ -2798,10 +2831,18 @@ async function handleProfile(request, env) {
   if (rawRun && String(rawRun).toLowerCase() !== "all") params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
   if (requestedLeague) params.league_name = `eq.${requestedLeague}`;
 
-  const [rows, playerPoolRows] = await Promise.all([
+  const [storedRows, storedPlayerPoolRows, archivedRows] = await Promise.all([
     fetchLeagueProfileRows(env, params, limit),
-    fetchLeaguePlayerPoolProfileRows(env, userId, rawRun, summaryLimit)
+    fetchLeaguePlayerPoolProfileRows(env, userId, rawRun, Math.max(summaryLimit * 20, 2000)),
+    fetchLeagueFinalProfileRows(env, userId, rawRun, Math.max(summaryLimit * 4, 1000))
   ]);
+  const archivedLeagueRows = archivedRows.filter(row =>
+    !isAggregateLeagueListName(row.league_name)
+    && (!requestedLeague || row.league_name === requestedLeague)
+  );
+  const archivedPlayerPoolRows = archivedRows.filter(row => row.league_name === LEAGUE_PLAYER_POOL_NAME);
+  const rows = mergeLeagueProfileSourceRows(storedRows, archivedLeagueRows);
+  const playerPoolRows = mergeLeagueProfileSourceRows(storedPlayerPoolRows, archivedPlayerPoolRows);
   const usernameMap = await resolveRobloxUsernames([userId], env).catch(() => new Map());
   const resolvedUsername = usernameMap.get(userId) || null;
   const visibleRows = rows.filter(row =>
@@ -2813,15 +2854,19 @@ async function handleProfile(request, env) {
   const rawSummaries = await addLeaguePlacementFieldsToSummaries(env, summarizeLeagueProfileRows(visibleRows, env)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0) || (a.final_rank || 999999) - (b.final_rank || 999999))
     .slice(0, summaryLimit));
-  const summaries = rawSummaries.map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
-  const leaderboardSummaries = summarizeLeaguePlayerPoolProfileRows(
+  const allLeaderboardSummaries = summarizeLeaguePlayerPoolProfileRows(
     playerPoolRows.filter(row => isLeagueSnapshotAtOrBeforeEnd(env, row.league_run_key, row.fetched_at)),
     env
-  )
+  );
+  const leaderboardSummaries = finalLeaguePoolSummariesForProfile(rawSummaries, allLeaderboardSummaries)
     .sort((a, b) => new Date(b.final_snapshot_at || 0) - new Date(a.final_snapshot_at || 0))
-    .slice(0, summaryLimit)
+    .slice(0, summaryLimit);
+  const profileSummaries = mergeLeagueProfileSummariesWithPoolFallbacks(rawSummaries, leaderboardSummaries);
+  const summaries = attachLeaguePoolPlacementsToProfileSummaries(profileSummaries, allLeaderboardSummaries)
     .map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
-  const latest = summaries[0] || leaderboardSummaries[0] || null;
+  const redactedLeaderboardSummaries = leaderboardSummaries
+    .map(row => redactLeagueProfileSummary(env, row, resolvedUsername));
+  const latest = summaries[0] || redactedLeaderboardSummaries[0] || null;
 
   return cacheJson({
     ok: true,
@@ -2832,7 +2877,7 @@ async function handleProfile(request, env) {
     rows_scanned: visibleRows.length,
     rows: summaries,
     leaderboard_rows_scanned: playerPoolRows.length,
-    leaderboard_rows: leaderboardSummaries
+    leaderboard_rows: redactedLeaderboardSummaries
   }, env);
 }
 
@@ -2841,24 +2886,70 @@ async function fetchLeaguePlayerPoolProfileRows(env, userId, rawRun, limit) {
     select: "snapshot_id,fetched_at,source,league_run_key,league_name,rank,user_id,display_name,points,raw_member,raw_league",
     league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
     user_id: `eq.${userId}`,
-    order: "fetched_at.desc,snapshot_id.desc",
-    limit: String(clamp(Number(limit) || 200, 1, 500))
+    order: "fetched_at.desc,snapshot_id.desc"
   };
   if (rawRun && String(rawRun).toLowerCase() !== "all") {
     params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
   }
-  return supabaseSelect(env, SNAPSHOT_TABLE, params);
+  return fetchLeagueProfileRows(env, params, clamp(Number(limit) || 2000, 1, 5000));
+}
+
+async function fetchLeagueFinalProfileRows(env, userId, rawRun, limit) {
+  const params = {
+    select: "snapshot_id,fetched_at,source,league_run_key,league_name,league_id,league_level,league_points,league_icon,member_capacity,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time,raw_member,raw_contribution,raw_league,period_started_at,period_ended_at,league_period_key",
+    user_id: `eq.${userId}`,
+    order: "period_ended_at.desc,fetched_at.desc,snapshot_id.desc",
+    limit: String(clamp(Number(limit) || 1000, 1, 5000))
+  };
+  if (rawRun && String(rawRun).toLowerCase() !== "all") {
+    params.league_run_key = `eq.${normalizeRunKey(rawRun)}`;
+  }
+  return supabaseSelect(env, FINAL_RAW_SNAPSHOT_TABLE, params).catch(error => {
+    if (/ps99_league_final_raw_snapshots|PGRST205|404/i.test(String(error?.message || error))) return [];
+    throw error;
+  });
+}
+
+function mergeLeagueProfileSourceRows(storedRows, archivedRows) {
+  const rowsByKey = new Map();
+  for (const row of archivedRows || []) rowsByKey.set(leagueProfileSourceRowKey(row), row);
+  // Unpruned source rows win only when they are the exact same final row. The
+  // archive supplies ended periods after interval cleanup.
+  for (const row of storedRows || []) rowsByKey.set(leagueProfileSourceRowKey(row), row);
+  return [...rowsByKey.values()];
+}
+
+function leagueProfileSourceRowKey(row) {
+  return [
+    String(row?.league_run_key || ""),
+    String(row?.league_name || ""),
+    String(row?.snapshot_id || ""),
+    String(row?.user_id || "")
+  ].join("\u001f");
 }
 
 function summarizeLeaguePlayerPoolProfileRows(rows, env) {
   const groups = new Map();
   for (const row of rows || []) {
     const runKey = normalizeRunKey(row.league_run_key || DEFAULT_LEAGUE_RUN_KEY);
-    if (!groups.has(runKey)) groups.set(runKey, []);
-    groups.get(runKey).push(row);
+    const memberMetadata = normalizeRawLeague(row.raw_member);
+    const leagueMetadata = normalizeRawLeague(row.raw_league);
+    const sourceLeagueName = stringOrNull(memberMetadata.source_league_name)
+      || stringOrNull(leagueMetadata.Name)
+      || stringOrNull(leagueMetadata.name);
+    const sourceLeagueId = stringOrNull(memberMetadata.source_league_id)
+      || stringOrNull(leagueMetadata.ID)
+      || stringOrNull(leagueMetadata.id);
+    const event = leagueEventForTimestamp(env, row.fetched_at);
+    const groupKey = [event?.key || runKey, sourceLeagueId || "", String(sourceLeagueName || "").toLowerCase()].join("\u0000");
+    if (!groups.has(groupKey)) groups.set(groupKey, { runKey, event, rows: [] });
+    groups.get(groupKey).rows.push(row);
   }
 
-  return [...groups.entries()].map(([runKey, groupRows]) => {
+  return [...groups.values()].map(group => {
+    const runKey = group.runKey;
+    const event = group.event;
+    const groupRows = group.rows;
     const ordered = groupRows
       .slice()
       .filter(row => row?.fetched_at)
@@ -2871,7 +2962,7 @@ function summarizeLeaguePlayerPoolProfileRows(rows, env) {
     const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
     const metadata = normalizeRawLeague(latest.raw_league);
     const memberMetadata = normalizeRawLeague(latest.raw_member);
-    const runLabel = leagueRunLabel(env, runKey);
+    const runLabel = event?.name || leagueRunLabel(env, runKey);
     const leaderboardLabel = `${runLabel} (League)`;
 
     return {
@@ -2879,9 +2970,11 @@ function summarizeLeaguePlayerPoolProfileRows(rows, env) {
       source: "league-player-pool",
       run_key: runKey,
       league_run_key: runKey,
+      league_period_key: event?.key || null,
+      label_key: event?.key || null,
       label: leaderboardLabel,
       leaderboard_name: leaderboardLabel,
-      event_name: leaderboardLabel,
+      event_name: event?.name || leaderboardLabel,
       user_id: toNumber(latest.user_id ?? first.user_id),
       display_name: latest.display_name || first.display_name || null,
       final_rank: toNumber(latest.rank),
@@ -2893,13 +2986,124 @@ function summarizeLeaguePlayerPoolProfileRows(rows, env) {
       total_global_players: toNumber(metadata.pool_total_players),
       top_leagues_scanned: toNumber(metadata.pool_top_leagues_scanned),
       source_league_name: stringOrNull(memberMetadata.source_league_name),
+      source_league_id: stringOrNull(memberMetadata.source_league_id),
+      league_rank: toNumber(memberMetadata.source_league_rank ?? metadata.league_rank),
+      final_league_rank: toNumber(memberMetadata.source_league_rank ?? metadata.league_rank),
       first_snapshot_at: first.fetched_at || null,
       final_snapshot_at: latest.fetched_at || null,
-      period_start_at: first.fetched_at || null,
-      period_end_at: latest.fetched_at || null,
+      period_start_at: event?.start_at || first.fetched_at || null,
+      period_end_at: event?.end_at || latest.fetched_at || null,
       snapshot_count: ordered.length
     };
   }).filter(Boolean);
+}
+
+function attachLeaguePoolPlacementsToProfileSummaries(summaries, poolSummaries) {
+  const pools = Array.isArray(poolSummaries) ? poolSummaries : [];
+  return (Array.isArray(summaries) ? summaries : []).map(summary => {
+    const runKey = normalizeRunKey(summary.league_run_key || summary.run_key);
+    const periodKey = String(summary.league_period_key || summary.label_key || "").trim();
+    const leagueName = String(summary.league_name || "").trim().toLowerCase();
+    const leagueId = String(summary.league_id || "").trim();
+    const candidates = pools.filter(pool => {
+      const poolPeriodKey = String(pool.league_period_key || pool.label_key || "").trim();
+      if (periodKey && poolPeriodKey) {
+        if (periodKey !== poolPeriodKey) return false;
+      } else if (normalizeRunKey(pool.league_run_key || pool.run_key) !== runKey) return false;
+      const poolLeagueId = String(pool.source_league_id || "").trim();
+      const poolLeagueName = String(pool.source_league_name || "").trim().toLowerCase();
+      return Boolean((leagueId && poolLeagueId === leagueId) || (leagueName && poolLeagueName === leagueName));
+    });
+    if (!candidates.length) return summary;
+    const summaryTime = new Date(summary.final_snapshot_at || summary.period_end_at || 0).getTime();
+    const nearest = candidates.slice().sort((left, right) =>
+      Math.abs(new Date(left.final_snapshot_at || 0).getTime() - summaryTime)
+      - Math.abs(new Date(right.final_snapshot_at || 0).getTime() - summaryTime)
+    )[0];
+    const leagueRank = toNumber(summary.league_rank ?? summary.final_league_rank ?? summary.rank)
+      ?? toNumber(nearest.league_rank ?? nearest.final_league_rank);
+    return {
+      ...summary,
+      rank: leagueRank,
+      league_rank: leagueRank,
+      final_league_rank: leagueRank,
+      global_rank: toNumber(nearest.global_rank ?? nearest.final_rank),
+      total_global_players: toNumber(nearest.total_global_players ?? nearest.total_ranked)
+    };
+  });
+}
+
+function finalLeaguePoolSummariesForProfile(summaries, poolSummaries) {
+  const pools = Array.isArray(poolSummaries) ? poolSummaries : [];
+  const selected = [];
+  const seen = new Set();
+
+  for (const summary of Array.isArray(summaries) ? summaries : []) {
+    const periodKey = String(summary.league_period_key || summary.label_key || "").trim();
+    const runKey = normalizeRunKey(summary.league_run_key || summary.run_key);
+    const leagueId = String(summary.league_id || "").trim();
+    const leagueName = String(summary.league_name || "").trim().toLowerCase();
+    const candidates = pools.filter(pool => {
+      const poolPeriodKey = String(pool.league_period_key || pool.label_key || "").trim();
+      if (periodKey && poolPeriodKey) {
+        if (periodKey !== poolPeriodKey) return false;
+      } else if (normalizeRunKey(pool.league_run_key || pool.run_key) !== runKey) return false;
+      return Boolean(
+        (leagueId && String(pool.source_league_id || "").trim() === leagueId)
+        || (leagueName && String(pool.source_league_name || "").trim().toLowerCase() === leagueName)
+      );
+    });
+    if (!candidates.length) continue;
+    const summaryTime = new Date(summary.final_snapshot_at || summary.period_end_at || 0).getTime();
+    const nearest = candidates.slice().sort((left, right) =>
+      Math.abs(new Date(left.final_snapshot_at || 0).getTime() - summaryTime)
+      - Math.abs(new Date(right.final_snapshot_at || 0).getTime() - summaryTime)
+    )[0];
+    const identity = [periodKey || runKey, nearest.source_league_id || nearest.source_league_name || ""].join("\u0000");
+    if (!seen.has(identity)) {
+      seen.add(identity);
+      selected.push(nearest);
+    }
+  }
+
+  const selectedPeriods = new Set(selected.map(row => String(row.league_period_key || row.label_key || "").trim()).filter(Boolean));
+  const fallbackByPeriod = new Map();
+  for (const pool of pools) {
+    const periodKey = String(pool.league_period_key || pool.label_key || "").trim();
+    if (!periodKey || selectedPeriods.has(periodKey)) continue;
+    const existing = fallbackByPeriod.get(periodKey);
+    if (!existing || new Date(pool.final_snapshot_at || 0) > new Date(existing.final_snapshot_at || 0)) {
+      fallbackByPeriod.set(periodKey, pool);
+    }
+  }
+  selected.push(...fallbackByPeriod.values());
+  return selected;
+}
+
+function mergeLeagueProfileSummariesWithPoolFallbacks(summaries, poolSummaries) {
+  const merged = [...(Array.isArray(summaries) ? summaries : [])];
+  const knownPeriods = new Set(merged.map(row => String(row.league_period_key || row.label_key || "").trim()).filter(Boolean));
+  for (const pool of Array.isArray(poolSummaries) ? poolSummaries : []) {
+    const periodKey = String(pool.league_period_key || pool.label_key || "").trim();
+    if (!periodKey || knownPeriods.has(periodKey)) continue;
+    knownPeriods.add(periodKey);
+    merged.push({
+      ...pool,
+      league_period_key: periodKey,
+      label_key: periodKey,
+      run_label: pool.event_name || pool.label || periodKey,
+      event_name: pool.event_name || pool.label || periodKey,
+      league_name: pool.source_league_name || null,
+      league_id: pool.source_league_id || null,
+      rank: toNumber(pool.league_rank ?? pool.final_league_rank),
+      league_rank: toNumber(pool.league_rank ?? pool.final_league_rank),
+      final_league_rank: toNumber(pool.league_rank ?? pool.final_league_rank),
+      final_rank: null,
+      final_points: toNumber(pool.final_points) || 0,
+      source: "league-player-pool-final"
+    });
+  }
+  return merged;
 }
 
 async function fetchLeagueProfileRows(env, params, limit) {
@@ -2922,9 +3126,16 @@ async function fetchLeagueProfileRows(env, params, limit) {
 
 function summarizeLeagueProfileRows(rows, env) {
   const groups = new Map();
+  const eventGroups = new Map();
   const gapMs = leagueProfilePeriodGapHours(env) * 60 * 60 * 1000;
 
   for (const row of rows || []) {
+    const event = leagueEventForTimestamp(env, row.fetched_at);
+    if (event) {
+      if (!eventGroups.has(event.key)) eventGroups.set(event.key, { event, rows: [] });
+      eventGroups.get(event.key).rows.push(row);
+      continue;
+    }
     const keyParts = [
       String(row.league_run_key || DEFAULT_LEAGUE_RUN_KEY).trim(),
       String(row.league_id || "").trim(),
@@ -2936,6 +3147,24 @@ function summarizeLeagueProfileRows(rows, env) {
   }
 
   const summaries = [];
+
+  for (const group of eventGroups.values()) {
+    const ordered = group.rows
+      .slice()
+      .filter(row => row?.fetched_at)
+      .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
+    const latest = ordered[ordered.length - 1];
+    if (!latest) continue;
+    const latestLeagueId = String(latest.league_id || "").trim();
+    const latestLeagueName = String(latest.league_name || "").trim().toLowerCase();
+    const finalLeagueRows = ordered.filter(row => {
+      const rowLeagueId = String(row.league_id || "").trim();
+      const rowLeagueName = String(row.league_name || "").trim().toLowerCase();
+      return Boolean((latestLeagueId && rowLeagueId === latestLeagueId) || (latestLeagueName && rowLeagueName === latestLeagueName));
+    });
+    const summary = summarizeLeagueProfileGroup(finalLeagueRows, env, group.event);
+    if (summary) summaries.push(summary);
+  }
 
   for (const groupRows of groups.values()) {
     const ordered = groupRows
@@ -2971,7 +3200,7 @@ function summarizeLeagueProfileRows(rows, env) {
   return summaries;
 }
 
-function summarizeLeagueProfileGroup(rows, env) {
+function summarizeLeagueProfileGroup(rows, env, event = null) {
   const ordered = rows
     .slice()
     .filter(row => row?.fetched_at)
@@ -2984,8 +3213,8 @@ function summarizeLeagueProfileGroup(rows, env) {
   const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
 
   const runKey = latest.league_run_key || first.league_run_key || DEFAULT_LEAGUE_RUN_KEY;
-  const periodKey = leagueProfilePeriodKey(runKey, latest.league_name || first.league_name, first.fetched_at);
-  const runLabel = leagueProfilePeriodLabel(env, periodKey, runKey, latest.fetched_at);
+  const periodKey = event?.key || leagueProfilePeriodKey(runKey, latest.league_name || first.league_name, first.fetched_at);
+  const runLabel = event?.name || leagueProfilePeriodLabel(env, periodKey, runKey, latest.fetched_at);
 
   return {
     league_run_key: runKey,
@@ -3007,8 +3236,8 @@ function summarizeLeagueProfileGroup(rows, env) {
     highest_points: points.length ? Math.max(...points) : 0,
     first_snapshot_at: first.fetched_at || null,
     final_snapshot_at: latest.fetched_at || null,
-    period_start_at: first.fetched_at || null,
-    period_end_at: latest.fetched_at || null,
+    period_start_at: event?.start_at || first.fetched_at || null,
+    period_end_at: event?.end_at || latest.fetched_at || null,
     period_gap_hours: leagueProfilePeriodGapHours(env),
     snapshot_count: ordered.length,
     last_contribution_at: latest.last_contribution_at || null,
@@ -3058,33 +3287,35 @@ async function fetchStoredLeagueRankForProfileSummary(env, summary) {
 
   const labels = [TOP_LEAGUES_NAME, ALL_TOP_LEAGUES_NAME];
   const lookup = async (timeFilters, order, options = {}) => {
-    for (const label of labels) {
-      if (leagueId) {
-        const byId = await supabaseSelect(env, SNAPSHOT_TABLE, {
-          select: "rank,fetched_at,display_name,league_id",
-          league_run_key: `eq.${runKey}`,
-          league_name: `eq.${label}`,
-          league_id: `eq.${leagueId}`,
-          ...timeFilters,
-          order,
-          limit: "1"
-        }, options);
-        const rank = toNumber(byId[0]?.rank);
-        if (rank !== null) return rank;
-      }
+    for (const table of [SNAPSHOT_TABLE, FINAL_RAW_SNAPSHOT_TABLE]) {
+      for (const label of labels) {
+        if (leagueId) {
+          const byId = await supabaseSelect(env, table, {
+            select: "rank,fetched_at,display_name,league_id",
+            league_run_key: `eq.${runKey}`,
+            league_name: `eq.${label}`,
+            league_id: `eq.${leagueId}`,
+            ...timeFilters,
+            order,
+            limit: "1"
+          }, options);
+          const rank = toNumber(byId[0]?.rank);
+          if (rank !== null) return rank;
+        }
 
-      if (leagueNameValue) {
-        const byName = await supabaseSelect(env, SNAPSHOT_TABLE, {
-          select: "rank,fetched_at,display_name,league_id",
-          league_run_key: `eq.${runKey}`,
-          league_name: `eq.${label}`,
-          display_name: `eq.${leagueNameValue}`,
-          ...timeFilters,
-          order,
-          limit: "1"
-        }, options);
-        const rank = toNumber(byName[0]?.rank);
-        if (rank !== null) return rank;
+        if (leagueNameValue) {
+          const byName = await supabaseSelect(env, table, {
+            select: "rank,fetched_at,display_name,league_id",
+            league_run_key: `eq.${runKey}`,
+            league_name: `eq.${label}`,
+            display_name: `eq.${leagueNameValue}`,
+            ...timeFilters,
+            order,
+            limit: "1"
+          }, options);
+          const rank = toNumber(byName[0]?.rank);
+          if (rank !== null) return rank;
+        }
       }
     }
 
@@ -4951,6 +5182,9 @@ function generalLeagueRefreshBatchSize(env) {
 function generalLeagueRefreshConcurrency(env) {
   return clamp(Number(env.GENERAL_LEAGUE_REFRESH_CONCURRENCY || DEFAULT_GENERAL_LEAGUE_REFRESH_CONCURRENCY), 1, 12);
 }
+function generalLeagueWatchHours(env) {
+  return clamp(Number(env.GENERAL_LEAGUE_WATCH_HOURS || DEFAULT_GENERAL_LEAGUE_WATCH_HOURS), 1, 24 * 30);
+}
 function scheduledEventTime(event) {
   const scheduledTime = Number(event?.scheduledTime);
   return Number.isFinite(scheduledTime) && scheduledTime > 0 ? scheduledTime : Date.now();
@@ -4963,44 +5197,109 @@ function logScheduledLeagueIngest(kind) {
   return response => response.clone().json().catch(() => ({}))
     .then(payload => console.log(`scheduled ${kind} league ingest complete`, JSON.stringify(payload)));
 }
-async function generalLeagueNamesDueForRefresh(env, runKey, nowMs) {
-  const aggregateNames = [
-    TOP_LEAGUES_NAME,
-    ALL_TOP_LEAGUES_NAME,
-    COLD_DISCOVERED_LEAGUES_NAME,
-    LEAGUE_PLAYER_POOL_NAME,
-    LEAGUE_PLAYER_POOL_STAGING_NAME,
-    LEAGUE_OVERLAP_SCAN_STAGING_NAME
-  ];
-  const rows = await supabaseSelectAll(env, CURRENT_TABLE, {
-    select: "league_name,updated_at,fetched_at",
+async function generalLeagueWatchesDueForRefresh(env, runKey, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const requestedAfter = new Date(now - generalLeagueWatchHours(env) * 60 * 60 * 1000).toISOString();
+  const dueBefore = new Date(now - generalLeagueRefreshMinutes(env) * 60 * 1000).toISOString();
+  const rows = await supabaseSelectAll(env, GENERAL_LEAGUE_WATCHLIST_TABLE, {
+    select: "league_run_key,league_key,league_name,requested_at,last_attempt_at,last_success_at,failure_count,last_error",
     league_run_key: `eq.${runKey}`,
-    league_name: `not.in.(${aggregateNames.map(postgrestFilterText).join(",")})`,
-    order: "updated_at.asc.nullsfirst"
-  }, { maxRows: 50000 });
+    requested_at: `gte.${requestedAfter}`,
+    or: `(last_attempt_at.is.null,last_attempt_at.lte.${dueBefore})`,
+    order: "last_attempt_at.asc.nullsfirst,requested_at.desc"
+  }, { maxRows: Math.max(1000, generalLeagueRefreshBatchSize(env) * 4) }).catch(error => {
+    if (/ps99_league_refresh_watchlist|PGRST205|404/i.test(String(error?.message || error))) return [];
+    throw error;
+  });
   const configured = new Set(leagueNames(env).map(key));
-  const latestByLeague = new Map();
+  return rows
+    .filter(row => row.league_name && !configured.has(key(row.league_name)) && !isAggregateLeagueListName(row.league_name))
+    .slice(0, generalLeagueRefreshBatchSize(env));
+}
 
-  for (const row of rows) {
-    const name = String(row.league_name || "").trim();
-    const normalized = key(name);
-    if (!name || !normalized || configured.has(normalized) || isAggregateLeagueListName(name)) continue;
-    const updatedAt = Math.max(
-      new Date(row.updated_at || 0).getTime() || 0,
-      new Date(row.fetched_at || 0).getTime() || 0
-    );
-    const current = latestByLeague.get(normalized);
-    if (!current || updatedAt > current.updatedAt) latestByLeague.set(normalized, { name, updatedAt });
-  }
+async function generalLeagueNamesDueForRefresh(env, runKey, nowMs) {
+  return (await generalLeagueWatchesDueForRefresh(env, runKey, nowMs)).map(item => item.league_name);
+}
 
-  const dueBefore = Number(nowMs) - generalLeagueRefreshMinutes(env) * 60 * 1000;
-  return [...latestByLeague.values()]
-    .filter(item => item.updatedAt <= dueBefore)
-    .sort((a, b) => a.updatedAt - b.updatedAt || a.name.localeCompare(b.name))
-    .slice(0, generalLeagueRefreshBatchSize(env))
-    .map(item => item.name);
+async function markGeneralLeagueRefreshAttempts(env, watches, nowMs) {
+  const attemptedAt = new Date(Number(nowMs) || Date.now()).toISOString();
+  const rows = (watches || []).map(watch => ({
+    ...watch,
+    last_attempt_at: attemptedAt,
+    updated_at: attemptedAt
+  }));
+  if (rows.length) await supabaseUpsert(env, GENERAL_LEAGUE_WATCHLIST_TABLE, rows, "league_run_key,league_key");
+}
+
+async function upsertGeneralLeagueWatch(env, watch) {
+  const name = String(watch?.league_name || "").trim();
+  const runKey = normalizeRunKey(watch?.league_run_key || leagueRunKey(env));
+  if (!name || isAggregateLeagueListName(name)) return;
+  const now = new Date().toISOString();
+  await supabaseUpsert(env, GENERAL_LEAGUE_WATCHLIST_TABLE, [{
+    league_run_key: runKey,
+    league_key: key(name),
+    league_name: name,
+    requested_at: watch.requested_at || now,
+    last_attempt_at: watch.last_attempt_at || null,
+    last_success_at: watch.last_success_at || null,
+    failure_count: Math.max(0, Math.trunc(toNumber(watch.failure_count) || 0)),
+    last_error: stringOrNull(watch.last_error),
+    updated_at: now
+  }], "league_run_key,league_key");
+}
+
+async function updateGeneralLeagueWatchResults(env, runKey, fetchedAt, watches, results) {
+  const watchByKey = new Map((watches || []).map(watch => [key(watch.league_name), watch]));
+  const rows = (results || []).map(result => {
+    const watch = watchByKey.get(key(result.requested));
+    if (!watch) return null;
+    return {
+      league_run_key: runKey,
+      league_key: key(watch.league_name),
+      league_name: result.league_name || watch.league_name,
+      requested_at: watch.requested_at,
+      last_attempt_at: fetchedAt,
+      last_success_at: result.ok ? fetchedAt : watch.last_success_at,
+      failure_count: result.ok ? 0 : Math.max(0, Math.trunc(toNumber(watch.failure_count) || 0)) + 1,
+      last_error: result.ok ? null : String(result.message || "League refresh failed.").slice(0, 500),
+      updated_at: fetchedAt
+    };
+  }).filter(Boolean);
+  if (rows.length) await supabaseUpsert(env, GENERAL_LEAGUE_WATCHLIST_TABLE, rows, "league_run_key,league_key");
 }
 function normalizeRunKey(value) { return String(value || DEFAULT_LEAGUE_RUN_KEY).trim() || DEFAULT_LEAGUE_RUN_KEY; }
+function leagueEventCatalog(env = {}) {
+  let configured = [];
+  try {
+    const parsed = JSON.parse(String(env.LEAGUE_EVENTS_JSON || "[]"));
+    if (Array.isArray(parsed)) configured = parsed;
+  } catch {}
+  const byKey = new Map(DEFAULT_LEAGUE_EVENTS.map(event => [event.key, event]));
+  for (const raw of configured) {
+    const eventKey = String(raw?.key || raw?.event_key || "").trim();
+    const name = String(raw?.name || raw?.event_name || "").trim();
+    const startAt = parseTimestamp(raw?.start_at || raw?.started_at);
+    if (!eventKey || !name || !startAt) continue;
+    byKey.set(eventKey, {
+      key: eventKey,
+      name,
+      update_number: toNumber(raw?.update_number),
+      start_at: startAt,
+      end_at: parseTimestamp(raw?.end_at || raw?.ended_at)
+    });
+  }
+  return [...byKey.values()].sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+}
+function leagueEventForTimestamp(env, value) {
+  const time = new Date(value || 0).getTime();
+  if (!Number.isFinite(time)) return null;
+  return leagueEventCatalog(env).find(event => {
+    const start = new Date(event.start_at).getTime();
+    const end = event.end_at ? new Date(event.end_at).getTime() : Infinity;
+    return Number.isFinite(start) && time >= start && time < end;
+  }) || null;
+}
 function leagueRunKey(env) {
   const configured = normalizeRunKey(env.LEAGUE_RUN_KEY || env.LEAGUE_SEASON_KEY || DEFAULT_LEAGUE_RUN_KEY);
   return configured.toLowerCase() === "active" ? DEFAULT_LEAGUE_RUN_KEY : configured;
@@ -5058,18 +5357,18 @@ function leagueRunLabel(env, runKey) {
   const key = normalizeRunKey(runKey || leagueRunKey(env));
   const labels = parseJsonObject(env.LEAGUE_RUN_LABELS_JSON || env.LEAGUE_EVENT_LABELS_JSON);
   const mapped = String(labels[key] || labels[key.toLowerCase()] || labels.default || "").trim();
-  if (mapped) return mapped;
+  if (mapped) return canonicalLeagueRunLabel(mapped);
 
   const currentKey = leagueRunKey(env);
   if (key === currentKey) {
     const explicit = String(env.LEAGUE_RUN_LABEL || env.LEAGUE_EVENT_LABEL || "").trim();
-    if (explicit) return explicit;
+    if (explicit) return canonicalLeagueRunLabel(explicit);
 
     const updateTheme = String(env.PS99_UPDATE_THEME || env.PS99_UPDATE_NAME || "").trim();
-    if (updateTheme) return updateTheme;
+    if (updateTheme) return canonicalLeagueRunLabel(updateTheme);
 
     const updateLabel = String(env.PS99_UPDATE_LABEL || "").trim();
-    if (updateLabel) return updateLabel;
+    if (updateLabel) return canonicalLeagueRunLabel(updateLabel);
 
     const updateNumber = String(env.PS99_UPDATE_NUMBER || "").trim();
     if (updateNumber) return `Update ${updateNumber}`;
@@ -5077,6 +5376,16 @@ function leagueRunLabel(env, runKey) {
 
   if (key === DEFAULT_LEAGUE_RUN_KEY) return DEFAULT_LEAGUE_RUN_LABEL;
   return key || "";
+}
+
+function canonicalLeagueRunLabel(value) {
+  const label = String(value || "").trim();
+  // The current League was initially deployed with the update theme instead
+  // of its actual League event name. Normalize that stale value even when it
+  // remains in a Worker variable or per-run label map.
+  return label.toLowerCase().replace(/[^a-z0-9]/g, "") === "plantsvscoinspart2"
+    ? "Fiesta Part 2"
+    : label;
 }
 function leagueRunEndAt(env, runKey) {
   const key = normalizeRunKey(runKey || leagueRunKey(env));

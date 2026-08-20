@@ -1124,9 +1124,11 @@ continues to run every five minutes:
   configured c0ld league pool. `COLD_LEAGUE_REFRESH_MINUTES=15` refreshes them
   at `:00`, `:15`, `:30`, and `:45`.
 - A successful one-off `/league info` or `/lg` lookup stores that league in
-  `ps99_league_current`. Non-configured names in that table form the persistent
-  general-league pool. `GENERAL_LEAGUE_REFRESH_MINUTES=30` refreshes due names
-  at `:00` and `:30`.
+  `ps99_league_current` and renews it in `ps99_league_refresh_watchlist`.
+  Recently requested names are selected by oldest attempt time, so a missing or
+  invalid League cannot remain at the front and starve every League behind it.
+  `GENERAL_LEAGUE_REFRESH_MINUTES=15` refreshes due watches, and
+  `GENERAL_LEAGUE_WATCH_HOURS=48` controls how long a lookup stays active.
 
 Set `GENERAL_LEAGUE_REFRESH_ENABLED=false` to disable the second pool.
 `GENERAL_LEAGUE_REFRESH_BATCH_SIZE` limits how many due general leagues run in
@@ -1136,8 +1138,8 @@ BIG Games requests. On the Discord Worker,
 30-minute general cadence. The 15-minute and 30-minute chart spacing comes from
 these stored snapshot times; no separate graph table or migration is required.
 
-The current clean run is `LEAGUE_RUN_KEY="tap-heroes-part-2"` with
-`LEAGUE_RUN_LABEL="Tap Heroes Part 2"`. A new run key isolates its snapshots
+The current run uses `LEAGUE_RUN_KEY="plants-vs-coins-part-2"` with
+`LEAGUE_RUN_LABEL="Fiesta Part 2"`. A new run key isolates its snapshots
 and current rows without deleting previous league history.
 
 BIG Games can continue returning the previous run's cumulative point counters
@@ -1546,6 +1548,12 @@ The user flow is:
   even when Big Games Profile does not expose a parseable Roblox user ID.
 - `/htg accounts` lists every Roblox account connected to the user's Discord
   account.
+- `/htg report timeframe:<day|week|month>` privately summarizes the user's
+  recorded HTG acquisitions across all connected accounts for a rolling 24-hour,
+  7-day, or 30-day window. Repeated copies are grouped by item and account. The
+  private report displays ten grouped items per owner-bound page. It reads
+  `ps99_hatch_alerts`; it does not call Big Games, consume refresh quota, change
+  tracker state, or resend alerts.
 - `/htg assign channel:<channel>` sets the HTG gain-alert destination for that
   Discord server. HTG opt-ins are server-scoped: an account posts only to the
   server where that account was explicitly enabled, and only if that same server
@@ -1671,21 +1679,30 @@ every configured destination with `scripts/test-discord-hourly-clans.ps1`.
 
 ## Luna clan comparison posts
 
-`/clan compare` uses the stored all-clans leaderboard to compare the requested
-middle clan with the clan immediately above and below it. The embed includes
-point gaps, recent pace, projected finish, an ETA to pass the clan above, the
-minimum pace required to pass by event end, and the threat ETA from below.
+`/clan compare view` directly compares two clans, two Leagues, or two players.
+Choose the type and provide both names. The preview shows each entry's current
+rank, points, pace, one-hour projection, point lead, pace lead, and rank gap.
+
+Persistent `assign` comparisons remain clan-only. They use the stored all-clans
+leaderboard to compare the requested middle clan with the clan immediately
+above and below it, including point gaps, projected finish, passing ETA, and
+the threat from below.
 
 ```text
-/clan compare view clan:WMSY
+/clan compare view type:Clans first:WMSY second:COLD
+/clan compare view type:Leagues first:MOVO second:YAMO
+/clan compare view type:Players first:Cinnamowopal second:PandoraJ999
 /clan compare assign clan:WMSY channel:#clan-race
 /clan compare remove clan:WMSY
 ```
 
-Run `supabase/migrations/057_discord_clan_compare_assignments.sql` before using
-`assign`. Persistent comparisons edit one Discord post in place every five
-minutes by default. Set `CLAN_COMPARE_POST_INTERVAL_MINUTES` on the Discord
-Worker to change that cadence. Use `GET /admin/clan-compare/status` or
+Run migrations `053_discord_clan_tracker_assignments.sql`,
+`058_discord_clan_tracker_compare_mode.sql`, and
+`20260820165421_consolidate_clan_compare_persistence.sql` before using `assign`.
+Persistent comparisons use the same authoritative assignment store as clan
+trackers and edit one Discord post in place every 20 minutes by default. Set
+`CLAN_TRACKER_POST_INTERVAL_MINUTES` on the Discord Worker to change that
+cadence. Use `GET /admin/clan-compare/status` or
 `POST /admin/clan-compare/run` with the Discord Worker admin token for checks
 and manual refreshes.
 

@@ -4,6 +4,7 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../cloudflare/inventory-detector-worker.js", import.meta.url), "utf8")
   .replace("export default {", "globalThis.__worker = {");
+const reportQueries = [];
 const context = vm.createContext({
   console,
   URL,
@@ -17,7 +18,29 @@ const context = vm.createContext({
   btoa,
   atob,
   setTimeout,
-  clearTimeout
+  clearTimeout,
+  fetch: async input => {
+    const url = new URL(typeof input === "string" ? input : input.url);
+    if (url.hostname === "supabase.test" && url.pathname === "/rest/v1/ps99_hatch_alerts") {
+      reportQueries.push(url);
+      return Response.json([{
+        id: "00000000-0000-0000-0000-000000000001",
+        discord_user_id: "123456789012345678",
+        roblox_user_id: 1,
+        roblox_username: "Tester",
+        period_start: "2026-08-19T11:45:00.000Z",
+        period_end: "2026-08-19T12:00:00.000Z",
+        tier: "huge",
+        item_key: "huge-test",
+        display_name: "Huge Test",
+        variant: "Normal",
+        delta: 1,
+        rap: 1_000_000,
+        created_at: "2026-08-19T12:00:01.000Z"
+      }]);
+    }
+    return Response.json({ message: "Not found" }, { status: 404 });
+  }
 });
 new vm.Script(source, { filename: "inventory-detector-worker.js" }).runInContext(context);
 
@@ -42,6 +65,65 @@ const {
   hatchAuthorizationExpiryNoticeGuildIdsNeeded,
   hatchTrackerMetadataWithAuthorizationExpiryNotice
 } = context;
+
+const reportPeriod = context.hatchReportPeriod("week", "2026-08-20T12:00:00.000Z");
+assert.equal(reportPeriod.start_at, "2026-08-13T12:00:00.000Z", "weekly HTG reports must use a rolling seven-day window");
+assert.throws(() => context.hatchReportPeriod("year"), /day, week, or month/, "yearly HTG reports must remain unavailable to bound query size");
+const reportSummary = context.buildHatchReportSummary([
+  {
+    tier: "huge",
+    item_key: "huge-test",
+    display_name: "Huge Test",
+    variant: "Normal",
+    roblox_user_id: "1",
+    roblox_username: "Tester",
+    delta: 1,
+    rap: 1_000_000,
+    period_end: "2026-08-18T12:00:00.000Z"
+  },
+  {
+    tier: "huge",
+    item_key: "huge-test",
+    display_name: "Huge Test",
+    variant: "Normal",
+    roblox_user_id: "1",
+    roblox_username: "Tester",
+    delta: 2,
+    rap: 1_250_000,
+    period_end: "2026-08-19T12:00:00.000Z"
+  },
+  {
+    tier: "titanic",
+    item_key: "titanic-test",
+    display_name: "Titanic Test",
+    variant: "Normal",
+    roblox_user_id: "2",
+    roblox_username: "Alt",
+    delta: 1,
+    rap: 5_000_000_000,
+    period_end: "2026-08-20T10:00:00.000Z"
+  }
+], reportPeriod);
+assert.equal(reportSummary.total_quantity, 4, "HTG reports must total acquired copies rather than alert rows");
+assert.equal(reportSummary.acquisition_count, 3, "HTG reports must retain the number of recorded acquisition events");
+assert.equal(reportSummary.items.length, 2, "repeated acquisitions of the same item and account must be grouped");
+assert.equal(reportSummary.items.find(item => item.item_key === "huge-test").quantity, 3);
+assert.equal(reportSummary.tier_totals.titanic, 1);
+const reportResponse = await context.__worker.fetch(new Request(
+  "https://inventory.test/api/hatch/report?discord_user_id=123456789012345678&timeframe=month",
+  { headers: { authorization: "Bearer test-admin" } }
+), {
+  INGEST_ADMIN_TOKEN: "test-admin",
+  SUPABASE_URL: "https://supabase.test",
+  SUPABASE_SERVICE_ROLE_KEY: "test-service-role"
+});
+assert.equal(reportResponse.status, 200, "the authenticated HTG report endpoint must answer successfully");
+const reportPayload = await reportResponse.json();
+assert.equal(reportPayload.timeframe, "month");
+assert.equal(reportPayload.total_quantity, 1);
+assert.equal(reportQueries.length, 1, "the HTG report endpoint should require only one indexed alert-history query for a small result");
+assert.equal(reportQueries[0].searchParams.get("discord_user_id"), "eq.123456789012345678");
+assert.match(reportQueries[0].searchParams.get("period_end"), /^gte\./, "the report query must remain bounded by its rolling start time");
 
 const coldGuild = "1457088639006670979";
 const lunaGuild = "1457088639006670980";

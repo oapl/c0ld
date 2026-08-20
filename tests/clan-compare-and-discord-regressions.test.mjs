@@ -101,13 +101,111 @@ const discord = workerContext("../cloudflare/discord-search-interactions-worker.
   fetch: async () => Response.json({ ok: true })
 });
 
-const compareCommand = discord.clanCommandPayload().options.find(option => option.name === "compare");
+const discordSource = readFileSync(new URL("../cloudflare/discord-search-interactions-worker.js", import.meta.url), "utf8");
+const clanLogDeliveryMigration = readFileSync(new URL("../supabase/migrations/20260820210000_add_clan_log_delivery_receipts.sql", import.meta.url), "utf8");
+assert.equal(
+  (discordSource.match(/if \(clanPath\.group === "compare"\)/g) || []).length,
+  1,
+  "/clan compare must have one command handler and one persistence owner"
+);
+assert.doesNotMatch(
+  discordSource,
+  /hourlyClanApiRequest\(env, "\/api\/discord\/clan-compare-assignments"/,
+  "the Discord worker must not read or write the retired comparison assignment table"
+);
+assert.match(discordSource, /enforce_nonce:\s*true/, "clan log posts must ask Discord to reject a duplicate nonce");
+assert.match(discordSource, /claimClanLogDelivery/, "clan log posts must acquire a durable delivery claim before posting");
+assert.match(
+  clanLogDeliveryMigration,
+  /primary key \(assignment_key, event_id\)/,
+  "delivery receipts must uniquely identify each event for each assigned log"
+);
+
+const invalidEditCalls = [];
+const invalidEditDiscord = workerContext("../cloudflare/discord-search-interactions-worker.js", {
+  fetch: async (_request, init = {}) => {
+    invalidEditCalls.push(init.method || "GET");
+    return Response.json({ message: "Invalid Form Body" }, { status: 400 });
+  }
+});
+await assert.rejects(
+  invalidEditDiscord.postOrUpdateClanTrackerMessages(
+    { DISCORD_BOT_TOKEN: "test-token" },
+    { channel_id: "12345", message_id: '["67890"]' },
+    [{ embeds: [{ description: "updated" }] }]
+  ),
+  /Invalid Form Body/,
+  "an invalid edit must fail without creating a replacement post"
+);
+assert.deepEqual(invalidEditCalls, ["PATCH"], "Discord 400 must never fall through to POST");
+
+const missingEditCalls = [];
+const missingEditDiscord = workerContext("../cloudflare/discord-search-interactions-worker.js", {
+  fetch: async (_request, init = {}) => {
+    const method = init.method || "GET";
+    missingEditCalls.push(method);
+    return method === "PATCH"
+      ? Response.json({ message: "Unknown Message" }, { status: 404 })
+      : Response.json({ id: "99999" });
+  }
+});
+const recreated = await missingEditDiscord.postOrUpdateClanTrackerMessages(
+  { DISCORD_BOT_TOKEN: "test-token" },
+  { channel_id: "12345", message_id: '["67890"]' },
+  [{ embeds: [{ description: "updated" }] }]
+);
+assert.deepEqual(missingEditCalls, ["PATCH", "POST", "DELETE"], "only Discord 404 may recreate the persistent post");
+assert.deepEqual(Array.from(recreated.ids), ["99999"]);
+
+const clanCommand = discord.clanCommandPayload();
+const clanOptionNames = Array.from(clanCommand.options, option => option.name);
+assert.equal(
+  new Set(clanOptionNames).size,
+  clanOptionNames.length,
+  "/clan must not register duplicate top-level option names"
+);
+const compareCommand = clanCommand.options.find(option => option.name === "compare");
 assert.equal(compareCommand.type, 2, "/clan compare should register as a subcommand group");
 assert.deepEqual(
   Array.from(compareCommand.options, option => option.name),
   ["view", "assign", "remove"],
   "/clan compare should expose preview and persistent-post controls"
 );
+const compareView = compareCommand.options.find(option => option.name === "view");
+assert.deepEqual(
+  Array.from(compareView.options, option => option.name),
+  ["type", "first", "second"],
+  "/clan compare view should accept a comparison type and two direct entries"
+);
+assert.deepEqual(
+  Array.from(compareView.options[0].choices, choice => choice.value),
+  ["clan", "league", "player"],
+  "/clan compare view should support clans, Leagues, and players"
+);
+
+const directComparison = discord.buildDirectComparisonMessage("league", {
+  name: "ALPHA",
+  rank: 4,
+  points: 10_000_000,
+  pace: 500_000,
+  projectedPoints: 10_500_000,
+  detail: "4 members recorded",
+  context: "Fiesta Part 2",
+  updatedAt: "2026-08-20T12:00:00.000Z"
+}, {
+  name: "BETA",
+  rank: 7,
+  points: 9_000_000,
+  pace: 700_000,
+  projectedPoints: 9_700_000,
+  detail: "4 members recorded",
+  context: "Fiesta Part 2",
+  updatedAt: "2026-08-20T12:00:00.000Z"
+});
+assert.equal(directComparison.embeds[0].title, "League Comparison");
+assert.match(directComparison.embeds[0].fields[0].value, /Rank:\*\* #4/);
+assert.match(directComparison.embeds[0].fields[2].value, /ALPHA by 1M points/);
+assert.match(directComparison.embeds[0].fields[2].value, /BETA by 200K\/h/);
 
 assert.equal(
   discord.searchChartDirectGain({ history: [{ gain_1h: 77 }] }, { gain_1h: null }, "gain_1h"),
@@ -121,7 +219,7 @@ assert.deepEqual(
 );
 
 assert.equal(
-  discord.shouldRunHourlyScheduledPosts({}, Date.parse("2026-08-10T12:07:00.000Z")),
+  discord.shouldRunHourlyScheduledPosts({}, Date.parse("2026-08-10T12:03:00.000Z")),
   true,
   "overdue hourly assignments must be allowed to drain after the exact post minute"
 );
@@ -174,8 +272,24 @@ const topMessage = discord.buildTopCommandMessage({
     { rank: 2, clan_name: "TWO", points: 90 }
   ]
 }, { kind: "clans", page: 0, ownerId: "123", env: {} });
-const topBody = topMessage.components[0].components[2].content;
-assert.doesNotMatch(topBody, /stars\n\n\*\*#2/, "/top rows should not contain the old blank-line spacing");
+assert.equal(topMessage.embeds[0].fields, undefined, "leaderboard columns must not use placeholder embed fields");
+assert.equal(
+  topMessage.embeds[0].footer.text,
+  "\u2800".repeat(72),
+  "three-column leaderboards must request Discord's full desktop embed width"
+);
+assert.match(topMessage.embeds[0].description, /```text\n#1 ONE\s+100 stars\s+—\n#2 TWO\s+90 stars\s+—\n```/);
+
+assert.equal(
+  discord.topCommandColumnLine("leagues", { rank: 1, league_name: "AG0NY", total_points: 102_690_000, gain_1h: 1_120_000 }, 1),
+  "#1 AG0NY                        102.69M points     +1.12M/h",
+  "Top Leagues must use all three inline columns"
+);
+assert.equal(
+  discord.topCommandColumnLine("players", { global_rank: 1, username: "Player", source_clan: "COLD", points: 50_000, gain_1h: 2_000 }, 1),
+  "#1 Player · COLD                50K points         +2K/h",
+  "Top Players must use all three inline columns while retaining the source group"
+);
 
 const clanMessage = discord.buildClanLookupMessage({
   payload: {
@@ -206,5 +320,36 @@ assert.match(compareText, /Luna Pet Sim 99 Bot/);
 assert.doesNotMatch(compareText, /basis/i);
 assert.doesNotMatch(compareText, /Projections use the best available recent pace window/);
 assert.equal(compareMessage.embeds[0].footer, undefined);
+
+const leftEmbed = await discord.buildClanActivityEventEmbed({
+  event_id: "left-1",
+  event_type: "member_left",
+  clan_name: "ORBI",
+  user_id: 1,
+  display_name: "RoastBeefKweeef",
+  detected_at: "2026-08-14T16:35:00.000Z",
+  avatar_url: "https://example.com/avatar.png",
+  details: { member_count: 75, member_capacity: 75, join_time: "2026-05-19T00:00:00.000Z" }
+});
+const joinedEmbed = await discord.buildClanActivityEventEmbed({
+  event_id: "joined-1",
+  event_type: "member_joined",
+  clan_name: "ORBI",
+  user_id: 2,
+  display_name: "NewPlayer",
+  detected_at: "2026-08-14T16:35:00.000Z",
+  avatar_url: "https://example.com/avatar.png",
+  details: { member_count: 75, member_capacity: 75, global_rank: 123, global_rank_total: 30000 }
+});
+assert.equal(leftEmbed.footer.text, joinedEmbed.footer.text, "every clan activity embed must use the same width anchor");
+assert.equal(
+  leftEmbed.footer.text,
+  `Luna clan activity tracker${"\u2800".repeat(44)}`,
+  "the invisible footer anchor must keep compact clan activity embeds at one consistent width"
+);
+const repeatedNonce = await discord.clanLogDiscordNonce("assignment", "event");
+assert.equal(repeatedNonce, await discord.clanLogDiscordNonce("assignment", "event"));
+assert.equal(repeatedNonce.length, 25, "Discord nonces must stay within the documented 25-character limit");
+assert.notEqual(repeatedNonce, await discord.clanLogDiscordNonce("assignment", "different-event"));
 
 console.log("Clan comparison and Discord regression tests passed");

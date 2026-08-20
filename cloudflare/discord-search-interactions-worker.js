@@ -28,6 +28,7 @@ const COMPONENT_TYPE_CONTAINER = 17;
 const BUTTON_STYLE_PRIMARY = 1;
 const BUTTON_STYLE_SECONDARY = 2;
 const BUTTON_STYLE_DANGER = 4;
+const HTG_REPORT_PAGE_SIZE = 10;
 const BUTTON_STYLE_LINK = 5;
 const LUNA_REWARD_THUMBNAIL_URL = "https://i.imgur.com/rVVo99A.png";
 const LEAGUE_CHART_HOURS = [1, 6, 12, 24];
@@ -60,6 +61,7 @@ const CHART_PRIOR_PULL_TOLERANCE_MINUTES = 12;
 const CHART_LARGE_GAP_BREAK_MINUTES = 25;
 const DEFAULT_TRACKER_PLACE_ID = "8737899170";
 const HOURLY_CLAN_ALLOWED_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
+const HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES = 50;
 const DEFAULT_HOURLY_CLAN_POST_MINUTE = 0;
 const HOURLY_DELIVERY_START_MINUTE = 0;
 const HOURLY_CLAN_POST_WINDOW_MINUTES = 4;
@@ -75,9 +77,11 @@ const DEFAULT_SEARCH_CHART_INTERVAL_OFFSET_MINUTES = 0;
 const DEFAULT_SEARCH_CHART_SCHEDULE_DRIFT_MINUTES = 8;
 const DEFAULT_CLAN_LOG_POST_INTERVAL_MINUTES = 15;
 const DEFAULT_CLAN_LOG_POST_OFFSET_MINUTES = 5;
+const CLAN_LOG_DELIVERY_LEASE_SECONDS = 180;
+const CLAN_ACTIVITY_EMBED_WIDTH_ANCHOR = "\u2800".repeat(44);
 const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
 const DEFAULT_CLAN_TRACKER_POST_OFFSET_MINUTES = 11;
-const DISCORD_INTERACTION_BUILD_ID = "discord-ack-reliability-2026-08-14a";
+const DISCORD_INTERACTION_BUILD_ID = "discord-direct-comparison-2026-08-20c";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -85,6 +89,10 @@ const RAM_LINK_URL = "https://github.com/ic3w0lf22/Roblox-Account-Manager";
 const RDP_LINK_URL = "https://www.youtube.com/watch?v=uaWaIQwzO9U";
 const TOP_COMMAND_LIMIT = 100;
 const TOP_COMMAND_PAGE_SIZE = 20;
+// Discord does not expose an embed width property. Braille blanks are invisible
+// but have layout width, which makes the desktop client use its full embed width
+// instead of shrink-wrapping these compact three-column leaderboards.
+const TOP_COMMAND_EMBED_WIDTH_ANCHOR = "\u2800".repeat(72);
 const CLAN_LOOKUP_PAGE_SIZE = 20;
 let chartDuckImagePromise = null;
 const historyRenderMemoryCache = new Map();
@@ -420,16 +428,11 @@ export default {
     }
 
     if (shouldRunClanTrackerScheduledPosts(env, scheduledTime)) {
-      ctx.waitUntil(runScheduledClanTrackerAssignments(env, { scheduledTime }).catch(err => {
+      ctx.waitUntil(runScheduledClanTrackerAssignments(env, { scheduledTime, scheduled: true }).catch(err => {
         console.error("Persistent clan tracker delivery failed", err);
       }));
     }
 
-    if (shouldRunClanCompareScheduledPosts(env, scheduledTime)) {
-      ctx.waitUntil(runClanCompareAssignments(env, { scheduledTime }).catch(err => {
-        console.error("Persistent clan comparison delivery failed", err);
-      }));
-    }
   }
 };
 
@@ -660,6 +663,11 @@ async function handleInteraction(request, env, ctx) {
       return interactionJson(handleHtgSetupComponent(interaction, env, ctx, hatchSetup));
     }
 
+    const hatchReport = parseHtgReportCustomId(interaction.data?.custom_id);
+    if (hatchReport) {
+      return interactionJson(handleHtgReportComponent(interaction, env, ctx, hatchReport));
+    }
+
     return interactionJson(handleHistoryComponent(interaction, env, ctx));
   }
 
@@ -815,7 +823,7 @@ async function handleInteraction(request, env, ctx) {
       view: "clan",
       page: 0,
       ownerId: interactionUserId(interaction)
-    }));
+    }, ctx));
 
     return interactionJson({
       type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
@@ -871,10 +879,25 @@ async function handleInteraction(request, env, ctx) {
     }
 
     if (clanPath.group === "compare") {
+      if (subcommand === "view") {
+        const comparisonType = String(getCommandOption(interaction, "type") || "").trim().toLowerCase();
+        const first = String(getCommandOption(interaction, "first") || "").trim();
+        const second = String(getCommandOption(interaction, "second") || "").trim();
+        if (!["clan", "league", "player"].includes(comparisonType) || !first || !second) {
+          return interactionJson(messageResponse("Use `/clan compare view type:<Clans|Leagues|Players> first:<name> second:<name>`.", true));
+        }
+
+        ctx.waitUntil(completeDirectComparisonInteraction(interaction, env, comparisonType, first, second));
+        return interactionJson({
+          type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+          data: { flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined }
+        });
+      }
+
       const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
       const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
       if (!clanName) {
-        return interactionJson(messageResponse("Use `/clan compare view clan:<name>` to preview a comparison, `/clan compare assign clan:<name> channel:<channel>` to keep one updated, or `/clan compare remove clan:<name>` to remove it.", true));
+        return interactionJson(messageResponse("Use `/clan compare view type:<type> first:<name> second:<name>` to compare two entries, `/clan compare assign clan:<name> channel:<channel>` to keep an adjacent-clan comparison updated, or `/clan compare remove clan:<name>` to remove it.", true));
       }
       const action = subcommand === "remove"
         ? "remove"
@@ -949,42 +972,6 @@ async function handleInteraction(request, env, ctx) {
       });
     }
 
-    if (clanPath.group === "compare") {
-      const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
-      if (!clanName) {
-        return interactionJson(messageResponse("Use `/clan compare view clan:<name>` to preview, `/clan compare assign clan:<name> channel:<channel>` to keep one updated, or `/clan compare remove clan:<name>` to remove it.", true));
-      }
-
-      const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
-      const action = subcommand === "remove" ? "remove" : subcommand === "assign" ? "assign" : "view";
-      if (!["view", "assign", "remove"].includes(action)) {
-        return interactionJson(messageResponse("Use `/clan compare view`, `/clan compare assign`, or `/clan compare remove`.", true));
-      }
-      if (action === "assign" && !assignmentChannelId) {
-        return interactionJson(messageResponse("Choose a text channel or thread with `channel:<channel>`.", true));
-      }
-      if (action === "remove" && assignmentChannelId) {
-        return interactionJson(messageResponse("`/clan compare remove` only needs the clan name.", true));
-      }
-      if (action === "assign" || action === "remove") {
-        if (!interaction.guild_id) {
-          return interactionJson(messageResponse("Persistent clan comparisons must be managed from inside the Discord server that receives them.", true));
-        }
-        const permitted = await memberCanManageServerTracker(interaction, env, { allowDiscordManage: false });
-        if (!permitted) {
-          return interactionJson(messageResponse("You need the configured Luna administrator role to change a persistent clan comparison.", true));
-        }
-      }
-
-      ctx.waitUntil(completeClanCompareInteraction(interaction, env, action, clanName));
-      return interactionJson({
-        type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
-        data: {
-          flags: action !== "view" || ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined
-        }
-      });
-    }
-
     if (subcommand === "info") {
       const clanName = getCommandOption(interaction, "name");
       if (!clanName) {
@@ -1015,7 +1002,7 @@ async function handleInteraction(request, env, ctx) {
       });
     }
 
-    return interactionJson(messageResponse("Use `/clan info name:<clan>`, `/clan compare view clan:<clan>`, or `/clan rewards`.", true));
+    return interactionJson(messageResponse("Use `/clan info name:<clan>`, `/clan compare view type:<type> first:<name> second:<name>`, or `/clan rewards`.", true));
   }
 
   if (commandName === "cw") {
@@ -1143,8 +1130,8 @@ async function handleInteraction(request, env, ctx) {
   if (commandName === "htg") {
     const subcommand = getSubcommandName(interaction);
     const hatchSubcommand = subcommand === "setup" || subcommand === "alert" ? "tracker" : subcommand;
-    if (!["tracker", "accounts", "enable", "disable", "assign"].includes(hatchSubcommand)) {
-      return interactionJson(messageResponse("Use `/htg setup account:<roblox username>`, `/htg accounts`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
+    if (!["tracker", "accounts", "report", "enable", "disable", "assign"].includes(hatchSubcommand)) {
+      return interactionJson(messageResponse("Use `/htg setup account:<roblox username>`, `/htg accounts`, `/htg report timeframe:<choice>`, `/htg enable tier:<choice>`, `/htg disable tier:<choice>`, or `/htg assign channel:<channel>`.", true));
     }
 
     // The tracker is intentionally configured per Discord server.  Do not let
@@ -1330,12 +1317,12 @@ async function buildSearchResponse(query, env) {
             : null
         ].filter(Boolean).join(", ")
       : "\u{1F30D} Global Rank: **Outside the tracked League-player pool**";
-    const leagueEventLabel = String(
+    const leagueEventLabel = leagueEventDisplayLabel(
       leaguePayload?.league_run_label ||
       leaguePayload?.league_run_key ||
       payload.source_label ||
       "Current League"
-    ).trim();
+    );
 
     embed.title = "League Global Search Results";
     embed.description = [
@@ -2448,6 +2435,21 @@ async function completeHatchInteraction(interaction, env, subcommand) {
       return;
     }
 
+    if (subcommand === "report") {
+      const timeframe = String(getCommandOption(interaction, "timeframe") || "week").trim().toLowerCase();
+      payload = await hatchApiRequest(env, "/api/hatch/report", {
+        query: {
+          discord_user_id: discordUserId,
+          timeframe
+        }
+      });
+      await editOriginalInteraction(interaction, buildHatchReportMessage(payload, {
+        ownerId: discordUserId,
+        page: 0
+      }));
+      return;
+    }
+
     if (subcommand === "assign") {
       const guildId = String(interaction.guild_id || "").trim();
       const sourceChannelId = interactionSourceChannelId(interaction);
@@ -2511,7 +2513,7 @@ async function completeHatchInteraction(interaction, env, subcommand) {
     }
 
     await editOriginalInteraction(interaction, {
-      content: `Hatch tracker failed: ${err?.message || String(err)}`,
+      content: `${subcommand === "report" ? "HTG report" : "Hatch tracker"} failed: ${err?.message || String(err)}`,
       embeds: [],
       components: [],
       allowed_mentions: { parse: [] },
@@ -2691,6 +2693,7 @@ function htgSetupPages(payload, context = {}) {
         "/htg enable [user]",
         "/htg disable [user]",
         "/htg accounts - lists all accounts associated with your Discord Account",
+        "/htg report timeframe:<day|week|month> - summarizes your recorded HTG acquisitions",
         "```",
         "",
         "If you're a server owner or administrator you'll need to run this to assign the channel where it posts to:",
@@ -4160,8 +4163,6 @@ async function runHourlyDeliveryLanes(assignments, deliver) {
     .map(item => item.result);
 }
 
-}
-
 async function runOneHourlyClanAssignment(url, env, options = {}) {
   const channelId = String(url.searchParams.get("channel_id") || "").trim();
   if (!/^\d{5,30}$/.test(channelId)) {
@@ -4221,6 +4222,186 @@ function hourlyAssignmentDue(assignment, now = Date.now(), options = {}) {
   return (now - lastPosted >= HOURLY_CLAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000) || hourlyAssignmentHasStaleClaim(assignment, now);
 }
 
+function parseHtgReportCustomId(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 5 || parts[0] !== "htgreport") return null;
+  const ownerId = String(parts[1] || "").trim();
+  const timeframe = String(parts[2] || "").trim().toLowerCase();
+  const page = Math.max(0, Math.floor(Number(parts[3]) || 0));
+  const action = String(parts[4] || "page").trim().toLowerCase();
+  if (!/^\d{5,30}$/.test(ownerId)) return null;
+  if (!["day", "week", "month"].includes(timeframe)) return null;
+  if (!["previous", "indicator", "next", "close"].includes(action)) return null;
+  return { ownerId, timeframe, page, action };
+}
+
+function htgReportCustomId(ownerId, timeframe, page, action = "page") {
+  return `htgreport|${String(ownerId || "").trim()}|${String(timeframe || "week").toLowerCase()}|${Math.max(0, Math.floor(Number(page) || 0))}|${action}`;
+}
+
+function handleHtgReportComponent(interaction, env, ctx, state) {
+  const userId = interactionUserId(interaction);
+  if (!userId || userId !== state.ownerId) {
+    return messageResponse("Only the person who ran `/htg report` can use these report controls.", true);
+  }
+  if (state.action === "close") {
+    ctx.waitUntil(deleteOriginalInteraction(interaction).catch(() => null));
+    return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+  }
+  ctx.waitUntil(completeHtgReportPageInteraction(interaction, env, state));
+  return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
+}
+
+async function completeHtgReportPageInteraction(interaction, env, state) {
+  try {
+    const payload = await hatchApiRequest(env, "/api/hatch/report", {
+      query: {
+        discord_user_id: state.ownerId,
+        timeframe: state.timeframe
+      }
+    });
+    await editOriginalInteraction(interaction, buildHatchReportMessage(payload, {
+      ownerId: state.ownerId,
+      page: state.page
+    }));
+  } catch (err) {
+    await editOriginalInteraction(interaction, {
+      content: `HTG report failed: ${err?.message || String(err)}`,
+      embeds: [],
+      components: [],
+      allowed_mentions: { parse: [] },
+      flags: MESSAGE_FLAG_EPHEMERAL
+    }).catch(() => null);
+  }
+}
+
+function buildHatchReportMessage(payload = {}, context = {}) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const timeframe = String(payload.timeframe || "week").toLowerCase();
+  const ownerId = String(context.ownerId || "").trim();
+  const totalPages = Math.max(1, Math.ceil(items.length / HTG_REPORT_PAGE_SIZE));
+  const page = Math.min(totalPages - 1, Math.max(0, Math.floor(Number(context.page) || 0)));
+  const pageItems = items.slice(page * HTG_REPORT_PAGE_SIZE, (page + 1) * HTG_REPORT_PAGE_SIZE);
+  const title = `HTG ${hatchReportTimeframeName(timeframe)} Report`;
+  const tierTotals = payload.tier_totals || {};
+  const totalRap = Math.max(0, Number(payload.total_estimated_rap) || 0);
+  const start = discordAbsoluteTime(payload.period_start, "d");
+  const end = discordAbsoluteTime(payload.period_end, "d");
+  const accounts = (Array.isArray(payload.accounts) ? payload.accounts : [])
+    .map(account => escapeDiscordMarkdown(truncateHistoryText(account.roblox_username || account.roblox_user_id || "Unknown", 30)));
+  const visibleAccounts = accounts.slice(0, 6);
+  const accountText = visibleAccounts.length
+    ? `${visibleAccounts.join(", ")}${accounts.length > visibleAccounts.length ? `, +${accounts.length - visibleAccounts.length} more` : ""}`
+    : "None recorded";
+  const summary = [
+    `## ${title}`,
+    `**${payload.window_label || hatchReportWindowLabel(timeframe)}** · ${start} – ${end}`,
+    "",
+    `:gem: **Gargantuan:** ${fullNumber(tierTotals.gargantuan || 0)} · :milky_way: **Titanic:** ${fullNumber(tierTotals.titanic || 0)} · :sparkles: **Huge:** ${fullNumber(tierTotals.huge || 0)}`,
+    `**Estimated RAP acquired:** ${shortNumber(totalRap)}`,
+    `**Accounts:** ${accountText}`
+  ].filter(Boolean).join("\n");
+
+  if (!items.length) {
+    return {
+      components: [{
+        type: COMPONENT_TYPE_CONTAINER,
+        accent_color: 0x34e1ef,
+        components: [{
+          type: COMPONENT_TYPE_TEXT_DISPLAY,
+          content: `${summary}\n\nNo recorded HTG acquisitions were found in this timeframe.`
+        }]
+      }],
+      embeds: [],
+      allowed_mentions: { parse: [] },
+      flags: MESSAGE_FLAG_COMPONENTS_V2 | MESSAGE_FLAG_EPHEMERAL
+    };
+  }
+
+  const itemLines = pageItems.map(item => {
+    const icon = hatchReportTierIcon(item.tier);
+    const name = escapeDiscordMarkdown(truncateHistoryText(item.display_name || item.item_id || item.item_key || "Unknown HTG", 60));
+    const account = escapeDiscordMarkdown(truncateHistoryText(item.roblox_username || item.roblox_user_id || "Unknown account", 30));
+    const quantity = Math.max(0, Number(item.quantity) || 0);
+    const rap = Math.max(0, Number(item.estimated_rap) || 0);
+    return `${icon} **${name}**${quantity > 1 ? ` ×${fullNumber(quantity)}` : ""} · ${account} · ${shortNumber(rap)} RAP · ${discordAbsoluteTime(item.latest_at, "R")}`;
+  });
+  const components = [
+    { type: COMPONENT_TYPE_TEXT_DISPLAY, content: summary },
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    { type: COMPONENT_TYPE_TEXT_DISPLAY, content: itemLines.join("\n") },
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_ACTION_ROW,
+      components: [
+        historyButton("Previous", htgReportCustomId(ownerId, timeframe, page - 1, "previous"), BUTTON_STYLE_SECONDARY, page <= 0),
+        historyButton(`Page ${page + 1}/${totalPages}`, htgReportCustomId(ownerId, timeframe, page, "indicator"), BUTTON_STYLE_SECONDARY, true),
+        historyButton("Next", htgReportCustomId(ownerId, timeframe, page + 1, "next"), BUTTON_STYLE_SECONDARY, page >= totalPages - 1),
+        historyButton("Close", htgReportCustomId(ownerId, timeframe, page, "close"), BUTTON_STYLE_DANGER, false)
+      ]
+    }
+  ];
+
+  return {
+    components: [{
+      type: COMPONENT_TYPE_CONTAINER,
+      accent_color: hatchReportAccent(tierTotals),
+      components
+    }],
+    embeds: [],
+    allowed_mentions: { parse: [] },
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | MESSAGE_FLAG_EPHEMERAL
+  };
+}
+
+function hatchReportTimeframeName(value) {
+  if (value === "day") return "Daily";
+  if (value === "month") return "Monthly";
+  return "Weekly";
+}
+
+function hatchReportWindowLabel(value) {
+  if (value === "day") return "Last 24 Hours";
+  if (value === "month") return "Last 30 Days";
+  return "Last 7 Days";
+}
+
+function hatchReportTierIcon(value) {
+  if (String(value).toLowerCase() === "gargantuan") return ":gem:";
+  if (String(value).toLowerCase() === "titanic") return ":milky_way:";
+  return ":sparkles:";
+}
+
+function hatchReportAccent(tiers = {}) {
+  if (Number(tiers.gargantuan) > 0) return 0xffd44d;
+  if (Number(tiers.titanic) > 0) return 0xff5db8;
+  return 0x34e1ef;
+}
+
+function discordAbsoluteTime(value, style = "F") {
+  const ms = new Date(value || 0).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return "Unknown";
+  return `<t:${Math.floor(ms / 1000)}:${style}>`;
+}
+
+function leagueEventDisplayLabel(value) {
+  const label = String(value || "").trim();
+  // Keep Discord correct during staggered deployments when the League API or
+  // its environment still returns the superseded update-theme label.
+  return label.toLowerCase().replace(/[^a-z0-9]/g, "") === "plantsvscoinspart2"
+    ? "Fiesta Part 2"
+    : label;
+}
+
+function hourlyAssignmentHasStaleClaim(assignment, now = Date.now()) {
+  const lastPosted = new Date(assignment?.last_posted_at || 0).getTime();
+  const posting = String(assignment?.last_error || "").startsWith("posting:");
+  return posting
+    && Number.isFinite(lastPosted)
+    && lastPosted > 0
+    && lastPosted <= Number(now || Date.now()) - HOURLY_DELIVERY_CLAIM_LEASE_MS;
+}
+
 function hourlyScheduledBatchSize(env) {
   const value = Number(env.HOURLY_SCHEDULED_BATCH_SIZE ?? 2);
   if (!Number.isFinite(value)) return 2;
@@ -4255,10 +4436,9 @@ function hourlySelectScheduledBatch(assignments, limit) {
 }
 
 function hourlyScheduledPostMinute(env) {
-  const value = Number(env.HOURLY_CLAN_POST_MINUTE ?? DEFAULT_HOURLLY_CLAN_POST_MINUTE);
+  const value = Number(env.HOURLY_CLAN_POST_MINUTE ?? DEFAULT_HOURLY_CLAN_POST_MINUTE);
   if (!Number.isFinite(value)) return DEFAULT_HOURLY_CLAN_POST_MINUTE;
   return Math.max(0, Math.min(59, Math.round(value)));
-}
 }
 
 function hourlyScheduledDeliveryStartMinute(_env) {
@@ -4345,18 +4525,6 @@ function shouldRunClanTrackerScheduledPosts(env, scheduledTime = Date.now()) {
     clanTrackerScheduledIntervalMinutes(env),
     clanTrackerScheduledOffsetMinutes(env)
   );
-}
-
-function clanCompareScheduledIntervalMinutes(env) {
-  const value = Number(env.CLAN_COMPARE_POST_INTERVAL_MINUTES ?? 5);
-  if (!Number.isFinite(value)) return 5;
-  return Math.max(1, Math.min(60, Math.round(value)));
-}
-
-function shouldRunClanCompareScheduledPosts(env, scheduledTime = Date.now()) {
-  const date = new Date(scheduledTime || Date.now());
-  if (Number.isNaN(date.getTime())) return false;
-  return date.getUTCMinutes() % clanCompareScheduledIntervalMinutes(env) === 0;
 }
 
 function hourlyScheduledBucketMs(value, postMinute = DEFAULT_HOURLY_CLAN_POST_MINUTE) {
@@ -6855,41 +7023,28 @@ function buildTopCommandMessage(data, options = {}) {
   const rows = data.rows.slice(start, start + pageSize);
   const rangeStart = totalRows ? start + 1 : 0;
   const rangeEnd = totalRows ? start + rows.length : 0;
-  const lines = rows.length
-    ? rows.map((row, index) => topCommandRowLine(data.kind, row, start + index + 1))
-    : ["No rows are available yet."];
+  const tableRows = rows.map((row, index) => topCommandColumnLine(data.kind, row, start + index + 1));
   const updated = data.updatedAt ? discordTime(data.updatedAt) : "Unknown";
   const theme = topCommandTheme(data.kind);
   const subtitle = String(data.subtitle || "").trim();
-  const headerText = [
-    `## ${escapeDiscordMarkdown(data.title)}`,
+  const description = [
     subtitle ? `**${theme.contextLabel}:** ${escapeDiscordMarkdown(subtitle)}` : "",
     `**Showing:** ${fullNumber(rangeStart)}-${fullNumber(rangeEnd)} of ${fullNumber(totalRows)}`,
     `**Page:** ${page + 1}/${totalPages}`,
-    `**Updated:** ${updated}`
+    `**Updated:** ${updated}`,
+    rows.length ? `\n\`\`\`text\n${tableRows.join("\n")}\n\`\`\`` : "No rows are available yet."
   ].filter(Boolean).join("\n");
 
   return {
-    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(options.env) ? MESSAGE_FLAG_EPHEMERAL : 0),
+    flags: ephemeralResponses(options.env) ? MESSAGE_FLAG_EPHEMERAL : 0,
     allowed_mentions: { parse: [] },
-    components: [
-      {
-        type: COMPONENT_TYPE_CONTAINER,
-        accent_color: theme.accent,
-        components: [
-          {
-            type: COMPONENT_TYPE_TEXT_DISPLAY,
-            content: headerText
-          },
-          { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
-          {
-            type: COMPONENT_TYPE_TEXT_DISPLAY,
-            content: lines.join("\n").slice(0, 3900)
-          }
-        ]
-      },
-      ...topCommandButtons(options.ownerId, data.kind, page, totalPages)
-    ]
+    embeds: [{
+      title: escapeDiscordMarkdown(data.title),
+      description,
+      color: theme.accent,
+      footer: { text: TOP_COMMAND_EMBED_WIDTH_ANCHOR }
+    }],
+    components: topCommandButtons(options.ownerId, data.kind, page, totalPages)
   };
 }
 
@@ -6903,31 +7058,50 @@ function topCommandTheme(kind) {
   return { accent: 0x34e1ef, contextLabel: "Snapshot" };
 }
 
-function topCommandRowLine(kind, row, number) {
+function topCommandColumnLine(kind, row, number) {
+  let rankValue;
+  let name;
+  let points;
+  let unit;
+  let identityDetail = "";
+
   if (kind === "leagues") {
-    const rankValue = positiveInteger(row.rank) || number;
-    const name = escapeDiscordMarkdown(row.league_name || row.display_name || "Unknown");
-    const points = shortNumber(row.total_points ?? row.points ?? row.league_points);
-    const gain = topGainText(row);
-    return `**#${fullNumber(rankValue)} ${name}**\n-# ${points} points${gain}`;
+    rankValue = positiveInteger(row.rank) || number;
+    name = escapeDiscordMarkdown(row.league_name || row.display_name || "Unknown");
+    points = shortNumber(row.total_points ?? row.points ?? row.league_points);
+    unit = "points";
+  } else if (kind === "clans") {
+    rankValue = positiveInteger(row.rank) || number;
+    name = escapeDiscordMarkdown(row.clan_name || "Unknown");
+    points = shortNumber(row.points);
+    unit = "stars";
+  } else {
+    rankValue = positiveInteger(row.global_rank ?? row.rank) || number;
+    name = escapeDiscordMarkdown(row.username || row.display_name || `user_${row.user_id || number}`);
+    points = shortNumber(row.points ?? row.total_points ?? row.global_points);
+    unit = "points";
+    identityDetail = row.clan || row.source_clan || row.league_name || row.clan_name || "";
   }
-  if (kind === "clans") {
-    const rankValue = positiveInteger(row.rank) || number;
-    const name = escapeDiscordMarkdown(row.clan_name || "Unknown");
-    const points = shortNumber(row.points);
-    const gain = topGainText(row);
-    return `**#${fullNumber(rankValue)} ${name}**\n-# ${points} stars${gain}`;
-  }
-  const rankValue = positiveInteger(row.global_rank ?? row.rank) || number;
-  const name = escapeDiscordMarkdown(row.username || row.display_name || `user_${row.user_id || number}`);
-  const group = escapeDiscordMarkdown(row.clan || row.source_clan || row.league_name || row.clan_name || "");
-  const points = shortNumber(row.points ?? row.total_points ?? row.global_points);
-  return `**#${fullNumber(rankValue)} ${name}**\n-# ${group ? `${group} · ` : ""}${points} points`;
+
+  const identity = topCommandPlainColumn(`#${fullNumber(rankValue)} ${name}${identityDetail ? ` · ${identityDetail}` : ""}`, 30);
+  const pointsColumn = topCommandPlainColumn(`${points} ${unit}`, 17);
+  const pace = topGainText(row, { fallback: "—" }).replace(/^ · /, "");
+  return `${identity.padEnd(30)}  ${pointsColumn.padEnd(17)}  ${pace}`;
 }
 
-function topGainText(row) {
+function topCommandPlainColumn(value, width) {
+  const text = String(value || "")
+    .replace(/[`\r\n\t]/g, " ")
+    .replace(/[\\*_~|>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= width) return text;
+  return `${text.slice(0, Math.max(1, width - 1)).trimEnd()}…`;
+}
+
+function topGainText(row, options = {}) {
   const gain = finiteNumber(row.gain_1h ?? row.projected_gain_1h);
-  return gain && gain > 0 ? ` · +${shortNumber(gain)}/h` : "";
+  return gain && gain > 0 ? ` · +${shortNumber(gain)}/h` : String(options.fallback || "");
 }
 
 function topCommandButtons(ownerId, kind, page, totalPages) {
@@ -7325,7 +7499,7 @@ async function buildClanActivityEventEmbed(event, fallbackClan = "", options = {
     color: clanActivityLogAccent(event),
     description,
     ...(imageUrl ? { thumbnail: { url: imageUrl } } : {}),
-    footer: { text: "Luna clan activity tracker" }
+    footer: { text: `Luna clan activity tracker${CLAN_ACTIVITY_EMBED_WIDTH_ANCHOR}` }
   };
 }
 
@@ -7402,6 +7576,42 @@ function clanLogEventsSince(payload, assignment) {
   };
 }
 
+async function clanLogDiscordNonce(assignmentKey, eventId) {
+  const bytes = new TextEncoder().encode(`${assignmentKey}\u0000${eventId}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("").slice(0, 25);
+}
+
+function clanLogDeliveryEventId(event) {
+  return String(event?.event_id || clanActivityEventFingerprint(event)).trim();
+}
+
+async function claimClanLogDelivery(env, assignment, event, claimToken) {
+  return hourlyClanApiRequest(env, "/api/discord/clan-log-deliveries", {
+    method: "POST",
+    body: {
+      assignment_key: String(assignment?.assignment_key || ""),
+      event_id: clanLogDeliveryEventId(event),
+      event_at: event?.event_at || event?.detected_at || null,
+      claim_token: claimToken,
+      lease_seconds: CLAN_LOG_DELIVERY_LEASE_SECONDS
+    }
+  });
+}
+
+async function finishClanLogDelivery(env, assignment, event, claimToken, action, details = {}) {
+  return hourlyClanApiRequest(env, "/api/discord/clan-log-deliveries", {
+    method: "PATCH",
+    body: {
+      assignment_key: String(assignment?.assignment_key || ""),
+      event_id: clanLogDeliveryEventId(event),
+      claim_token: claimToken,
+      action,
+      ...details
+    }
+  });
+}
+
 async function postClanActivityLogEvent(env, channelId, event, fallbackClan, options = {}) {
   const embed = await buildClanActivityEventEmbed(event, fallbackClan, options);
   const response = await fetch(`${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`, {
@@ -7409,6 +7619,7 @@ async function postClanActivityLogEvent(env, channelId, event, fallbackClan, opt
     headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       embeds: [embed],
+      ...(options.nonce ? { nonce: options.nonce, enforce_nonce: true } : {}),
       allowed_mentions: { parse: [] }
     })
   });
@@ -7452,26 +7663,49 @@ async function runClanLogAssignments(env, options = {}) {
         continue;
       }
       const pendingEvents = delta.events.slice(0, 25);
-      let lastPosted = null;
+      let lastProcessed = null;
+      let postedCount = 0;
       try {
         for (const event of pendingEvents) {
-          await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name, {
-            clanIconUrl: payload?.summary?.icon_url || payload?.icon_url || null
-          });
-          lastPosted = event;
+          const eventId = clanLogDeliveryEventId(event);
+          const claimToken = crypto.randomUUID();
+          const claim = await claimClanLogDelivery(env, assignment, event, claimToken);
+          if (!claim?.claimed) {
+            if (claim?.delivered) {
+              lastProcessed = event;
+              continue;
+            }
+            break;
+          }
+          try {
+            const message = await postClanActivityLogEvent(env, assignment.channel_id, event, payload.clan_name || assignment.clan_name, {
+              clanIconUrl: payload?.summary?.icon_url || payload?.icon_url || null,
+              nonce: await clanLogDiscordNonce(assignment.assignment_key, eventId)
+            });
+            await finishClanLogDelivery(env, assignment, event, claimToken, "delivered", {
+              discord_message_id: message?.id || null
+            });
+            lastProcessed = event;
+            postedCount += 1;
+          } catch (err) {
+            await finishClanLogDelivery(env, assignment, event, claimToken, "release", {
+              last_error: String(err?.message || err).slice(0, 500)
+            }).catch(() => null);
+            throw err;
+          }
         }
       } catch (err) {
-        if (lastPosted) {
+        if (lastProcessed) {
           await updateClanLogAssignment(env, assignment, {
-            last_event_id: clanActivityEventFingerprint(lastPosted),
-            last_event_at: lastPosted.event_at || lastPosted.detected_at,
+            last_event_id: clanActivityEventFingerprint(lastProcessed),
+            last_event_at: lastProcessed.event_at || lastProcessed.detected_at,
             last_error: String(err?.message || err).slice(0, 500)
           }).catch(() => null);
         }
         throw err;
       }
 
-      const cursorEvent = lastPosted || (delta.events.length === 0 ? delta.newest : null);
+      const cursorEvent = lastProcessed || (delta.events.length === 0 ? delta.newest : null);
       const currentCursorTime = new Date(assignment?.last_event_at || 0).getTime();
       const nextCursorTime = cursorEvent ? clanActivityEventTime(cursorEvent) : 0;
       if (cursorEvent && (!Number.isFinite(currentCursorTime) || currentCursorTime <= 0 || nextCursorTime >= currentCursorTime)) {
@@ -7483,13 +7717,186 @@ async function runClanLogAssignments(env, options = {}) {
       } else {
         await updateClanLogAssignment(env, assignment, { last_error: null });
       }
-      results.push({ assignment_key: assignment.assignment_key, posted: pendingEvents.length });
+      results.push({ assignment_key: assignment.assignment_key, posted: postedCount });
     } catch (err) {
       await updateClanLogAssignment(env, assignment, { last_error: String(err?.message || err).slice(0, 500) }).catch(() => null);
       results.push({ assignment_key: assignment.assignment_key, posted: false, error: err?.message || String(err) });
     }
   }
   return { ok: true, assignments: assignments.length, results };
+}
+
+async function completeDirectComparisonInteraction(interaction, env, comparisonType, firstQuery, secondQuery) {
+  try {
+    const type = String(comparisonType || "").trim().toLowerCase();
+    const first = String(firstQuery || "").trim();
+    const second = String(secondQuery || "").trim();
+    if (!["clan", "league", "player"].includes(type)) {
+      throw httpError(400, "Choose Clans, Leagues, or Players.");
+    }
+    if (!first || !second) throw httpError(400, "Provide both entries to compare.");
+    if (first.toLowerCase() === second.toLowerCase()) {
+      throw httpError(400, "Choose two different entries to compare.");
+    }
+
+    const [firstEntry, secondEntry] = await Promise.all([
+      fetchDirectComparisonEntry(env, type, first),
+      fetchDirectComparisonEntry(env, type, second)
+    ]);
+    await editOriginalInteraction(interaction, buildDirectComparisonMessage(type, firstEntry, secondEntry, env));
+  } catch (err) {
+    await editOriginalInteraction(interaction, commandErrorMessage("Comparison failed", err, env)).catch(() => null);
+  }
+}
+
+async function fetchDirectComparisonEntry(env, comparisonType, query) {
+  const type = String(comparisonType || "").trim().toLowerCase();
+  const requested = String(query || "").trim();
+
+  if (type === "clan") {
+    const payload = await fetchClanCompareCurrent(env, requested);
+    const row = payload?.clan;
+    if (!row) throw httpError(404, `No current clan result was found for ${requested}.`);
+    return {
+      type,
+      name: String(row.clan_name || requested).trim(),
+      rank: positiveInteger(row.rank),
+      points: finiteNumber(row.points),
+      pace: finiteNumber(row.rate_per_hour ?? row.gain_1h),
+      projectedPoints: finiteNumber(row.projected_points),
+      detail: String(row.battle_display_name || payload.display_name || payload.battle || "").trim(),
+      context: String(payload.display_name || payload.battle || row.battle_display_name || "Current Clan Battle").trim(),
+      updatedAt: payload.snapshot_at || payload.generated_at || row.snapshot_at || null
+    };
+  }
+
+  if (type === "league") {
+    const payload = await fetchLeagueCurrentPayload(requested, env);
+    const rows = (Array.isArray(payload?.rows) ? payload.rows : []).filter(row => !isLeagueAggregateMemberRow(row));
+    if (!rows.length && finiteNumber(payload?.league_points) === null) {
+      throw httpError(404, `No current League result was found for ${requested}.`);
+    }
+    const pace = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.gain_1h ?? row.hourly_points) || 0), 0);
+    const points = finiteNumber(payload.league_points)
+      ?? rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.total_points ?? row.points) || 0), 0);
+    return {
+      type,
+      name: String(payload.league_name || requested).trim(),
+      rank: positiveInteger(payload.league_rank),
+      points,
+      pace,
+      projectedPoints: points === null ? null : points + pace,
+      detail: `${fullNumber(rows.length)} member${rows.length === 1 ? "" : "s"} recorded`,
+      context: String(payload.league_run_label || payload.league_run_key || "Current League").trim(),
+      updatedAt: payload.snapshot_at || payload.generated_at || payload.fetched_at || null
+    };
+  }
+
+  const search = await fetchGlobalSearchPayload(requested, env);
+  const payload = search?.payload || {};
+  const row = payload?.row;
+  if (!search?.ok || payload.ok === false || !row) {
+    throw httpError(search?.status || 404, payload.message || `No current player result was found for ${requested}.`);
+  }
+  const points = finiteNumber(row.points ?? row.total_points ?? row.global_points);
+  const pace = finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain);
+  const group = String(row.source_clan || row.clan_name || row.clan || row.league_name || "").trim();
+  return {
+    type,
+    name: String(searchUsername(row) || displayName(row) || requested).trim(),
+    rank: positiveInteger(row.global_rank ?? row.rank),
+    points,
+    pace,
+    projectedPoints: points === null ? null : points + Math.max(0, pace || 0),
+    detail: group ? `${String(payload.source_mode || "").toLowerCase() === "leagues" ? "League" : "Clan"}: ${group}` : "",
+    context: String(payload.source_label || payload.event_name || payload.run?.event_name || payload.run?.battle_display_name || "Current Global Leaderboard").trim(),
+    updatedAt: payload.snapshot_at || payload.generated_at || row.fetched_at || row.snapshot_at || null
+  };
+}
+
+function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, env = {}) {
+  const type = String(comparisonType || "clan").trim().toLowerCase();
+  const labels = type === "league"
+    ? { singular: "League", unit: "points", color: 0x58a6ff }
+    : type === "player"
+      ? { singular: "Player", unit: "points", color: 0x34e1ef }
+      : { singular: "Clan", unit: "stars", color: 0xf2cc60 };
+  const first = firstEntry || {};
+  const second = secondEntry || {};
+  const contexts = [...new Set([first.context, second.context].map(value => String(value || "").trim()).filter(Boolean))];
+  const updatedAt = [first.updatedAt, second.updatedAt]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+  return {
+    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0,
+    allowed_mentions: { parse: [] },
+    embeds: [{
+      title: `${labels.singular} Comparison`,
+      description: [
+        contexts.length ? `**Event:** ${contexts.map(escapeDiscordMarkdown).join(" · ")}` : "",
+        `**Updated:** ${updatedAt ? discordTime(updatedAt) : "Unknown"}`
+      ].filter(Boolean).join("\n"),
+      color: labels.color,
+      fields: [
+        directComparisonEntryField(first, labels.unit),
+        directComparisonEntryField(second, labels.unit),
+        {
+          name: "Comparison",
+          value: directComparisonDifferenceText(first, second, labels.unit),
+          inline: false
+        }
+      ],
+      footer: { text: TOP_COMMAND_EMBED_WIDTH_ANCHOR }
+    }],
+    components: [],
+    attachments: []
+  };
+}
+
+function directComparisonEntryField(entry, unit) {
+  const rankValue = positiveInteger(entry?.rank);
+  const points = finiteNumber(entry?.points);
+  const pace = finiteNumber(entry?.pace);
+  const projected = finiteNumber(entry?.projectedPoints);
+  return {
+    name: escapeDiscordMarkdown(entry?.name || "Unknown"),
+    value: [
+      `**Rank:** ${rankValue ? `#${fullNumber(rankValue)}` : "N/A"}`,
+      `**Points:** ${points === null ? "N/A" : `${shortNumber(points)} ${unit}`}`,
+      `**Pace:** ${pace === null ? "N/A" : `+${shortNumber(Math.max(0, pace))}/h`}`,
+      `**Projected +1h:** ${projected === null ? "N/A" : shortNumber(projected)}`,
+      entry?.detail ? `**${escapeDiscordMarkdown(entry.detail)}**` : ""
+    ].filter(Boolean).join("\n"),
+    inline: true
+  };
+}
+
+function directComparisonDifferenceText(first, second, unit) {
+  const firstPoints = finiteNumber(first?.points);
+  const secondPoints = finiteNumber(second?.points);
+  const firstPace = finiteNumber(first?.pace);
+  const secondPace = finiteNumber(second?.pace);
+  const firstRank = positiveInteger(first?.rank);
+  const secondRank = positiveInteger(second?.rank);
+  const lines = [];
+
+  if (firstPoints !== null && secondPoints !== null) {
+    const difference = Math.abs(firstPoints - secondPoints);
+    lines.push(firstPoints === secondPoints
+      ? `**Points:** Tied at ${shortNumber(firstPoints)} ${unit}`
+      : `**Points lead:** ${escapeDiscordMarkdown(firstPoints > secondPoints ? first.name : second.name)} by ${shortNumber(difference)} ${unit}`);
+  }
+  if (firstPace !== null && secondPace !== null) {
+    const difference = Math.abs(firstPace - secondPace);
+    lines.push(firstPace === secondPace
+      ? `**Pace:** Tied at +${shortNumber(Math.max(0, firstPace))}/h`
+      : `**Faster pace:** ${escapeDiscordMarkdown(firstPace > secondPace ? first.name : second.name)} by ${shortNumber(difference)}/h`);
+  }
+  if (firstRank && secondRank) {
+    lines.push(`**Rank gap:** ${fullNumber(Math.abs(firstRank - secondRank))}`);
+  }
+  return lines.length ? lines.join("\n") : "No directly comparable metrics are available yet.";
 }
 
 async function completeClanTrackerInteraction(interaction, env, action, clanName, trackerMode = "members") {
@@ -7591,144 +7998,6 @@ async function completeClanTrackerInteraction(interaction, env, action, clanName
   }
 }
 
-async function fetchClanCompareCurrent(env, clanNameValue) {
-  const clan = String(clanNameValue || "").trim();
-  if (!clan) throw httpError(400, "A clan name is required.");
-
-  let payload = await fetchTopClansPayloadForCommand(env, "", 500);
-  if (!Array.isArray(payload.rows) || !payload.rows.length || payload.waiting_for_first_snapshot) {
-    const latestBattle = await fetchLatestClanBattleForCommand(env);
-    if (latestBattle?.battle) payload = await fetchTopClansPayloadForCommand(env, latestBattle.battle, 500);
-  }
-
-  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
-    .map(row => ({
-      ...row,
-      rank: positiveInteger(row?.rank ?? row?.clan_rank),
-      clan_name: String(row?.clan_name || row?.name || "").trim(),
-      points: finiteNumber(row?.points ?? row?.clan_points) || 0,
-      gain_1h: finiteNumber(row?.gain_1h ?? row?.rate_per_hour),
-      gain_24h: finiteNumber(row?.gain_24h),
-      projected_rank: positiveInteger(row?.projected_rank),
-      projected_points: finiteNumber(row?.projected_points)
-    }))
-    .filter(row => row.clan_name && row.rank)
-    .sort((a, b) => a.rank - b.rank || b.points - a.points);
-  const targetIndex = rows.findIndex(row => row.clan_name.toLowerCase() === clan.toLowerCase());
-  if (targetIndex < 0) throw httpError(404, `${clan} was not found in the current Top ${rows.length || 500} Clans snapshot.`);
-
-  return {
-    clan_name: rows[targetIndex].clan_name,
-    target: rows[targetIndex],
-    above: targetIndex > 0 ? rows[targetIndex - 1] : null,
-    below: targetIndex + 1 < rows.length ? rows[targetIndex + 1] : null,
-    snapshot_at: payload.snapshot_at || payload.generated_at || null,
-    battle_name: payload.display_name || payload.battle || "Current Clan Battle",
-    battle_end_iso: payload.battle_end_iso || null
-  };
-}
-
-function clanCompareRate(row) {
-  const direct = finiteNumber(row?.gain_1h ?? row?.rate_per_hour);
-  if (direct !== null) return direct;
-  const daily = finiteNumber(row?.gain_24h);
-  return daily !== null ? daily / 24 : 0;
-}
-
-function clanCompareSigned(value) {
-  const number = finiteNumber(value) || 0;
-  return `${number >= 0 ? "+" : ""}${shortNumber(number)}`;
-}
-
-function clanCompareBlock(marker, row, relation, current) {
-  if (!row) return null;
-  const rate = clanCompareRate(row);
-  const daily = finiteNumber(row?.gain_24h) ?? rate * 24;
-  const projectedRank = positiveInteger(row?.projected_rank) || row.rank;
-  const projectedPoints = finiteNumber(row?.projected_points);
-  const lines = [
-    `${marker} **[${escapeDiscordMarkdown(String(row.clan_name || "Clan").toUpperCase())}] #${fullNumber(row.rank)}**`,
-    `**Points:** ${shortNumber(row.points)} stars`,
-    `**Pace:** ${clanCompareSigned(rate)}/h | ${clanCompareSigned(daily)}/24h`
-  ];
-  if (projectedPoints !== null) {
-    lines.push(`**Projected Finish:** #${fullNumber(projectedRank)} at ${shortNumber(projectedPoints)} stars`);
-  }
-
-  if (relation === "target" && current?.above) {
-    const gap = Math.max(0, Number(current.above.points || 0) - Number(row.points || 0));
-    const rateDifference = rate - clanCompareRate(current.above);
-    lines.push(`**Time-To-Pass:** ${rateDifference > 0 && gap > 0 ? `${formatRewardProjectionDuration(gap / rateDifference)} at current pace` : "Not catching at current pace"}`);
-    const endAt = new Date(current?.battle_end_iso || 0).getTime();
-    const snapshotAt = new Date(current?.snapshot_at || Date.now()).getTime();
-    const remainingHours = Math.max(0, (endAt - snapshotAt) / (60 * 60 * 1000));
-    if (remainingHours > 0 && gap > 0) {
-      const needed = clanCompareRate(current.above) + gap / remainingHours;
-      lines.push(`**Passing Pace:** ${shortNumber(needed)}/h is needed to pass by CB end (**${clanCompareSigned(needed - rate)}/h** above current pace).`);
-    }
-  } else if (relation === "above" && current?.target) {
-    lines.push(`**Point Gap:** ${shortNumber(Math.max(0, Number(row.points || 0) - Number(current.target.points || 0)))} stars`);
-  } else if (relation === "below" && current?.target) {
-    lines.push(`**Point Gap:** ${shortNumber(Math.max(0, Number(current.target.points || 0) - Number(row.points || 0)))} stars`);
-  }
-  return lines.join("\n");
-}
-
-function buildClanCompareMessage(current) {
-  const target = current?.target;
-  if (!target) throw httpError(409, "No current clan comparison was returned.");
-  const sections = [
-    clanCompareBlock("⬆️", current.above, "above", current),
-    clanCompareBlock("☀️", target, "target", current),
-    clanCompareBlock("⬇️", current.below, "below", current)
-  ].filter(Boolean);
-  const projectedRank = positiveInteger(target.projected_rank) || target.rank;
-  const aboveName = current?.above?.clan_name ? `[${String(current.above.clan_name).toUpperCase()}]` : "the clan above";
-  const belowName = current?.below?.clan_name ? `[${String(current.below.clan_name).toUpperCase()}]` : "the clan below";
-  sections.push(`**Outlook:** Current pace projects **[${String(target.clan_name).toUpperCase()}]** at #${fullNumber(projectedRank)}, between **${escapeDiscordMarkdown(aboveName)}** and **${escapeDiscordMarkdown(belowName)}** through CB end.`);
-
-  const updatedAt = new Date(current.snapshot_at || Date.now());
-  const updatedUnix = Math.floor((Number.isFinite(updatedAt.getTime()) ? updatedAt.getTime() : Date.now()) / 1000);
-  const iconUrl = String(target.icon_url || target.clan_icon_url || "").trim();
-  const comparisonText = {
-    type: COMPONENT_TYPE_TEXT_DISPLAY,
-    content: sections.join("\n\n").slice(0, 4000)
-  };
-  const comparisonBody = [
-    iconUrl
-      ? {
-          type: COMPONENT_TYPE_SECTION,
-          components: [comparisonText],
-          accessory: {
-            type: COMPONENT_TYPE_THUMBNAIL,
-            media: { url: iconUrl },
-            description: `${String(target.clan_name || "Clan").toUpperCase()} icon`
-          }
-        }
-      : comparisonText,
-    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
-    {
-      type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: `-# **Updated <t:${updatedUnix}:R>**`
-    },
-    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
-    {
-      type: COMPONENT_TYPE_TEXT_DISPLAY,
-      content: `-# 🧞‍♀️ **Luna Pet Sim 99 Bot** 🏳️‍🌈 **∙ by Cinnamowopal | Last Updated: Today at <t:${updatedUnix}:t>**`
-    }
-  ];
-  return {
-    flags: MESSAGE_FLAG_COMPONENTS_V2,
-    allowed_mentions: { parse: [] },
-    components: [{
-      type: COMPONENT_TYPE_CONTAINER,
-      accent_color: 0xf1c40f,
-      components: comparisonBody
-    }],
-    attachments: []
-  };
-}
-
 async function fetchClanTrackerCurrent(env, clanNameValue) {
   const clan = String(clanNameValue || "").trim();
   if (!clan) throw httpError(400, "A clan name is required.");
@@ -7757,7 +8026,7 @@ async function fetchClanTrackerCurrent(env, clanNameValue) {
 }
 
 function clanTrackerRows(current) {
-  return (Array.isArray(current?.rows) ? current.rows : [])
+  const normalized = (Array.isArray(current?.rows) ? current.rows : [])
     .map((row, index) => ({
       ...row,
       tracker_rank: positiveInteger(row?.rank ?? row?.member_rank ?? row?.clan_rank) || index + 1,
@@ -7766,8 +8035,49 @@ function clanTrackerRows(current) {
       tracker_gain_20m: finiteNumber(row?.gain_20m ?? row?.last_20m ?? row?.twenty_minute_gain),
       tracker_gain_1h: finiteNumber(row?.gain_1h ?? row?.one_hour_gain ?? row?.hourly_points ?? row?.projected_gain_1h),
       tracker_downtime: hourlyDowntimeMinutes(row)
-    }))
+    }));
+  const unique = new Map();
+  const userIdByUsername = new Map(normalized.flatMap(row => {
+    const username = normalizeSearchKey(row?.username);
+    const userId = String(row?.user_id || row?.UserID || "").trim();
+    return username && userId ? [[username, userId]] : [];
+  }));
+
+  for (const row of normalized) {
+    // Roblox usernames are unique and remain the best fallback when an upstream
+    // duplicate is missing its user_id. Prefer user_id only when no username is
+    // available so the same member cannot occupy two tracker slots.
+    const usernameKey = normalizeSearchKey(row?.username);
+    const userId = String(row?.user_id || row?.UserID || "").trim();
+    const displayKey = normalizeSearchKey(row?.display_name);
+    const resolvedUserId = userId || userIdByUsername.get(usernameKey) || "";
+    const identity = resolvedUserId
+      ? `id:${resolvedUserId}`
+      : usernameKey
+        ? `name:${usernameKey}`
+        : `display:${displayKey}`;
+    const existing = unique.get(identity);
+    if (!existing || clanTrackerRowQuality(row) > clanTrackerRowQuality(existing)) {
+      unique.set(identity, row);
+    }
+  }
+
+  return [...unique.values()]
     .sort((a, b) => a.tracker_rank - b.tracker_rank || b.tracker_points - a.tracker_points);
+}
+
+function clanTrackerRowQuality(row) {
+  const completeness = [
+    row?.user_id ?? row?.UserID,
+    row?.username,
+    row?.tracker_gain_20m,
+    row?.tracker_gain_1h,
+    row?.tracker_downtime
+  ].reduce((score, value) => score + Number(value !== null && value !== undefined && value !== ""), 0);
+  const points = Math.max(0, finiteNumber(row?.tracker_points) || 0);
+  const fetchedAt = new Date(row?.fetched_at || row?.snapshot_at || row?.updated_at || 0).getTime();
+  // Completeness is authoritative; cumulative points and recency break ties.
+  return completeness * 1e18 + Math.min(points, 1e15) * 1e3 + (Number.isFinite(fetchedAt) ? fetchedAt / 1e12 : 0);
 }
 
 function clanTrackerDelta(value) {
@@ -7823,7 +8133,7 @@ function buildClanTrackerMessages(current, fallbackClan = "", env = {}) {
   const rows = clanTrackerRows(current);
   const totalPoints = hourlyClanPoints(current, rows);
   const currentRank = positiveInteger(current?.clan_rank ?? current?.rank ?? current?.source_clan_rank);
-  const memberCount = positiveInteger(current?.member_count ?? current?.current_members) || rows.length;
+  const memberCount = rows.length;
   const capacity = positiveInteger(current?.member_capacity ?? current?.max_members);
   const snapshotAt = current?.snapshot_at || current?.fetched_at || current?.updated_at || null;
   const displayClan = String(current?.clan_name || fallbackClan || "Clan").trim();
@@ -7941,7 +8251,10 @@ async function postOrUpdateClanTrackerMessages(env, assignment, messages) {
         ids.push(String(payload?.id || previousId));
         continue;
       }
-      if (edit.status !== 400 && edit.status !== 404) {
+      // Only a confirmed missing message permits replacement. A 400 means the
+      // edit payload needs attention; creating a new post would orphan the old
+      // persistent card and repeat on every scheduled refresh.
+      if (edit.status !== 404) {
         throw httpError(edit.status === 403 ? 403 : 502, payload?.message || `Discord clan tracker update failed (${edit.status}).`);
       }
       staleIds.push(previousId);
@@ -7982,7 +8295,11 @@ function runScheduledClanTrackerAssignments(env, options = {}) {
 
 async function runClanTrackerAssignments(env, options = {}) {
   const response = await hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
-    query: { enabled: "true", limit: 1000 }
+    query: {
+      enabled: "true",
+      ...(options.trackerMode ? { mode: options.trackerMode } : {}),
+      limit: 1000
+    }
   });
   const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
   const reports = new Map();
@@ -7993,6 +8310,13 @@ async function runClanTrackerAssignments(env, options = {}) {
     const clanKey = String(assignment?.clan_name || "").trim().toLowerCase();
     const reportKey = `${trackerMode}:${clanKey}`;
     try {
+      // The assign command owns creation of the initial persistent message.
+      // A scheduled tick can overlap that short POST/PATCH window in another
+      // Worker isolate; never let it create a second message from a null ID.
+      if (options.scheduled === true && !parseClanTrackerMessageIds(assignment?.message_id).length) {
+        results.push({ assignment_key: assignment.assignment_key, updated: false, skipped: true, reason: "awaiting_initial_message" });
+        continue;
+      }
       let current = reports.get(reportKey);
       if (!current) {
         current = trackerMode === "compare"
@@ -8020,89 +8344,6 @@ async function runClanTrackerAssignments(env, options = {}) {
   }
 
   return { ok: results.every(result => result.updated), assignments: assignments.length, results };
-}
-
-async function completeClanCompareInteraction(interaction, env, action, clanName) {
-  try {
-    if (action === "remove") {
-      const response = await hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-        query: {
-          guild_id: interaction.guild_id,
-          clan: clanName,
-          limit: 1000
-        }
-      });
-      const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
-      for (const assignment of assignments) {
-        await hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-          method: "DELETE",
-          body: { assignment_key: String(assignment?.assignment_key || "") }
-        });
-      }
-      let deletedMessages = 0;
-      for (const assignment of assignments) {
-        deletedMessages += await deleteClanTrackerMessages(env, assignment, {
-          bestEffort: true,
-          maxAttempts: 3
-        });
-      }
-      await editOriginalInteraction(interaction, {
-        content: assignments.length
-          ? `Removed the persistent comparison for **${escapeDiscordMarkdown(clanName)}** from ${assignments.length} channel${assignments.length === 1 ? "" : "s"} and deleted ${deletedMessages} post${deletedMessages === 1 ? "" : "s"}.`
-          : `No persistent comparison for **${escapeDiscordMarkdown(clanName)}** is configured in this server.`,
-        allowed_mentions: { parse: [] },
-        embeds: [],
-        components: [],
-        attachments: []
-      });
-      return;
-    }
-
-    const comparison = await fetchClanCompareCurrent(env, clanName);
-    const message = buildClanCompareMessage(comparison, clanName, env);
-    if (action !== "assign") {
-      await editOriginalInteraction(interaction, message);
-      return;
-    }
-
-    const channelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
-    if (!channelId) throw httpError(400, "Choose a text channel or thread for the persistent comparison.");
-    const channel = await resolveHourlyClanChannel(interaction, env, channelId);
-    if (!HOURLY_CLAN_ALLOWED_CHANNEL_TYPES.has(Number(channel?.type))) {
-      throw httpError(400, "Choose a text channel or thread that Luna can post in.");
-    }
-
-    const assignmentResponse = await hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-      method: "POST",
-      body: {
-        guild_id: interaction.guild_id,
-        channel_id: channelId,
-        channel_type: Number(channel?.type),
-        clan_name: comparison?.clan?.clan_name || clanName,
-        assigned_by: interactionUserId(interaction),
-        message_id: null,
-        last_updated_at: null,
-        last_error: null
-      }
-    });
-    const assignment = assignmentResponse?.assignment || assignmentResponse;
-    const delivery = await postOrUpdateClanCompareMessage(env, assignment, message);
-    await updateClanCompareAssignment(env, assignment, {
-      message_id: delivery.id || null,
-      last_updated_at: comparison.snapshot_at || new Date().toISOString(),
-      last_error: null
-    });
-
-    await editOriginalInteraction(interaction, {
-      content: `Persistent comparison tracking is now enabled for **${escapeDiscordMarkdown(comparison?.clan?.clan_name || clanName)}** in <#${channelId}>. Luna will edit that post every ${clanCompareScheduledIntervalMinutes(env)} minutes.`,
-      allowed_mentions: { parse: [] },
-      embeds: [],
-      components: [],
-      attachments: []
-    });
-  } catch (err) {
-    await editOriginalInteraction(interaction, commandErrorMessage("Clan comparison failed", err, env)).catch(() => null);
-  }
 }
 
 async function fetchClanCompareCurrent(env, clanName) {
@@ -8248,105 +8489,22 @@ function clanCompareAccent(race, threat) {
   return 0xfee75c;
 }
 
-async function postOrUpdateClanCompareMessage(env, assignment, message) {
-  const channelId = String(assignment?.channel_id || "").trim();
-  if (!channelId) throw httpError(400, "The clan comparison assignment is missing its channel.");
-  const previousId = parseClanTrackerMessageIds(assignment?.message_id)[0] || "";
-  if (previousId) {
-    const edited = await clanCompareDiscordRequest(
-      env,
-      `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(previousId)}`,
-      "PATCH",
-      message
-    );
-    if (edited.ok) return edited.payload;
-    if (edited.status !== 400 && edited.status !== 404) {
-      throw httpError(edited.status === 403 ? 403 : 502, edited.payload?.message || `Discord clan comparison update failed (${edited.status}).`);
-    }
-  }
-
-  const created = await clanCompareDiscordRequest(
-    env,
-    `${DISCORD_API_BASE}/channels/${encodeURIComponent(channelId)}/messages`,
-    "POST",
-    message
-  );
-  if (!created.ok) {
-    throw httpError(created.status === 403 ? 403 : 502, created.payload?.message || `Discord clan comparison post failed (${created.status}).`);
-  }
-  return created.payload;
-}
-
-async function clanCompareDiscordRequest(env, url, method, body) {
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(url, {
-      method,
-      headers: discordBotHeaders(env, { "Content-Type": "application/json" }),
-      body: JSON.stringify(body)
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok) return { ok: true, status: response.status, payload };
-    if (attempt < maxAttempts && discordHourlyPostShouldRetry(response.status)) {
-      await sleep(discordHourlyPostRetryDelayMs(response, payload, attempt));
-      continue;
-    }
-    return { ok: false, status: response.status, payload };
-  }
-  return { ok: false, status: 502, payload: { message: "Discord request failed after retries." } };
-}
-
-async function updateClanCompareAssignment(env, assignment, patch) {
-  return hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-    method: "PATCH",
-    body: { assignment_key: String(assignment?.assignment_key || ""), ...patch }
-  });
-}
-
 async function runClanCompareAssignments(env, options = {}) {
-  const response = await hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-    query: { enabled: "true", limit: 1000 }
-  });
-  const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
-  const comparisons = new Map();
-  const results = [];
-
-  for (const assignment of assignments) {
-    const clanKey = normalizeSearchKey(assignment?.clan_name);
-    try {
-      let comparison = comparisons.get(clanKey);
-      if (!comparison) {
-        comparison = await fetchClanCompareCurrent(env, assignment.clan_name);
-        comparisons.set(clanKey, comparison);
-      }
-      const message = buildClanCompareMessage(comparison, assignment.clan_name, env);
-      const delivery = await postOrUpdateClanCompareMessage(env, assignment, message);
-      await updateClanCompareAssignment(env, assignment, {
-        message_id: delivery.id || assignment.message_id || null,
-        last_updated_at: comparison.snapshot_at || new Date(options.scheduledTime || Date.now()).toISOString(),
-        last_error: null
-      });
-      results.push({ assignment_key: assignment.assignment_key, updated: true, message_id: delivery.id || null });
-    } catch (err) {
-      await updateClanCompareAssignment(env, assignment, {
-        last_error: String(err?.message || err).slice(0, 500)
-      }).catch(() => null);
-      results.push({ assignment_key: assignment.assignment_key, updated: false, error: err?.message || String(err) });
-    }
-  }
-
-  return { ok: results.every(result => result.updated), assignments: assignments.length, results };
+  // Compatibility endpoint for operators. Comparisons now share the unified
+  // tracker assignment table and delivery path, so there is exactly one row
+  // and one Discord message owner per guild/channel/clan/mode.
+  return runClanTrackerAssignments(env, { ...options, trackerMode: "compare" });
 }
 
 async function clanCompareAssignmentStatus(env) {
-  const response = await hourlyClanApiRequest(env, "/api/discord/clan-compare-assignments", {
-    query: { enabled: "true", limit: 1000 }
+  const response = await hourlyClanApiRequest(env, "/api/discord/clan-tracker-assignments", {
+    query: { enabled: "true", mode: "compare", limit: 1000 }
   });
   const assignments = Array.isArray(response?.assignments) ? response.assignments : [];
   return {
     ok: true,
     checked_at: new Date().toISOString(),
-    interval_minutes: clanCompareScheduledIntervalMinutes(env),
+    interval_minutes: clanTrackerScheduledIntervalMinutes(env),
     assignment_count: assignments.length,
     assignments
   };
@@ -9466,7 +9624,27 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
   const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
 
-  const plot = { x: chartPanel.x + 56, y: chartPanel.y + 84, w: chartPanel.w - 104, h: 380 };
+  // Reserve a real Y-axis gutter inside the panel. Previously the plot began
+  // too close to the panel edge, so wide values were painted over the frame
+  // and looked like detached labels floating outside the chart.
+  const plot = { x: chartPanel.x + 116, y: chartPanel.y + 84, w: chartPanel.w - 150, h: 380 };
+  const yAxisGutter = {
+    x: chartPanel.x + 16,
+    y: plot.y - 14,
+    w: plot.x - chartPanel.x - 32,
+    h: plot.h + 28
+  };
+  hourlyBlendRoundedRect(
+    canvas,
+    yAxisGutter.x,
+    yAxisGutter.y,
+    yAxisGutter.w,
+    yAxisGutter.h,
+    10,
+    color.inset,
+    210
+  );
+  canvas.fillRect(plot.x - 10, plot.y, 1, plot.h, color.line);
   hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 10, color.inset, 235);
   hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
 
@@ -9487,8 +9665,11 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const labelFont = fonts.rowBold || fonts.bold;
     const labelSize = 15;
     const labelWidth = canvas.measureFontText(labelFont, label, labelSize);
+    const labelRight = plot.x - 18;
+    const labelX = Math.max(yAxisGutter.x + 8, labelRight - labelWidth);
     canvas.fillRect(plot.x, yy, plot.w, 1, [39, 49, 68, 255]);
-    canvas.drawFontText(labelFont, label, Math.max(24, plot.x - labelWidth - 16), yy - 9, labelSize, color.muted, labelWidth + 12);
+    canvas.fillRect(plot.x - 9, yy, 9, 1, color.line);
+    canvas.drawFontText(labelFont, label, labelX, yy - 9, labelSize, color.muted, labelWidth + 4);
   }
 
   const xTickCount = hours <= 1 ? 2 : Math.min(12, hours);
@@ -9684,7 +9865,8 @@ function leagueDrawSharpPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
     const x2 = xFor(current);
     const y2 = yFor(current);
     if (Math.abs(y2 - y1) < 0.5 || x2 <= x1) {
-      chartDrawLine(canvas, x1, y1, x2, y2, rgba, width);
+      if (current.observedGap) leagueDrawDashedLine(canvas, x1, y1, x2, y2, rgba, width);
+      else chartDrawLine(canvas, x1, y1, x2, y2, rgba, width);
       continue;
     }
 
@@ -9693,8 +9875,33 @@ function leagueDrawSharpPolyline(canvas, points, xFor, yFor, rgba, width = 2) {
     const intervalWidth = x2 - x1;
     const rampWidth = Math.min(14, Math.max(5, intervalWidth * 0.16));
     const rampStartX = Math.max(x1, x2 - rampWidth);
-    chartDrawLine(canvas, x1, y1, rampStartX, y1, rgba, width);
-    chartDrawLine(canvas, rampStartX, y1, x2, y2, rgba, width);
+    if (current.observedGap) {
+      leagueDrawDashedLine(canvas, x1, y1, rampStartX, y1, rgba, width);
+      leagueDrawDashedLine(canvas, rampStartX, y1, x2, y2, rgba, width);
+    } else {
+      chartDrawLine(canvas, x1, y1, rampStartX, y1, rgba, width);
+      chartDrawLine(canvas, rampStartX, y1, x2, y2, rgba, width);
+    }
+  }
+}
+
+function leagueDrawDashedLine(canvas, x1, y1, x2, y2, rgba, width = 2, dash = 8, gap = 6) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.hypot(dx, dy);
+  if (!(distance > 0)) return;
+  for (let offset = 0; offset < distance; offset += dash + gap) {
+    const start = offset / distance;
+    const end = Math.min(distance, offset + dash) / distance;
+    chartDrawLine(
+      canvas,
+      x1 + dx * start,
+      y1 + dy * start,
+      x1 + dx * end,
+      y1 + dy * end,
+      rgba,
+      width
+    );
   }
 }
 
@@ -9723,7 +9930,6 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
   const currentAt = Number.isFinite(requestedEndAt) && requestedEndAt > 0
     ? requestedEndAt
     : leagueChartTime(payload?.snapshot_at || payload?.fetched_at || payload?.updated_at) || Date.now();
-  const historyTimes = history.map(row => leagueChartTime(row.fetched_at || row.snapshot_at || row.created_at)).filter(Number.isFinite);
   const end = currentAt;
   const start = end - windowMs;
   const byUser = new Map();
@@ -9745,9 +9951,10 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
     )
       .filter(sample => Number.isFinite(sample.time) && sample.points !== null)
       .sort((a, b) => a.time - b.time);
-    const samples = storedSamples.length >= 2
-      ? storedSamples
-      : leagueDerivedGrowthSamples(member, currentAt, storedSamples);
+    // A couple of recent observations must not suppress the longer rolling
+    // baselines returned with the current row. Fill only missing window anchors;
+    // real stored samples near an anchor always remain authoritative.
+    const samples = leagueDerivedGrowthSamples(member, currentAt, storedSamples);
     const baseline = [...samples].reverse().find(sample => sample.time < start) || null;
     const visibleSamples = samples.filter(sample => sample.time >= start && sample.time <= end);
     if (baseline) visibleSamples.unshift({ time: start, points: baseline.points, synthetic: true });
@@ -9763,7 +9970,8 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
         t: sample.time,
         value: sample.points,
         intervalGain,
-        breakBefore: Boolean(previous && sample.time - previous.time > SEARCH_CHART_MAX_OBSERVED_GAP_MS)
+        breakBefore: false,
+        observedGap: Boolean(previous && sample.time - previous.time > SEARCH_CHART_MAX_OBSERVED_GAP_MS)
       });
     }
 
@@ -9811,8 +10019,14 @@ function leagueDerivedGrowthSamples(member, currentAt, storedSamples = []) {
   for (const window of windows) {
     const gain = finiteNumber(window.gain);
     if (gain === null) continue;
+    const targetTime = currentAt - window.hours * 60 * 60 * 1000;
+    const toleranceMs = 30 * 60 * 1000;
+    const hasStoredAnchor = storedSamples.some(sample =>
+      Number.isFinite(sample?.time) && Math.abs(sample.time - targetTime) <= toleranceMs
+    );
+    if (hasStoredAnchor) continue;
     derived.push({
-      time: currentAt - window.hours * 60 * 60 * 1000,
+      time: targetTime,
       points: Math.max(0, member.points - Math.max(0, gain)),
       synthetic: true
     });
@@ -10050,12 +10264,12 @@ function handleHistoryComponent(interaction, env, ctx) {
     view: state.view,
     page: state.page,
     cacheId: state.cacheId
-  }));
+  }, ctx));
 
   return { type: INTERACTION_RESPONSE_DEFERRED_MESSAGE_UPDATE };
 }
 
-async function completeHistoryInteraction(interaction, env, state) {
+async function completeHistoryInteraction(interaction, env, state, ctx = null) {
   try {
     // /history is an image-card command. Keeping an environment switch here
     // allowed an old production variable to silently restore the retired text
@@ -10070,15 +10284,29 @@ async function completeHistoryInteraction(interaction, env, state) {
     }
 
     const history = await loadHistoryCommandData(state.query, env);
+    const cacheId = historyCacheIdPart(state.cacheId) || historyCreateCacheId(history.user_id);
     await editOriginalInteraction(interaction, await renderHistoryMessage(history, {
       ownerId: state.ownerId,
       view: state.view,
       page: state.page,
       pageSize: historyPageSize(env),
       imageEnabled,
-      cacheId: state.cacheId,
+      cacheId,
       env
     }));
+
+    // The first /history response already loaded both data sets. Warm the other
+    // image after sending the requested card so a view-button click only swaps
+    // a cached attachment instead of repeating every API and database lookup.
+    const warmView = HISTORY_VIEWS.find(candidate => candidate !== state.view);
+    if (ctx?.waitUntil && warmView) {
+      ctx.waitUntil(prepareHistoryRenderCache(history, {
+        env,
+        ownerId: state.ownerId,
+        cacheId,
+        view: warmView
+      }).catch(error => console.warn("history alternate-view cache warm failed", error?.message || String(error))));
+    }
   } catch (err) {
     await editOriginalInteraction(interaction, {
       content: `History lookup failed: ${err?.message || String(err)}`,
@@ -10296,10 +10524,10 @@ async function loadHistoryCommandData(query, env) {
     });
   }
 
-  const leagueRows = mergeHistorySummaryRows(
+  const leagueRows = attachLeagueGlobalHistoryRows(mergeHistorySummaryRows(
     normalizeLeagueHistoryRows(leagueHistory?.rows),
     normalizeLeagueHistoryRows(staticProfile?.league_summaries)
-  );
+  ), normalizeLeagueGlobalHistoryRows(leagueHistory?.leaderboard_rows));
   const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
     || absoluteProfileAssetUrl(staticProfile?.avatar_url, env)
     || await searchAvatarUrl({
@@ -10312,8 +10540,6 @@ async function loadHistoryCommandData(query, env) {
     user_id: subject.userId,
     username: globalPayload?.row ? displayName(globalPayload.row) : staticProfile?.username || subject.username || `user_${subject.userId}`,
     avatar_url: avatarUrl || null,
-    current_clan: globalPayload?.row?.source_clan || globalPayload?.row?.clan_name || null,
-    clan_join_time: globalPayload?.row?.join_time || null,
     clan: sortClanHistoryRecords([...clanMap.values()]),
     league: leagueRows,
     league_unavailable: leagueHistory === null && leagueRows.length === 0
@@ -10608,13 +10834,84 @@ function normalizeLeagueHistoryRows(rows) {
     ].filter(Boolean).join(":");
     return {
       key: historyRecordKey(row.league_period_key || row.label_key || row.run_label || row.event_name || fallbackPeriod),
-      name: historyRecordName(row.run_label || row.event_name || row.label || row.league_period_key || row.league_name || "League"),
+      name: leagueHistoryEventName(row),
+      league_run_key: row.league_run_key || row.run_key || null,
+      league_period_key: row.league_period_key || row.label_key || null,
       league_name: row.league_name || null,
       league_rank: finiteHistoryNumber(row.league_rank ?? row.final_league_rank ?? row.rank),
       player_rank: finiteHistoryNumber(row.player_league_rank ?? row.member_rank ?? row.final_rank ?? row.best_rank),
-      points: finiteHistoryNumber(row.final_points ?? row.points ?? row.highest_points)
+      global_rank: finiteHistoryNumber(row.global_rank),
+      total_global_players: finiteHistoryNumber(row.total_global_players ?? row.total_ranked),
+      points: finiteHistoryNumber(row.final_points ?? row.points ?? row.highest_points),
+      final_snapshot_at: row.final_snapshot_at || row.period_end_at || row.fetched_at || null
     };
-  }).filter(row => row.key && !isSyntheticLeagueHistoryRow(row) && (row.league_rank !== null || row.player_rank !== null || row.points !== null));
+  }).filter(row => row.key && !isSyntheticLeagueHistoryRow(row) && (row.league_rank !== null || row.global_rank !== null || row.points !== null));
+}
+
+function normalizeLeagueGlobalHistoryRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map(row => ({
+    league_run_key: row.league_run_key || row.run_key || null,
+    league_name: row.source_league_name || row.league_name || null,
+    league_rank: finiteHistoryNumber(row.league_rank ?? row.final_league_rank),
+    global_rank: finiteHistoryNumber(row.global_rank ?? row.final_rank),
+    total_global_players: finiteHistoryNumber(row.total_global_players ?? row.total_ranked),
+    final_snapshot_at: row.final_snapshot_at || row.period_end_at || row.fetched_at || null
+  })).filter(row => row.league_run_key && row.global_rank !== null);
+}
+
+function attachLeagueGlobalHistoryRows(rows, globalRows) {
+  const candidates = Array.isArray(globalRows) ? globalRows : [];
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    if (finiteHistoryNumber(row.global_rank) !== null && finiteHistoryNumber(row.league_rank) !== null) return row;
+    const runKey = historyRecordKey(row.league_run_key);
+    const leagueKey = historyRecordKey(row.league_name);
+    const matches = candidates.filter(candidate => historyRecordKey(candidate.league_run_key) === runKey);
+    const exactLeagueMatches = matches.filter(candidate =>
+      leagueKey && historyRecordKey(candidate.league_name) === leagueKey
+    );
+    const eligible = exactLeagueMatches.length ? exactLeagueMatches : matches.filter(candidate => !candidate.league_name);
+    if (!eligible.length) return row;
+    const rowTime = historyDateMs(row.final_snapshot_at);
+    const match = eligible.slice().sort((left, right) =>
+      Math.abs(historyDateMs(left.final_snapshot_at) - rowTime) - Math.abs(historyDateMs(right.final_snapshot_at) - rowTime)
+    )[0];
+    return {
+      ...row,
+      league_rank: finiteHistoryNumber(row.league_rank) ?? finiteHistoryNumber(match.league_rank),
+      global_rank: finiteHistoryNumber(row.global_rank) ?? finiteHistoryNumber(match.global_rank),
+      total_global_players: finiteHistoryNumber(row.total_global_players) ?? finiteHistoryNumber(match.total_global_players)
+    };
+  });
+}
+
+function leagueHistoryEventName(row) {
+  const technicalValues = new Set([
+    row?.league_period_key,
+    row?.label_key,
+    row?.league_run_key,
+    row?.run_key,
+    row?.league_name
+  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean));
+  for (const rawValue of [row?.run_label, row?.event_name, row?.label, row?.leaderboard_name]) {
+    const value = String(rawValue || "").trim().replace(/\s*\(League\)\s*$/i, "");
+    const normalized = value.toLowerCase();
+    if (!value || technicalValues.has(normalized) || normalized === "league") continue;
+    if (String(row?.league_run_key || "") && normalized.startsWith(`${String(row.league_run_key).toLowerCase()}:`)) continue;
+    return historyRecordName(value);
+  }
+  return historyLeagueFinalDate(row);
+}
+
+function historyLeagueFinalDate(row) {
+  const value = row?.final_snapshot_at || row?.period_end_at || row?.fetched_at || row?.last_snapshot_at;
+  const date = new Date(value || 0);
+  if (!Number.isFinite(date.getTime())) return "Unknown Date";
+  return date.toLocaleDateString("en-US", {
+    timeZone: "America/Denver",
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 function normalizeLeaderboardHistoryRows(rows) {
@@ -10645,7 +10942,7 @@ function mergeClanHistoryRecord(map, row) {
   if (!key) return;
   const normalizedName = isGenericGlobalHistoryLabel(row?.name)
     ? historyRecordName(identity)
-    : row?.name;
+    : historyRecordName(row?.name || identity);
   const normalizedRow = {
     ...row,
     key,
@@ -10687,11 +10984,13 @@ function historySourcePriority(source) {
 }
 
 function historyRecordKey(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return cleanExternalHistoryField(value, ["clan\\s+battle", "battle", "event", "name"])
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function historyRecordName(value) {
-  const text = String(value || "").trim();
+  const text = cleanExternalHistoryField(value, ["clan\\s+battle", "battle", "event", "name"]);
   if (!text) return "Unknown";
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -11487,16 +11786,24 @@ async function buildCachedHistoryMessage(state, env) {
   const cacheId = historyCacheIdPart(state.cacheId);
   if (!cacheId) return null;
 
-  const [meta, bytes] = await Promise.all([
+  const [meta, cachedBytes, history] = await Promise.all([
     historyGetCachedJson(env, "meta", cacheId),
-    historyGetCachedBytes(env, "image", cacheId, view)
+    historyGetCachedBytes(env, "image", cacheId, view),
+    historyGetCachedJson(env, "data", cacheId)
   ]);
-  if (!meta || !bytes?.byteLength) return null;
+  if (!meta) return null;
 
   const ownerId = String(meta.owner_id || state.ownerId || "");
   const targetId = String(meta.user_id || state.targetId || "");
   if (ownerId && ownerId !== state.ownerId) return null;
   if (!targetId) return null;
+
+  let bytes = cachedBytes;
+  if (!bytes?.byteLength && history?.user_id) {
+    bytes = await renderHistoryCardPng(history, view, env);
+    await historyPutCachedBytes(env, "image", cacheId, view, bytes, "image/png");
+  }
+  if (!bytes?.byteLength) return null;
 
   return historyImageMessage({
     filename: `c0ld-history-${targetId}-${view}.png`,
@@ -11540,6 +11847,7 @@ async function prepareHistoryRenderCache(history, options = {}) {
   };
 
   await historyPutCachedJson(env, "meta", cacheId, meta);
+  await historyPutCachedJson(env, "data", cacheId, history);
 
   // Render only the selected view. Rendering every full-history card in
   // parallel made an unrelated view failure collapse /history to plain text.
@@ -11703,7 +12011,7 @@ function formatHistoryLine(row, view, number) {
   const name = escapeDiscordMarkdown(truncateHistoryText(row.name, 72));
   if (view === "league") {
     const league = escapeDiscordMarkdown(truncateHistoryText(row.league_name || "Unknown", 32));
-    return `${number}. **${name}** — ${league} — League ${historyRank(row.league_rank)} — Player ${historyRank(row.player_rank)} — ${historyPoints(row.points)} pts`;
+    return `${number}. **${name}** — ${league} — League ${historyRank(row.league_rank)} — Global ${historyRank(row.global_rank, row.total_global_players)} — ${historyPoints(row.points)} pts`;
   }
   if (view === "clan") {
     const clan = escapeDiscordMarkdown(truncateHistoryText(row.clan_name || "Unknown", 16)).toUpperCase();
@@ -11847,7 +12155,11 @@ async function renderHistoryCardPng(history, view, env = {}) {
   visibleRows.forEach((row, index) => {
     const y = listTop + index * rowHeight;
     if (row) {
-      const rowAccent = selectedView === "clan" ? historyClanAccent(row.clan_name, color) : accent;
+      const rowAccent = selectedView === "clan"
+        ? historyClanAccent(row.clan_name, color)
+        : selectedView === "league"
+          ? historyLeagueAccent(row.league_name, color)
+          : accent;
       historyModernDrawRecordRow(canvas, fontsWithRows, row, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight - 5, index, color, rowAccent);
     } else {
       historyModernDrawEmptyRow(canvas, fontsWithRows, history, selectedView, rightPanel.x + 12, y, rightPanel.w - 24, rowHeight + 20, color);
@@ -11888,6 +12200,35 @@ function historyClanAccent(clanName, color) {
   return palette[hash % palette.length];
 }
 
+function historyLeagueAccent(leagueName, color) {
+  const palette = [
+    color.yellow,
+    color.orange,
+    color.pink,
+    color.violet,
+    color.cyan,
+    [255, 111, 145, 255],
+    [177, 116, 255, 255],
+    [255, 185, 72, 255],
+    [82, 203, 218, 255]
+  ];
+  const key = String(leagueName || "UNKNOWN").trim().toUpperCase() || "UNKNOWN";
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
+function historyLeagueBarColors(color) {
+  return {
+    ...color,
+    violet: color.orange,
+    cyan: color.pink,
+    green: color.violet
+  };
+}
+
 function isSyntheticLeagueHistoryRow(row) {
   const values = [
     row?.key,
@@ -11919,6 +12260,10 @@ function historyModernDrawHeader(canvas, fonts, playerName, title, centerX, y, c
 
 function historyModernMetricRows(history, rows, view, highlight, color) {
   const globalBest = bestGlobalPerformanceRows(rows);
+  const bestGlobalRank = (rows || []).reduce((best, row) => {
+    const rankValue = positiveInteger(row.global_rank);
+    return rankValue && (!best || rankValue < best) ? rankValue : best;
+  }, null);
   const leagueBest = view === "league"
     ? rows.reduce((best, row) => {
         const rankValue = positiveInteger(row.league_rank);
@@ -11929,10 +12274,10 @@ function historyModernMetricRows(history, rows, view, highlight, color) {
     return [
       { label: "Player ID", value: historyCardText(history.user_id || "-", 18), tone: color.muted },
       { label: "Records", value: fullNumber(rows.length), tone: rows.length ? color.green : color.zeroText },
-      { label: "Best League Rank", value: leagueBest ? rank(leagueBest) : "-", tone: color.yellow }
+      { label: "Best League Rank", value: leagueBest ? rank(leagueBest) : "-", tone: color.yellow },
+      { label: "Best Global Rank", value: bestGlobalRank ? rank(bestGlobalRank) : "-", tone: color.pink }
     ];
   }
-  const currentClan = historyCardText(String(history.current_clan || "-").toUpperCase(), 16);
   return [
     { label: "Player ID", value: historyCardText(history.user_id || "-", 18), tone: color.muted },
     { label: "View", value: HISTORY_VIEW_LABELS[view], tone: historyModernAccent(view, color) },
@@ -11942,8 +12287,7 @@ function historyModernMetricRows(history, rows, view, highlight, color) {
       label: "Top Performance",
       value: globalBest ? historyTopLabel(globalBest.percent) : historyCardText(highlight.value, 20),
       tone: highlight.tone === "gold" ? color.yellow : color.green
-    },
-    { label: "Current Clan", value: currentClan || "-", tone: color.green }
+    }
   ];
 }
 
@@ -11972,7 +12316,7 @@ function historyModernDrawSummaryStrip(canvas, fonts, metrics, panel, color) {
 
 function historyModernDrawRecordRow(canvas, fonts, row, view, x, y, width, height, index, color, accent) {
   const record = historyModernRecordParts(row, view);
-  const tagTone = view === "clan" ? accent : record.tagTone;
+  const tagTone = view === "clan" || view === "league" ? accent : record.tagTone;
   hourlyDrawPlayerRowShell(canvas, x, y, width, height, index, true, color);
   canvas.fillRect(x + 12, y + 8, 5, height - 16, accent);
   const titleX = x + 28;
@@ -11980,7 +12324,8 @@ function historyModernDrawRecordRow(canvas, fonts, row, view, x, y, width, heigh
   const rankX = x + Math.floor(width * 0.46);
   const barX = x + Math.floor(width * 0.63);
   const pctX = x + width - 18;
-  const barW = Math.max(80, pctX - barX - 72);
+  const endLabelWidth = view === "league" ? 118 : 66;
+  const barW = Math.max(80, pctX - barX - endLabelWidth - 6);
   const betterThan = historyBetterThanPercent(row);
   const betterFraction = betterThan === null ? null : betterThan / 100;
 
@@ -11989,8 +12334,12 @@ function historyModernDrawRecordRow(canvas, fonts, row, view, x, y, width, heigh
   historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, record.points, pointsX, y + 15, 15, color.red, Math.max(110, rankX - pointsX - 18));
   historyDrawCleanFittedText(canvas, fonts.rowBold || fonts.bold, record.rank, rankX, y + 15, 15, color.yellow, Math.max(120, barX - rankX - 18));
   if (betterFraction !== null) {
-    historyDrawBetterThanBar(canvas, barX, y + 22, barW, 8, betterFraction, color);
-    historyDrawCleanRightText(canvas, fonts.rowBold || fonts.bold, `${historyPercentLabel(betterThan)}%`, pctX, y + 18, 13, color.green, 66);
+    historyDrawBetterThanBar(canvas, barX, y + 22, barW, 8, betterFraction, view === "league" ? historyLeagueBarColors(color) : color);
+  }
+  if (view === "league") {
+    historyDrawCleanRightText(canvas, fonts.rowBold || fonts.bold, record.globalRank, pctX, y + 18, 13, color.pink, endLabelWidth);
+  } else if (betterFraction !== null) {
+    historyDrawCleanRightText(canvas, fonts.rowBold || fonts.bold, `${historyPercentLabel(betterThan)}%`, pctX, y + 18, 13, color.green, endLabelWidth);
   }
 }
 
@@ -12005,10 +12354,11 @@ function historyModernDrawEmptyRow(canvas, fonts, history, view, x, y, width, he
 function historyModernRecordParts(row, view) {
   if (view === "league") {
     return {
-      title: row.league_name || row.name || "Unknown League",
-      tag: `Player ${historyCardRank(row.player_rank)}`,
+      title: row.name || historyLeagueFinalDate(row),
+      tag: historyCardText(String(row.league_name || "Unknown").toUpperCase(), 18),
       tagTone: [247, 211, 83, 255],
       rank: `League ${historyCardRank(row.league_rank)}`,
+      globalRank: `Global ${historyCardRank(row.global_rank)}`,
       points: historyCardPointLabel(row.points)
     };
   }
@@ -12369,7 +12719,7 @@ function drawCombinedHistoryRow(canvas, fonts, row, view, x, y, width, color, ac
   }
   let details;
   if (view === "league") {
-    details = `${row.league_name || "Unknown"}  |  League ${historyCardRank(row.league_rank)}  |  Player ${historyCardRank(row.player_rank)}  |  ${historyCardPointLabel(row.points)}`;
+    details = `${row.league_name || "Unknown"}  |  League ${historyCardRank(row.league_rank)}  |  Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPointLabel(row.points)}`;
   } else if (view === "clan") {
     const clanName = historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 8);
     canvas.fillRect(x + 17, y + 35, 3, 17, accent);
@@ -12386,10 +12736,6 @@ function drawCombinedHistoryRow(canvas, fonts, row, view, x, y, width, color, ac
 }
 
 function historyPerformanceBadge(row, view, color) {
-  if (view === "league") {
-    const playerRank = positiveInteger(row.player_rank);
-    return playerRank ? { label: `PLAYER #${fullNumber(playerRank)}`, foreground: color.gold, background: color.goldDark } : null;
-  }
   const rankValue = positiveInteger(row.global_rank);
   const totalValue = positiveInteger(row.total_global_players);
   if (!rankValue || !totalValue) return null;
@@ -12407,14 +12753,10 @@ function historyTopLabel(percent) {
 
 function historyViewHighlight(rows, view) {
   if (view === "league") {
-    const best = (rows || []).reduce((current, row) => {
-      const playerRank = positiveInteger(row.player_rank);
-      if (!playerRank || (current && current.playerRank <= playerRank)) return current;
-      return { playerRank, leagueRank: positiveInteger(row.league_rank) };
-    }, null);
+    const best = bestGlobalPerformanceRows(rows);
     return best
-      ? { label: "BEST LEAGUE FINISH", value: `Player #${fullNumber(best.playerRank)}${best.leagueRank ? `  |  League #${fullNumber(best.leagueRank)}` : ""}`, tone: "gold" }
-      : { label: "LEAGUE PERFORMANCE", value: "No ranked result", tone: "gold" };
+      ? { label: "BEST GLOBAL FINISH", value: `${historyCardRank(best.rank)}  |  ${historyTopLabel(best.percent)}`, tone: best.percent <= 1 ? "gold" : "green" }
+      : { label: "LEAGUE PERFORMANCE", value: "No global rank", tone: "gold" };
   }
   const best = bestGlobalPerformanceRows(rows);
   return best
@@ -16472,16 +16814,35 @@ function clanCommandPayload() {
         options: [
           {
             name: "view",
-            description: "Preview an adjacent-clan comparison without posting it.",
+            description: "Compare two clans, Leagues, or players.",
             type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
             options: [
               {
-                name: "clan",
-                description: "Clan name to compare with the clans directly above and below it",
+                name: "type",
+                description: "What should be compared",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                choices: [
+                  { name: "Clans", value: "clan" },
+                  { name: "Leagues", value: "league" },
+                  { name: "Players", value: "player" }
+                ]
+              },
+              {
+                name: "first",
+                description: "First clan, League, or Roblox username",
                 type: APPLICATION_COMMAND_OPTION_STRING,
                 required: true,
                 min_length: 1,
-                max_length: 32
+                max_length: 64
+              },
+              {
+                name: "second",
+                description: "Second clan, League, or Roblox username",
+                type: APPLICATION_COMMAND_OPTION_STRING,
+                required: true,
+                min_length: 1,
+                max_length: 64
               }
             ]
           },
@@ -16574,65 +16935,6 @@ function clanCommandPayload() {
               {
                 name: "clan",
                 description: "Clan name, for example COLD or c0ld",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                min_length: 1,
-                max_length: 32
-              }
-            ]
-          }
-        ]
-      },
-      {
-        name: "compare",
-        description: "Compare a clan with the clans directly above and below it.",
-        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
-        options: [
-          {
-            name: "view",
-            description: "Preview the current three-clan comparison.",
-            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-            options: [
-              {
-                name: "clan",
-                description: "Clan name, for example COLD or c0ld",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                min_length: 1,
-                max_length: 32
-              }
-            ]
-          },
-          {
-            name: "assign",
-            description: "Post and keep a clan comparison updated.",
-            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-            options: [
-              {
-                name: "clan",
-                description: "The middle clan to track",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                min_length: 1,
-                max_length: 32
-              },
-              {
-                name: "channel",
-                description: "Text channel or thread for the persistent comparison",
-                type: APPLICATION_COMMAND_OPTION_CHANNEL,
-                required: true,
-                channel_types: [...HOURLY_CLAN_ALLOWED_CHANNEL_TYPES]
-              }
-            ]
-          },
-          {
-            name: "remove",
-            description: "Remove a persistent clan comparison from this server.",
-            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-            options: [
-              {
-                name: "clan",
-                description: "The middle clan to stop tracking",
                 type: APPLICATION_COMMAND_OPTION_STRING,
                 required: true,
                 min_length: 1,
@@ -17039,6 +17341,24 @@ function htgCommandPayload() {
         name: "accounts",
         description: "List the Roblox accounts connected to your HTG tracker.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND
+      },
+      {
+        name: "report",
+        description: "Show your recorded HTG acquisitions for a recent timeframe.",
+        type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
+        options: [
+          {
+            name: "timeframe",
+            description: "Rolling timeframe to summarize",
+            type: APPLICATION_COMMAND_OPTION_STRING,
+            required: true,
+            choices: [
+              { name: "Last 24 hours", value: "day" },
+              { name: "Last 7 Days", value: "week" },
+              { name: "Last 30 Days", value: "month" }
+            ]
+          }
+        ]
       },
       {
         name: "enable",
@@ -17676,6 +17996,7 @@ function positiveInteger(value) {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }

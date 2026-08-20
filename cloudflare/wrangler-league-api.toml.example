@@ -11,7 +11,7 @@ LEAGUE_NAME = "YAMO"
 LEAGUE_COLLECTION_ENABLED = "false"
 # A new run key starts a clean collection period without deleting older league history.
 LEAGUE_RUN_KEY = "plants-vs-coins-part-2"
-LEAGUE_RUN_LABEL = "Plants VS Coins Part 2"
+LEAGUE_RUN_LABEL = "Fiesta Part 2"
 # Optional current League start. If set, scheduled collection waits until this ISO time.
 LEAGUE_RUN_START_AT = ""
 # Current League end. Required when LEAGUE_COLLECTION_ENABLED = "auto".
@@ -49,6 +49,8 @@ GENERAL_LEAGUE_REFRESH_ENABLED = "true"
 GENERAL_LEAGUE_REFRESH_MINUTES = "15"
 GENERAL_LEAGUE_REFRESH_BATCH_SIZE = "100"
 GENERAL_LEAGUE_REFRESH_CONCURRENCY = "4"
+# A successful on-demand lookup stays on the fair refresh watchlist this long.
+GENERAL_LEAGUE_WATCH_HOURS = "48"
 # Exact-league pulls retry temporary Big Games throttling/server failures.
 LEAGUE_API_RETRY_ATTEMPTS = "4"
 LEAGUE_API_RETRY_BASE_MS = "1500"
