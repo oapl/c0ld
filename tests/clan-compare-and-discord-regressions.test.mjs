@@ -102,6 +102,8 @@ const discord = workerContext("../cloudflare/discord-search-interactions-worker.
 });
 
 const discordSource = readFileSync(new URL("../cloudflare/discord-search-interactions-worker.js", import.meta.url), "utf8");
+const clanApiSource = readFileSync(new URL("../cloudflare/c0ld-clan-api-worker.js", import.meta.url), "utf8");
+const leagueApiSource = readFileSync(new URL("../cloudflare/yamo-league-api-worker.js", import.meta.url), "utf8");
 const clanLogDeliveryMigration = readFileSync(new URL("../supabase/migrations/20260820210000_add_clan_log_delivery_receipts.sql", import.meta.url), "utf8");
 assert.equal(
   (discordSource.match(/if \(clanPath\.group === "compare"\)/g) || []).length,
@@ -119,6 +121,16 @@ assert.match(
   clanLogDeliveryMigration,
   /primary key \(assignment_key, event_id\)/,
   "delivery receipts must uniquely identify each event for each assigned log"
+);
+assert.match(
+  leagueApiSource,
+  /responseRows = query\s*\? await enrichSoloLeaderboardSearchGains\(env, runKey, visibleRows\)/,
+  "queried League players must be enriched from their stored League snapshots"
+);
+assert.match(
+  clanApiSource,
+  /source_mode: "leagues",[\s\S]{0,900}gain_1h: toNumber\(row\.gain_1h\),[\s\S]{0,150}gain_24h: toNumber\(row\.gain_24h\)/,
+  "the global League search must preserve calculated player gains"
 );
 
 const invalidEditCalls = [];
@@ -168,19 +180,19 @@ const compareCommand = clanCommand.options.find(option => option.name === "compa
 assert.equal(compareCommand.type, 2, "/clan compare should register as a subcommand group");
 assert.deepEqual(
   Array.from(compareCommand.options, option => option.name),
-  ["view", "assign", "remove"],
-  "/clan compare should expose preview and persistent-post controls"
+  ["assign", "remove"],
+  "/clan compare should retain only clan-specific persistent-post controls"
 );
-const compareView = compareCommand.options.find(option => option.name === "view");
+const compareView = discord.compareCommandPayload();
 assert.deepEqual(
   Array.from(compareView.options, option => option.name),
   ["type", "first", "second"],
-  "/clan compare view should accept a comparison type and two direct entries"
+  "/compare should accept a comparison type and two direct entries"
 );
 assert.deepEqual(
   Array.from(compareView.options[0].choices, choice => choice.value),
   ["clan", "league", "player"],
-  "/clan compare view should support clans, Leagues, and players"
+  "/compare should support clans, Leagues, and players"
 );
 
 const directComparison = discord.buildDirectComparisonMessage("league", {
@@ -188,24 +200,88 @@ const directComparison = discord.buildDirectComparisonMessage("league", {
   rank: 4,
   points: 10_000_000,
   pace: 500_000,
+  gain1h: 500_000,
+  gain12h: 2_000_000,
+  gain24h: 4_000_000,
+  projectedRank: 3,
   projectedPoints: 10_500_000,
   detail: "4 members recorded",
   context: "Fiesta Part 2",
-  updatedAt: "2026-08-20T12:00:00.000Z"
+  updatedAt: "2026-08-20T12:00:00.000Z",
+  imageUrl: "https://example.com/alpha.png"
 }, {
   name: "BETA",
   rank: 7,
   points: 9_000_000,
   pace: 700_000,
+  gain1h: 700_000,
+  gain12h: 2_500_000,
+  gain24h: 5_000_000,
+  projectedRank: 6,
   projectedPoints: 9_700_000,
   detail: "4 members recorded",
   context: "Fiesta Part 2",
   updatedAt: "2026-08-20T12:00:00.000Z"
 });
-assert.equal(directComparison.embeds[0].title, "League Comparison");
-assert.match(directComparison.embeds[0].fields[0].value, /Rank:\*\* #4/);
-assert.match(directComparison.embeds[0].fields[2].value, /ALPHA by 1M points/);
-assert.match(directComparison.embeds[0].fields[2].value, /BETA by 200K\/h/);
+assert.ok((directComparison.flags & 32768) !== 0, "direct comparisons should use Components V2");
+const directComparisonContainer = directComparison.components[0];
+const directComparisonText = directComparisonContainer.components.flatMap(component => (
+  component.content ? [component.content] : (component.components || []).map(child => child.content || "")
+)).join("\n");
+assert.match(directComparisonText, /League Comparison/);
+assert.match(directComparisonText, /🚶‍♀️‍➡️ ALPHA  VS  BETA 🚶‍♂️/);
+assert.match(directComparisonText, /:xone: \*\*ALPHA\*\*/);
+assert.match(directComparisonText, /\*#4 · 10M points\*/);
+assert.match(directComparisonText, /1 Hr: 500K/);
+assert.match(directComparisonText, /12 Hr: \+2M/);
+assert.match(directComparisonText, /Projection:\*\*\nAfter 1 hour, \*\*ALPHA\*\* is projected to lead by \*\*800K points\*\*/);
+assert.doesNotMatch(directComparisonText, /%|████|░░░░/);
+assert.equal(directComparisonContainer.components[2].accessory.media.url, "https://example.com/alpha.png");
+assert.match(directComparisonContainer.components.at(-1).content, /\u2800{72}/, "all comparison types should use the same width anchor");
+
+const chartComparison = discord.buildDirectComparisonMessage(
+  "player",
+  { name: "ALPHA", rank: 4, points: 10_000_000, gain1h: 500_000, gain24h: 12_000_000, detail: "League: A", imageUrl: "https://example.com/alpha.png", updatedAt: "2026-08-20T12:00:00.000Z" },
+  { name: "BETA", rank: 7, points: 9_000_000, gain1h: 700_000, gain24h: 16_800_000, detail: "League: B", imageUrl: "https://example.com/beta.png", updatedAt: "2026-08-20T12:00:00.000Z" },
+  {},
+  { filename: "player-compare.png", bytes: new Uint8Array([1, 2, 3]) }
+);
+const chartComparisonEmbed = chartComparison.embeds[0];
+const chartComparisonText = [
+  chartComparisonEmbed.title,
+  chartComparisonEmbed.description,
+  ...chartComparisonEmbed.fields.flatMap(field => [field.name, field.value])
+].join("\n");
+assert.doesNotMatch(chartComparisonText, /⏱️ Projection:/, "the image chart should replace the text projection block");
+assert.doesNotMatch(chartComparisonText, /Player Comparison|Leagues|Updated|1 Hr:|12 Hr:|24 Hr:/, "the text area should omit metadata and point-rate lines");
+assert.equal(chartComparison._file.filename, "player-compare.png");
+assert.equal(chartComparisonEmbed.image.url, "attachment://player-compare.png", "the comparison chart should remain one full-width embed image");
+assert.equal(chartComparisonEmbed.fields.length, 3, "the text card should contain two player columns and one VS column");
+assert.equal(chartComparisonEmbed.fields.every(field => field.inline === true), true, "all three comparison fields should render inline");
+assert.equal(chartComparisonEmbed.fields[0].name, "ALPHA", "the first player name should use the clean native field label");
+assert.equal(chartComparisonEmbed.fields[1].name, "🚶‍♀️‍➡️ VS 🚶‍♂️", "the middle column should place the walking emotes directly around VS");
+assert.equal(chartComparisonEmbed.fields[1].value, "\u200b", "the middle VS column must not include any other visible text");
+assert.equal(chartComparisonEmbed.fields[2].name, "BETA", "the second player name should use the clean native field label");
+assert.doesNotMatch(chartComparisonText, /###/, "embed fields must not expose unsupported heading markup");
+assert.doesNotMatch(chartComparisonText, /:xone:/, "player comparison text must not contain the xone placeholder");
+assert.equal(chartComparisonEmbed.thumbnail.url, "https://example.com/beta.png", "the projected 24-hour winner should appear as the embed thumbnail");
+assert.deepEqual(Array.from(chartComparison.components), [], "the two-column player embed must not retain thumbnail sections");
+assert.match(chartComparisonEmbed.description, /BETA.*take the lead.*24 hours/, "the embed should state the projected outcome without repeating projection figures");
+assert.equal("title" in chartComparisonEmbed, false, "the player columns must not be preceded by a duplicate title line");
+assert.match(chartComparisonEmbed.footer.text, /^Updated ·/, "the update label should sit in the footer below the graph");
+assert.equal(chartComparisonEmbed.timestamp, "2026-08-20T12:00:00.000Z", "the footer should carry Discord's localized update timestamp");
+assert.match(discordSource, /projectionHours:\s*24/, "player comparison charts should show the full 24-hour outlook");
+assert.match(discordSource, /searchChartDrawComparisonHeader/, "player comparison charts should use the two-avatar VS header");
+assert.match(discordSource, /comparisonDrawRaceInsights/, "player comparisons should use race-specific insight cards instead of the League table");
+assert.match(discordSource, /\[1, 6, 12, 24\]/, "the comparison image should summarize 1, 6, 12, and 24-hour horizons");
+assert.match(discordSource, /MAX CHASE/, "each horizon should include the trailer's observed maximum pace");
+assert.match(discordSource, /PRESSURED[\s\S]{0,300}LEAD HOLDS/, "multi-horizon cards should distinguish a vulnerable lead from a secure one");
+assert.match(discordSource, /const endLabel = `\$\{projectionHours\} Hrs`/, "the forecast boundary should carry its golden hour label");
+assert.match(discordSource, /yAxisGutter\.x \+ Math\.max\(8, \(yAxisGutter\.w - labelWidth\) \/ 2\)/, "point-axis labels should be centered in their gutter");
+const comparisonMembers = discord.leagueChartMembers({
+  rows: [{ user_id: 123, display_name: "Tester", global_rank: 47, points: 1_000 }]
+}, { preserveOrder: true });
+assert.equal(comparisonMembers[0].rank, 47, "comparison chart normalization must preserve the displayed global rank");
 
 assert.equal(
   discord.searchChartDirectGain({ history: [{ gain_1h: 77 }] }, { gain_1h: null }, "gain_1h"),

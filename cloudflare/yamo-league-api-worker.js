@@ -1216,6 +1216,9 @@ async function handleSoloLeaderboard(request, env) {
       if (bRank !== null) return 1;
       return (toNumber(b.points) || 0) - (toNumber(a.points) || 0) || String(a.username || "").localeCompare(String(b.username || ""));
     });
+  const responseRows = query
+    ? await enrichSoloLeaderboardSearchGains(env, runKey, visibleRows)
+    : visibleRows;
 
   return cacheJson({
     ok: true,
@@ -1233,8 +1236,61 @@ async function handleSoloLeaderboard(request, env) {
           ? "top-500-direct-plus-published-top-league-roster-player-pool"
           : "top-500-plus-direct-player-plus-stored-league-rosters")
       : "top-500",
-    rows: visibleRows
+    rows: responseRows
   }, env);
+}
+
+async function enrichSoloLeaderboardSearchGains(env, runKey, rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+
+  const leagueNames = [...new Set(rows
+    .map(row => String(row.league_name || "").trim())
+    .filter(Boolean))];
+  const gainsByLeagueAndUser = new Map();
+
+  await Promise.all(leagueNames.map(async league => {
+    let currentRows = await selectLeagueCurrentRows(env, {
+      select: "fetched_at,league_run_key,league_name,user_id,points",
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${league}`,
+      order: "rank.asc",
+      limit: "500"
+    }).catch(() => []);
+    if (!currentRows.length) {
+      currentRows = await selectLeagueCurrentRows(env, {
+        select: "fetched_at,league_run_key,league_name,user_id,points",
+        league_run_key: `eq.${runKey}`,
+        league_name: `ilike.${league}`,
+        order: "rank.asc",
+        limit: "500"
+      }).catch(() => []);
+    }
+
+    const latest = latestMeta(currentRows);
+    if (!latest) return;
+    const rowsWithGains = await addGainFields(env, currentRows, {
+      ...latest,
+      league_run_key: runKey,
+      league_name: latest.league_name || league
+    }).catch(() => currentRows.map(addNullGains));
+    for (const row of rowsWithGains) {
+      gainsByLeagueAndUser.set(`${key(latest.league_name || league)}:${String(row.user_id || "")}`, row);
+      gainsByLeagueAndUser.set(`${key(league)}:${String(row.user_id || "")}`, row);
+    }
+  }));
+
+  return rows.map(row => {
+    const current = gainsByLeagueAndUser.get(`${key(row.league_name)}:${String(row.user_id || "")}`);
+    if (!current) return row;
+    return {
+      ...row,
+      gain_5m: toNumber(current.gain_5m),
+      gain_1h: toNumber(current.gain_1h),
+      gain_6h: toNumber(current.gain_6h),
+      gain_12h: toNumber(current.gain_12h),
+      gain_24h: toNumber(current.gain_24h)
+    };
+  });
 }
 
 function normalizeSoloSearchKey(value) {

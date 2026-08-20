@@ -1679,8 +1679,8 @@ every configured destination with `scripts/test-discord-hourly-clans.ps1`.
 
 ## Luna clan comparison posts
 
-`/clan compare view` directly compares two clans, two Leagues, or two players.
-Choose the type and provide both names. The preview shows each entry's current
+`/compare` directly compares two clans, two Leagues, or two players. Choose the
+type and provide both names. The preview shows each entry's current
 rank, points, pace, one-hour projection, point lead, pace lead, and rank gap.
 
 Persistent `assign` comparisons remain clan-only. They use the stored all-clans
@@ -1689,9 +1689,9 @@ above and below it, including point gaps, projected finish, passing ETA, and
 the threat from below.
 
 ```text
-/clan compare view type:Clans first:WMSY second:COLD
-/clan compare view type:Leagues first:MOVO second:YAMO
-/clan compare view type:Players first:Cinnamowopal second:PandoraJ999
+/compare type:Clans first:WMSY second:COLD
+/compare type:Leagues first:MOVO second:YAMO
+/compare type:Players first:Cinnamowopal second:PandoraJ999
 /clan compare assign clan:WMSY channel:#clan-race
 /clan compare remove clan:WMSY
 ```

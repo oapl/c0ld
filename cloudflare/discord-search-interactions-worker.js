@@ -81,7 +81,7 @@ const CLAN_LOG_DELIVERY_LEASE_SECONDS = 180;
 const CLAN_ACTIVITY_EMBED_WIDTH_ANCHOR = "\u2800".repeat(44);
 const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
 const DEFAULT_CLAN_TRACKER_POST_OFFSET_MINUTES = 11;
-const DISCORD_INTERACTION_BUILD_ID = "discord-direct-comparison-2026-08-20c";
+const DISCORD_INTERACTION_BUILD_ID = "discord-player-compare-multi-horizon-2026-08-20t";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -190,6 +190,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/register-player-command") {
         requireAdmin(request, env);
         return await registerPlayerCommand(url, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/register-compare-command") {
+        requireAdmin(request, env);
+        return await registerCompareCommand(url, env);
       }
 
       if (request.method === "POST" && url.pathname === "/admin/register-server-command") {
@@ -833,6 +838,21 @@ async function handleInteraction(request, env, ctx) {
     });
   }
 
+  if (commandName === "compare") {
+    const comparisonType = String(getCommandOption(interaction, "type") || "").trim().toLowerCase();
+    const first = String(getCommandOption(interaction, "first") || "").trim();
+    const second = String(getCommandOption(interaction, "second") || "").trim();
+    if (!["clan", "league", "player"].includes(comparisonType) || !first || !second) {
+      return interactionJson(messageResponse("Use `/compare type:<Clans|Leagues|Players> first:<name> second:<name>`.", true));
+    }
+
+    ctx.waitUntil(completeDirectComparisonInteraction(interaction, env, comparisonType, first, second));
+    return interactionJson({
+      type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
+      data: { flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined }
+    });
+  }
+
   if (commandName === "clan") {
     const clanPath = getOfflineSubcommandPath(interaction);
     const subcommand = clanPath.subcommand;
@@ -879,33 +899,16 @@ async function handleInteraction(request, env, ctx) {
     }
 
     if (clanPath.group === "compare") {
-      if (subcommand === "view") {
-        const comparisonType = String(getCommandOption(interaction, "type") || "").trim().toLowerCase();
-        const first = String(getCommandOption(interaction, "first") || "").trim();
-        const second = String(getCommandOption(interaction, "second") || "").trim();
-        if (!["clan", "league", "player"].includes(comparisonType) || !first || !second) {
-          return interactionJson(messageResponse("Use `/clan compare view type:<Clans|Leagues|Players> first:<name> second:<name>`.", true));
-        }
-
-        ctx.waitUntil(completeDirectComparisonInteraction(interaction, env, comparisonType, first, second));
-        return interactionJson({
-          type: INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE,
-          data: { flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined }
-        });
-      }
-
       const clanName = getCommandOption(interaction, "clan") || getCommandOption(interaction, "name");
       const assignmentChannelId = getCommandOption(interaction, "channel") || getCommandOption(interaction, "assign");
       if (!clanName) {
-        return interactionJson(messageResponse("Use `/clan compare view type:<type> first:<name> second:<name>` to compare two entries, `/clan compare assign clan:<name> channel:<channel>` to keep an adjacent-clan comparison updated, or `/clan compare remove clan:<name>` to remove it.", true));
+        return interactionJson(messageResponse("Use `/clan compare assign clan:<name> channel:<channel>` to keep an adjacent-clan comparison updated, or `/clan compare remove clan:<name>` to remove it. Use `/compare` for direct comparisons.", true));
       }
       const action = subcommand === "remove"
         ? "remove"
-        : subcommand === "assign"
-          ? "assign"
-          : "view";
-      if (!["view", "assign", "remove"].includes(subcommand)) {
-        return interactionJson(messageResponse("Use `/clan compare view`, `/clan compare assign`, or `/clan compare remove`.", true));
+        : "assign";
+      if (!["assign", "remove"].includes(subcommand)) {
+        return interactionJson(messageResponse("Use `/clan compare assign`, `/clan compare remove`, or `/compare` for a direct comparison.", true));
       }
       if (action === "assign" && !assignmentChannelId) {
         return interactionJson(messageResponse("Choose a text channel or thread with `channel:<channel>`.", true));
@@ -1002,7 +1005,7 @@ async function handleInteraction(request, env, ctx) {
       });
     }
 
-    return interactionJson(messageResponse("Use `/clan info name:<clan>`, `/clan compare view type:<type> first:<name> second:<name>`, or `/clan rewards`.", true));
+    return interactionJson(messageResponse("Use `/clan info name:<clan>`, `/clan compare assign`, `/compare`, or `/clan rewards`.", true));
   }
 
   if (commandName === "cw") {
@@ -1984,6 +1987,75 @@ function searchChartDrawPlayerHeader(canvas, fonts, playerName, rankText, center
 
   hourlyDrawOutlinedText(canvas, fonts.bold, name, nameX, y, size, color.green, [7, 18, 31, 235], nameWidth + 4);
   hourlyDrawOutlinedText(canvas, fonts.bold, rankLabel, rankX, y, size, color.yellow, [48, 32, 9, 235], rankWidth + 4);
+}
+
+function searchChartDrawComparisonHeader(canvas, fonts, members, avatars, centerX, color) {
+  const competitors = (members || []).slice(0, 2);
+  const centers = [centerX - 370, centerX + 370];
+  const nameColors = [color.red, color.cyan];
+  hourlyDrawHeaderOrnaments(canvas, centerX, 122, color);
+
+  competitors.forEach((member, index) => {
+    const avatarSize = 82;
+    const avatarX = centers[index] - avatarSize / 2;
+    searchChartDrawAvatarBadge(
+      canvas,
+      fonts,
+      member?.name || `Player ${index + 1}`,
+      avatars?.[index] || null,
+      avatarX,
+      62,
+      avatarSize,
+      color
+    );
+    const rawName = historyCardText(member?.name || `Player ${index + 1}`, 48);
+    const fittedName = canvas.fitFontText(fonts.bold, rawName, 28, 350);
+    const nameWidth = canvas.measureFontText(fonts.bold, fittedName, 28);
+    hourlyDrawOutlinedText(
+      canvas,
+      fonts.bold,
+      fittedName,
+      centers[index] - nameWidth / 2,
+      151,
+      28,
+      nameColors[index] || color.white,
+      [7, 18, 31, 235],
+      nameWidth + 4
+    );
+    const stats = [
+      member?.rank ? `#${fullNumber(member.rank)}` : null,
+      member?.points !== null ? shortNumber(member.points) : null,
+      String(member?.group || "").trim() || null
+    ].filter(Boolean).join("  |  ");
+    const fittedStats = canvas.fitFontText(fonts.rowBold || fonts.bold, stats || "No current details", 16, 360);
+    const statsWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, fittedStats, 16);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, fittedStats, centers[index] - statsWidth / 2, 182, 16, color.muted, statsWidth + 4);
+  });
+
+  const versus = "VS";
+  const versusWidth = canvas.measureFontText(fonts.bold, versus, 46);
+  hourlyDrawOutlinedText(
+    canvas,
+    fonts.bold,
+    versus,
+    centerX - versusWidth / 2,
+    91,
+    46,
+    color.yellow,
+    [48, 32, 9, 235],
+    versusWidth + 4
+  );
+  if (competitors.length === 2) {
+    const firstPoints = finiteNumber(competitors[0]?.points);
+    const secondPoints = finiteNumber(competitors[1]?.points);
+    if (firstPoints !== null && secondPoints !== null) {
+      const lead = firstPoints === secondPoints
+        ? "TIED"
+        : `${historyCardText(firstPoints > secondPoints ? competitors[0].name : competitors[1].name, 24)} +${shortNumber(Math.abs(firstPoints - secondPoints))}`;
+      const leadWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, lead, 16);
+      canvas.drawFontText(fonts.rowBold || fonts.bold, lead, centerX - leadWidth / 2, 151, 16, color.green, leadWidth + 4);
+    }
+  }
 }
 
 function searchChartDrawMetricRow(canvas, fonts, x, y, width, height, metric, index, color) {
@@ -6711,6 +6783,7 @@ async function buildLeagueInfoMessage(leagueName, env, options = {}) {
       row,
       id: String(row.user_id || row.UserID || "").trim(),
       name: leagueMemberName(row, index + 1),
+      rank: positiveInteger(row.global_rank ?? row.rank),
       points: finiteNumber(row.total_points ?? row.points),
       gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain)
     }))
@@ -7739,14 +7812,29 @@ async function completeDirectComparisonInteraction(interaction, env, comparisonT
       throw httpError(400, "Choose two different entries to compare.");
     }
 
-    const [firstEntry, secondEntry] = await Promise.all([
+    const [firstEntry, secondEntry] = await withDirectComparisonTimeout(Promise.all([
       fetchDirectComparisonEntry(env, type, first),
       fetchDirectComparisonEntry(env, type, second)
-    ]);
-    await editOriginalInteraction(interaction, buildDirectComparisonMessage(type, firstEntry, secondEntry, env));
+    ]), env);
+    const comparisonChart = type === "player"
+      ? await buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntry, env).catch(() => null)
+      : null;
+    await editOriginalInteraction(interaction, buildDirectComparisonMessage(type, firstEntry, secondEntry, env, comparisonChart));
   } catch (err) {
     await editOriginalInteraction(interaction, commandErrorMessage("Comparison failed", err, env)).catch(() => null);
   }
+}
+
+function withDirectComparisonTimeout(promise, env = {}) {
+  const timeoutMs = Math.max(3000, Math.min(25000, Number(env.COMPARE_API_TIMEOUT_MS || 12000) || 12000));
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(httpError(
+      504,
+      `Comparison data took longer than ${Math.round(timeoutMs / 1000)} seconds. Please try again.`
+    )), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 async function fetchDirectComparisonEntry(env, comparisonType, query) {
@@ -7763,10 +7851,16 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
       rank: positiveInteger(row.rank),
       points: finiteNumber(row.points),
       pace: finiteNumber(row.rate_per_hour ?? row.gain_1h),
+      gain1h: finiteNumber(row.gain_1h ?? row.rate_per_hour),
+      gain6h: finiteNumber(row.gain_6h),
+      gain12h: finiteNumber(row.gain_12h),
+      gain24h: finiteNumber(row.gain_24h),
+      projectedRank: positiveInteger(row.projected_rank),
       projectedPoints: finiteNumber(row.projected_points),
       detail: String(row.battle_display_name || payload.display_name || payload.battle || "").trim(),
       context: String(payload.display_name || payload.battle || row.battle_display_name || "Current Clan Battle").trim(),
-      updatedAt: payload.snapshot_at || payload.generated_at || row.snapshot_at || null
+      updatedAt: payload.snapshot_at || payload.generated_at || row.snapshot_at || null,
+      imageUrl: absoluteProfileAssetUrl(row.icon_url || payload.icon_url || payload.clan_icon, env)
     };
   }
 
@@ -7777,22 +7871,41 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
       throw httpError(404, `No current League result was found for ${requested}.`);
     }
     const pace = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.gain_1h ?? row.hourly_points) || 0), 0);
+    const gain12hValues = rows.map(row => finiteNumber(row.gain_12h)).filter(value => value !== null);
+    const gain24hValues = rows.map(row => finiteNumber(row.gain_24h)).filter(value => value !== null);
     const points = finiteNumber(payload.league_points)
       ?? rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.total_points ?? row.points) || 0), 0);
+    const projection = await fetchLeagueRewardRankProjection(
+      payload.league_name || requested,
+      payload.league_id,
+      points,
+      pace,
+      env
+    ).catch(() => null);
     return {
       type,
       name: String(payload.league_name || requested).trim(),
       rank: positiveInteger(payload.league_rank),
       points,
       pace,
-      projectedPoints: points === null ? null : points + pace,
+      gain1h: pace,
+      gain6h: null,
+      gain12h: gain12hValues.length ? gain12hValues.reduce((sum, value) => sum + Math.max(0, value), 0) : null,
+      gain24h: gain24hValues.length ? gain24hValues.reduce((sum, value) => sum + Math.max(0, value), 0) : null,
+      projectedRank: positiveInteger(projection?.projected_rank_1h),
+      projectedPoints: finiteNumber(projection?.projected_points_1h) ?? (points === null ? null : points + pace),
       detail: `${fullNumber(rows.length)} member${rows.length === 1 ? "" : "s"} recorded`,
       context: String(payload.league_run_label || payload.league_run_key || "Current League").trim(),
-      updatedAt: payload.snapshot_at || payload.generated_at || payload.fetched_at || null
+      updatedAt: payload.snapshot_at || payload.generated_at || payload.fetched_at || null,
+      imageUrl: leagueIconUrl(payload.league_icon)
     };
   }
 
-  const search = await fetchGlobalSearchPayload(requested, env);
+  const search = await fetchGlobalSearchPayload(requested, env, {
+    avatars: true,
+    historyHours: 1,
+    historyLimit: 2
+  });
   const payload = search?.payload || {};
   const row = payload?.row;
   if (!search?.ok || payload.ok === false || !row) {
@@ -7807,14 +7920,151 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
     rank: positiveInteger(row.global_rank ?? row.rank),
     points,
     pace,
+    gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain),
+    gain6h: finiteNumber(row.gain_6h ?? row.six_hour_gain),
+    gain12h: finiteNumber(row.gain_12h),
+    gain24h: finiteNumber(row.gain_24h),
+    projectedRank: positiveInteger(row.projected_rank_1h ?? row.projected_global_rank ?? row.projected_rank),
     projectedPoints: points === null ? null : points + Math.max(0, pace || 0),
     detail: group ? `${String(payload.source_mode || "").toLowerCase() === "leagues" ? "League" : "Clan"}: ${group}` : "",
     context: String(payload.source_label || payload.event_name || payload.run?.event_name || payload.run?.battle_display_name || "Current Global Leaderboard").trim(),
-    updatedAt: payload.snapshot_at || payload.generated_at || row.fetched_at || row.snapshot_at || null
+    updatedAt: payload.snapshot_at || payload.generated_at || row.fetched_at || row.snapshot_at || null,
+    imageUrl: absoluteProfileAssetUrl(row.avatar_url || row.avatarUrl || row.thumbnail_url || row.thumbnailUrl, env),
+    userId: positiveInteger(row.user_id ?? row.roblox_user_id),
+    group,
+    sourceMode: String(payload.source_mode || "").trim().toLowerCase(),
+    runKey: String(payload.league_run_key || payload.run?.run_key || "").trim(),
+    historyRows: Array.isArray(payload.history) ? payload.history : []
   };
 }
 
-function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, env = {}) {
+async function buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntry, env) {
+  const entries = [firstEntry, secondEntry].filter(Boolean);
+  if (entries.length !== 2 || entries.some(entry => !entry.userId)) return null;
+
+  const leagueHistoryByName = new Map();
+  const leagueEntries = entries.filter(entry => entry.sourceMode === "leagues" && entry.group);
+  await Promise.all([...new Set(leagueEntries.map(entry => entry.group))].map(async leagueName => {
+    const runKey = leagueEntries.find(entry => entry.group === leagueName)?.runKey || "";
+    const history = await fetchLeagueHistoryPayload(leagueName, env, 24, runKey, { limit: 5000 });
+    leagueHistoryByName.set(leagueName, Array.isArray(history?.rows) ? history.rows : []);
+  }));
+
+  const historyRows = entries.flatMap(entry => {
+    const sourceRows = entry.sourceMode === "leagues"
+      ? (leagueHistoryByName.get(entry.group) || [])
+      : (Array.isArray(entry.historyRows) ? entry.historyRows : []);
+    return sourceRows
+      .filter(row => {
+        const rowId = positiveInteger(row.user_id ?? row.roblox_user_id);
+        return rowId ? rowId === entry.userId : true;
+      })
+      .map(row => ({
+        ...row,
+        user_id: entry.userId,
+        display_name: entry.name,
+        total_points: finiteNumber(row.total_points ?? row.points ?? row.global_points ?? row.member_points ?? row.clan_points),
+        points: finiteNumber(row.total_points ?? row.points ?? row.global_points ?? row.member_points ?? row.clan_points)
+      }))
+      .filter(row => row.points !== null);
+  });
+
+  const latestAt = entries
+    .map(entry => new Date(entry.updatedAt || 0).getTime())
+    .filter(value => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a)[0] || Date.now();
+  const payload = {
+    snapshot_at: new Date(latestAt).toISOString(),
+    league_name: `${firstEntry.name} VS ${secondEntry.name}`,
+    league_rank: null,
+    rows: entries.map(entry => ({
+      user_id: entry.userId,
+      username: entry.name,
+      display_name: entry.name,
+      global_rank: entry.rank,
+      group_name: entry.group || "",
+      total_points: entry.points,
+      points: entry.points,
+      avatar_url: entry.imageUrl || null,
+      gain_1h: entry.gain1h,
+      gain_6h: entry.gain6h,
+      gain_12h: entry.gain12h,
+      gain_24h: entry.gain24h
+    }))
+  };
+  const bytes = await renderLeagueMemberGrowthChartPng(payload, historyRows, {
+    hours: 24,
+    projectionHours: 24,
+    comparison: true,
+    env
+  });
+  if (!bytes?.byteLength) return null;
+  return {
+    filename: `player-compare-${chartFilenamePart(firstEntry.name)}-vs-${chartFilenamePart(secondEntry.name)}.png`,
+    bytes,
+    outlook: directPlayerComparisonOutlook(firstEntry, secondEntry, 24)
+  };
+}
+
+function directPlayerSustainedPace(entry) {
+  const windows = [
+    [entry?.gain24h, 24],
+    [entry?.gain12h, 12],
+    [entry?.gain6h, 6],
+    [entry?.gain1h ?? entry?.pace, 1]
+  ];
+  for (const [gainValue, hours] of windows) {
+    const gain = finiteNumber(gainValue);
+    if (gain !== null && gain >= 0) return gain / hours;
+  }
+  return 0;
+}
+
+function directPlayerMaximumPace(entry) {
+  const rates = [
+    [entry?.gain1h ?? entry?.pace, 1],
+    [entry?.gain6h, 6],
+    [entry?.gain12h, 12],
+    [entry?.gain24h, 24]
+  ].map(([gainValue, hours]) => {
+    const gain = finiteNumber(gainValue);
+    return gain !== null && gain >= 0 ? gain / hours : null;
+  }).filter(rate => rate !== null);
+  return Math.max(directPlayerSustainedPace(entry), ...rates);
+}
+
+function directPlayerComparisonOutlook(first, second, hours = 24) {
+  const competitors = [first || {}, second || {}];
+  const current = competitors.map(entry => finiteNumber(entry.points) || 0);
+  const pace = competitors.map(directPlayerSustainedPace);
+  const projected = competitors.map((entry, index) => current[index] + pace[index] * hours);
+  const winnerIndex = projected[0] >= projected[1] ? 0 : 1;
+  const currentLeaderIndex = current[0] >= current[1] ? 0 : 1;
+  const trailerIndex = 1 - currentLeaderIndex;
+  const winner = competitors[winnerIndex];
+  const tied = Math.abs(projected[0] - projected[1]) < 1;
+  const name = escapeDiscordMarkdown(winner?.name || `Player ${winnerIndex + 1}`);
+  const trailerName = escapeDiscordMarkdown(competitors[trailerIndex]?.name || `Player ${trailerIndex + 1}`);
+  const verb = winnerIndex === currentLeaderIndex ? "stay in the lead" : "take the lead";
+  const chaseProjected = [...projected];
+  chaseProjected[trailerIndex] = current[trailerIndex] + directPlayerMaximumPace(competitors[trailerIndex]) * hours;
+  const vulnerable = winnerIndex === currentLeaderIndex && chaseProjected[trailerIndex] > chaseProjected[currentLeaderIndex];
+  const baseText = `**${name}** is projected to ${verb} through the next ${hours} hours at the competitors' sustained run rates.`;
+  return {
+    winner,
+    winnerIndex,
+    currentLeaderIndex,
+    projected,
+    pace,
+    text: tied
+      ? `At their sustained run rates, this race is projected to be effectively tied after ${hours} hours.`
+      : vulnerable
+        ? `${baseText} **${trailerName}** can overturn that result only by returning to their best recorded pace.`
+        : `${baseText}${winnerIndex === currentLeaderIndex ? ` The lead remains intact even against **${trailerName}**'s best recorded pace.` : ""}`
+  };
+}
+
+function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, env = {}, comparisonChart = null) {
   const type = String(comparisonType || "clan").trim().toLowerCase();
   const labels = type === "league"
     ? { singular: "League", unit: "points", color: 0x58a6ff }
@@ -7828,75 +8078,165 @@ function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, e
     .filter(Boolean)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
-  return {
-    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0,
+  if (type === "player") {
+    return buildDirectPlayerComparisonEmbedMessage(first, second, contexts, updatedAt, env, comparisonChart);
+  }
+
+  const comparisonComponents = [
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: [
+        `# 🚶‍♀️‍➡️ ${escapeDiscordMarkdown(first.name || "Unknown")}  VS  ${escapeDiscordMarkdown(second.name || "Unknown")} 🚶‍♂️`,
+        `**${labels.singular} Comparison**`,
+        contexts.length ? `${contexts.map(escapeDiscordMarkdown).join(" · ")}` : "",
+        `-# Updated ${updatedAt ? discordTime(updatedAt) : "Unknown"}`
+      ].filter(Boolean).join("\n")
+    },
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    directComparisonEntryComponent(first, labels.unit),
+    { type: COMPONENT_TYPE_TEXT_DISPLAY, content: "## ────────── VS ──────────" },
+    directComparisonEntryComponent(second, labels.unit),
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 }
+  ];
+  if (comparisonChart?.bytes?.byteLength) {
+    comparisonComponents.push({
+      type: COMPONENT_TYPE_MEDIA_GALLERY,
+      items: [{
+        media: { url: `attachment://${comparisonChart.filename}` },
+        description: `24-hour history and six-hour projection for ${first.name || "first player"} and ${second.name || "second player"}`
+      }]
+    });
+  } else {
+    comparisonComponents.push({
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `**⏱️ Projection:**\n${directComparisonProjectionText(first, second, labels.unit)}`
+    });
+  }
+  comparisonComponents.push(
+    { type: COMPONENT_TYPE_SEPARATOR, divider: true, spacing: 1 },
+    {
+      type: COMPONENT_TYPE_TEXT_DISPLAY,
+      content: `-# 🧞‍♀️ **Luna Pet Sim 99 Bot** 🏳️‍🌈 · by Cinnamowopal\n-# ${TOP_COMMAND_EMBED_WIDTH_ANCHOR}`
+    }
+  );
+
+  const message = {
+    flags: MESSAGE_FLAG_COMPONENTS_V2 | (ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : 0),
     allowed_mentions: { parse: [] },
-    embeds: [{
-      title: `${labels.singular} Comparison`,
-      description: [
-        contexts.length ? `**Event:** ${contexts.map(escapeDiscordMarkdown).join(" · ")}` : "",
-        `**Updated:** ${updatedAt ? discordTime(updatedAt) : "Unknown"}`
-      ].filter(Boolean).join("\n"),
-      color: labels.color,
-      fields: [
-        directComparisonEntryField(first, labels.unit),
-        directComparisonEntryField(second, labels.unit),
-        {
-          name: "Comparison",
-          value: directComparisonDifferenceText(first, second, labels.unit),
-          inline: false
-        }
-      ],
-      footer: { text: TOP_COMMAND_EMBED_WIDTH_ANCHOR }
+    components: [{
+      type: COMPONENT_TYPE_CONTAINER,
+      accent_color: labels.color,
+      components: comparisonComponents
     }],
+    attachments: []
+  };
+  if (comparisonChart?.bytes?.byteLength) {
+    message._file = {
+      filename: comparisonChart.filename,
+      contentType: "image/png",
+      bytes: comparisonChart.bytes
+    };
+  }
+  return message;
+}
+
+function buildDirectPlayerComparisonEmbedMessage(first, second, contexts, updatedAt, env = {}, comparisonChart = null) {
+  const outlook = comparisonChart?.outlook || directPlayerComparisonOutlook(first, second, 24);
+  const playerField = entry => {
+    const rankValue = positiveInteger(entry?.rank);
+    const points = finiteNumber(entry?.points);
+    return {
+      name: escapeDiscordMarkdown(entry?.name || "Unknown"),
+      value: [
+        `*${rankValue ? `#${fullNumber(rankValue)}` : "Rank N/A"} · ${points === null ? "Points unavailable" : `${shortNumber(points)} points`}*`,
+        entry?.detail ? `-# ${escapeDiscordMarkdown(entry.detail)}` : ""
+      ].filter(Boolean).join("\n"),
+      inline: true
+    };
+  };
+  const embed = {
+    color: 0x34e1ef,
+    description: outlook.text,
+    fields: [
+      playerField(first),
+      { name: "🚶‍♀️‍➡️ VS 🚶‍♂️", value: "\u200b", inline: true },
+      playerField(second)
+    ],
+    footer: { text: "Updated · 🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 · by Cinnamowopal" }
+  };
+  const projectedWinnerAvatar = String(outlook?.winner?.imageUrl || "").trim();
+  if (projectedWinnerAvatar) {
+    embed.thumbnail = { url: projectedWinnerAvatar };
+  }
+  const updatedMs = new Date(updatedAt || 0).getTime();
+  if (Number.isFinite(updatedMs) && updatedMs > 0) embed.timestamp = new Date(updatedMs).toISOString();
+  if (comparisonChart?.bytes?.byteLength) {
+    embed.image = { url: `attachment://${comparisonChart.filename}` };
+  }
+
+  const message = {
+    flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
+    allowed_mentions: { parse: [] },
+    embeds: [embed],
     components: [],
     attachments: []
   };
+  if (comparisonChart?.bytes?.byteLength) {
+    message._file = {
+      filename: comparisonChart.filename,
+      contentType: "image/png",
+      bytes: comparisonChart.bytes
+    };
+  }
+  return message;
 }
 
-function directComparisonEntryField(entry, unit) {
+function directComparisonEntryComponent(entry, unit) {
   const rankValue = positiveInteger(entry?.rank);
   const points = finiteNumber(entry?.points);
-  const pace = finiteNumber(entry?.pace);
-  const projected = finiteNumber(entry?.projectedPoints);
+  const content = [
+    `:xone: **${escapeDiscordMarkdown(entry?.name || "Unknown")}**`,
+    `*${rankValue ? `#${fullNumber(rankValue)}` : "Rank N/A"} · ${points === null ? "Points unavailable" : `${shortNumber(points)} ${unit}`}*`,
+    `-# 1 Hr: ${directComparisonGainText(entry?.gain1h, false)}`,
+    `-# 12 Hr: ${directComparisonGainText(entry?.gain12h, true)}`,
+    `-# 24 Hr: ${directComparisonGainText(entry?.gain24h, true)}`,
+    entry?.detail ? `-# ${escapeDiscordMarkdown(entry.detail)}` : ""
+  ].filter(Boolean).join("\n");
+  const imageUrl = String(entry?.imageUrl || "").trim();
+  if (!imageUrl) return { type: COMPONENT_TYPE_TEXT_DISPLAY, content };
   return {
-    name: escapeDiscordMarkdown(entry?.name || "Unknown"),
-    value: [
-      `**Rank:** ${rankValue ? `#${fullNumber(rankValue)}` : "N/A"}`,
-      `**Points:** ${points === null ? "N/A" : `${shortNumber(points)} ${unit}`}`,
-      `**Pace:** ${pace === null ? "N/A" : `+${shortNumber(Math.max(0, pace))}/h`}`,
-      `**Projected +1h:** ${projected === null ? "N/A" : shortNumber(projected)}`,
-      entry?.detail ? `**${escapeDiscordMarkdown(entry.detail)}**` : ""
-    ].filter(Boolean).join("\n"),
-    inline: true
+    type: COMPONENT_TYPE_SECTION,
+    components: [{ type: COMPONENT_TYPE_TEXT_DISPLAY, content }],
+    accessory: {
+      type: COMPONENT_TYPE_THUMBNAIL,
+      media: { url: imageUrl },
+      description: `${entry?.name || "Comparison entry"} image`
+    }
   };
 }
 
-function directComparisonDifferenceText(first, second, unit) {
-  const firstPoints = finiteNumber(first?.points);
-  const secondPoints = finiteNumber(second?.points);
-  const firstPace = finiteNumber(first?.pace);
-  const secondPace = finiteNumber(second?.pace);
-  const firstRank = positiveInteger(first?.rank);
-  const secondRank = positiveInteger(second?.rank);
-  const lines = [];
+function directComparisonGainText(value, signed) {
+  const gain = finiteNumber(value);
+  if (gain === null) return "N/A";
+  if (signed && gain > 0) return `+${shortNumber(gain)}`;
+  return shortNumber(gain);
+}
 
-  if (firstPoints !== null && secondPoints !== null) {
-    const difference = Math.abs(firstPoints - secondPoints);
-    lines.push(firstPoints === secondPoints
-      ? `**Points:** Tied at ${shortNumber(firstPoints)} ${unit}`
-      : `**Points lead:** ${escapeDiscordMarkdown(firstPoints > secondPoints ? first.name : second.name)} by ${shortNumber(difference)} ${unit}`);
+function directComparisonProjectionText(first, second, unit) {
+  const firstProjected = finiteNumber(first?.projectedPoints);
+  const secondProjected = finiteNumber(second?.projectedPoints);
+  const firstProjectedRank = positiveInteger(first?.projectedRank);
+  const secondProjectedRank = positiveInteger(second?.projectedRank);
+  const lines = [];
+  if (firstProjected !== null && secondProjected !== null) {
+    const difference = Math.abs(firstProjected - secondProjected);
+    lines.push(firstProjected === secondProjected
+      ? `After 1 hour, both are projected at **${shortNumber(firstProjected)} ${unit}**.`
+      : `After 1 hour, **${escapeDiscordMarkdown(firstProjected > secondProjected ? first.name : second.name)}** is projected to lead by **${shortNumber(difference)} ${unit}**.`);
+    lines.push(`-# ${escapeDiscordMarkdown(first?.name || "First")}: ${shortNumber(firstProjected)} ${unit}${firstProjectedRank ? ` · #${fullNumber(firstProjectedRank)}` : ""}`);
+    lines.push(`-# ${escapeDiscordMarkdown(second?.name || "Second")}: ${shortNumber(secondProjected)} ${unit}${secondProjectedRank ? ` · #${fullNumber(secondProjectedRank)}` : ""}`);
   }
-  if (firstPace !== null && secondPace !== null) {
-    const difference = Math.abs(firstPace - secondPace);
-    lines.push(firstPace === secondPace
-      ? `**Pace:** Tied at +${shortNumber(Math.max(0, firstPace))}/h`
-      : `**Faster pace:** ${escapeDiscordMarkdown(firstPace > secondPace ? first.name : second.name)} by ${shortNumber(difference)}/h`);
-  }
-  if (firstRank && secondRank) {
-    lines.push(`**Rank gap:** ${fullNumber(Math.abs(firstRank - secondRank))}`);
-  }
-  return lines.length ? lines.join("\n") : "No directly comparable metrics are available yet.";
+  return lines.length ? lines.join("\n") : "One-hour projection data is not available yet.";
 }
 
 async function completeClanTrackerInteraction(interaction, env, action, clanName, trackerMode = "members") {
@@ -9549,14 +9889,15 @@ function parseLeagueChartCustomId(value) {
   };
 }
 
-async function fetchLeagueHistoryPayload(leagueName, env, hours = 24, leagueRunKey = "") {
+async function fetchLeagueHistoryPayload(leagueName, env, hours = 24, leagueRunKey = "", options = {}) {
   const historyHours = leagueChartHours(hours);
   let emptyPayload = null;
   for (const target of leagueApiTargets(env)) {
     const apiUrl = new URL("/api/leagues/history", target.base);
     apiUrl.searchParams.set("league", leagueName);
     apiUrl.searchParams.set("hours", String(Math.max(3, historyHours + 2)));
-    apiUrl.searchParams.set("limit", "50000");
+    const requestedLimit = Number(options.limit || 50000);
+    apiUrl.searchParams.set("limit", String(Math.max(100, Math.min(50000, Number.isFinite(requestedLimit) ? Math.round(requestedLimit) : 50000))));
     if (String(leagueRunKey || "").trim()) {
       apiUrl.searchParams.set("run", String(leagueRunKey).trim());
     }
@@ -9573,16 +9914,20 @@ async function fetchLeagueHistoryPayload(leagueName, env, hours = 24, leagueRunK
 
 async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const [loadedFonts, leagueIcon] = await Promise.all([
+  const projectionHours = Math.max(0, Math.min(24, finiteNumber(options.projectionHours) || 0));
+  const members = leagueChartMembers(payload, { preserveOrder: options.comparison }).slice(0, 4);
+  const [loadedFonts, leagueIcon, comparisonAvatars] = await Promise.all([
     loadHistoryFonts(),
-    hourlyLoadLeagueIcon(payload).catch(() => null)
+    hourlyLoadLeagueIcon(payload).catch(() => null),
+    options.comparison
+      ? Promise.all(members.slice(0, 2).map(member => loadHistoryAvatar(member.row?.avatar_url).catch(() => null)))
+      : Promise.resolve([])
   ]);
   const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
   const height = 1040;
   const color = searchChartBoardColors();
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
-  const members = leagueChartMembers(payload).slice(0, 4);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
   const displayLeagueName = String(payload?.league_name || "League").trim() || "League";
 
@@ -9591,14 +9936,33 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   hourlyDrawMysticSmoke(canvas, width, height, color);
   hourlyDrawPanelFrame(canvas, panel.x, panel.y, panel.w, panel.h, color.line);
   searchChartDrawRainbowBar(canvas, panel.x + 22, panel.y + 12, panel.w - 44, 5, color);
-  hourlyDrawHeaderOrnaments(canvas, width / 2, 116, color);
-  searchChartDrawAvatarBadge(canvas, fonts, displayLeagueName, leagueIcon, width / 2 - 47, 70, 94, color);
-  searchChartDrawPlayerHeader(canvas, fonts, displayLeagueName, rank(payload?.league_rank), width / 2, 91, color);
+  if (options.comparison) {
+    searchChartDrawComparisonHeader(canvas, fonts, members.slice(0, 2), comparisonAvatars, width / 2, color);
+  } else {
+    hourlyDrawHeaderOrnaments(canvas, width / 2, 116, color);
+    searchChartDrawAvatarBadge(canvas, fonts, displayLeagueName, leagueIcon, width / 2 - 47, 70, 94, color);
+    searchChartDrawPlayerHeader(canvas, fonts, displayLeagueName, rank(payload?.league_rank), width / 2, 91, color);
+  }
 
-  const chartPanel = { x: 54, y: 206, w: 1492, h: 760 };
+  const chartPanel = { x: 54, y: 216, w: 1492, h: 760 };
   hourlyDrawPanel(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, color.panelDeep, color.line);
   hourlyDrawColumnAura(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, 1, color);
-  hourlyDrawColumnHeader(canvas, fonts, chartPanel.x, chartPanel.y, chartPanel.w, 50, ["Member Growth", `Last ${hours} Hour${hours === 1 ? "" : "s"}`], 1, color);
+  hourlyDrawColumnHeader(
+    canvas,
+    fonts,
+    chartPanel.x,
+    chartPanel.y,
+    chartPanel.w,
+    50,
+    [
+      options.comparison ? "24 Hour Point Race" : "Member Growth",
+      options.comparison
+        ? "Recorded History  |  24h Outlook"
+        : (projectionHours ? `${projectionHours} Hour Projection` : `Last ${hours} Hour${hours === 1 ? "" : "s"}`)
+    ],
+    1,
+    color
+  );
 
   if (!series.some(item => item.points.length >= 1)) {
     const emptyPlot = { x: chartPanel.x + 56, y: chartPanel.y + 84, w: chartPanel.w - 104, h: 430 };
@@ -9609,25 +9973,33 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   }
 
   const allPoints = series.flatMap(item => item.points);
-  const maxT = Math.max(...allPoints.map(point => point.t));
-  const chartMinT = maxT - hours * 60 * 60 * 1000;
-  const chartMaxT = maxT;
+  const observedMaxT = Math.max(...allPoints.map(point => point.t));
+  const chartMinT = observedMaxT - hours * 60 * 60 * 1000;
+  const chartMaxT = observedMaxT + projectionHours * 60 * 60 * 1000;
   const visibleSeries = series
     .map(item => ({
       ...item,
-      points: item.points.filter(point => point.t >= chartMinT && point.t <= chartMaxT)
+      points: item.points.filter(point => point.t >= chartMinT && point.t <= observedMaxT)
     }))
     .filter(item => item.points.length);
   const chartSeries = visibleSeries;
-  const visiblePoints = chartSeries.flatMap(item => item.points);
-  const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, chartMaxT).catch(() => ({ updates: [], restarts: [] }));
-  const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
-  const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= chartMaxT);
+  const projectedPoints = projectionHours
+    ? chartSeries.flatMap(item => {
+        const last = item.points[item.points.length - 1];
+        if (!last) return [];
+        const steadyPace = options.comparison ? item.steadyPace : Math.max(0, finiteNumber(item.latestGain) || 0);
+        return [{ t: chartMaxT, value: last.value + steadyPace * projectionHours }];
+      })
+    : [];
+  const visiblePoints = [...chartSeries.flatMap(item => item.points), ...projectedPoints];
+  const markers = await fetchSearchChartMarkers(options.env || {}, chartMinT, observedMaxT).catch(() => ({ updates: [], restarts: [] }));
+  const visibleUpdates = (markers.updates || []).filter(marker => marker.t >= chartMinT && marker.t <= observedMaxT);
+  const visibleRestarts = (markers.restarts || []).filter(marker => marker.t >= chartMinT && marker.t <= observedMaxT);
 
   // Reserve a real Y-axis gutter inside the panel. Previously the plot began
   // too close to the panel edge, so wide values were painted over the frame
   // and looked like detached labels floating outside the chart.
-  const plot = { x: chartPanel.x + 116, y: chartPanel.y + 84, w: chartPanel.w - 150, h: 380 };
+  const plot = { x: chartPanel.x + 116, y: chartPanel.y + 84, w: chartPanel.w - 150, h: options.comparison ? 390 : 380 };
   const yAxisGutter = {
     x: chartPanel.x + 16,
     y: plot.y - 14,
@@ -9658,6 +10030,11 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const xForTime = time => chartMaxT === chartMinT ? plot.x : plot.x + ((time - chartMinT) / Math.max(1, chartMaxT - chartMinT)) * plot.w;
   const yFor = point => yMax === yMin ? plot.y + plot.h / 2 : plot.y + (1 - ((point.value - yMin) / Math.max(1, yMax - yMin))) * plot.h;
 
+  if (projectionHours) {
+    const forecastX = xForTime(observedMaxT);
+    hourlyBlendRoundedRect(canvas, forecastX, plot.y + 1, Math.max(1, plot.x + plot.w - forecastX - 1), plot.h - 2, 4, color.yellow, 18);
+  }
+
   for (let i = 0; i <= 4; i += 1) {
     const yy = plot.y + (i / 4) * plot.h;
     const value = yMax - (i / 4) * (yMax - yMin);
@@ -9665,8 +10042,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const labelFont = fonts.rowBold || fonts.bold;
     const labelSize = 15;
     const labelWidth = canvas.measureFontText(labelFont, label, labelSize);
-    const labelRight = plot.x - 18;
-    const labelX = Math.max(yAxisGutter.x + 8, labelRight - labelWidth);
+    const labelX = yAxisGutter.x + Math.max(8, (yAxisGutter.w - labelWidth) / 2);
     canvas.fillRect(plot.x, yy, plot.w, 1, [39, 49, 68, 255]);
     canvas.fillRect(plot.x - 9, yy, 9, 1, color.line);
     canvas.drawFontText(labelFont, label, labelX, yy - 9, labelSize, color.muted, labelWidth + 4);
@@ -9696,23 +10072,77 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     searchChartDrawDashedVertical(canvas, x, plot.y, plot.y + plot.h, color.orange, 10, 5);
   });
 
+  if (projectionHours) {
+    const nowX = xForTime(observedMaxT);
+    searchChartDrawDashedVertical(canvas, nowX, plot.y, plot.y + plot.h, color.cyan, 6, 5);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, "NOW", Math.max(plot.x, nowX - 18), plot.y + 10, 13, color.cyan, 46);
+    const projectionEndX = xForTime(chartMaxT) - 2;
+    searchChartDrawDashedVertical(canvas, projectionEndX, plot.y, plot.y + plot.h, color.yellow, 8, 5);
+    const endLabel = `${projectionHours} Hrs`;
+    const endLabelWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, endLabel, 13);
+    canvas.drawFontText(fonts.rowBold || fonts.bold, endLabel, projectionEndX - endLabelWidth - 8, plot.y + 10, 13, color.yellow, endLabelWidth + 4);
+    if (options.comparison) {
+      [1, 6, 12].filter(value => value < projectionHours).forEach(horizon => {
+        const markerX = xForTime(observedMaxT + horizon * 60 * 60 * 1000);
+        searchChartDrawDashedVertical(canvas, markerX, plot.y, plot.y + plot.h, [...color.yellow.slice(0, 3), 72], 4, 8);
+        const markerLabel = `+${horizon}h`;
+        const markerWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, markerLabel, 12);
+        canvas.drawFontText(fonts.rowBold || fonts.bold, markerLabel, markerX - markerWidth / 2, plot.y + plot.h - 22, 12, [...color.yellow.slice(0, 3), 155], markerWidth + 4);
+      });
+    }
+  }
+
   chartSeries.forEach((item, index) => {
     const lineOffset = (index - (chartSeries.length - 1) / 2) * 2;
     const lineY = point => yFor(point) + lineOffset;
     leagueDrawSharpPolyline(canvas, item.points, point => xForTime(point.t), lineY, item.color, 3);
     const last = item.points[item.points.length - 1];
-    if (last) chartFillCircle(canvas, xForTime(last.t), lineY(last), 4, item.color);
+    if (last) {
+      chartFillCircle(canvas, xForTime(last.t), lineY(last), 4, item.color);
+      if (projectionHours) {
+        const steadyPace = options.comparison ? item.steadyPace : Math.max(0, finiteNumber(item.latestGain) || 0);
+        const projected = {
+          t: chartMaxT,
+          value: last.value + steadyPace * projectionHours
+        };
+        leagueDrawDashedLine(
+          canvas,
+          xForTime(last.t),
+          lineY(last),
+          xForTime(projected.t),
+          lineY(projected),
+          item.color,
+          3,
+          10,
+          7
+        );
+        chartFillCircle(canvas, xForTime(projected.t), lineY(projected), 4, item.color);
+      }
+    }
   });
 
-  leagueDrawMemberPerformanceTable(
-    canvas,
-    fonts,
-    chartSeries,
-    chartPanel.x + 34,
-    chartPanel.y + 514,
-    chartPanel.w - 68,
-    color
-  );
+  if (options.comparison) {
+    comparisonDrawRaceInsights(
+      canvas,
+      fonts,
+      chartSeries,
+      chartPanel.x + 34,
+      chartPanel.y + 548,
+      chartPanel.w - 68,
+      color,
+      projectionHours
+    );
+  } else {
+    leagueDrawMemberPerformanceTable(
+      canvas,
+      fonts,
+      chartSeries,
+      chartPanel.x + 34,
+      chartPanel.y + 514,
+      chartPanel.w - 68,
+      color
+    );
+  }
 
   return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
 }
@@ -9756,6 +10186,86 @@ async function fetchLeaguePlayerPoolRank(query, userId, env) {
   return null;
 }
 
+function comparisonDrawRaceInsights(canvas, fonts, series, x, y, width, color) {
+  const players = (series || []).slice(0, 2);
+  if (players.length < 2) return;
+  const current = players.map(item => finiteNumber(item.latestPoints) || 0);
+  const steady = players.map(item => Math.max(0, finiteNumber(item.steadyPace) || 0));
+  const maximum = players.map((item, index) => Math.max(steady[index], finiteNumber(item.maxPace) || 0));
+  const currentLeader = current[0] >= current[1] ? 0 : 1;
+  const trailer = 1 - currentLeader;
+  const gap = 14;
+  const cardWidth = (width - gap * 3) / 4;
+  const cards = [1, 6, 12, 24].map(horizon => {
+    const projected = current.map((points, index) => points + steady[index] * horizon);
+    const steadyLeader = projected[0] >= projected[1] ? 0 : 1;
+    const steadyGap = Math.abs(projected[0] - projected[1]);
+    const chase = [...projected];
+    chase[trailer] = current[trailer] + maximum[trailer] * horizon;
+    const chaseLeader = chase[0] >= chase[1] ? 0 : 1;
+    const chaseGap = Math.abs(chase[0] - chase[1]);
+    const steadyOvertake = steadyLeader !== currentLeader;
+    const ceilingOvertake = chaseLeader === trailer;
+    return {
+      label: `${horizon} HOUR${horizon === 1 ? "" : "S"}`,
+      value: steadyOvertake ? "OVERTAKE" : ceilingOvertake ? "PRESSURED" : "LEAD HOLDS",
+      detail: `Steady: ${players[steadyLeader].name} +${shortNumber(steadyGap)}`,
+      secondary: ceilingOvertake
+        ? `Max chase: ${players[trailer].name} +${shortNumber(chaseGap)}`
+        : `Max chase: ${players[currentLeader].name} +${shortNumber(chaseGap)}`,
+      tone: steadyOvertake ? color.red : ceilingOvertake ? color.orange : color.green
+    };
+  });
+
+  const legend = "STEADY = LONGEST TRACKED RUN RATE     |     MAX CHASE = TRAILER'S BEST OBSERVED PACE";
+  const legendWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, legend, 13);
+  canvas.drawFontText(fonts.rowBold || fonts.bold, legend, x + Math.max(0, (width - legendWidth) / 2), y - 25, 13, color.muted, width);
+
+  cards.forEach((card, index) => {
+    comparisonDrawInsightCard(canvas, fonts, x + index * (cardWidth + gap), y, cardWidth, 142, card, color);
+  });
+}
+
+function comparisonDrawInsightCard(canvas, fonts, x, y, width, height, card, color) {
+  comparisonFillRoundedRect(canvas, x, y, width, height, 18, color.line, 255);
+  comparisonFillRoundedRect(canvas, x + 1, y + 1, width - 2, height - 2, 17, color.inset, 255);
+  comparisonFillRoundedRect(canvas, x + 1, y + 1, width - 2, 8, 7, card.tone || color.cyan, 255);
+  const label = canvas.fitFontText(fonts.rowBold || fonts.bold, card.label, 14, width - 28);
+  canvas.drawFontText(fonts.rowBold || fonts.bold, label, x + 16, y + 21, 14, color.muted, width - 32);
+  const value = canvas.fitFontText(fonts.rowBold || fonts.bold, historyCardText(card.value, 40), 22, width - 28);
+  canvas.drawFontText(fonts.rowBold || fonts.bold, value, x + 16, y + 48, 22, card.tone || color.white, width - 32);
+  const detail = canvas.fitFontText(fonts.regular, historyCardText(card.detail, 56), 14, width - 28);
+  canvas.drawFontText(fonts.regular, detail, x + 16, y + 86, 14, color.white, width - 32);
+  const secondary = canvas.fitFontText(fonts.regular, historyCardText(card.secondary, 56), 13, width - 28);
+  canvas.drawFontText(fonts.regular, secondary, x + 16, y + 113, 13, color.muted, width - 32);
+}
+
+function comparisonFillRoundedRect(canvas, x, y, width, height, radius, rgba, coverage = 255) {
+  const left = Math.round(x);
+  const top = Math.round(y);
+  const right = Math.round(x + width) - 1;
+  const bottom = Math.round(y + height) - 1;
+  const r = Math.max(0, Math.min(Math.round(radius), Math.floor(Math.min(width, height) / 2)));
+  for (let py = top; py <= bottom; py += 1) {
+    for (let px = left; px <= right; px += 1) {
+      const dx = px < left + r ? left + r - px : px > right - r ? px - (right - r) : 0;
+      const dy = py < top + r ? top + r - py : py > bottom - r ? py - (bottom - r) : 0;
+      if (dx * dx + dy * dy <= r * r) canvas.blendPixel(px, py, rgba, coverage);
+    }
+  }
+}
+
+function comparisonHoursLabel(hours) {
+  const safeHours = Math.max(0, Number(hours) || 0);
+  if (safeHours < 1) return `${Math.max(1, Math.round(safeHours * 60))}m`;
+  if (safeHours < 48) {
+    const whole = Math.floor(safeHours);
+    const minutes = Math.round((safeHours - whole) * 60);
+    return minutes ? `${whole}h ${minutes}m` : `${whole}h`;
+  }
+  return `${Math.round(safeHours / 24)}d`;
+}
+
 function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, color) {
   const visible = (series || []).slice(0, 4);
   const headerHeight = 30;
@@ -9771,7 +10281,8 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
     { label: "Up", x: 1150, width: 120, align: "right" },
     { label: "Down", x: 1290, width: 120, align: "right" }
   ];
-  const totalHeight = headerHeight + rowHeight * Math.max(4, visible.length);
+  const renderedRowCount = Math.max(4, visible.length);
+  const totalHeight = headerHeight + rowHeight * renderedRowCount;
   const activityDividerX = x + 1130;
 
   hourlyBlendRoundedRect(canvas, x, y, width, totalHeight, 8, color.inset, 225);
@@ -9787,7 +10298,7 @@ function leagueDrawMemberPerformanceTable(canvas, fonts, series, x, y, width, co
     }
   }
 
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < renderedRowCount; index += 1) {
     const item = visible[index] || null;
     const rowY = y + headerHeight + index * rowHeight;
     if (index % 2 === 0) canvas.fillRect(x + 1, rowY + 1, width - 2, rowHeight - 1, [18, 25, 37, 190]);
@@ -9905,21 +10416,25 @@ function leagueDrawDashedLine(canvas, x1, y1, x2, y2, rgba, width = 2, dash = 8,
   }
 }
 
-function leagueChartMembers(payload) {
-  return (Array.isArray(payload?.rows) ? payload.rows : [])
+function leagueChartMembers(payload, options = {}) {
+  const members = (Array.isArray(payload?.rows) ? payload.rows : [])
     .filter(row => !isLeagueAggregateMemberRow(row))
     .map((row, index) => ({
       row,
       id: String(row.user_id || row.UserID || "").trim(),
       name: leagueMemberName(row, index + 1),
+      rank: positiveInteger(row.global_rank ?? row.rank),
+      group: String(row.group_name || row.league_name || row.source_clan || "").trim(),
       points: finiteNumber(row.total_points ?? row.points),
       gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain),
       gain6h: finiteNumber(row.gain_6h ?? row.six_hour_gain),
       gain12h: finiteNumber(row.gain_12h ?? row.twelve_hour_gain),
       gain24h: finiteNumber(row.gain_24h ?? row.daily_gain ?? row.twenty_four_hour_gain)
     }))
-    .filter(item => item.id && item.points !== null)
-    .sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)));
+    .filter(item => item.id && item.points !== null);
+  return options.preserveOrder
+    ? members
+    : members.sort((a, b) => b.points - a.points || String(a.name).localeCompare(String(b.name)));
 }
 
 function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
@@ -9986,10 +10501,19 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       end
     );
     const hasTrackedActivity = activity.activeMs + activity.downtimeMs > 0;
+    const paceProfile = comparisonPaceProfile({
+      points,
+      latestGain,
+      gain6h: member.gain6h,
+      gain12h: member.gain12h,
+      gain24h: member.gain24h,
+      avgGain: totalGain / Math.max(1, hours)
+    });
 
     return {
       id: member.id,
       name: member.name,
+      rank: member.rank,
       color: colors[index % colors.length],
       points,
       latestPoints: member.points,
@@ -10001,10 +10525,40 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       totalGain,
       avgGain: totalGain / Math.max(1, hours),
       peakGain,
+      steadyPace: paceProfile.steady,
+      maxPace: paceProfile.maximum,
       activeMs: hasTrackedActivity ? activity.activeMs : null,
       downtimeMs: hasTrackedActivity ? activity.downtimeMs : null
     };
   });
+}
+
+function comparisonPaceProfile(item) {
+  const windowRates = [
+    [item?.gain24h, 24],
+    [item?.gain12h, 12],
+    [item?.gain6h, 6],
+    [item?.latestGain, 1]
+  ].map(([gainValue, hours]) => {
+    const gain = finiteNumber(gainValue);
+    return gain !== null && gain >= 0 ? gain / hours : null;
+  });
+  const steady = windowRates.find(rate => rate !== null)
+    ?? Math.max(0, finiteNumber(item?.avgGain) || 0);
+  const observedRates = [];
+  const points = Array.isArray(item?.points) ? item.points : [];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const elapsedHours = (finiteNumber(current?.t) - finiteNumber(previous?.t)) / (60 * 60 * 1000);
+    if (!(elapsedHours >= 0.25 && elapsedHours <= 3)) continue;
+    const gain = Math.max(0, (finiteNumber(current?.value) || 0) - (finiteNumber(previous?.value) || 0));
+    observedRates.push(gain / elapsedHours);
+  }
+  return {
+    steady: Math.max(0, steady),
+    maximum: Math.max(0, steady, ...windowRates.filter(rate => rate !== null), ...observedRates)
+  };
 }
 
 function leagueDerivedGrowthSamples(member, currentAt, storedSamples = []) {
@@ -13311,6 +13865,10 @@ async function registerPlayerCommand(url, env) {
   return registerCommand(url, env, playerCommandPayload());
 }
 
+async function registerCompareCommand(url, env) {
+  return registerCommand(url, env, compareCommandPayload());
+}
+
 async function registerServerCommand(url, env) {
   return registerCommand(url, env, serverCommandPayload());
 }
@@ -13474,6 +14032,7 @@ async function registerAllCommands(url, env) {
     ramCommandPayload(),
     rdpCommandPayload(),
     topCommandPayload(),
+    compareCommandPayload(),
     cwCommandPayload(),
     ...rewardCommandPayloads(),
     lbCommandPayload(),
@@ -13536,6 +14095,7 @@ async function syncGlobalCommands(url, env) {
     ramCommandPayload(),
     rdpCommandPayload(),
     topCommandPayload(),
+    compareCommandPayload(),
     cwCommandPayload(),
     ...rewardCommandPayloads(),
     lbCommandPayload(),
@@ -16696,6 +17256,44 @@ function historyCommandPayload() {
   };
 }
 
+function compareCommandPayload() {
+  return {
+    name: "compare",
+    type: APPLICATION_COMMAND_CHAT_INPUT,
+    description: "Compare two clans, Leagues, or players.",
+    dm_permission: false,
+    options: [
+      {
+        name: "type",
+        description: "What should be compared",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        choices: [
+          { name: "Clans", value: "clan" },
+          { name: "Leagues", value: "league" },
+          { name: "Players", value: "player" }
+        ]
+      },
+      {
+        name: "first",
+        description: "First clan, League, or Roblox username",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 64
+      },
+      {
+        name: "second",
+        description: "Second clan, League, or Roblox username",
+        type: APPLICATION_COMMAND_OPTION_STRING,
+        required: true,
+        min_length: 1,
+        max_length: 64
+      }
+    ]
+  };
+}
+
 function clanCommandPayload() {
   return {
     name: "clan",
@@ -16809,43 +17407,9 @@ function clanCommandPayload() {
       },
       {
         name: "compare",
-        description: "Preview or manage persistent adjacent-clan comparisons.",
+        description: "Manage persistent adjacent-clan comparisons.",
         type: APPLICATION_COMMAND_OPTION_SUB_COMMAND_GROUP,
         options: [
-          {
-            name: "view",
-            description: "Compare two clans, Leagues, or players.",
-            type: APPLICATION_COMMAND_OPTION_SUB_COMMAND,
-            options: [
-              {
-                name: "type",
-                description: "What should be compared",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                choices: [
-                  { name: "Clans", value: "clan" },
-                  { name: "Leagues", value: "league" },
-                  { name: "Players", value: "player" }
-                ]
-              },
-              {
-                name: "first",
-                description: "First clan, League, or Roblox username",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                min_length: 1,
-                max_length: 64
-              },
-              {
-                name: "second",
-                description: "Second clan, League, or Roblox username",
-                type: APPLICATION_COMMAND_OPTION_STRING,
-                required: true,
-                min_length: 1,
-                max_length: 64
-              }
-            ]
-          },
           {
             name: "assign",
             description: "Post and keep an adjacent-clan comparison updated.",

@@ -2,7 +2,7 @@ param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev",
   [string]$GuildId = "1457088639006670979",
   [string]$Token = "",
-  [string]$ExpectedBuildId = "discord-direct-comparison-2026-08-20c"
+  [string]$ExpectedBuildId = "discord-player-compare-multi-horizon-2026-08-20t"
 )
 
 $ErrorActionPreference = "Stop"

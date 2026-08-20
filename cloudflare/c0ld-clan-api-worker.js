@@ -1892,10 +1892,10 @@ async function handleLeagueGlobalLeaderboard(url, env) {
     display_name: String(row.display_name || row.username || `user_${row.user_id}`).trim(),
     avatar_url: avatarMap.get(String(row.user_id)) || null,
     points: toNumber(row.points ?? row.total_points) || 0,
-    gain_5m: null,
-    gain_1h: null,
-    gain_12h: null,
-    gain_24h: null,
+    gain_5m: toNumber(row.gain_5m),
+    gain_1h: toNumber(row.gain_1h),
+    gain_12h: toNumber(row.gain_12h),
+    gain_24h: toNumber(row.gain_24h),
     total_global_players: topAvailable,
     fetched_at: safeIso(row.fetched_at) || snapshotAt
   }));
@@ -4390,10 +4390,10 @@ async function handleGlobalLeaderboardPoolSearch(url, env, clan, query, sourceMo
       display_name: String(row.display_name || row.username || `user_${row.user_id}`).trim(),
       avatar_url: avatarMap.get(String(row.user_id)) || null,
       points: toNumber(row.points ?? row.total_points) || 0,
-      gain_5m: null,
-      gain_1h: null,
-      gain_12h: null,
-      gain_24h: null,
+      gain_5m: toNumber(row.gain_5m),
+      gain_1h: toNumber(row.gain_1h),
+      gain_12h: toNumber(row.gain_12h),
+      gain_24h: toNumber(row.gain_24h),
       total_global_players: totalGlobalPlayers,
       fetched_at: safeIso(row.fetched_at || payload.snapshot_at || payload.generated_at)
     }));
