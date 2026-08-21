@@ -3265,6 +3265,7 @@ function summarizeLeagueProfileGroup(rows, env, event = null) {
 
   const first = ordered[0];
   const latest = ordered[ordered.length - 1];
+  const manualRosterOnly = String(latest.source || first.source || "").trim().toLowerCase() === "manual_league_history";
   const ranks = ordered.map(row => toNumber(row.rank)).filter(Number.isFinite);
   const points = ordered.map(row => toNumber(row.points)).filter(Number.isFinite);
 
@@ -3281,15 +3282,15 @@ function summarizeLeagueProfileGroup(rows, env, event = null) {
     league_name: latest.league_name || first.league_name || null,
     league_id: latest.league_id || first.league_id || null,
     league_level: toNumber(latest.league_level ?? first.league_level),
-    league_points: toNumber(latest.league_points ?? first.league_points) || 0,
+    league_points: manualRosterOnly ? null : (toNumber(latest.league_points ?? first.league_points) || 0),
     league_icon: latest.league_icon || first.league_icon || null,
     member_capacity: toNumber(latest.member_capacity ?? first.member_capacity),
     user_id: toNumber(latest.user_id ?? first.user_id),
     display_name: latest.display_name || first.display_name || null,
-    final_rank: toNumber(latest.rank),
-    best_rank: ranks.length ? Math.min(...ranks) : null,
-    final_points: toNumber(latest.points) || 0,
-    highest_points: points.length ? Math.max(...points) : 0,
+    final_rank: manualRosterOnly ? null : toNumber(latest.rank),
+    best_rank: manualRosterOnly ? null : (ranks.length ? Math.min(...ranks) : null),
+    final_points: manualRosterOnly ? null : (toNumber(latest.points) || 0),
+    highest_points: manualRosterOnly ? null : (points.length ? Math.max(...points) : 0),
     first_snapshot_at: first.fetched_at || null,
     final_snapshot_at: latest.fetched_at || null,
     period_start_at: event?.start_at || first.fetched_at || null,
@@ -3300,7 +3301,8 @@ function summarizeLeagueProfileGroup(rows, env, event = null) {
     permission_level: latest.permission_level ?? null,
     role: latest.role || null,
     join_time: latest.join_time || null,
-    source: latest.source || first.source || null
+    source: latest.source || first.source || null,
+    roster_only: manualRosterOnly
   };
 }
 

@@ -15,6 +15,7 @@ const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
 const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const EXTERNAL_PLAYER_HISTORY_TABLE = "c0ld_external_player_history";
 const CW_BOT_HISTORY_TABLE = "c0ld_cwbot_history_imports";
+const C0LD_MEMBER_FINAL_RAW_TABLE = "c0ld_battle_c0ld_member_final_raw_snapshots";
 const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
@@ -59,6 +60,12 @@ const DEFAULT_CW_BOT_USER_ID = "1219229814150398003";
 const DEFAULT_BIG_BOT_USER_ID = "920446937986129960";
 const CLANS_BATTLE_RUN_CLAN_NAME = "__clans__";
 const DEFAULT_CLAN_NAME = "c0ld";
+const DEFAULT_CLAN_MEMBER_CAPACITY = 75;
+const LEGACY_C0LD_BATTLE_MEMBER_COVERAGE = Object.freeze([
+  { battle_key: "Spring2026", battle_display_name: "Abstract Battle", identified_members: 62, member_capacity: 75, final_snapshot_at: "2026-04-25T13:09:36.000Z" },
+  { battle_key: "StarryBattle", battle_display_name: "Starry Battle", identified_members: 73, member_capacity: 75, final_snapshot_at: "2026-05-11T13:51:38.704Z" },
+  { battle_key: "AngelBattle2026", battle_display_name: "Angel Battle 2026", identified_members: 73, member_capacity: 75, final_snapshot_at: "2026-05-15T11:05:55.407Z" }
+]);
 const DEFAULT_BATTLE_KEY = "auto";
 const DEFAULT_HISTORY_MAX_HOURS = 100000;
 const DEFAULT_PUBLIC_CACHE_SECONDS = 30;
@@ -269,6 +276,8 @@ export default {
         response = await handleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/battles") {
         response = await handleBattles(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/battle-member-coverage") {
+        response = await handleBattleMemberCoverage(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/current") {
         response = await handleClansCurrent(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/clans/history") {
@@ -6464,6 +6473,111 @@ async function handleBattles(request, env) {
       source: "api"
     }))
   }, env);
+}
+
+async function handleBattleMemberCoverage(request, env) {
+  requireSupabase(env);
+
+  const url = new URL(request.url);
+  const requestedClan = String(url.searchParams.get("clan") || clanName(env)).trim() || DEFAULT_CLAN_NAME;
+  const requestedClanKey = normalizeText(requestedClan);
+  const coverage = new Map();
+
+  // This archive is intentionally c0ld-specific. Never make another clan look
+  // complete by combining individual player histories from unrelated sources.
+  if (requestedClanKey !== normalizeText(DEFAULT_CLAN_NAME)) {
+    return cacheJson({
+      generated_at: new Date().toISOString(),
+      clan_name: requestedClan,
+      rows: []
+    }, env);
+  }
+
+  for (const row of LEGACY_C0LD_BATTLE_MEMBER_COVERAGE) {
+    const key = battleMemberCoverageKey(row.battle_key || row.battle_display_name);
+    coverage.set(key, {
+      ...row,
+      clan_name: requestedClan,
+      coverage_source: "legacy_final_snapshot",
+      is_final_roster: true
+    });
+  }
+
+  const rawFinalRows = await supabaseSelectPaged(env, C0LD_MEMBER_FINAL_RAW_TABLE, {
+    select: "battle_key,final_snapshot_at,user_id,raw_row",
+    order: "final_snapshot_at.asc,user_id.asc",
+    limit: "100000"
+  }, 100000, 1000).catch(() => []);
+
+  const exactByBattle = new Map();
+  for (const row of rawFinalRows) {
+    const key = battleMemberCoverageKey(row.battle_key);
+    if (!key) continue;
+    if (!exactByBattle.has(key)) {
+      exactByBattle.set(key, {
+        battle_key: row.battle_key,
+        battle_display_name: row.raw_row?.battle_display_name || cleanBattleDisplayName(row.battle_key, row.battle_key),
+        final_snapshot_at: row.final_snapshot_at || null,
+        users: new Set()
+      });
+    }
+    const exact = exactByBattle.get(key);
+    const rowSnapshotMs = isoToMs(row.final_snapshot_at);
+    const exactSnapshotMs = isoToMs(exact.final_snapshot_at);
+    if (rowSnapshotMs > exactSnapshotMs) {
+      exact.final_snapshot_at = row.final_snapshot_at;
+      exact.battle_display_name = row.raw_row?.battle_display_name || exact.battle_display_name;
+      exact.users = new Set();
+    } else if (rowSnapshotMs < exactSnapshotMs) {
+      continue;
+    }
+    if (row.user_id !== null && row.user_id !== undefined && row.user_id !== "") {
+      exact.users.add(String(row.user_id));
+    }
+  }
+
+  for (const [key, exact] of exactByBattle) {
+    coverage.set(key, {
+      battle_key: exact.battle_key,
+      battle_display_name: exact.battle_display_name,
+      clan_name: requestedClan,
+      identified_members: exact.users.size,
+      member_capacity: DEFAULT_CLAN_MEMBER_CAPACITY,
+      final_snapshot_at: exact.final_snapshot_at,
+      coverage_source: "final_raw_roster",
+      is_final_roster: true
+    });
+  }
+
+  const rows = [...coverage.values()]
+    .map(row => ({
+      ...row,
+      identified_members: Math.max(0, Number(row.identified_members) || 0),
+      member_capacity: Math.max(1, Number(row.member_capacity) || DEFAULT_CLAN_MEMBER_CAPACITY),
+      is_complete: Number(row.identified_members) >= Number(row.member_capacity)
+    }))
+    .filter(row => row.identified_members > 0)
+    .sort((a, b) => isoToMs(a.final_snapshot_at) - isoToMs(b.final_snapshot_at));
+
+  return cacheJson({
+    generated_at: new Date().toISOString(),
+    clan_name: requestedClan,
+    rows
+  }, env);
+}
+
+function battleMemberCoverageKey(value) {
+  const key = normalizeText(cleanExternalBattleName(value));
+  if (!key) return "";
+  if (key.includes("abstract") || key === "spring2026" || key === "battlespring2026") return "spring2026";
+  if (key.includes("starry")) return "starrybattle";
+  if (key.includes("angelbattle2026")) return "angelbattle2026";
+  if (key.includes("backrooms2026") || key.includes("deepbackrooms")) return "backrooms2026";
+  if (key.includes("soccerbattle2026")) return "soccerbattle2026";
+  if (key.includes("lunarbattle2026")) return "lunarbattle2026";
+  if (key.includes("gummybattle2026")) return "gummybattle2026";
+  if (key.includes("ninjabattle2026")) return "ninjabattle2026";
+  return key;
 }
 
 async function handleClansIngest(env, source, force = false, options = {}) {
@@ -19291,6 +19405,7 @@ function extractClanImageId(iconValue) {
 function normalizeMembers(clan, battle) {
   const members = collectClanMembersWithOwner(clan);
   const contributions = buildContributionMap(clan, battle);
+  const diamondContributions = buildDiamondContributionMap(clan);
 
   return members
     .map(member => {
@@ -19304,15 +19419,98 @@ function normalizeMembers(clan, battle) {
       if (!userId) return null;
 
       const contribution = contributions.get(userId) || { points: 0, raw: {} };
+      const diamondContribution = diamondContributions.get(userId) || null;
+      const existingDiamondContributions = member?.DiamondContributions;
+      const rawMember = diamondContribution ? {
+        ...member,
+        // BIG Games publishes this separately from Contribution.Battle. Keep a
+        // normalized cumulative value on the member snapshot so activity-log
+        // comparisons can emit only the positive delta between two pulls.
+        DiamondContributions: {
+          ...(existingDiamondContributions && typeof existingDiamondContributions === "object" && !Array.isArray(existingDiamondContributions)
+            ? existingDiamondContributions
+            : {}),
+          AllTime: diamondContribution.total
+        }
+      } : member;
 
       return {
         user_id: userId,
         total_points: contribution.points,
-        raw_member: member,
+        raw_member: rawMember,
         raw_contribution: contribution.raw
       };
     })
     .filter(Boolean);
+}
+
+function buildDiamondContributionMap(clan) {
+  const result = new Map();
+  const container = firstDefined(
+    clan?.DiamondContributions,
+    clan?.diamondContributions,
+    clan?.diamond_contributions,
+    clan?.DiamondContribution,
+    clan?.diamondContribution
+  );
+  const allTime = firstDefined(
+    container?.AllTime,
+    container?.allTime,
+    container?.all_time,
+    Array.isArray(container) ? container : undefined
+  );
+
+  const contributionTotal = value => {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "object") return toNumber(value);
+    return toNumber(firstDefined(
+      value.Diamonds,
+      value.diamonds,
+      value.TotalDiamonds,
+      value.totalDiamonds,
+      value.total_diamonds,
+      value.Amount,
+      value.amount,
+      value.Value,
+      value.value,
+      value.Points,
+      value.points
+    ));
+  };
+
+  const record = (value, keyHint = null) => {
+    const userId = toNumber(firstDefined(
+      value?.UserID,
+      value?.UserId,
+      value?.userID,
+      value?.userId,
+      value?.user_id,
+      keyHint
+    ));
+    const total = contributionTotal(value);
+    if (!userId || total === null || total < 0) return;
+    const previous = result.get(userId);
+    if (!previous || total > previous.total) result.set(userId, { total });
+  };
+
+  if (Array.isArray(allTime)) {
+    for (const row of allTime) record(row);
+  } else if (allTime && typeof allTime === "object") {
+    const singleUserId = toNumber(firstDefined(
+      allTime.UserID,
+      allTime.UserId,
+      allTime.userID,
+      allTime.userId,
+      allTime.user_id
+    ));
+    if (singleUserId) {
+      record(allTime);
+    } else {
+      for (const [userId, value] of Object.entries(allTime)) record(value, userId);
+    }
+  }
+
+  return result;
 }
 
 function collectClanMembersWithOwner(clan) {
