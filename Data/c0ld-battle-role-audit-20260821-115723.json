@@ -1,0 +1,5746 @@
+{
+  "GeneratedAt": "2026-08-21T17:57:23.1687471+00:00",
+  "Mode": "apply_add_only",
+  "Guild": {
+    "Id": "1457088639006670979",
+    "Name": "C0LD Clan"
+  },
+  "RosterPath": "C:\\Users\\oaadmin\\Documents\\GitHub\\c0ld\\Data\\c0ld-battle-rosters.txt",
+  "BattleSummaries": [
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "RosterEntries": 12,
+      "ResolvedRosterEntries": 11,
+      "UniqueDiscordUsers": 11,
+      "UnresolvedRosterEntries": 1
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "RosterEntries": 19,
+      "ResolvedRosterEntries": 17,
+      "UniqueDiscordUsers": 17,
+      "UnresolvedRosterEntries": 2
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "RosterEntries": 16,
+      "ResolvedRosterEntries": 16,
+      "UniqueDiscordUsers": 15,
+      "UnresolvedRosterEntries": 0
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "RosterEntries": 11,
+      "ResolvedRosterEntries": 11,
+      "UniqueDiscordUsers": 11,
+      "UnresolvedRosterEntries": 0
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "RosterEntries": 75,
+      "ResolvedRosterEntries": 65,
+      "UniqueDiscordUsers": 58,
+      "UnresolvedRosterEntries": 10
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "RosterEntries": 75,
+      "ResolvedRosterEntries": 72,
+      "UniqueDiscordUsers": 69,
+      "UnresolvedRosterEntries": 3
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "RosterEntries": 75,
+      "ResolvedRosterEntries": 73,
+      "UniqueDiscordUsers": 71,
+      "UnresolvedRosterEntries": 2
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "RosterEntries": 75,
+      "ResolvedRosterEntries": 74,
+      "UniqueDiscordUsers": 72,
+      "UnresolvedRosterEntries": 1
+    }
+  ],
+  "Counts": {
+    "DeduplicatedChecks": 324,
+    "AlreadyAssigned": 80,
+    "MissingBeforeApply": 228,
+    "AddedAndVerified": 228,
+    "FailedAdds": 0,
+    "MappedUsersNotInGuild": 16,
+    "UnresolvedRosterEntries": 19
+  },
+  "AlreadyAssigned": [
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "aguilapvp"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal",
+        "Malmortius"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "aguilapvp"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1462844978966429727",
+      "DiscordUsernameFromRoster": "toe_biter21",
+      "RobloxUsernames": [
+        "JamalTheHarryThe3rd"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1475731765191643146",
+      "DiscordUsernameFromRoster": "dxdraz2",
+      "RobloxUsernames": [
+        "NeWwavOrder"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1395231067413151755",
+      "DiscordUsernameFromRoster": "literallyalwaysbro",
+      "RobloxUsernames": [
+        "TurtlesRCool900"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "165533461241659403",
+      "DiscordUsernameFromRoster": "soulivan71",
+      "RobloxUsernames": [
+        "Kessho02"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "656229914042826792",
+      "DiscordUsernameFromRoster": "charalife",
+      "RobloxUsernames": [
+        "charaLifee"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "783813311157633054",
+      "DiscordUsernameFromRoster": "fighter92399",
+      "RobloxUsernames": [
+        "FIGHTER92399_alt"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "480456446748917762",
+      "DiscordUsernameFromRoster": "the_cameraman_sos",
+      "RobloxUsernames": [
+        "sosd35"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1205677551272329247",
+      "DiscordUsernameFromRoster": "fishy_axl",
+      "RobloxUsernames": [
+        "Fishy_axl22"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "693517985490403489",
+      "DiscordUsernameFromRoster": "itzeg",
+      "RobloxUsernames": [
+        "JustCaIIMeEgg"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1241759765076377665",
+      "DiscordUsernameFromRoster": "_nullun_.",
+      "RobloxUsernames": [
+        "PtiDoriankt"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "716102355787186178",
+      "DiscordUsernameFromRoster": "07maw",
+      "RobloxUsernames": [
+        "M3WPEWPEW",
+        "mawahlah"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "AguilaPvP"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1257152988452225035",
+      "DiscordUsernameFromRoster": "cedmb._31229",
+      "RobloxUsernames": [
+        "ced123zx"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "746949608797896734",
+      "DiscordUsernameFromRoster": "f4ln",
+      "RobloxUsernames": [
+        "azmvoisshot"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "861554120678309889",
+      "DiscordUsernameFromRoster": "zemenen",
+      "RobloxUsernames": [
+        "tigran_2206"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "531058447156903938",
+      "DiscordUsernameFromRoster": "savage8010",
+      "RobloxUsernames": [
+        "Savvag3e"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "AguilaPvP"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "716102355787186178",
+      "DiscordUsernameFromRoster": "07maw",
+      "RobloxUsernames": [
+        "mawahlah"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1325534261914108037",
+      "DiscordUsernameFromRoster": "ldksky",
+      "RobloxUsernames": [
+        "ldkSky"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "656229914042826792",
+      "DiscordUsernameFromRoster": "charalife",
+      "RobloxUsernames": [
+        "charaLifee"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "688671906534129970",
+      "DiscordUsernameFromRoster": "mimilrol",
+      "RobloxUsernames": [
+        "mimilrol"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "693517985490403489",
+      "DiscordUsernameFromRoster": "itzeg",
+      "RobloxUsernames": [
+        "JustCaIIMeEgg"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "165533461241659403",
+      "DiscordUsernameFromRoster": "soulivan71",
+      "RobloxUsernames": [
+        "Kessho02"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1395231067413151755",
+      "DiscordUsernameFromRoster": "literallyalwaysbro",
+      "RobloxUsernames": [
+        "TurtlesRCool900"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1241759765076377665",
+      "DiscordUsernameFromRoster": "_nullun_.",
+      "RobloxUsernames": [
+        "PtiDoriankt"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "861554120678309889",
+      "DiscordUsernameFromRoster": "zemenen",
+      "RobloxUsernames": [
+        "tigran_2206"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "480456446748917762",
+      "DiscordUsernameFromRoster": "the_cameraman_sos",
+      "RobloxUsernames": [
+        "sosd35"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1257152988452225035",
+      "DiscordUsernameFromRoster": "cedmb._31229",
+      "RobloxUsernames": [
+        "ced123zx"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "691304983299358801",
+      "DiscordUsernameFromRoster": "Olerist",
+      "RobloxUsernames": [
+        "lOleristl"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1205677551272329247",
+      "DiscordUsernameFromRoster": "fishy_axl",
+      "RobloxUsernames": [
+        "Fishy_axl22"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "617481924780490793",
+      "DiscordUsernameFromRoster": "armnotpro",
+      "RobloxUsernames": [
+        "ArmNotPro"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "746949608797896734",
+      "DiscordUsernameFromRoster": "f4ln",
+      "RobloxUsernames": [
+        "azmvoisshot"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "531058447156903938",
+      "DiscordUsernameFromRoster": "savage8010",
+      "RobloxUsernames": [
+        "Savvag3e"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1475731765191643146",
+      "DiscordUsernameFromRoster": "dxdraz2",
+      "RobloxUsernames": [
+        "NeWwavOrder"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1462844978966429727",
+      "DiscordUsernameFromRoster": "toe_biter21",
+      "RobloxUsernames": [
+        "JamalTheHarryThe3rd"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "531058447156903938",
+      "DiscordUsernameFromRoster": "savage8010",
+      "RobloxUsernames": [
+        "Savvag3e"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "AguilaPvP"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1395231067413151755",
+      "DiscordUsernameFromRoster": "literallyalwaysbro",
+      "RobloxUsernames": [
+        "TurtlesRCool900"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1241759765076377665",
+      "DiscordUsernameFromRoster": "_nullun_.",
+      "RobloxUsernames": [
+        "PtiDoriankt"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "982612967206031370",
+      "DiscordUsernameFromRoster": "pepek__",
+      "RobloxUsernames": [
+        "Jozula12"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "480456446748917762",
+      "DiscordUsernameFromRoster": "the_cameraman_sos",
+      "RobloxUsernames": [
+        "sosd35"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1257152988452225035",
+      "DiscordUsernameFromRoster": "cedmb._31229",
+      "RobloxUsernames": [
+        "ced123zx"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "716102355787186178",
+      "DiscordUsernameFromRoster": "07maw",
+      "RobloxUsernames": [
+        "mawahlah"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "929069433819902042",
+      "DiscordUsernameFromRoster": "luskai06",
+      "RobloxUsernames": [
+        "zerz06"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "693517985490403489",
+      "DiscordUsernameFromRoster": "itzeg",
+      "RobloxUsernames": [
+        "JustCaIIMeEgg"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1325534261914108037",
+      "DiscordUsernameFromRoster": "ldksky",
+      "RobloxUsernames": [
+        "ldkSky"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "861554120678309889",
+      "DiscordUsernameFromRoster": "zemenen",
+      "RobloxUsernames": [
+        "tigran_2206"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "746949608797896734",
+      "DiscordUsernameFromRoster": "f4ln",
+      "RobloxUsernames": [
+        "azmvoisshot"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "617481924780490793",
+      "DiscordUsernameFromRoster": "armnotpro",
+      "RobloxUsernames": [
+        "ArmNotPro"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1205677551272329247",
+      "DiscordUsernameFromRoster": "fishy_axl",
+      "RobloxUsernames": [
+        "Fishy_axl22"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "656229914042826792",
+      "DiscordUsernameFromRoster": "charalife",
+      "RobloxUsernames": [
+        "charaLifee"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1189992747877273752",
+      "DiscordUsernameFromRoster": "m1nty_73",
+      "RobloxUsernames": [
+        "AgreedFlower11"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "279436788777484289",
+      "DiscordUsernameFromRoster": "orlion_",
+      "RobloxUsernames": [
+        "AguilaPvP"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "652595309263716372",
+      "DiscordUsernameFromRoster": "oaple",
+      "RobloxUsernames": [
+        "Cinnamowopal"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1333829442698477653",
+      "DiscordUsernameFromRoster": "anrijstalks01_50866",
+      "RobloxUsernames": [
+        "anrijs9991"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1325534261914108037",
+      "DiscordUsernameFromRoster": "ldksky",
+      "RobloxUsernames": [
+        "ldkSky"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "693517985490403489",
+      "DiscordUsernameFromRoster": "itzeg",
+      "RobloxUsernames": [
+        "JustCaIIMeEgg"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "929069433819902042",
+      "DiscordUsernameFromRoster": "luskai06",
+      "RobloxUsernames": [
+        "zerz06"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1241759765076377665",
+      "DiscordUsernameFromRoster": "_nullun_.",
+      "RobloxUsernames": [
+        "PtiDoriankt"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "716102355787186178",
+      "DiscordUsernameFromRoster": "07maw",
+      "RobloxUsernames": [
+        "mawahlah"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1462341457695215656",
+      "DiscordUsernameFromRoster": "odduder",
+      "RobloxUsernames": [
+        "Odderuh"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "982612967206031370",
+      "DiscordUsernameFromRoster": "pepek__",
+      "RobloxUsernames": [
+        "Jozula12"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "480456446748917762",
+      "DiscordUsernameFromRoster": "the_cameraman_sos",
+      "RobloxUsernames": [
+        "sosd35"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "691304983299358801",
+      "DiscordUsernameFromRoster": "Olerist",
+      "RobloxUsernames": [
+        "lOleristl"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "531058447156903938",
+      "DiscordUsernameFromRoster": "savage8010",
+      "RobloxUsernames": [
+        "Savvag3e"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "746949608797896734",
+      "DiscordUsernameFromRoster": "f4ln",
+      "RobloxUsernames": [
+        "azmvoisshot"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "165533461241659403",
+      "DiscordUsernameFromRoster": "soulivan71",
+      "RobloxUsernames": [
+        "Kessho02"
+      ]
+    }
+  ],
+  "MissingBeforeApply": [
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxikea"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1302515962741915709",
+      "DiscordUsernameFromRoster": "crisisofmyfaith",
+      "RobloxUsernames": [
+        "superpositlon"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1429628113909977192",
+      "DiscordUsernameFromRoster": "busy_dove_02434",
+      "RobloxUsernames": [
+        "Star_1110789"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "921690785345335316",
+      "DiscordUsernameFromRoster": "pzndaroux",
+      "RobloxUsernames": [
+        "ytpandaroux"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1226669467950518353",
+      "DiscordUsernameFromRoster": "5023w",
+      "RobloxUsernames": [
+        "5023w"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxikea"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "bub2540"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "cfwinner12"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1226669467950518353",
+      "DiscordUsernameFromRoster": "5023w",
+      "RobloxUsernames": [
+        "5023w"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1488936997677432963",
+      "DiscordUsernameFromRoster": "snowzy1219",
+      "RobloxUsernames": [
+        "snowzy1219"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "nuxx7"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "bub2540"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "nuxx7"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "Ac3scar"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "798632350752702534",
+      "DiscordUsernameFromRoster": "mybanana367",
+      "RobloxUsernames": [
+        "mybanana367"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "234384542192893952",
+      "DiscordUsernameFromRoster": "bollis",
+      "RobloxUsernames": [
+        "Bol1is"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01",
+        "Pemcofsit",
+        "Labyrinthiy"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1111638343009185803",
+      "DiscordUsernameFromRoster": "kemototo",
+      "RobloxUsernames": [
+        "T0xicCoco"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "wydtiki",
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "Cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_06",
+        "MercBandit_08",
+        "MercBandit_07"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "CFwinner12"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1313848959365681177",
+      "DiscordUsernameFromRoster": "samvador1681",
+      "RobloxUsernames": [
+        "samsam16725"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "608006838830759997",
+      "DiscordUsernameFromRoster": "erichgamingyt",
+      "RobloxUsernames": [
+        "edwinrichards"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "LaughyTRex"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "CFwinner12"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1111638343009185803",
+      "DiscordUsernameFromRoster": "kemototo",
+      "RobloxUsernames": [
+        "T0xicCoco"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "montrealpuppy"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92",
+        "StanleyFarmer1992"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1313848959365681177",
+      "DiscordUsernameFromRoster": "samvador1681",
+      "RobloxUsernames": [
+        "samsam16725"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "kitkatdog89"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "864254127215214612",
+      "DiscordUsernameFromRoster": "solorclasher",
+      "RobloxUsernames": [
+        "FlipFlopFloop417"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "965298162627645513",
+      "DiscordUsernameFromRoster": "_xdbro",
+      "RobloxUsernames": [
+        "hayojeu2k"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "Ac3scar",
+        "LaughyTRex"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1158514851669360700",
+      "DiscordUsernameFromRoster": "bhd431",
+      "RobloxUsernames": [
+        "BHD431"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "Kazuya030Y"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1059370299432390696",
+      "DiscordUsernameFromRoster": "balloo521",
+      "RobloxUsernames": [
+        "TCG_Wayne2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1132748534517612544",
+      "DiscordUsernameFromRoster": "cyberdoge7181",
+      "RobloxUsernames": [
+        "M4thou3"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "montrealpuppy"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "872932275979956265",
+      "DiscordUsernameFromRoster": "weller457",
+      "RobloxUsernames": [
+        "Weller457sk"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "LaughyTRex",
+        "Ac3scar"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "965298162627645513",
+      "DiscordUsernameFromRoster": "_xdbro",
+      "RobloxUsernames": [
+        "hayojeu2k"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "715518924598411365",
+      "DiscordUsernameFromRoster": "rostislavvv_1",
+      "RobloxUsernames": [
+        "Rostislavvv155"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1147751114205302804",
+      "DiscordUsernameFromRoster": "d0n0.",
+      "RobloxUsernames": [
+        "Digitallw"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "414822853368610816",
+      "DiscordUsernameFromRoster": "karmatime",
+      "RobloxUsernames": [
+        "ThatsMyBirth"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "2scythe0"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "278634046966202369",
+      "DiscordUsernameFromRoster": "zabimaru420",
+      "RobloxUsernames": [
+        "zabimar420"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08",
+        "MercBandit_07"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "862616844690391040",
+      "DiscordUsernameFromRoster": "qzau",
+      "RobloxUsernames": [
+        "zoggi10"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "505244969754427393",
+      "DiscordUsernameFromRoster": "circlepresser",
+      "RobloxUsernames": [
+        "dezisp2w"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "TheGoldenHuskyAlt"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "Kazuya030Y"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1158514851669360700",
+      "DiscordUsernameFromRoster": "bhd431",
+      "RobloxUsernames": [
+        "BHD431"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "292987197013884938",
+      "DiscordUsernameFromRoster": "mrbenzy67",
+      "RobloxUsernames": [
+        "carloskar08"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "2scythe0"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1310226386253774865",
+      "DiscordUsernameFromRoster": "gr4pyx",
+      "RobloxUsernames": [
+        "RealYoDream"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "656229914042826792",
+      "DiscordUsernameFromRoster": "charalife",
+      "RobloxUsernames": [
+        "charaLifee"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "864254127215214612",
+      "DiscordUsernameFromRoster": "solorclasher",
+      "RobloxUsernames": [
+        "FlipFlopFloop417"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1059370299432390696",
+      "DiscordUsernameFromRoster": "balloo521",
+      "RobloxUsernames": [
+        "TCG_Wayne2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "wyatiki"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1132748534517612544",
+      "DiscordUsernameFromRoster": "cyberdoge7181",
+      "RobloxUsernames": [
+        "M4thou3"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "414822853368610816",
+      "DiscordUsernameFromRoster": "karmatime",
+      "RobloxUsernames": [
+        "ThatsMyBirth"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "789156714292183050",
+      "DiscordUsernameFromRoster": "elliespuppy",
+      "RobloxUsernames": [
+        "ceficat"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "715518924598411365",
+      "DiscordUsernameFromRoster": "rostislavvv_1",
+      "RobloxUsernames": [
+        "Rostislavvv155"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "544622605156745226",
+      "DiscordUsernameFromRoster": "_sch1zo",
+      "RobloxUsernames": [
+        "Sch1zos_25"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1395231067413151755",
+      "DiscordUsernameFromRoster": "literallyalwaysbro",
+      "RobloxUsernames": [
+        "TurtlesRCool900"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "872932275979956265",
+      "DiscordUsernameFromRoster": "weller457",
+      "RobloxUsernames": [
+        "Weller457sk"
+      ]
+    }
+  ],
+  "AddedAndVerified": [
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxikea"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1302515962741915709",
+      "DiscordUsernameFromRoster": "crisisofmyfaith",
+      "RobloxUsernames": [
+        "superpositlon"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1429628113909977192",
+      "DiscordUsernameFromRoster": "busy_dove_02434",
+      "RobloxUsernames": [
+        "Star_1110789"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "921690785345335316",
+      "DiscordUsernameFromRoster": "pzndaroux",
+      "RobloxUsernames": [
+        "ytpandaroux"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1226669467950518353",
+      "DiscordUsernameFromRoster": "5023w",
+      "RobloxUsernames": [
+        "5023w"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxikea"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "bub2540"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "cfwinner12"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1226669467950518353",
+      "DiscordUsernameFromRoster": "5023w",
+      "RobloxUsernames": [
+        "5023w"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1488936997677432963",
+      "DiscordUsernameFromRoster": "snowzy1219",
+      "RobloxUsernames": [
+        "snowzy1219"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "nuxx7"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1135909402940022946",
+      "DiscordUsernameFromRoster": "xx19q2_63804",
+      "RobloxUsernames": [
+        "Xx19Q2"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "scytheskii"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "bub2540"
+      ]
+    },
+    {
+      "Battle": "Angel Battle 2026",
+      "RoleId": "1504867128631759038",
+      "ExpectedRoleName": "Angel Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "nuxx7"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "Ac3scar"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Backrooms 2026",
+      "RoleId": "1517565278685368440",
+      "ExpectedRoleName": "Daydream Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "798632350752702534",
+      "DiscordUsernameFromRoster": "mybanana367",
+      "RobloxUsernames": [
+        "mybanana367"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "234384542192893952",
+      "DiscordUsernameFromRoster": "bollis",
+      "RobloxUsernames": [
+        "Bol1is"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01",
+        "Pemcofsit",
+        "Labyrinthiy"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1111638343009185803",
+      "DiscordUsernameFromRoster": "kemototo",
+      "RobloxUsernames": [
+        "T0xicCoco"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "wydtiki",
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "705381903976628226",
+      "DiscordUsernameFromRoster": "_cxrlo",
+      "RobloxUsernames": [
+        "Cxrl_o"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_06",
+        "MercBandit_08",
+        "MercBandit_07"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "CFwinner12"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1313848959365681177",
+      "DiscordUsernameFromRoster": "samvador1681",
+      "RobloxUsernames": [
+        "samsam16725"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "608006838830759997",
+      "DiscordUsernameFromRoster": "erichgamingyt",
+      "RobloxUsernames": [
+        "edwinrichards"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "LaughyTRex"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1325465619994509423",
+      "DiscordUsernameFromRoster": "cfwinner",
+      "RobloxUsernames": [
+        "CFwinner12"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "KazuyaTTV"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1111638343009185803",
+      "DiscordUsernameFromRoster": "kemototo",
+      "RobloxUsernames": [
+        "T0xicCoco"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "montrealpuppy"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92",
+        "StanleyFarmer1992"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1313848959365681177",
+      "DiscordUsernameFromRoster": "samvador1681",
+      "RobloxUsernames": [
+        "samsam16725"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "kitkatdog89"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "864254127215214612",
+      "DiscordUsernameFromRoster": "solorclasher",
+      "RobloxUsernames": [
+        "FlipFlopFloop417"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "623640202933567508",
+      "DiscordUsernameFromRoster": "e8ght",
+      "RobloxUsernames": [
+        "tofuu12342"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "965298162627645513",
+      "DiscordUsernameFromRoster": "_xdbro",
+      "RobloxUsernames": [
+        "hayojeu2k"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "Ac3scar",
+        "LaughyTRex"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1299159367068684364",
+      "DiscordUsernameFromRoster": "joss_1412",
+      "RobloxUsernames": [
+        "Josep_xD2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1158514851669360700",
+      "DiscordUsernameFromRoster": "bhd431",
+      "RobloxUsernames": [
+        "BHD431"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "Kazuya030Y"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1059370299432390696",
+      "DiscordUsernameFromRoster": "balloo521",
+      "RobloxUsernames": [
+        "TCG_Wayne2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1132748534517612544",
+      "DiscordUsernameFromRoster": "cyberdoge7181",
+      "RobloxUsernames": [
+        "M4thou3"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "montrealpuppy"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "llasmodeus"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "725335467813240912",
+      "DiscordUsernameFromRoster": "loulichee",
+      "RobloxUsernames": [
+        "TheoFuraxe"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "872932275979956265",
+      "DiscordUsernameFromRoster": "weller457",
+      "RobloxUsernames": [
+        "Weller457sk"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1226238729287635109",
+      "DiscordUsernameFromRoster": "strykertoff",
+      "RobloxUsernames": [
+        "LaughyTRex",
+        "Ac3scar"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "453939422577033236",
+      "DiscordUsernameFromRoster": "danyo8784",
+      "RobloxUsernames": [
+        "DanoMan987"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "965298162627645513",
+      "DiscordUsernameFromRoster": "_xdbro",
+      "RobloxUsernames": [
+        "hayojeu2k"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "998032904561107015",
+      "DiscordUsernameFromRoster": "mikeytheguy_",
+      "RobloxUsernames": [
+        "mkmike27mk"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "715518924598411365",
+      "DiscordUsernameFromRoster": "rostislavvv_1",
+      "RobloxUsernames": [
+        "Rostislavvv155"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1147751114205302804",
+      "DiscordUsernameFromRoster": "d0n0.",
+      "RobloxUsernames": [
+        "Digitallw"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "414822853368610816",
+      "DiscordUsernameFromRoster": "karmatime",
+      "RobloxUsernames": [
+        "ThatsMyBirth"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "2scythe0"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1036342456230363187",
+      "DiscordUsernameFromRoster": "_bitrox",
+      "RobloxUsernames": [
+        "KeyzziHD94"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "278634046966202369",
+      "DiscordUsernameFromRoster": "zabimaru420",
+      "RobloxUsernames": [
+        "zabimar420"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "811047576269750302",
+      "DiscordUsernameFromRoster": "fsai",
+      "RobloxUsernames": [
+        "0ffxIkea"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1013975324276559884",
+      "DiscordUsernameFromRoster": "mercilessbandit",
+      "RobloxUsernames": [
+        "MercilessBanditTaken",
+        "MercBandit_08",
+        "MercBandit_07"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "862616844690391040",
+      "DiscordUsernameFromRoster": "qzau",
+      "RobloxUsernames": [
+        "zoggi10"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "505244969754427393",
+      "DiscordUsernameFromRoster": "circlepresser",
+      "RobloxUsernames": [
+        "dezisp2w"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1040727894621696122",
+      "DiscordUsernameFromRoster": "corrosionv2",
+      "RobloxUsernames": [
+        "dragonballx1412"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "513928285407936533",
+      "DiscordUsernameFromRoster": "itzgoldie_",
+      "RobloxUsernames": [
+        "TheGoldenHuskyAlt"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "563458496591560734",
+      "DiscordUsernameFromRoster": "blam01",
+      "RobloxUsernames": [
+        "Blam_BB"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "829053741931298836",
+      "DiscordUsernameFromRoster": "kazuyaw",
+      "RobloxUsernames": [
+        "Kazuya030Y"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1215897225033420810",
+      "DiscordUsernameFromRoster": "gater_0_36593",
+      "RobloxUsernames": [
+        "ItsGaterNotGator"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1158514851669360700",
+      "DiscordUsernameFromRoster": "bhd431",
+      "RobloxUsernames": [
+        "BHD431"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "292987197013884938",
+      "DiscordUsernameFromRoster": "mrbenzy67",
+      "RobloxUsernames": [
+        "carloskar08"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1348909957457903668",
+      "DiscordUsernameFromRoster": "4xph",
+      "RobloxUsernames": [
+        "praisevolxtz"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "969882896666066964",
+      "DiscordUsernameFromRoster": "shadow_does_gaming",
+      "RobloxUsernames": [
+        "Ey3d46"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1191280147588993039",
+      "DiscordUsernameFromRoster": "scytheskii",
+      "RobloxUsernames": [
+        "2scythe0"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1310226386253774865",
+      "DiscordUsernameFromRoster": "gr4pyx",
+      "RobloxUsernames": [
+        "RealYoDream"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "402554250216865802",
+      "DiscordUsernameFromRoster": "tazerrazer",
+      "RobloxUsernames": [
+        "cloudedseven56"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "769967064043094037",
+      "DiscordUsernameFromRoster": "v._xy",
+      "RobloxUsernames": [
+        "0k_0w"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "470923759193161729",
+      "DiscordUsernameFromRoster": "stanleyfox92",
+      "RobloxUsernames": [
+        "StanleyFox92"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1490091159173726229",
+      "DiscordUsernameFromRoster": "y30",
+      "RobloxUsernames": [
+        "projectsupramev2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1432555304419065948",
+      "DiscordUsernameFromRoster": "3v4nz01",
+      "RobloxUsernames": [
+        "3v4nz01"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1165348283238076498",
+      "DiscordUsernameFromRoster": "brandonn25",
+      "RobloxUsernames": [
+        "Bub2540"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "656229914042826792",
+      "DiscordUsernameFromRoster": "charalife",
+      "RobloxUsernames": [
+        "charaLifee"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "430386458306674708",
+      "DiscordUsernameFromRoster": "eunhye01",
+      "RobloxUsernames": [
+        "selena082319"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "864254127215214612",
+      "DiscordUsernameFromRoster": "solorclasher",
+      "RobloxUsernames": [
+        "FlipFlopFloop417"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "141949707445338112",
+      "DiscordUsernameFromRoster": "baskettcase",
+      "RobloxUsernames": [
+        "YoBaskett"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1354200315884470364",
+      "DiscordUsernameFromRoster": "majinbacon",
+      "RobloxUsernames": [
+        "J2X1NESIWXID"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1059370299432390696",
+      "DiscordUsernameFromRoster": "balloo521",
+      "RobloxUsernames": [
+        "TCG_Wayne2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "599991968092913685",
+      "DiscordUsernameFromRoster": "69.4",
+      "RobloxUsernames": [
+        "wyatiki"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1452402829481349171",
+      "DiscordUsernameFromRoster": "joxnyxzz67.",
+      "RobloxUsernames": [
+        "Misia21252"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "898011893552279642",
+      "DiscordUsernameFromRoster": "braydennsss",
+      "RobloxUsernames": [
+        "2rello"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "851691102360829963",
+      "DiscordUsernameFromRoster": "seba386",
+      "RobloxUsernames": [
+        "sebastjan35"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1102644961423409182",
+      "DiscordUsernameFromRoster": "xavimavi2",
+      "RobloxUsernames": [
+        "DahRealXaViMaVi2"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1132748534517612544",
+      "DiscordUsernameFromRoster": "cyberdoge7181",
+      "RobloxUsernames": [
+        "M4thou3"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1195125931757539339",
+      "DiscordUsernameFromRoster": "eclipse4wins",
+      "RobloxUsernames": [
+        "coolgur0"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1084195208440316006",
+      "DiscordUsernameFromRoster": "psst148",
+      "RobloxUsernames": [
+        "psst1422"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "677231354873643083",
+      "DiscordUsernameFromRoster": "jimmycleetus",
+      "RobloxUsernames": [
+        "JimmyCIeetus"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1495120484625420472",
+      "DiscordUsernameFromRoster": "cheeseemaster",
+      "RobloxUsernames": [
+        "killerboy143279"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "414822853368610816",
+      "DiscordUsernameFromRoster": "karmatime",
+      "RobloxUsernames": [
+        "ThatsMyBirth"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1005452826606047232",
+      "DiscordUsernameFromRoster": "la4izar",
+      "RobloxUsernames": [
+        "proto123q"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "378795177092972545",
+      "DiscordUsernameFromRoster": "z.ee",
+      "RobloxUsernames": [
+        "Nuxx7"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1320032853555282032",
+      "DiscordUsernameFromRoster": "jamont0ast",
+      "RobloxUsernames": [
+        "IStoleYourChica"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "982719187308924928",
+      "DiscordUsernameFromRoster": "wavy1xx",
+      "RobloxUsernames": [
+        "uzuisnipes"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1371620102365249626",
+      "DiscordUsernameFromRoster": "vaultofmusic",
+      "RobloxUsernames": [
+        "kyle558888"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "789156714292183050",
+      "DiscordUsernameFromRoster": "elliespuppy",
+      "RobloxUsernames": [
+        "ceficat"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "715518924598411365",
+      "DiscordUsernameFromRoster": "rostislavvv_1",
+      "RobloxUsernames": [
+        "Rostislavvv155"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "544622605156745226",
+      "DiscordUsernameFromRoster": "_sch1zo",
+      "RobloxUsernames": [
+        "Sch1zos_25"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "374309620166033418",
+      "DiscordUsernameFromRoster": "_bruhhh1",
+      "RobloxUsernames": [
+        "matmat32"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "886785227249295370",
+      "DiscordUsernameFromRoster": "not_mason3725.",
+      "RobloxUsernames": [
+        "itsmason3725"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1342917270174826589",
+      "DiscordUsernameFromRoster": "noedec",
+      "RobloxUsernames": [
+        "flexmyspa1"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1331748707376431207",
+      "DiscordUsernameFromRoster": "dog2489",
+      "RobloxUsernames": [
+        "840game"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "763895199062687775",
+      "DiscordUsernameFromRoster": "arcticgalaxy149",
+      "RobloxUsernames": [
+        "AgentP_0928"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1395231067413151755",
+      "DiscordUsernameFromRoster": "literallyalwaysbro",
+      "RobloxUsernames": [
+        "TurtlesRCool900"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "872932275979956265",
+      "DiscordUsernameFromRoster": "weller457",
+      "RobloxUsernames": [
+        "Weller457sk"
+      ]
+    }
+  ],
+  "FailedAdds": [],
+  "MappedUsersNotInGuild": [
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "674905905317281800",
+      "DiscordUsernameFromRoster": "ttkcash",
+      "RobloxUsernames": [
+        "ttkcash1"
+      ]
+    },
+    {
+      "Battle": "Abstract Battle",
+      "RoleId": "1502766588250820731",
+      "ExpectedRoleName": "Abstract Battle",
+      "DiscordUserId": "1417156198620205138",
+      "DiscordUsernameFromRoster": "idekanymore_935",
+      "RobloxUsernames": [
+        "Andrewasper0987"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "736744164326113390",
+      "DiscordUsernameFromRoster": "904aj603",
+      "RobloxUsernames": [
+        "904aj603"
+      ]
+    },
+    {
+      "Battle": "Starry Battle",
+      "RoleId": "1500141659449589830",
+      "ExpectedRoleName": "Starry Battle",
+      "DiscordUserId": "1417156198620205138",
+      "DiscordUsernameFromRoster": "idekanymore_935",
+      "RobloxUsernames": [
+        "Andrewasper0987"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "879113882533261342",
+      "DiscordUsernameFromRoster": "life_is_fortunate",
+      "RobloxUsernames": [
+        "rrodgers0206"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "1248678985328627824",
+      "DiscordUsernameFromRoster": "Street2m3",
+      "RobloxUsernames": [
+        "danr1234450"
+      ]
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RoleId": "1522642293817999420",
+      "ExpectedRoleName": "Thunderstorm Battle",
+      "DiscordUserId": "403350638664089602",
+      "DiscordUsernameFromRoster": "strikezone.",
+      "RobloxUsernames": [
+        "strikezoneTTV"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1248678985328627824",
+      "DiscordUsernameFromRoster": "Street2m3",
+      "RobloxUsernames": [
+        "danr1234450"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "1059346885158121472",
+      "DiscordUsernameFromRoster": "dcme.ftbl",
+      "RobloxUsernames": [
+        "dontchallengeme2"
+      ]
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RoleId": "1527709947842793724",
+      "ExpectedRoleName": "Lunar Battle",
+      "DiscordUserId": "879113882533261342",
+      "DiscordUsernameFromRoster": "life_is_fortunate",
+      "RobloxUsernames": [
+        "rrodgers0206"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1248678985328627824",
+      "DiscordUsernameFromRoster": "Street2m3",
+      "RobloxUsernames": [
+        "danr1234450"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "1059346885158121472",
+      "DiscordUsernameFromRoster": "dcme.ftbl",
+      "RobloxUsernames": [
+        "dontchallengeme2"
+      ]
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RoleId": "1532784432896020661",
+      "ExpectedRoleName": "Gummy Battle",
+      "DiscordUserId": "879113882533261342",
+      "DiscordUsernameFromRoster": "life_is_fortunate",
+      "RobloxUsernames": [
+        "rrodgers0206"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1404142018887684267",
+      "DiscordUsernameFromRoster": "m00nlitw0undsxo",
+      "RobloxUsernames": [
+        "infinitelygratefulx"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "1248678985328627824",
+      "DiscordUsernameFromRoster": "Street2m3",
+      "RobloxUsernames": [
+        "danr1234450"
+      ]
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RoleId": "1537954331196784700",
+      "ExpectedRoleName": "Ninja Battle",
+      "DiscordUserId": "402794194663637002",
+      "DiscordUsernameFromRoster": "__noa_.",
+      "RobloxUsernames": [
+        "noa420"
+      ]
+    }
+  ],
+  "UnresolvedRosterEntries": [
+    {
+      "Battle": "Abstract Battle",
+      "RobloxUsername": "younes89755",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Starry Battle",
+      "RobloxUsername": "younes89755",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Starry Battle",
+      "RobloxUsername": "Doggo_1490",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "Edgy_Gamer",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "Foggsterist",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "ProfessorFoxSubBot96",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "Pikachu_paez",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "FoggersPoggers",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "EgPS99nc",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "kurtis2345789",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "TheMinorityMuncher",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "MercIssaScam",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Soccer Battle 2026",
+      "RobloxUsername": "antoon92",
+      "Reason": "uncertain_discord_user_id"
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RobloxUsername": "Pikachu_paez",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RobloxUsername": "kurtis2345789",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Lunar Battle 2026",
+      "RobloxUsername": "kuroihanin",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RobloxUsername": "kurtis2345789",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Gummy Battle 2026",
+      "RobloxUsername": "Pikachu_paez",
+      "Reason": "missing_discord_user_id"
+    },
+    {
+      "Battle": "Ninja Battle 2026",
+      "RobloxUsername": "kurtis2345789",
+      "Reason": "missing_discord_user_id"
+    }
+  ]
+}

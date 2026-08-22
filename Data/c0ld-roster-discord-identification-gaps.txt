@@ -1,0 +1,27 @@
+c0ld Clan Battle Roster - Discord Identification Gaps
+Updated: August 21, 2026
+
+This distinguishes a completely unidentified Discord account from a known
+Discord username whose numeric user ID is unavailable or uncertain.
+
+=== No Discord Username Identified (10 unique Roblox users) ===
+
+1. Doggo_1490 - Starry Battle (alt account)
+2. Edgy_Gamer - Soccer Battle 2026
+3. Foggsterist - Soccer Battle 2026
+4. ProfessorFoxSubBot96 - Soccer Battle 2026
+5. Pikachu_paez - Soccer Battle 2026, Lunar Battle 2026, Gummy Battle 2026
+6. FoggersPoggers - Soccer Battle 2026
+7. EgPS99nc - Soccer Battle 2026
+8. TheMinorityMuncher - Soccer Battle 2026
+9. MercIssaScam - Soccer Battle 2026
+10. kuroihanin - Lunar Battle 2026
+
+=== Discord Username Known, but User ID Missing or Uncertain (3 unique Roblox users) ===
+
+1. younes89755 - @younes89755 - User ID missing - Abstract Battle, Starry Battle
+2. kurtis2345789 - @repoi. - User ID missing - Soccer, Lunar, Gummy, and Ninja Battles 2026
+3. antoon92 - @wimp22 - supplied User ID 136971651609919488 was marked uncertain - Soccer Battle 2026
+
+The earlier role-assignment report correctly listed unresolved roster entries,
+but it combined these two categories and repeated a player once per battle.

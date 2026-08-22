@@ -104,6 +104,32 @@ const discord = workerContext("../cloudflare/discord-search-interactions-worker.
   fetch: async () => Response.json({ ok: true })
 });
 
+assert.deepEqual(
+  JSON.parse(JSON.stringify(discord.apiCommandPayload())),
+  {
+    name: "api",
+    type: 1,
+    description: "Run a live status check against the BIG Games API.",
+    dm_permission: false
+  }
+);
+const apiStatusMessage = discord.buildBigGamesApiStatusMessage({
+  status: "degraded",
+  checked_at: "2026-08-21T18:00:00.000Z",
+  healthy_origins: 1,
+  total_origins: 2,
+  origins: [
+    { origin: "https://biggamesapi.io", ok: true, http_status: 200, latency_ms: 123 },
+    { origin: "https://ps99.biggamesapi.io", ok: false, http_status: 503, latency_ms: 456, error: "HTTP 503" }
+  ]
+});
+assert.match(apiStatusMessage.embeds[0].title, /Degraded/);
+assert.equal(apiStatusMessage.embeds[0].description, undefined);
+assert.equal(apiStatusMessage.embeds[0].fields.length, 3);
+assert.match(apiStatusMessage.embeds[0].fields[0].value, /123 ms/);
+assert.match(apiStatusMessage.embeds[0].fields[1].value, /HTTP 503/);
+assert.equal(apiStatusMessage.embeds[0].fields[2].name, "Checked");
+
 const discordSource = readFileSync(new URL("../cloudflare/discord-search-interactions-worker.js", import.meta.url), "utf8");
 const clanApiSource = readFileSync(new URL("../cloudflare/c0ld-clan-api-worker.js", import.meta.url), "utf8");
 const leagueApiSource = readFileSync(new URL("../cloudflare/yamo-league-api-worker.js", import.meta.url), "utf8");
@@ -535,6 +561,29 @@ assert.equal(
   discord.searchChartDirectGain({ history: [{ gain_1h: 77 }] }, { gain_1h: null }, "gain_1h"),
   77,
   "a null direct gain must fall through to a usable history gain"
+);
+const leagueSearchSamples = discord.searchChartLeagueSamples(
+  {
+    rows: [
+      { fetched_at: "2026-08-21T10:00:00.000Z", points: 14_000_000 },
+      { fetched_at: "2026-08-21T10:20:00.000Z", points: 14_200_000 }
+    ]
+  },
+  {
+    rows: [
+      { fetched_at: "2026-08-21T10:00:00.000Z", rank: 3_000, points: 14_000_000 },
+      { fetched_at: "2026-08-21T10:20:00.000Z", rank: 2_900, points: 14_200_000 }
+    ]
+  },
+  { history: [] },
+  { fetched_at: "2026-08-21T10:40:00.000Z", points: 14_300_000, global_rank: 2_850 },
+  { SEARCH_CHART_INTERVAL_MINUTES: "20" }
+);
+assert.equal(leagueSearchSamples.length, 3, "League search charts should merge stored history with the current row");
+assert.deepEqual(
+  Array.from(leagueSearchSamples, sample => [sample.points, sample.rank]),
+  [[14_000_000, 3_000], [14_200_000, 2_900], [14_300_000, 2_850]],
+  "League chart points and global ranks should share the same historical timeline"
 );
 assert.deepEqual(
   { ...discord.hourlyClaimFailurePatch({ last_posted_at: "2026-08-10T11:00:00.000Z" }, "Discord 429") },

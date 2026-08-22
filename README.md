@@ -1,3 +1,3 @@
-I use Supabase to host a Postgres DB. Cloudflare triggers the Action in Github to update the website because Github's actions are stupidly unreliable. Discord and anywhere else I choose to link this repo.
+hi merc. (and emma)
 
-See [`docs/repo-organization.md`](docs/repo-organization.md) for the current file layout and route-cleanup plan.
+kn0x, go away.

@@ -164,6 +164,57 @@ const trackerRows = discord.clanTrackerRows({ rows: [
 assert.equal(trackerRows.length, 1, "the clan tracker must emit each Roblox member once");
 assert.equal(trackerRows[0].tracker_rank, 48, "the more complete duplicate tracker row must win");
 
+const trackerFields = discord.clanTrackerEmbedFields([{
+  tracker_rank: 16,
+  tracker_username: "BHD431",
+  tracker_points: 16_140_000,
+  tracker_gain_20m: 0,
+  tracker_gain_1h: 0
+}]);
+assert.equal(trackerFields.length, 1, "an incomplete final page must not add empty spacer columns");
+assert.equal(trackerFields[0].name, "`16` · **BHD431**");
+assert.equal(trackerFields[0].value, ":star: 16.14M\n-# · 20m 0\n-# · 1h 0");
+assert.doesNotMatch(`${trackerFields[0].name}${trackerFields[0].value}`, /\u200b/,
+  "tracker fields must not contain top or bottom zero-width spacer lines");
+
+const trackerMessages = discord.buildClanTrackerMessages({
+  clan_name: "COLD",
+  icon_url: "https://example.test/clan.png",
+  rows: Array.from({ length: 22 }, (_, index) => ({
+    rank: index + 1,
+    user_id: index + 1,
+    username: `Member${index + 1}`,
+    total_points: 20_000_000 - index,
+    gain_20m: 0,
+    gain_1h: 0
+  }))
+}, "COLD", {});
+assert.equal(trackerMessages.length, 2);
+assert.equal(trackerMessages[0].embeds[0].fields.length, 3,
+  "the preceding tracker page must retain three populated member columns after balancing");
+assert.equal(trackerMessages[1].embeds[0].fields.length, 3,
+  "a short final tracker page must borrow real rows instead of shrinking to fewer columns");
+assert.equal(trackerMessages[0].embeds[0].footer, undefined,
+  "clan tracker posts must not add a selectable footer spacer row");
+assert.equal(trackerMessages[1].embeds[0].footer, undefined,
+  "split clan tracker posts must not add a selectable footer spacer row");
+assert.equal(trackerMessages[0].embeds[0].thumbnail, undefined,
+  "the first tracker page must not reserve thumbnail width that shifts its member columns");
+
+const fullClanTrackerMessages = discord.buildClanTrackerMessages({
+  clan_name: "COLD",
+  rows: Array.from({ length: 75 }, (_, index) => ({
+    rank: index + 1,
+    user_id: index + 1,
+    username: `Member${index + 1}`,
+    total_points: 20_000_000 - index,
+    gain_20m: 0,
+    gain_1h: 0
+  }))
+}, "COLD", {});
+assert.equal(fullClanTrackerMessages.length, 4,
+  "a full 75-member clan roster must fit into exactly four tracker posts");
+
 const clanMap = new Map();
 discord.mergeClanHistoryRecord(clanMap, {
   key: "battleblockpartybattle",
@@ -186,6 +237,41 @@ assert.equal(historyRow.points, 425_830);
 assert.equal(historyRow.rank, 1123, "the selected history row should retain complementary complete fields");
 
 const clanApiSource = readFileSync(new URL("../cloudflare/c0ld-clan-api-worker.js", import.meta.url), "utf8");
+const battleCoverageSource = clanApiSource.slice(
+  clanApiSource.indexOf("async function handleBattleMemberCoverage"),
+  clanApiSource.indexOf("async function handleClansIngest")
+);
+assert.match(battleCoverageSource, /C0LD_MEMBER_FINAL_RAW_TABLE/, "battle coverage must read the preserved c0ld final-roster archive");
+assert.doesNotMatch(
+  battleCoverageSource,
+  /BATTLE_PLAYER_FINALS_TABLE|EXTERNAL_PLAYER_HISTORY_TABLE|CW_BOT_HISTORY_TABLE|partial_player_history/,
+  "battle coverage must never union joins, leaves, or individual-history imports into the final roster"
+);
+const finalCoverage = discord.historyBattleCoverageMap([{
+  battle_key: "Spring2026",
+  battle_display_name: "Abstract Battle",
+  identified_members: 62,
+  member_capacity: 75,
+  coverage_source: "legacy_final_snapshot",
+  is_final_roster: true
+}]);
+assert.equal(finalCoverage.get(discord.canonicalClanHistoryKey("Abstract Battle")).identified_members, 62);
+assert.equal(
+  discord.historyClanMemberCoverageLabel({ identified_members: 81, member_capacity: 75, is_final_roster: true }),
+  "81/75",
+  "an authoritative final roster must not be clamped to the nominal clan capacity"
+);
+assert.equal(
+  discord.historyModernRecordParts({
+    name: "Abstract Battle",
+    clan_name: "c0ld",
+    identified_members: 62,
+    member_capacity: 75,
+    is_final_roster: true
+  }, "clan").tag,
+  "C0LD | 62/75",
+  "Clan Battle history cards must show final-roster coverage beside the clan"
+);
 const leaguePoolBranch = clanApiSource.slice(
   clanApiSource.indexOf('if (sourceMode === "leagues") {', clanApiSource.indexOf("async function handleGlobalLeaderboardPoolSearch")),
   clanApiSource.indexOf("const historyHoursValue", clanApiSource.indexOf("async function handleGlobalLeaderboardPoolSearch"))

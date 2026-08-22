@@ -2,7 +2,7 @@ param(
   [string]$WorkerUrl = "https://discord-search-interactions-worker.opal-dde.workers.dev",
   [string]$GuildId = "1457088639006670979",
   [string]$Token = "",
-  [string]$ExpectedBuildId = "discord-league-history-ordered-2026-08-21z13"
+  [string]$ExpectedBuildId = "discord-clan-tracker-four-post-roster-2026-08-21"
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,12 +51,24 @@ $globalHtg = @($result.global_commands | Where-Object {
 $preservedGuildHtg = @($result.preserved_guild_commands | Where-Object {
   ([string]$_.name).Trim().ToLowerInvariant() -eq "htg"
 })
+$globalApi = @($result.global_commands | Where-Object {
+  ([string]$_.name).Trim().ToLowerInvariant() -eq "api"
+})
+$preservedGuildApi = @($result.preserved_guild_commands | Where-Object {
+  ([string]$_.name).Trim().ToLowerInvariant() -eq "api"
+})
 
 if ($globalHtg.Count -ne 1) {
   throw "Expected exactly one global /htg command after synchronization; Discord returned $($globalHtg.Count)."
 }
 if ($preservedGuildHtg.Count -ne 0) {
   throw "A guild-scoped /htg command still exists after synchronization."
+}
+if ($globalApi.Count -ne 1) {
+  throw "Expected exactly one global /api command after synchronization; Discord returned $($globalApi.Count)."
+}
+if ($preservedGuildApi.Count -ne 0) {
+  throw "A guild-scoped /api command still exists after synchronization."
 }
 
 $removedNames = @($result.deleted_guild_commands | ForEach-Object { "/$($_.name)" })
@@ -65,4 +77,5 @@ if ($removedNames.Count -gt 0) {
 }
 
 Write-Host "Confirmed: exactly one global /htg command and no guild-scoped /htg duplicate." -ForegroundColor Green
+Write-Host "Confirmed: exactly one global /api command and no guild-scoped /api duplicate." -ForegroundColor Green
 Write-Host "Discord clients may take a few minutes to refresh global command labels." -ForegroundColor Yellow
