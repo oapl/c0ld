@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import vm from "node:vm";
 
 function workerContext(relativePath, overrides = {}) {
@@ -22,6 +22,9 @@ function workerContext(relativePath, overrides = {}) {
     atob,
     setTimeout,
     clearTimeout,
+    CompressionStream,
+    DecompressionStream,
+    structuredClone,
     ...overrides
   });
   new vm.Script(source, { filename: relativePath }).runInContext(context);
@@ -104,7 +107,13 @@ const discord = workerContext("../cloudflare/discord-search-interactions-worker.
 const discordSource = readFileSync(new URL("../cloudflare/discord-search-interactions-worker.js", import.meta.url), "utf8");
 const clanApiSource = readFileSync(new URL("../cloudflare/c0ld-clan-api-worker.js", import.meta.url), "utf8");
 const leagueApiSource = readFileSync(new URL("../cloudflare/yamo-league-api-worker.js", import.meta.url), "utf8");
+const leagueApi = workerContext("../cloudflare/yamo-league-api-worker.js", {
+  fetch: async () => Response.json({ status: "error" }, { status: 404 })
+});
 const clanLogDeliveryMigration = readFileSync(new URL("../supabase/migrations/20260820210000_add_clan_log_delivery_receipts.sql", import.meta.url), "utf8");
+const retainedHistoryMigration = readFileSync(new URL("../supabase/migrations/20260821053000_restore_complete_retained_global_battle_history.sql", import.meta.url), "utf8");
+const reconstructedRankMigration = readFileSync(new URL("../supabase/migrations/20260821061500_reconstruct_missing_final_global_ranks.sql", import.meta.url), "utf8");
+const participantRankMigration = readFileSync(new URL("../supabase/migrations/20260821064500_reconstruct_history_ranks_from_participation.sql", import.meta.url), "utf8");
 assert.equal(
   (discordSource.match(/if \(clanPath\.group === "compare"\)/g) || []).length,
   1,
@@ -132,6 +141,58 @@ assert.match(
   /source_mode: "leagues",[\s\S]{0,900}gain_1h: toNumber\(row\.gain_1h\),[\s\S]{0,150}gain_24h: toNumber\(row\.gain_24h\)/,
   "the global League search must preserve calculated player gains"
 );
+assert.match(clanApiSource, /url\.pathname === "\/api\/global\/battle-history"/, "history must support a direct retained-rank lookup by user ID");
+assert.match(discordSource, /fetchClanHistoryJson\(env, "\/api\/global\/battle-history"/, "/history must request retained ranks independently of current leaderboard membership");
+assert.match(retainedHistoryMigration, /from public\.c0ld_battle_global_final_snapshots final/, "raw finalized global snapshots must remain the first history source");
+assert.match(retainedHistoryMigration, /from public\.c0ld_battle_player_finals final/, "older compact player finals must remain available as a history fallback");
+assert.match(retainedHistoryMigration, /select \* from raw_archived[\s\S]*select \* from compact_archived[\s\S]*select \* from retained/, "history sources must retain raw, compact, and interval records");
+assert.match(reconstructedRankMigration, /from public\.c0ld_battle_player_finals final[\s\S]*final\.global_rank is null/, "rank reconstruction must only supplement compact rows whose global rank is missing");
+assert.match(reconstructedRankMigration, /candidate\.points > missing\.ranking_points[\s\S]*from public\.c0ld_global_rank_candidates candidate/, "missing ranks must be placed against the preserved final candidate distribution");
+assert.match(reconstructedRankMigration, /candidate\.points = missing\.ranking_points[\s\S]*candidate\.user_id < missing\.user_id/, "rank reconstruction must preserve the leaderboard user-ID tie break");
+assert.match(participantRankMigration, /from public\.c0ld_clan_snapshots snapshot[\s\S]*from public\.c0ld_clan_snapshots_archive snapshot/, "missing global ranks must be recoverable from both live and archived participation snapshots");
+assert.match(participantRankMigration, /select distinct on \(final_run\.battle_identity\)[\s\S]*participation\.fetched_at desc/, "rank reconstruction must use each participant's final retained battle observation");
+assert.match(participantRankMigration, /select distinct on \(candidate\.run_key, candidate\.user_id\)/, "the final candidate distribution must deduplicate players who appeared under more than one clan");
+assert.match(participantRankMigration, /select \* from raw_archived[\s\S]*select \* from reconstructed_participation[\s\S]*select \* from compact_archived/, "participation reconstruction must fill gaps without overriding authoritative raw finals");
+assert.match(clanApiSource, /supplementMissingRetainedGlobalRanks\(env, clan, userId/, "retained history must recover missing ranks in the worker when archive linkage is absent");
+assert.match(clanApiSource, /resolveGlobalCandidateRank\(env, finalRun\.run_key/, "preserved final candidate runs must be used for exact missing-rank recovery");
+assert.match(clanApiSource, /candidateCount = await supabaseCount[\s\S]*?run_key: `eq\.\$\{finalRun\.run_key\}`[\s\S]*?\}\)\.catch/, "retained candidate recovery must count the complete battle-specific run");
+assert.doesNotMatch(clanApiSource, /candidateCount = await supabaseCount[\s\S]*?run_key: `eq\.\$\{finalRun\.run_key\}`,[\s\S]*?battle_key:[\s\S]*?\}\)\.catch/, "legacy retained candidates must not be excluded by a redundant row-level battle key");
+assert.match(clanApiSource, /resolveGlobalCandidateRank\(env, finalRun\.run_key,[\s\S]*?battle_key: ""/, "exact retained-rank recovery must rank across the whole battle-specific run");
+assert.match(clanApiSource, /resolveArchivedFinalDistributionRank\([\s\S]*?global_rank_recovered_from: "archived_final_distribution"/, "pruned raw candidates must fall back to the permanent final distribution");
+assert.match(clanApiSource, /source_kind: "eq\.global_candidate"[\s\S]*?global_points: `gt\.\$\{points\}`[\s\S]*?user_id: `lt\.\$\{userId\}`/, "an unranked participant must be placed by points and the global user-ID tie break");
+assert.match(clanApiSource, /status: "in\.\(ok,complete,completed\)"/, "history recovery must query completed battle runs directly instead of rejecting older valid runs");
+assert.match(clanApiSource, /estimateArchivedGlobalRankFromAnchors/, "deleted historical runs must fall back to neighboring archived rank anchors");
+assert.match(discordSource, /estimated \? "~" : ""/, "estimated historical ranks must be visibly marked instead of presented as exact");
+assert.match(discordSource, /const limits = \[500\];/, "League history should not scan thousands of redundant active-period observations");
+assert.match(leagueApiSource, /key: "tap-2026"[\s\S]*end_at: "2026-08-01T16:00:00\.000Z"/, "Tap must retain its stored event boundary");
+assert.match(leagueApiSource, /key: "garden-2026"[\s\S]*start_at: "2026-08-01T16:00:00\.000Z"[\s\S]*end_at: "2026-08-15T16:00:00\.000Z"/, "Garden League must retain the period containing its OAPL final");
+assert.match(discordSource, /sortLeagueHistoryRecords\(attachLeagueGlobalHistoryRows/, "League history display order must follow event dates rather than fallback insertion order");
+assert.match(discordSource, /options\.view === "league"[\s\S]*fetchLeagueHistoryJson/, "the initial Clan history card must not block on unrelated League history");
+assert.match(discordSource, /league_loaded: options\.view === "league"/, "history data must record whether the League API was actually loaded");
+assert.match(discordSource, /view === "league" && history\?\.league_loaded !== true[\s\S]*hydrateCachedLeagueHistoryMessage/, "the League button must hydrate a Clan-only render cache");
+assert.match(discordSource, /historyLeagueHydrationsInFlight\.get\(hydrationKey\)[\s\S]*historyLeagueHydrationsInFlight\.set\(hydrationKey, hydration\)/, "repeated League button presses must share one in-flight history lookup");
+assert.match(discordSource, /league_unavailable: options\.view === "league" && leagueHistory === null/, "an intentionally skipped League request must not be labeled unavailable");
+assert.doesNotMatch(discordSource, /history alternate-view cache warm failed/, "the initial response must not spend its Worker lifetime warming the unrequested history view");
+assert.deepEqual(
+  { ...api.interpolateArchivedGlobalRank([
+    { rank: 163, points: 77_750_000, total: 36_974 },
+    { rank: 186, points: 77_560_000, total: 36_974 }
+  ], 77_613_485) },
+  { rank: 180, totalGlobalPlayers: 36_974 },
+  "a deleted run must use transparent interpolation between its nearest surviving rank anchors"
+);
+assert.match(discord.historyCardRank(180, 36_974, true), /^~#180\//, "estimated ranks must render with a visible approximation marker");
+const detachedRetainedHistory = discord.summarizeGlobalHistory({
+  row: null,
+  battle_history: [{
+    battle_key: "NinjaBattle2026",
+    battle_display_name: "Ninja Battle 2026",
+    global_rank: 77,
+    global_points: 12345,
+    total_global_players: 30000
+  }]
+});
+assert.equal(detachedRetainedHistory[0].global_rank, 77, "retained ranks must load even when the player has no current League/global-search row");
 
 const invalidEditCalls = [];
 const invalidEditDiscord = workerContext("../cloudflare/discord-search-interactions-worker.js", {
@@ -246,38 +307,225 @@ const chartComparison = discord.buildDirectComparisonMessage(
   {},
   { filename: "player-compare.png", bytes: new Uint8Array([1, 2, 3]) }
 );
-const chartComparisonEmbed = chartComparison.embeds[0];
-const chartComparisonText = [
-  chartComparisonEmbed.title,
-  chartComparisonEmbed.description,
-  ...chartComparisonEmbed.fields.flatMap(field => [field.name, field.value])
-].join("\n");
-assert.doesNotMatch(chartComparisonText, /⏱️ Projection:/, "the image chart should replace the text projection block");
-assert.doesNotMatch(chartComparisonText, /Player Comparison|Leagues|Updated|1 Hr:|12 Hr:|24 Hr:/, "the text area should omit metadata and point-rate lines");
+
+assert.deepEqual(
+  Array.from(leagueApi.knownLeagueNamesFromStoredPlayerRows([
+    {
+      league_name: "GLOBAL_LEAGUE_PLAYER_POOL",
+      raw_member: { source_league_name: "FreshLeague" },
+      raw_league: { Name: "FreshLeague" }
+    },
+    { league_name: "OlderLeague", raw_member: {}, raw_league: {} }
+  ])),
+  ["FreshLeague", "OlderLeague"],
+  "player recovery should extract real League names from aggregate and ordinary stored rows"
+);
+const recoveredLeaguePlayer = await leagueApi.recoverSoloLeaguePlayerFromKnownLocations(
+  {},
+  "current-run",
+  33492395,
+  async () => [{
+    league_run_key: "previous-run",
+    league_name: "GLOBAL_LEAGUE_PLAYER_POOL",
+    raw_member: { source_league_name: "Competitive" },
+    raw_league: { Name: "Competitive" }
+  }],
+  async leagueName => ({
+    data: {
+      Name: leagueName,
+      ID: "league-id",
+      Icon: "rbxassetid://123",
+      Points: 25_000_000,
+      Owner: { UserID: 33492395, DisplayName: "unoyea" },
+      Members: [],
+      PointContributions: [{ UserID: 33492395, DisplayName: "unoyea", Points: 18_000_000 }]
+    }
+  })
+);
+assert.equal(recoveredLeaguePlayer.user_id, 33492395);
+assert.equal(recoveredLeaguePlayer.league_name, "Competitive");
+assert.equal(recoveredLeaguePlayer.points, 18_000_000);
+assert.equal(recoveredLeaguePlayer.source, "live-known-league-roster");
+assert.match(
+  leagueApiSource,
+  /completed:\s*Boolean\(metadataRow\)/,
+  "player-pool completion must not become false merely because one searched user is absent"
+);
 assert.equal(chartComparison._file.filename, "player-compare.png");
-assert.equal(chartComparisonEmbed.image.url, "attachment://player-compare.png", "the comparison chart should remain one full-width embed image");
-assert.equal(chartComparisonEmbed.fields.length, 3, "the text card should contain two player columns and one VS column");
-assert.equal(chartComparisonEmbed.fields.every(field => field.inline === true), true, "all three comparison fields should render inline");
-assert.equal(chartComparisonEmbed.fields[0].name, "ALPHA", "the first player name should use the clean native field label");
-assert.equal(chartComparisonEmbed.fields[1].name, "🚶‍♀️‍➡️ VS 🚶‍♂️", "the middle column should place the walking emotes directly around VS");
-assert.equal(chartComparisonEmbed.fields[1].value, "\u200b", "the middle VS column must not include any other visible text");
-assert.equal(chartComparisonEmbed.fields[2].name, "BETA", "the second player name should use the clean native field label");
-assert.doesNotMatch(chartComparisonText, /###/, "embed fields must not expose unsupported heading markup");
-assert.doesNotMatch(chartComparisonText, /:xone:/, "player comparison text must not contain the xone placeholder");
-assert.equal(chartComparisonEmbed.thumbnail.url, "https://example.com/beta.png", "the projected 24-hour winner should appear as the embed thumbnail");
-assert.deepEqual(Array.from(chartComparison.components), [], "the two-column player embed must not retain thumbnail sections");
-assert.match(chartComparisonEmbed.description, /BETA.*take the lead.*24 hours/, "the embed should state the projected outcome without repeating projection figures");
-assert.equal("title" in chartComparisonEmbed, false, "the player columns must not be preceded by a duplicate title line");
-assert.match(chartComparisonEmbed.footer.text, /^Updated ·/, "the update label should sit in the footer below the graph");
-assert.equal(chartComparisonEmbed.timestamp, "2026-08-20T12:00:00.000Z", "the footer should carry Discord's localized update timestamp");
-assert.match(discordSource, /projectionHours:\s*24/, "player comparison charts should show the full 24-hour outlook");
-assert.match(discordSource, /searchChartDrawComparisonHeader/, "player comparison charts should use the two-avatar VS header");
-assert.match(discordSource, /comparisonDrawRaceInsights/, "player comparisons should use race-specific insight cards instead of the League table");
+assert.equal(chartComparison.embeds, undefined, "a rendered player comparison should be an image-only response");
+assert.equal(chartComparison.components, undefined, "the image-only response must not retain a text card");
+assert.match(discordSource, /renderDirectPlayerComparisonChartPng/, "player comparisons should use the dedicated image renderer");
+assert.match(discordSource, /\["PREVIOUS 24 HOURS", "PROJECTED 24 HOURS"\]/, "the chart headings should use the requested plain-language labels");
+assert.match(discordSource, /const group = player\.subtitle \|\| `\$\{player\.groupKind\}: \$\{player\.groupName\}`/, "comparison headers should support player groups and combined-roster labels");
+assert.match(discordSource, /buildDirectComparisonChartAttachment\(type, firstEntry, secondEntry, env\)/, "Clans, Leagues, and players should all use the shared comparison image path");
 assert.match(discordSource, /\[1, 6, 12, 24\]/, "the comparison image should summarize 1, 6, 12, and 24-hour horizons");
-assert.match(discordSource, /MAX CHASE/, "each horizon should include the trailer's observed maximum pace");
-assert.match(discordSource, /PRESSURED[\s\S]{0,300}LEAD HOLDS/, "multi-horizon cards should distinguish a vulnerable lead from a secure one");
-assert.match(discordSource, /const endLabel = `\$\{projectionHours\} Hrs`/, "the forecast boundary should carry its golden hour label");
-assert.match(discordSource, /yAxisGutter\.x \+ Math\.max\(8, \(yAxisGutter\.w - labelWidth\) \/ 2\)/, "point-axis labels should be centered in their gutter");
+assert.doesNotMatch(discordSource, /directComparisonDrawLegend/, "the chart should not repeat the player color index");
+assert.doesNotMatch(discordSource, /directComparisonUpdatedLabel/, "the chart should not render bottom credit or update text");
+assert.doesNotMatch(discordSource, /directComparisonDrawOutlookCard/, "the graph should occupy the former outlook-card area");
+const entityChartComparison = discord.buildDirectComparisonMessage(
+  "league",
+  { name: "ALPHA", rank: 4, points: 10_000_000 },
+  { name: "BETA", rank: 7, points: 9_000_000 },
+  {},
+  { filename: "league-compare.png", bytes: new Uint8Array([1, 2, 3]) }
+);
+assert.equal(entityChartComparison._file.filename, "league-compare.png");
+assert.equal(entityChartComparison.components, undefined, "a rendered League comparison should use the same image-only response as players");
+const combinedEntityHistory = discord.aggregateDirectComparisonEntityHistory([
+  { snapshot_id: "one", fetched_at: "2026-08-20T10:00:00.000Z", user_id: 1, points: 100 },
+  { snapshot_id: "one", fetched_at: "2026-08-20T10:00:00.000Z", user_id: 2, points: 250 },
+  { snapshot_id: "two", fetched_at: "2026-08-20T11:00:00.000Z", user_id: 1, points: 175 },
+  { snapshot_id: "two", fetched_at: "2026-08-20T11:00:00.000Z", user_id: 2, points: 325 }
+], { name: "ALPHA", seriesKey: "league-1" }, "league");
+assert.deepEqual(
+  Array.from(combinedEntityHistory, row => [row.comparison_key, row.points]),
+  [["league-1", 350], ["league-1", 500]],
+  "League and Clan chart history must sum every member at each observation"
+);
+const redactedLeagueHistory = discord.aggregateDirectComparisonEntityHistory([
+  { snapshot_id: "one", fetched_at: "2026-08-20T10:00:00.000Z", league_points: 500, user_id: 1, points: 200 },
+  { snapshot_id: "one", fetched_at: "2026-08-20T10:00:00.000Z", user_id: 2, points_redacted: true },
+  { snapshot_id: "one", fetched_at: "2026-08-20T10:00:00.000Z", league_points: 500, user_id: 3, points: 175 }
+], { name: "APPY", seriesKey: "league-1" }, "league");
+assert.equal(
+  redactedLeagueHistory[0].points,
+  500,
+  "League comparison history may use the public aggregate total without exposing a redacted member row"
+);
+assert.match(
+  leagueApiSource,
+  /league_rank:\s*hourlySlotMs === null\s*\? \(liveLeagueRank \?\? storedLeagueRank\)/,
+  "current League comparisons should prefer the live leaderboard rank over the periodic stored rank"
+);
+assert.deepEqual(
+  Array.from(discord.directComparisonIntervalSamples([
+    { t: Date.parse("2026-08-20T10:30:39.000Z"), points: 100 },
+    { t: Date.parse("2026-08-20T10:31:39.000Z"), points: 100 },
+    { t: Date.parse("2026-08-20T10:32:15.000Z"), points: 100 },
+    { t: Date.parse("2026-08-20T10:47:15.000Z"), points: 140 }
+  ], 15), row => [new Date(row.t).toISOString(), row.points]),
+  [
+    ["2026-08-20T10:32:15.000Z", 100],
+    ["2026-08-20T10:47:15.000Z", 140]
+  ],
+  "duplicate on-demand pulls inside one 15-minute interval must not bias comparison metrics as extra zero-rate samples"
+);
+let leagueRankLookupCalls = 0;
+assert.equal(
+  await discord.resolveDirectComparisonPlayerRank(
+    { user_id: 2, username: "AgentP_0928" },
+    { source_mode: "leagues" },
+    "AgentP_0928",
+    {},
+    async (query, userId) => {
+      leagueRankLookupCalls += 1;
+      assert.equal(query, "AgentP_0928");
+      assert.equal(userId, 2);
+      return { rank: 417 };
+    }
+  ),
+  417,
+  "a League comparison must recover a missing global rank from the League-player pool"
+);
+assert.equal(
+  await discord.resolveDirectComparisonPlayerRank(
+    { user_id: 1, global_rank: 2159 },
+    { source_mode: "leagues" },
+    "Cinnamowopal",
+    {},
+    async () => {
+      leagueRankLookupCalls += 1;
+      return { rank: 9999 };
+    }
+  ),
+  2159,
+  "an exact rank already supplied by global search must remain authoritative"
+);
+assert.equal(leagueRankLookupCalls, 1, "the fallback lookup should run only for a missing League rank");
+const patternedForecast = discord.directComparisonForecastProfile([], {
+  gain1h: 100,
+  gain6h: 300,
+  gain12h: 900,
+  gain24h: 2100
+}, 0);
+assert.deepEqual(
+  Array.from(patternedForecast.bands, band => [band.start, band.end, band.rate]),
+  [[0, 1, 100], [1, 6, 40], [6, 12, 100], [12, 24, 100]],
+  "each projected segment should reproduce the remaining contribution from its matching historical window"
+);
+assert.deepEqual(
+  [1, 6, 12, 24].map(hours => discord.directComparisonProjectedGain({ forecastBands: patternedForecast.bands }, hours)),
+  [100, 300, 900, 2100],
+  "projection endpoints should exactly reproduce the previous 1h, 6h, 12h, and 24h cumulative gains"
+);
+const monotonicForecast = discord.directComparisonForecastProfile([], {
+  gain1h: 500,
+  gain6h: 300,
+  gain12h: 700,
+  gain24h: 650
+}, 0);
+assert.deepEqual(
+  [1, 6, 12, 24].map(hours => monotonicForecast.gains[hours]),
+  [500, 500, 700, 700],
+  "inconsistent sparse anchors must be clamped so projected point totals never move backward"
+);
+const disjointPatternNow = Date.parse("2026-08-20T12:00:00.000Z");
+const disjointPatternSamples = [{ t: disjointPatternNow - 24 * 3600000, points: 0 }];
+let disjointPatternPoints = 0;
+for (let age = 23; age >= 0; age -= 1) {
+  disjointPatternPoints += age >= 12 ? 10 : age >= 6 ? 20 : age >= 1 ? 30 : 40;
+  disjointPatternSamples.push({ t: disjointPatternNow - age * 3600000, points: disjointPatternPoints });
+}
+const observedPatternBands = discord.directComparisonObservedPatternBands(disjointPatternSamples, disjointPatternNow);
+assert.deepEqual(
+  Array.from(observedPatternBands, band => [band.start, band.end, band.gain, band.coverage]),
+  [[0, 1, 40, 1], [1, 6, 150, 1], [6, 12, 120, 1], [12, 24, 120, 1]],
+  "the forecast must measure the distinct previous 1h, hours 2-6, hours 7-12, and hours 13-24 slices"
+);
+const observedPatternForecast = discord.directComparisonForecastProfile(observedPatternBands, {
+  gain1h: 0,
+  gain6h: 0,
+  gain12h: 0,
+  gain24h: 0
+}, 0);
+assert.deepEqual(
+  [1, 6, 12, 24].map(hours => observedPatternForecast.gains[hours]),
+  [40, 190, 310, 430],
+  "fully observed pattern slices must override stale zero-valued API anchors"
+);
+const comparisonFixtureNow = Date.parse("2026-08-20T12:00:00.000Z");
+const comparisonHistoryRows = [];
+let alphaPoints = 900_000;
+let betaPoints = 980_000;
+for (let hour = 24; hour >= 0; hour -= 1) {
+  alphaPoints += 18_000 + (24 - hour) * 200;
+  betaPoints += 13_000 + ((24 - hour) % 3) * 500;
+  const fetchedAt = new Date(comparisonFixtureNow - hour * 3600000).toISOString();
+  comparisonHistoryRows.push({ user_id: 1, points: alphaPoints, fetched_at: fetchedAt });
+  comparisonHistoryRows.push({ user_id: 2, points: betaPoints, fetched_at: fetchedAt });
+}
+const comparisonPng = await discord.renderDirectPlayerComparisonChartPng({}, comparisonHistoryRows, [
+  { name: "ALPHA", userId: 1, rank: 121, points: alphaPoints, group: "Moonlight", sourceMode: "leagues", updatedAt: "2026-08-20T12:00:00.000Z" },
+  { name: "BETA", userId: 2, rank: 98, points: betaPoints, group: "Starlight", sourceMode: "leagues", updatedAt: "2026-08-20T12:00:00.000Z" }
+], {});
+const comparisonPngBytes = Buffer.from(comparisonPng);
+assert.equal(comparisonPngBytes.subarray(1, 4).toString("ascii"), "PNG");
+assert.equal(comparisonPngBytes.readUInt32BE(16), 1600);
+assert.equal(comparisonPngBytes.readUInt32BE(20), 1040);
+if (process.env.WRITE_COMPARE_PREVIEW) writeFileSync(process.env.WRITE_COMPARE_PREVIEW, comparisonPngBytes);
+const entityHistoryRows = comparisonHistoryRows.map(row => ({
+  ...row,
+  comparison_key: row.user_id === 1 ? "league-1" : "league-2",
+  user_id: null
+}));
+const entityComparisonPng = await discord.renderDirectPlayerComparisonChartPng({}, entityHistoryRows, [
+  { name: "MOONLIGHT", seriesKey: "league-1", comparisonType: "league", memberCount: 4, rank: 12, points: alphaPoints, updatedAt: "2026-08-20T12:00:00.000Z" },
+  { name: "STARLIGHT", seriesKey: "league-2", comparisonType: "league", memberCount: 4, rank: 18, points: betaPoints, updatedAt: "2026-08-20T12:00:00.000Z" }
+], {});
+const entityComparisonPngBytes = Buffer.from(entityComparisonPng);
+assert.equal(entityComparisonPngBytes.readUInt32BE(16), 1600);
+assert.equal(entityComparisonPngBytes.readUInt32BE(20), 1040);
+if (process.env.WRITE_ENTITY_COMPARE_PREVIEW) writeFileSync(process.env.WRITE_ENTITY_COMPARE_PREVIEW, entityComparisonPngBytes);
 const comparisonMembers = discord.leagueChartMembers({
   rows: [{ user_id: 123, display_name: "Tester", global_rank: 47, points: 1_000 }]
 }, { preserveOrder: true });

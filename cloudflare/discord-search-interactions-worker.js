@@ -81,7 +81,7 @@ const CLAN_LOG_DELIVERY_LEASE_SECONDS = 180;
 const CLAN_ACTIVITY_EMBED_WIDTH_ANCHOR = "\u2800".repeat(44);
 const DEFAULT_CLAN_TRACKER_POST_INTERVAL_MINUTES = 20;
 const DEFAULT_CLAN_TRACKER_POST_OFFSET_MINUTES = 11;
-const DISCORD_INTERACTION_BUILD_ID = "discord-player-compare-multi-horizon-2026-08-20t";
+const DISCORD_INTERACTION_BUILD_ID = "discord-league-history-ordered-2026-08-21z13";
 const SELF_TIMEOUT_DAYS = 7;
 const DEFAULT_T_COMMAND_GUILD_ID = "1457088639006670979";
 const DEFAULT_T_COMMAND_ROLE_ID = "1489032322056589413";
@@ -96,6 +96,7 @@ const TOP_COMMAND_EMBED_WIDTH_ANCHOR = "\u2800".repeat(72);
 const CLAN_LOOKUP_PAGE_SIZE = 20;
 let chartDuckImagePromise = null;
 const historyRenderMemoryCache = new Map();
+const historyLeagueHydrationsInFlight = new Map();
 let clanLogScheduledRunPromise = null;
 let clanTrackerScheduledRunPromise = null;
 const discordVerificationKeyPromises = new Map();
@@ -7816,9 +7817,7 @@ async function completeDirectComparisonInteraction(interaction, env, comparisonT
       fetchDirectComparisonEntry(env, type, first),
       fetchDirectComparisonEntry(env, type, second)
     ]), env);
-    const comparisonChart = type === "player"
-      ? await buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntry, env).catch(() => null)
-      : null;
+    const comparisonChart = await buildDirectComparisonChartAttachment(type, firstEntry, secondEntry, env).catch(() => null);
     await editOriginalInteraction(interaction, buildDirectComparisonMessage(type, firstEntry, secondEntry, env, comparisonChart));
   } catch (err) {
     await editOriginalInteraction(interaction, commandErrorMessage("Comparison failed", err, env)).catch(() => null);
@@ -7860,7 +7859,9 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
       detail: String(row.battle_display_name || payload.display_name || payload.battle || "").trim(),
       context: String(payload.display_name || payload.battle || row.battle_display_name || "Current Clan Battle").trim(),
       updatedAt: payload.snapshot_at || payload.generated_at || row.snapshot_at || null,
-      imageUrl: absoluteProfileAssetUrl(row.icon_url || payload.icon_url || payload.clan_icon, env)
+      imageUrl: absoluteProfileAssetUrl(row.icon_url || payload.icon_url || payload.clan_icon, env),
+      memberCount: positiveInteger(row.member_count ?? row.clan_member_count ?? payload.clan_member_count),
+      runKey: String(payload.battle || payload.battle_key || row.battle_key || "").trim()
     };
   }
 
@@ -7873,8 +7874,8 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
     const pace = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.gain_1h ?? row.hourly_points) || 0), 0);
     const gain12hValues = rows.map(row => finiteNumber(row.gain_12h)).filter(value => value !== null);
     const gain24hValues = rows.map(row => finiteNumber(row.gain_24h)).filter(value => value !== null);
-    const points = finiteNumber(payload.league_points)
-      ?? rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.total_points ?? row.points) || 0), 0);
+    const visiblePoints = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.total_points ?? row.points) || 0), 0);
+    const points = finiteNumber(payload.league_points) ?? visiblePoints;
     const projection = await fetchLeagueRewardRankProjection(
       payload.league_name || requested,
       payload.league_id,
@@ -7889,7 +7890,8 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
       points,
       pace,
       gain1h: pace,
-      gain6h: null,
+      gain6h: rows.map(row => finiteNumber(row.gain_6h)).filter(value => value !== null)
+        .reduce((sum, value) => sum + Math.max(0, value), 0) || null,
       gain12h: gain12hValues.length ? gain12hValues.reduce((sum, value) => sum + Math.max(0, value), 0) : null,
       gain24h: gain24hValues.length ? gain24hValues.reduce((sum, value) => sum + Math.max(0, value), 0) : null,
       projectedRank: positiveInteger(projection?.projected_rank_1h),
@@ -7897,7 +7899,9 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
       detail: `${fullNumber(rows.length)} member${rows.length === 1 ? "" : "s"} recorded`,
       context: String(payload.league_run_label || payload.league_run_key || "Current League").trim(),
       updatedAt: payload.snapshot_at || payload.generated_at || payload.fetched_at || null,
-      imageUrl: leagueIconUrl(payload.league_icon)
+      imageUrl: leagueIconUrl(payload.league_icon),
+      memberCount: rows.length,
+      runKey: String(payload.league_run_key || "").trim()
     };
   }
 
@@ -7914,10 +7918,13 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
   const points = finiteNumber(row.points ?? row.total_points ?? row.global_points);
   const pace = finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain);
   const group = String(row.source_clan || row.clan_name || row.clan || row.league_name || "").trim();
+  const userId = positiveInteger(row.user_id ?? row.roblox_user_id);
+  const sourceMode = searchResponseSourceMode(payload, row);
+  const playerRank = await resolveDirectComparisonPlayerRank(row, payload, requested, env);
   return {
     type,
     name: String(searchUsername(row) || displayName(row) || requested).trim(),
-    rank: positiveInteger(row.global_rank ?? row.rank),
+    rank: playerRank,
     points,
     pace,
     gain1h: finiteNumber(row.gain_1h ?? row.hourly_points ?? row.one_hour_gain),
@@ -7930,12 +7937,117 @@ async function fetchDirectComparisonEntry(env, comparisonType, query) {
     context: String(payload.source_label || payload.event_name || payload.run?.event_name || payload.run?.battle_display_name || "Current Global Leaderboard").trim(),
     updatedAt: payload.snapshot_at || payload.generated_at || row.fetched_at || row.snapshot_at || null,
     imageUrl: absoluteProfileAssetUrl(row.avatar_url || row.avatarUrl || row.thumbnail_url || row.thumbnailUrl, env),
-    userId: positiveInteger(row.user_id ?? row.roblox_user_id),
+    userId,
     group,
-    sourceMode: String(payload.source_mode || "").trim().toLowerCase(),
+    sourceMode,
     runKey: String(payload.league_run_key || payload.run?.run_key || "").trim(),
     historyRows: Array.isArray(payload.history) ? payload.history : []
   };
+}
+
+async function resolveDirectComparisonPlayerRank(row, payload, query, env, rankLookup = fetchLeaguePlayerPoolRank) {
+  const directRank = positiveInteger(row?.global_rank ?? row?.rank);
+  if (directRank) return directRank;
+  if (searchResponseSourceMode(payload, row) !== "leagues") return null;
+  const userId = positiveInteger(row?.user_id ?? row?.roblox_user_id);
+  const rankPayload = await rankLookup(query, userId, env).catch(() => null);
+  return positiveInteger(rankPayload?.rank);
+}
+
+async function buildDirectComparisonChartAttachment(comparisonType, firstEntry, secondEntry, env) {
+  const type = String(comparisonType || "").trim().toLowerCase();
+  if (type === "player") return buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntry, env);
+  if (!["league", "clan"].includes(type)) return null;
+
+  const entries = [firstEntry, secondEntry].filter(Boolean).map((entry, index) => ({
+    ...entry,
+    comparisonType: type,
+    seriesKey: `${type}-${index + 1}`
+  }));
+  if (entries.length !== 2) return null;
+
+  const historyPayloads = await Promise.all(entries.map(entry => (
+    type === "league"
+      ? fetchLeagueHistoryPayload(entry.name, env, 24, entry.runKey, { limit: 50000 })
+      : fetchClanHistoryJson(env, "/api/history", {
+          clan: entry.name,
+          battle: entry.runKey || undefined,
+          hours: 26,
+          limit: 50000,
+          order: "asc"
+        })
+  ).catch(() => ({ rows: [] }))));
+  const aggregatedHistory = entries.map((entry, index) => aggregateDirectComparisonEntityHistory(
+    historyPayloads[index]?.rows,
+    entry,
+    type
+  ));
+  aggregatedHistory.forEach((rows, index) => {
+    if (!entries[index].memberCount) entries[index].memberCount = positiveInteger(rows[rows.length - 1]?.member_count);
+  });
+  const historyRows = aggregatedHistory.flat();
+  const latestAt = entries
+    .map(entry => new Date(entry.updatedAt || 0).getTime())
+    .filter(value => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a)[0] || Date.now();
+  const payload = {
+    snapshot_at: new Date(latestAt).toISOString(),
+    rows: entries.map(entry => ({
+      comparison_key: entry.seriesKey,
+      display_name: entry.name,
+      total_points: entry.points,
+      points: entry.points,
+      gain_1h: entry.gain1h,
+      gain_6h: entry.gain6h,
+      gain_12h: entry.gain12h,
+      gain_24h: entry.gain24h
+    }))
+  };
+  const bytes = await renderDirectPlayerComparisonChartPng(payload, historyRows, entries, env);
+  if (!bytes?.byteLength) return null;
+  return {
+    filename: `${type}-compare-${chartFilenamePart(firstEntry.name)}-vs-${chartFilenamePart(secondEntry.name)}.png`,
+    bytes
+  };
+}
+
+function aggregateDirectComparisonEntityHistory(rows, entry, comparisonType) {
+  const groups = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (comparisonType === "league" && isLeagueAggregateMemberRow(row)) continue;
+    const fetchedAt = row?.fetched_at || row?.snapshot_at || row?.updated_at || null;
+    const t = new Date(fetchedAt || 0).getTime();
+    const points = finiteNumber(row?.total_points ?? row?.points ?? row?.member_points ?? row?.clan_points);
+    if (!Number.isFinite(t) || t <= 0 || points === null) continue;
+    const snapshotKey = String(row?.snapshot_id || `${t}`).trim();
+    const group = groups.get(snapshotKey) || {
+      t,
+      fetchedAt: new Date(t).toISOString(),
+      members: new Map(),
+      anonymous: 0,
+      aggregatePoints: null
+    };
+    const aggregatePoints = finiteNumber(row?.league_points);
+    if (aggregatePoints !== null) group.aggregatePoints = Math.max(0, aggregatePoints);
+    const userId = positiveInteger(row?.user_id ?? row?.roblox_user_id);
+    if (userId) group.members.set(String(userId), Math.max(0, points));
+    else group.anonymous += Math.max(0, points);
+    groups.set(snapshotKey, group);
+  }
+  return [...groups.values()]
+    .map(group => ({
+      comparison_key: entry.seriesKey,
+      display_name: entry.name,
+      fetched_at: group.fetchedAt,
+      member_count: group.members.size,
+      points: comparisonType === "league" && group.aggregatePoints !== null
+        ? group.aggregatePoints
+        : [...group.members.values()].reduce((sum, value) => sum + value, group.anonymous),
+      total_points: comparisonType === "league" && group.aggregatePoints !== null
+        ? group.aggregatePoints
+        : [...group.members.values()].reduce((sum, value) => sum + value, group.anonymous)
+    }))
+    .sort((left, right) => new Date(left.fetched_at) - new Date(right.fetched_at));
 }
 
 async function buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntry, env) {
@@ -7992,76 +8104,383 @@ async function buildDirectPlayerComparisonChartAttachment(firstEntry, secondEntr
       gain_24h: entry.gain24h
     }))
   };
-  const bytes = await renderLeagueMemberGrowthChartPng(payload, historyRows, {
-    hours: 24,
-    projectionHours: 24,
-    comparison: true,
-    env
-  });
+  const bytes = await renderDirectPlayerComparisonChartPng(payload, historyRows, entries, env);
   if (!bytes?.byteLength) return null;
   return {
     filename: `player-compare-${chartFilenamePart(firstEntry.name)}-vs-${chartFilenamePart(secondEntry.name)}.png`,
-    bytes,
-    outlook: directPlayerComparisonOutlook(firstEntry, secondEntry, 24)
+    bytes
   };
 }
 
-function directPlayerSustainedPace(entry) {
-  const windows = [
+function directComparisonRenderProfile(entry, historyRows) {
+  const userId = positiveInteger(entry?.userId);
+  const seriesKey = String(entry?.seriesKey || "").trim();
+  const byTime = new Map();
+  for (const row of Array.isArray(historyRows) ? historyRows : []) {
+    const rowSeriesKey = String(row?.comparison_key || "").trim();
+    if (seriesKey && rowSeriesKey && rowSeriesKey !== seriesKey) continue;
+    const rowId = positiveInteger(row?.user_id ?? row?.roblox_user_id);
+    if (userId && rowId && rowId !== userId) continue;
+    const t = new Date(row?.fetched_at || row?.snapshot_at || row?.updated_at || row?.created_at || 0).getTime();
+    const points = finiteNumber(row?.points ?? row?.total_points ?? row?.global_points ?? row?.member_points ?? row?.clan_points);
+    if (!Number.isFinite(t) || t <= 0 || points === null) continue;
+    byTime.set(t, { t, points });
+  }
+  const currentTime = new Date(entry?.updatedAt || 0).getTime();
+  const currentPoints = Math.max(0, finiteNumber(entry?.points) || 0);
+  if (Number.isFinite(currentTime) && currentTime > 0) byTime.set(currentTime, { t: currentTime, points: currentPoints });
+  const samples = directComparisonIntervalSamples([...byTime.values()], 15);
+  if (!samples.length) samples.push({ t: Date.now(), points: currentPoints });
+  const comparisonType = String(entry?.comparisonType || "player").trim().toLowerCase();
+  const memberCount = positiveInteger(entry?.memberCount);
+  return {
+    entry,
+    name: String(entry?.name || "Unknown").trim() || "Unknown",
+    rank: positiveInteger(entry?.rank),
+    points: currentPoints,
+    groupKind: entry?.sourceMode === "leagues" ? "League" : "Clan",
+    groupName: String(entry?.group || "Unknown").trim() || "Unknown",
+    subtitle: comparisonType === "player"
+      ? `${entry?.sourceMode === "leagues" ? "League" : "Clan"}: ${String(entry?.group || "Unknown").trim() || "Unknown"}`
+      : `${memberCount ? fullNumber(memberCount) : "ALL"} PLAYERS COMBINED`,
+    comparisonType,
+    seriesKey,
+    imageUrl: String(entry?.imageUrl || "").trim(),
+    userId,
+    samples,
+    pace: directComparisonPaceProfile(samples, entry)
+  };
+}
+
+function directComparisonIntervalSamples(samples, intervalMinutes = 15) {
+  const intervalMs = Math.max(1, finiteNumber(intervalMinutes) || 15) * 60 * 1000;
+  const buckets = new Map();
+  for (const sample of Array.isArray(samples) ? samples : []) {
+    if (!Number.isFinite(sample?.t) || !Number.isFinite(sample?.points)) continue;
+    const bucket = Math.floor(sample.t / intervalMs);
+    const existing = buckets.get(bucket);
+    if (!existing || sample.t >= existing.t) buckets.set(bucket, sample);
+  }
+  return [...buckets.values()].sort((left, right) => left.t - right.t);
+}
+
+function directComparisonPaceProfile(samples, entry = {}) {
+  const ordered = (Array.isArray(samples) ? samples : [])
+    .filter(item => Number.isFinite(item?.t) && Number.isFinite(item?.points))
+    .sort((left, right) => left.t - right.t);
+  const latestT = ordered[ordered.length - 1]?.t || Date.now();
+  const gains = [];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const durationHours = (ordered[index].t - ordered[index - 1].t) / 3600000;
+    if (!(durationHours > 0) || durationHours > 1.5) continue;
+    gains.push(Math.max(0, ordered[index].points - ordered[index - 1].points) / durationHours);
+  }
+  const windows = [1, 6, 12, 24].map(hours => {
+    const cutoff = latestT - hours * 3600000;
+    const visible = ordered.filter(item => item.t >= cutoff && item.t <= latestT);
+    const first = visible[0] || null;
+    const last = visible[visible.length - 1] || null;
+    const coveredHours = first && last ? Math.max(0, (last.t - first.t) / 3600000) : 0;
+    const gain = first && last ? Math.max(0, last.points - first.points) : 0;
+    return { hours, rate: coveredHours > 0 ? gain / coveredHours : 0, coveredHours, observations: visible.length };
+  });
+  const fallbackRates = [
     [entry?.gain24h, 24],
     [entry?.gain12h, 12],
     [entry?.gain6h, 6],
     [entry?.gain1h ?? entry?.pace, 1]
-  ];
-  for (const [gainValue, hours] of windows) {
-    const gain = finiteNumber(gainValue);
-    if (gain !== null && gain >= 0) return gain / hours;
-  }
-  return 0;
-}
-
-function directPlayerMaximumPace(entry) {
-  const rates = [
-    [entry?.gain1h ?? entry?.pace, 1],
-    [entry?.gain6h, 6],
-    [entry?.gain12h, 12],
-    [entry?.gain24h, 24]
-  ].map(([gainValue, hours]) => {
-    const gain = finiteNumber(gainValue);
-    return gain !== null && gain >= 0 ? gain / hours : null;
-  }).filter(rate => rate !== null);
-  return Math.max(directPlayerSustainedPace(entry), ...rates);
-}
-
-function directPlayerComparisonOutlook(first, second, hours = 24) {
-  const competitors = [first || {}, second || {}];
-  const current = competitors.map(entry => finiteNumber(entry.points) || 0);
-  const pace = competitors.map(directPlayerSustainedPace);
-  const projected = competitors.map((entry, index) => current[index] + pace[index] * hours);
-  const winnerIndex = projected[0] >= projected[1] ? 0 : 1;
-  const currentLeaderIndex = current[0] >= current[1] ? 0 : 1;
-  const trailerIndex = 1 - currentLeaderIndex;
-  const winner = competitors[winnerIndex];
-  const tied = Math.abs(projected[0] - projected[1]) < 1;
-  const name = escapeDiscordMarkdown(winner?.name || `Player ${winnerIndex + 1}`);
-  const trailerName = escapeDiscordMarkdown(competitors[trailerIndex]?.name || `Player ${trailerIndex + 1}`);
-  const verb = winnerIndex === currentLeaderIndex ? "stay in the lead" : "take the lead";
-  const chaseProjected = [...projected];
-  chaseProjected[trailerIndex] = current[trailerIndex] + directPlayerMaximumPace(competitors[trailerIndex]) * hours;
-  const vulnerable = winnerIndex === currentLeaderIndex && chaseProjected[trailerIndex] > chaseProjected[currentLeaderIndex];
-  const baseText = `**${name}** is projected to ${verb} through the next ${hours} hours at the competitors' sustained run rates.`;
+  ].map(([gain, hours]) => {
+    const value = finiteNumber(gain);
+    return value !== null && value >= 0 ? value / hours : null;
+  }).filter(value => value !== null);
+  const reliable = [...windows].reverse().find(item => item.observations >= 3 && item.coveredHours >= Math.max(0.65, item.hours * 0.55));
+  const observedAverage = gains.length ? gains.reduce((sum, value) => sum + value, 0) / gains.length : null;
+  const sustained = reliable?.rate ?? fallbackRates[0] ?? observedAverage ?? 0;
+  const hourlyAverage = observedAverage ?? sustained;
+  const variance = gains.length
+    ? gains.reduce((sum, value) => sum + Math.pow(value - hourlyAverage, 2), 0) / gains.length
+    : 0;
+  const consistencyPct = hourlyAverage > 0 && gains.length
+    ? Math.max(0, Math.min(100, (1 - Math.sqrt(variance) / hourlyAverage) * 100))
+    : 0;
+  const metrics = searchChartMetrics(ordered, latestT - 24 * 3600000, latestT);
+  const observedBands = directComparisonObservedPatternBands(ordered, latestT);
+  const forecast = directComparisonForecastProfile(observedBands, entry, Math.max(0, sustained || 0));
   return {
-    winner,
-    winnerIndex,
-    currentLeaderIndex,
-    projected,
-    pace,
-    text: tied
-      ? `At their sustained run rates, this race is projected to be effectively tied after ${hours} hours.`
-      : vulnerable
-        ? `${baseText} **${trailerName}** can overturn that result only by returning to their best recorded pace.`
-        : `${baseText}${winnerIndex === currentLeaderIndex ? ` The lead remains intact even against **${trailerName}**'s best recorded pace.` : ""}`
+    hourlyAverage: Math.max(0, hourlyAverage || 0),
+    low: gains.length ? Math.min(...gains) : Math.max(0, hourlyAverage || 0),
+    high: gains.length ? Math.max(...gains) : Math.max(0, hourlyAverage || 0),
+    consistencyPct,
+    uptimePct: metrics.activePct,
+    sustained: Math.max(0, sustained || 0),
+    maximum: Math.max(0, sustained || 0, observedAverage || 0, ...fallbackRates, ...windows.map(item => item.rate)),
+    sustainedWindow: reliable?.hours || null,
+    forecastGains: forecast.gains,
+    forecastBands: forecast.bands
   };
+}
+
+function directComparisonObservedPatternBands(samples, latestT) {
+  const definitions = [
+    { start: 0, end: 1 },
+    { start: 1, end: 6 },
+    { start: 6, end: 12 },
+    { start: 12, end: 24 }
+  ];
+  const bands = definitions.map(definition => ({ ...definition, gain: 0, coveredHours: 0, coverage: 0 }));
+  const ordered = (Array.isArray(samples) ? samples : [])
+    .filter(item => Number.isFinite(item?.t) && Number.isFinite(item?.points))
+    .sort((left, right) => left.t - right.t);
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    const durationMs = current.t - previous.t;
+    if (!(durationMs > 0) || durationMs > SEARCH_CHART_MAX_OBSERVED_GAP_MS) continue;
+    const intervalGain = Math.max(0, current.points - previous.points);
+    for (const band of bands) {
+      const bandStart = latestT - band.end * 3600000;
+      const bandEnd = latestT - band.start * 3600000;
+      const overlapMs = Math.max(0, Math.min(current.t, bandEnd) - Math.max(previous.t, bandStart));
+      if (!overlapMs) continue;
+      band.coveredHours += overlapMs / 3600000;
+      band.gain += intervalGain * (overlapMs / durationMs);
+    }
+  }
+  for (const band of bands) {
+    const durationHours = band.end - band.start;
+    band.coverage = Math.max(0, Math.min(1, band.coveredHours / durationHours));
+  }
+  return bands;
+}
+
+function directComparisonForecastProfile(observedBands, entry = {}, fallbackRate = 0) {
+  const cumulative = {
+    0: 0,
+    1: finiteNumber(entry?.gain1h),
+    6: finiteNumber(entry?.gain6h),
+    12: finiteNumber(entry?.gain12h),
+    24: finiteNumber(entry?.gain24h)
+  };
+  let previousCumulative = 0;
+  for (const horizon of [1, 6, 12, 24]) {
+    if (cumulative[horizon] === null) continue;
+    cumulative[horizon] = Math.max(previousCumulative, cumulative[horizon]);
+    previousCumulative = cumulative[horizon];
+  }
+  const bands = (Array.isArray(observedBands) && observedBands.length
+    ? observedBands
+    : [{ start: 0, end: 1 }, { start: 1, end: 6 }, { start: 6, end: 12 }, { start: 12, end: 24 }]
+  ).map(source => {
+    const start = Number(source.start);
+    const end = Number(source.end);
+    const duration = Math.max(0, end - start);
+    const coverage = Math.max(0, Math.min(1, finiteNumber(source.coverage) || 0));
+    const observedGain = Math.max(0, finiteNumber(source.gain) || 0);
+    const startCumulative = cumulative[start];
+    const endCumulative = cumulative[end];
+    let fallbackGain;
+    if (startCumulative !== null && endCumulative !== null) {
+      fallbackGain = Math.max(0, endCumulative - startCumulative);
+    } else if (endCumulative !== null && end > 0) {
+      fallbackGain = Math.max(0, endCumulative / end * duration);
+    } else {
+      fallbackGain = Math.max(0, finiteNumber(fallbackRate) || 0) * duration;
+    }
+    const selectedGain = coverage > 0
+      ? observedGain + fallbackGain * (1 - coverage)
+      : fallbackGain;
+    return { start, end, coverage, gain: selectedGain, rate: duration > 0 ? selectedGain / duration : 0 };
+  });
+  const gains = {};
+  let cumulativeGain = 0;
+  for (const band of bands) {
+    cumulativeGain += Math.max(0, band.gain);
+    gains[band.end] = cumulativeGain;
+  }
+  return { gains, bands };
+}
+
+function directComparisonProjectedGain(pace, hours) {
+  const target = Math.max(0, Math.min(24, finiteNumber(hours) || 0));
+  let gain = 0;
+  for (const band of Array.isArray(pace?.forecastBands) ? pace.forecastBands : []) {
+    const duration = Math.max(0, Math.min(target, band.end) - band.start);
+    if (duration > 0) gain += Math.max(0, finiteNumber(band.rate) || 0) * duration;
+  }
+  return gain;
+}
+
+async function renderDirectPlayerComparisonChartPng(payload, historyRows, entries, env = {}) {
+  const first = directComparisonRenderProfile(entries[0], historyRows);
+  const second = directComparisonRenderProfile(entries[1], historyRows);
+  const [loadedFonts, firstAvatar, secondAvatar] = await Promise.all([
+    loadHistoryFonts(),
+    first.comparisonType === "player"
+      ? loadRobloxProfileAvatar({ user_id: first.userId, avatar_url: first.imageUrl }, env, [first.imageUrl]).catch(() => null)
+      : loadHistoryAvatar(first.imageUrl).catch(() => null),
+    second.comparisonType === "player"
+      ? loadRobloxProfileAvatar({ user_id: second.userId, avatar_url: second.imageUrl }, env, [second.imageUrl]).catch(() => null)
+      : loadHistoryAvatar(second.imageUrl).catch(() => null)
+  ]);
+  const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
+  const width = 1600;
+  const height = 1040;
+  const color = searchChartBoardColors();
+  const firstTone = color.cyan;
+  const secondTone = color.pink;
+  const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
+  canvas.fillRect(32, 28, width - 64, height - 56, color.panel);
+  hourlyDrawMysticSmoke(canvas, width, height, color);
+  hourlyDrawPanelFrame(canvas, 32, 28, width - 64, height - 56, color.line);
+  searchChartDrawRainbowBar(canvas, 54, 40, width - 108, 5, color, { gapCenter: width / 2, gapWidth: 128 });
+
+  directComparisonDrawHeader(canvas, fonts, first, firstAvatar, 88, 68, 640, "left", firstTone, color);
+  directComparisonDrawHeader(canvas, fonts, second, secondAvatar, 872, 68, 640, "right", secondTone, color);
+  const vsWidth = canvas.measureFontText(fonts.bold, "VS", 46);
+  canvas.drawFontText(fonts.bold, "VS", width / 2 - vsWidth / 2, 96, 46, color.yellow, vsWidth + 4);
+
+  directComparisonDrawMetricPanel(canvas, fonts, first, 54, 220, 726, 214, firstTone, second.pace, color);
+  directComparisonDrawMetricPanel(canvas, fonts, second, 820, 220, 726, 214, secondTone, first.pace, color);
+
+  const chart = { x: 54, y: 458, w: 1492, h: 508 };
+  hourlyDrawPanel(canvas, chart.x, chart.y, chart.w, chart.h, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, chart.x, chart.y, chart.w, chart.h, 1, color);
+  hourlyDrawColumnHeader(canvas, fonts, chart.x, chart.y, chart.w, 48, ["PREVIOUS 24 HOURS", "PROJECTED 24 HOURS"], 1, color);
+  const plot = { x: chart.x + 88, y: chart.y + 70, w: chart.w - 126, h: 390 };
+  hourlyBlendRoundedRect(canvas, plot.x, plot.y, plot.w, plot.h, 10, color.inset, 230);
+  hourlyDrawPanelFrame(canvas, plot.x, plot.y, plot.w, plot.h, color.line);
+
+  const latestTimes = [first.samples[first.samples.length - 1]?.t, second.samples[second.samples.length - 1]?.t].filter(Number.isFinite);
+  const now = latestTimes.length ? Math.max(...latestTimes) : Date.now();
+  const historyStart = now - 24 * 3600000;
+  const outlookEnd = now + 24 * 3600000;
+  const firstHistory = first.samples.filter(item => item.t >= historyStart && item.t <= now);
+  const secondHistory = second.samples.filter(item => item.t >= historyStart && item.t <= now);
+  const firstForecast = directComparisonForecastPoints(first, now);
+  const secondForecast = directComparisonForecastPoints(second, now);
+  const values = [...firstHistory, ...secondHistory].map(item => item.points).concat([
+    first.points,
+    second.points,
+    ...firstForecast.map(item => item.points),
+    ...secondForecast.map(item => item.points)
+  ]).filter(Number.isFinite);
+  const rawMin = values.length ? Math.min(...values) : 0;
+  const rawMax = values.length ? Math.max(...values) : 1;
+  const padding = Math.max(1, (rawMax - rawMin) * 0.12);
+  const yMin = Math.max(0, rawMin - padding);
+  const yMax = rawMax + padding;
+  const xForTime = time => plot.x + ((time - historyStart) / (outlookEnd - historyStart)) * plot.w;
+  const yForPoints = points => plot.y + (1 - (points - yMin) / Math.max(1, yMax - yMin)) * plot.h;
+
+  for (let index = 0; index <= 4; index += 1) {
+    const yy = plot.y + index / 4 * plot.h;
+    canvas.fillRect(plot.x, yy, plot.w, 1, [42, 50, 70, 255]);
+    const label = shortNumber(yMax - index / 4 * (yMax - yMin));
+    const labelWidth = canvas.measureFontText(fonts.regular, label, 12);
+    canvas.drawFontText(fonts.regular, label, plot.x - labelWidth - 12, yy - 7, 12, color.muted, labelWidth + 4);
+  }
+  for (const hours of [-24, -18, -12, -6, 0, 6, 12, 24]) {
+    const xx = xForTime(now + hours * 3600000);
+    const isNow = hours === 0;
+    canvas.fillRect(xx, plot.y, isNow ? 3 : 1, plot.h, isNow ? color.cyan : [31, 39, 58, 255]);
+    const label = isNow ? "NOW" : hours < 0 ? `${hours}H` : `+${hours}H`;
+    const labelWidth = canvas.measureFontText(fonts.rowBold, label, 12);
+    const labelX = Math.max(plot.x, Math.min(plot.x + plot.w - labelWidth, xx - labelWidth / 2));
+    canvas.drawFontText(fonts.rowBold, label, labelX, plot.y + plot.h + 17, 12, isNow ? color.cyan : color.muted, labelWidth + 3);
+  }
+
+  searchChartDrawPolyline(canvas, firstHistory, item => xForTime(item.t), item => yForPoints(item.points), firstTone, 4);
+  searchChartDrawPolyline(canvas, secondHistory, item => xForTime(item.t), item => yForPoints(item.points), secondTone, 4);
+  directComparisonDrawForecast(canvas, firstForecast, xForTime, yForPoints, firstTone, 4);
+  directComparisonDrawForecast(canvas, secondForecast, xForTime, yForPoints, secondTone, 4);
+  const markerTones = { 1: color.green, 6: color.yellow, 12: color.orange, 24: color.violet };
+  for (const hours of [1, 6, 12, 24]) {
+    const xx = xForTime(now + hours * 3600000);
+    searchChartDrawDashedVertical(canvas, xx, plot.y, plot.y + plot.h, markerTones[hours], 7, 7);
+    if (hours === 1) directComparisonCenteredText(canvas, fonts.rowBold, "+1H", xx, plot.y + 8, 11, markerTones[hours], 42);
+  }
+
+  return encodeHistoryPng(canvas.width, canvas.height, canvas.pixels);
+}
+
+function directComparisonDrawHeader(canvas, fonts, player, avatar, x, y, width, side, tone, color) {
+  const avatarSize = 116;
+  const avatarX = side === "left" ? x : x + width - avatarSize;
+  searchChartDrawAvatarBadge(canvas, fonts, player.name, avatar, avatarX, y, avatarSize, color);
+  const textX = side === "left" ? avatarX + avatarSize + 28 : x;
+  const textWidth = width - avatarSize - 28;
+  const name = canvas.fitFontText(fonts.bold, player.name, 34, textWidth);
+  const nameWidth = canvas.measureFontText(fonts.bold, name, 34);
+  canvas.drawFontText(fonts.bold, name, side === "left" ? textX : x + textWidth - nameWidth, y + 11, 34, tone, nameWidth + 4);
+  const summary = `${rank(player.rank)}  /  ${shortNumber(player.points)} POINTS`;
+  const summaryWidth = canvas.measureFontText(fonts.rowBold, summary, 18);
+  canvas.drawFontText(fonts.rowBold, summary, side === "left" ? textX : x + textWidth - summaryWidth, y + 61, 18, color.white, summaryWidth + 4);
+  const group = player.subtitle || `${player.groupKind}: ${player.groupName}`;
+  const fitted = canvas.fitFontText(fonts.rowBold, group, 16, textWidth - 8);
+  const groupWidth = canvas.measureFontText(fonts.rowBold, fitted, 16);
+  canvas.drawFontText(fonts.rowBold, fitted, side === "left" ? textX : x + textWidth - groupWidth, y + 91, 16, color.muted, textWidth);
+}
+
+function directComparisonDrawMetricPanel(canvas, fonts, player, x, y, width, height, tone, opponentPace, color) {
+  hourlyDrawPanel(canvas, x, y, width, height, color.panelDeep, color.line);
+  hourlyDrawColumnAura(canvas, x, y, width, height, tone === color.cyan ? 0 : 1, color);
+  const maxAverage = Math.max(1, player.pace.hourlyAverage, opponentPace.hourlyAverage);
+  const metrics = [
+    { label: "POINT PACE", value: `${shortNumber(player.pace.hourlyAverage)}/h`, fraction: player.pace.hourlyAverage / maxAverage },
+    { label: "CONSISTENCY", value: `${player.pace.consistencyPct.toFixed(1)}%`, fraction: player.pace.consistencyPct / 100 },
+    { label: "UPTIME", value: `${player.pace.uptimePct.toFixed(1)}%`, fraction: player.pace.uptimePct / 100 },
+    { label: "STEADY PACE", value: `${shortNumber(player.pace.sustained)}/h`, fraction: player.pace.sustained / Math.max(1, player.pace.maximum) }
+  ];
+  metrics.forEach((metric, index) => {
+    const rowY = y + 13 + index * 49;
+    hourlyDrawPlayerRowShell(canvas, x + 12, rowY, width - 24, 42, index, metric.fraction > 0.03, color);
+    hourlyDrawFittedText(canvas, fonts.rowBold, metric.label, x + 28, rowY + 7, 14, color.muted, 142);
+    const barX = x + 181;
+    const barWidth = width - 410;
+    canvas.fillRect(barX, rowY + 17, barWidth, 8, color.bar);
+    canvas.fillRect(barX, rowY + 17, Math.max(metric.fraction > 0 ? 3 : 0, Math.min(barWidth, barWidth * metric.fraction)), 8, tone);
+    hourlyDrawRightText(canvas, fonts.rowBold, metric.value, x + width - 22, rowY + 10, 16, tone, 150);
+  });
+}
+
+function directComparisonDrawDashedLine(canvas, x1, y1, x2, y2, rgba, width = 3) {
+  const distance = Math.max(1, Math.hypot(x2 - x1, y2 - y1));
+  const steps = Math.ceil(distance / 10);
+  for (let index = 0; index < steps; index += 2) {
+    const start = index / steps;
+    const end = Math.min(1, (index + 1) / steps);
+    chartDrawLine(canvas, x1 + (x2 - x1) * start, y1 + (y2 - y1) * start, x1 + (x2 - x1) * end, y1 + (y2 - y1) * end, rgba, width);
+  }
+}
+
+function directComparisonForecastPoints(player, now) {
+  return [0, 1, 6, 12, 24].map(hours => ({
+    hours,
+    t: now + hours * 3600000,
+    points: player.points + directComparisonProjectedGain(player.pace, hours)
+  }));
+}
+
+function directComparisonDrawForecast(canvas, points, xForTime, yForPoints, rgba, width = 3) {
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    directComparisonDrawDashedLine(
+      canvas,
+      xForTime(previous.t),
+      yForPoints(previous.points),
+      xForTime(current.t),
+      yForPoints(current.points),
+      rgba,
+      width
+    );
+  }
+}
+
+function directComparisonCenteredText(canvas, font, value, centerX, y, size, rgba, maxWidth) {
+  const fitted = canvas.fitFontText(font, historyCardText(value, 500), size, maxWidth);
+  const textWidth = canvas.measureFontText(font, fitted, size);
+  canvas.drawFontText(font, fitted, centerX - textWidth / 2, y, size, rgba, textWidth + 3);
 }
 
 function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, env = {}, comparisonChart = null) {
@@ -8077,6 +8496,10 @@ function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, e
   const updatedAt = [first.updatedAt, second.updatedAt]
     .filter(Boolean)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+  if (comparisonChart?.bytes?.byteLength) {
+    return buildDirectPlayerComparisonEmbedMessage(first, second, contexts, updatedAt, env, comparisonChart);
+  }
 
   if (type === "player") {
     return buildDirectPlayerComparisonEmbedMessage(first, second, contexts, updatedAt, env, comparisonChart);
@@ -8141,7 +8564,18 @@ function buildDirectComparisonMessage(comparisonType, firstEntry, secondEntry, e
 }
 
 function buildDirectPlayerComparisonEmbedMessage(first, second, contexts, updatedAt, env = {}, comparisonChart = null) {
-  const outlook = comparisonChart?.outlook || directPlayerComparisonOutlook(first, second, 24);
+  if (comparisonChart?.bytes?.byteLength) {
+    return {
+      flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
+      allowed_mentions: { parse: [] },
+      attachments: [],
+      _file: {
+        filename: comparisonChart.filename,
+        contentType: "image/png",
+        bytes: comparisonChart.bytes
+      }
+    };
+  }
   const playerField = entry => {
     const rankValue = positiveInteger(entry?.rank);
     const points = finiteNumber(entry?.points);
@@ -8156,7 +8590,6 @@ function buildDirectPlayerComparisonEmbedMessage(first, second, contexts, update
   };
   const embed = {
     color: 0x34e1ef,
-    description: outlook.text,
     fields: [
       playerField(first),
       { name: "🚶‍♀️‍➡️ VS 🚶‍♂️", value: "\u200b", inline: true },
@@ -8164,15 +8597,13 @@ function buildDirectPlayerComparisonEmbedMessage(first, second, contexts, update
     ],
     footer: { text: "Updated · 🧞‍♀️ Luna Pet Sim 99 Bot 🏳️‍🌈 · by Cinnamowopal" }
   };
-  const projectedWinnerAvatar = String(outlook?.winner?.imageUrl || "").trim();
-  if (projectedWinnerAvatar) {
-    embed.thumbnail = { url: projectedWinnerAvatar };
-  }
   const updatedMs = new Date(updatedAt || 0).getTime();
   if (Number.isFinite(updatedMs) && updatedMs > 0) embed.timestamp = new Date(updatedMs).toISOString();
-  if (comparisonChart?.bytes?.byteLength) {
-    embed.image = { url: `attachment://${comparisonChart.filename}` };
-  }
+  embed.fields.push({
+    name: "⏱️ Projection",
+    value: directComparisonProjectionText(first, second, "points"),
+    inline: false
+  });
 
   const message = {
     flags: ephemeralResponses(env) ? MESSAGE_FLAG_EPHEMERAL : undefined,
@@ -8181,13 +8612,6 @@ function buildDirectPlayerComparisonEmbedMessage(first, second, contexts, update
     components: [],
     attachments: []
   };
-  if (comparisonChart?.bytes?.byteLength) {
-    message._file = {
-      filename: comparisonChart.filename,
-      contentType: "image/png",
-      bytes: comparisonChart.bytes
-    };
-  }
   return message;
 }
 
@@ -9914,7 +10338,7 @@ async function fetchLeagueHistoryPayload(leagueName, env, hours = 24, leagueRunK
 
 async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = {}) {
   const hours = leagueChartHours(options.hours);
-  const projectionHours = Math.max(0, Math.min(24, finiteNumber(options.projectionHours) || 0));
+  const projectionHours = Math.max(0, Math.min(6, finiteNumber(options.projectionHours) || 0));
   const members = leagueChartMembers(payload, { preserveOrder: options.comparison }).slice(0, 4);
   const [loadedFonts, leagueIcon, comparisonAvatars] = await Promise.all([
     loadHistoryFonts(),
@@ -9925,7 +10349,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   ]);
   const fonts = { ...loadedFonts, rowBold: loadedFonts.hourlyBold || loadedFonts.bold };
   const width = 1600;
-  const height = 1040;
+  const height = options.comparison ? 900 : 1040;
   const color = searchChartBoardColors();
   const canvas = new HistoryPixelCanvas(width, height, color.background, 1);
   const series = leagueMemberGrowthSeries(payload, historyRows, members, { hours });
@@ -9944,7 +10368,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     searchChartDrawPlayerHeader(canvas, fonts, displayLeagueName, rank(payload?.league_rank), width / 2, 91, color);
   }
 
-  const chartPanel = { x: 54, y: 216, w: 1492, h: 760 };
+  const chartPanel = { x: 54, y: 216, w: 1492, h: options.comparison ? 638 : 760 };
   hourlyDrawPanel(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, color.panelDeep, color.line);
   hourlyDrawColumnAura(canvas, chartPanel.x, chartPanel.y, chartPanel.w, chartPanel.h, 1, color);
   hourlyDrawColumnHeader(
@@ -9957,7 +10381,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     [
       options.comparison ? "24 Hour Point Race" : "Member Growth",
       options.comparison
-        ? "Recorded History  |  24h Outlook"
+        ? "Recorded History  |  6h Forecast"
         : (projectionHours ? `${projectionHours} Hour Projection` : `Last ${hours} Hour${hours === 1 ? "" : "s"}`)
     ],
     1,
@@ -9986,9 +10410,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   const projectedPoints = projectionHours
     ? chartSeries.flatMap(item => {
         const last = item.points[item.points.length - 1];
-        if (!last) return [];
-        const steadyPace = options.comparison ? item.steadyPace : Math.max(0, finiteNumber(item.latestGain) || 0);
-        return [{ t: chartMaxT, value: last.value + steadyPace * projectionHours }];
+        return last ? [{ t: chartMaxT, value: last.value + Math.max(0, finiteNumber(item.latestGain) || 0) * projectionHours }] : [];
       })
     : [];
   const visiblePoints = [...chartSeries.flatMap(item => item.points), ...projectedPoints];
@@ -9999,7 +10421,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
   // Reserve a real Y-axis gutter inside the panel. Previously the plot began
   // too close to the panel edge, so wide values were painted over the frame
   // and looked like detached labels floating outside the chart.
-  const plot = { x: chartPanel.x + 116, y: chartPanel.y + 84, w: chartPanel.w - 150, h: options.comparison ? 390 : 380 };
+  const plot = { x: chartPanel.x + 116, y: chartPanel.y + 84, w: chartPanel.w - 150, h: options.comparison ? 350 : 380 };
   const yAxisGutter = {
     x: chartPanel.x + 16,
     y: plot.y - 14,
@@ -10081,15 +10503,6 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     const endLabel = `${projectionHours} Hrs`;
     const endLabelWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, endLabel, 13);
     canvas.drawFontText(fonts.rowBold || fonts.bold, endLabel, projectionEndX - endLabelWidth - 8, plot.y + 10, 13, color.yellow, endLabelWidth + 4);
-    if (options.comparison) {
-      [1, 6, 12].filter(value => value < projectionHours).forEach(horizon => {
-        const markerX = xForTime(observedMaxT + horizon * 60 * 60 * 1000);
-        searchChartDrawDashedVertical(canvas, markerX, plot.y, plot.y + plot.h, [...color.yellow.slice(0, 3), 72], 4, 8);
-        const markerLabel = `+${horizon}h`;
-        const markerWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, markerLabel, 12);
-        canvas.drawFontText(fonts.rowBold || fonts.bold, markerLabel, markerX - markerWidth / 2, plot.y + plot.h - 22, 12, [...color.yellow.slice(0, 3), 155], markerWidth + 4);
-      });
-    }
   }
 
   chartSeries.forEach((item, index) => {
@@ -10100,10 +10513,9 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
     if (last) {
       chartFillCircle(canvas, xForTime(last.t), lineY(last), 4, item.color);
       if (projectionHours) {
-        const steadyPace = options.comparison ? item.steadyPace : Math.max(0, finiteNumber(item.latestGain) || 0);
         const projected = {
           t: chartMaxT,
-          value: last.value + steadyPace * projectionHours
+          value: last.value + Math.max(0, finiteNumber(item.latestGain) || 0) * projectionHours
         };
         leagueDrawDashedLine(
           canvas,
@@ -10127,7 +10539,7 @@ async function renderLeagueMemberGrowthChartPng(payload, historyRows, options = 
       fonts,
       chartSeries,
       chartPanel.x + 34,
-      chartPanel.y + 548,
+      chartPanel.y + 488,
       chartPanel.w - 68,
       color,
       projectionHours
@@ -10186,73 +10598,71 @@ async function fetchLeaguePlayerPoolRank(query, userId, env) {
   return null;
 }
 
-function comparisonDrawRaceInsights(canvas, fonts, series, x, y, width, color) {
+function comparisonDrawRaceInsights(canvas, fonts, series, x, y, width, color, projectionHours = 6) {
   const players = (series || []).slice(0, 2);
   if (players.length < 2) return;
   const current = players.map(item => finiteNumber(item.latestPoints) || 0);
-  const steady = players.map(item => Math.max(0, finiteNumber(item.steadyPace) || 0));
-  const maximum = players.map((item, index) => Math.max(steady[index], finiteNumber(item.maxPace) || 0));
+  const pace = players.map(item => Math.max(0, finiteNumber(item.latestGain) || 0));
+  const projected = players.map((item, index) => current[index] + pace[index] * projectionHours);
   const currentLeader = current[0] >= current[1] ? 0 : 1;
+  const projectedLeader = projected[0] >= projected[1] ? 0 : 1;
+  const paceLeader = pace[0] >= pace[1] ? 0 : 1;
+  const currentGap = Math.abs(current[0] - current[1]);
+  const projectedGap = Math.abs(projected[0] - projected[1]);
+  const paceGap = Math.abs(pace[0] - pace[1]);
   const trailer = 1 - currentLeader;
+  const catchRate = pace[trailer] - pace[currentLeader];
+  const catchHours = catchRate > 0 ? currentGap / catchRate : null;
+  const catchLabel = catchHours !== null && Number.isFinite(catchHours)
+    ? comparisonHoursLabel(catchHours)
+    : "No overtake";
+  const catchDetail = catchHours !== null && Number.isFinite(catchHours)
+    ? `${players[trailer].name} at current pace`
+    : "at current 1h pace";
   const gap = 14;
   const cardWidth = (width - gap * 3) / 4;
-  const cards = [1, 6, 12, 24].map(horizon => {
-    const projected = current.map((points, index) => points + steady[index] * horizon);
-    const steadyLeader = projected[0] >= projected[1] ? 0 : 1;
-    const steadyGap = Math.abs(projected[0] - projected[1]);
-    const chase = [...projected];
-    chase[trailer] = current[trailer] + maximum[trailer] * horizon;
-    const chaseLeader = chase[0] >= chase[1] ? 0 : 1;
-    const chaseGap = Math.abs(chase[0] - chase[1]);
-    const steadyOvertake = steadyLeader !== currentLeader;
-    const ceilingOvertake = chaseLeader === trailer;
-    return {
-      label: `${horizon} HOUR${horizon === 1 ? "" : "S"}`,
-      value: steadyOvertake ? "OVERTAKE" : ceilingOvertake ? "PRESSURED" : "LEAD HOLDS",
-      detail: `Steady: ${players[steadyLeader].name} +${shortNumber(steadyGap)}`,
-      secondary: ceilingOvertake
-        ? `Max chase: ${players[trailer].name} +${shortNumber(chaseGap)}`
-        : `Max chase: ${players[currentLeader].name} +${shortNumber(chaseGap)}`,
-      tone: steadyOvertake ? color.red : ceilingOvertake ? color.orange : color.green
-    };
-  });
-
-  const legend = "STEADY = LONGEST TRACKED RUN RATE     |     MAX CHASE = TRAILER'S BEST OBSERVED PACE";
-  const legendWidth = canvas.measureFontText(fonts.rowBold || fonts.bold, legend, 13);
-  canvas.drawFontText(fonts.rowBold || fonts.bold, legend, x + Math.max(0, (width - legendWidth) / 2), y - 25, 13, color.muted, width);
+  const cards = [
+    {
+      label: "CURRENT LEAD",
+      value: players[currentLeader].name,
+      detail: currentGap ? `+${shortNumber(currentGap)} points` : "Tied",
+      tone: players[currentLeader].color
+    },
+    {
+      label: "1H PACE EDGE",
+      value: pace[0] === pace[1] ? "Tied pace" : players[paceLeader].name,
+      detail: paceGap ? `+${shortNumber(paceGap)}/h` : `${shortNumber(pace[0])}/h each`,
+      tone: color.green
+    },
+    {
+      label: `AT +${projectionHours} HOURS`,
+      value: players[projectedLeader].name,
+      detail: projectedGap ? `+${shortNumber(projectedGap)} projected` : "Projected tie",
+      tone: color.yellow
+    },
+    {
+      label: "CATCH-UP OUTLOOK",
+      value: catchLabel,
+      detail: catchDetail,
+      tone: catchHours !== null ? color.orange : color.muted
+    }
+  ];
 
   cards.forEach((card, index) => {
-    comparisonDrawInsightCard(canvas, fonts, x + index * (cardWidth + gap), y, cardWidth, 142, card, color);
+    comparisonDrawInsightCard(canvas, fonts, x + index * (cardWidth + gap), y, cardWidth, 108, card, color);
   });
 }
 
 function comparisonDrawInsightCard(canvas, fonts, x, y, width, height, card, color) {
-  comparisonFillRoundedRect(canvas, x, y, width, height, 18, color.line, 255);
-  comparisonFillRoundedRect(canvas, x + 1, y + 1, width - 2, height - 2, 17, color.inset, 255);
-  comparisonFillRoundedRect(canvas, x + 1, y + 1, width - 2, 8, 7, card.tone || color.cyan, 255);
+  hourlyBlendRoundedRect(canvas, x, y, width, height, 10, color.inset, 230);
+  hourlyDrawPanelFrame(canvas, x, y, width, height, color.line);
+  canvas.fillRect(x + 1, y + 1, width - 2, 4, card.tone || color.cyan);
   const label = canvas.fitFontText(fonts.rowBold || fonts.bold, card.label, 14, width - 28);
-  canvas.drawFontText(fonts.rowBold || fonts.bold, label, x + 16, y + 21, 14, color.muted, width - 32);
+  canvas.drawFontText(fonts.rowBold || fonts.bold, label, x + 14, y + 17, 14, color.muted, width - 28);
   const value = canvas.fitFontText(fonts.rowBold || fonts.bold, historyCardText(card.value, 40), 22, width - 28);
-  canvas.drawFontText(fonts.rowBold || fonts.bold, value, x + 16, y + 48, 22, card.tone || color.white, width - 32);
+  canvas.drawFontText(fonts.rowBold || fonts.bold, value, x + 14, y + 42, 22, card.tone || color.white, width - 28);
   const detail = canvas.fitFontText(fonts.regular, historyCardText(card.detail, 56), 14, width - 28);
-  canvas.drawFontText(fonts.regular, detail, x + 16, y + 86, 14, color.white, width - 32);
-  const secondary = canvas.fitFontText(fonts.regular, historyCardText(card.secondary, 56), 13, width - 28);
-  canvas.drawFontText(fonts.regular, secondary, x + 16, y + 113, 13, color.muted, width - 32);
-}
-
-function comparisonFillRoundedRect(canvas, x, y, width, height, radius, rgba, coverage = 255) {
-  const left = Math.round(x);
-  const top = Math.round(y);
-  const right = Math.round(x + width) - 1;
-  const bottom = Math.round(y + height) - 1;
-  const r = Math.max(0, Math.min(Math.round(radius), Math.floor(Math.min(width, height) / 2)));
-  for (let py = top; py <= bottom; py += 1) {
-    for (let px = left; px <= right; px += 1) {
-      const dx = px < left + r ? left + r - px : px > right - r ? px - (right - r) : 0;
-      const dy = py < top + r ? top + r - py : py > bottom - r ? py - (bottom - r) : 0;
-      if (dx * dx + dy * dy <= r * r) canvas.blendPixel(px, py, rgba, coverage);
-    }
-  }
+  canvas.drawFontText(fonts.regular, detail, x + 14, y + 76, 14, color.white, width - 28);
 }
 
 function comparisonHoursLabel(hours) {
@@ -10501,14 +10911,6 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       end
     );
     const hasTrackedActivity = activity.activeMs + activity.downtimeMs > 0;
-    const paceProfile = comparisonPaceProfile({
-      points,
-      latestGain,
-      gain6h: member.gain6h,
-      gain12h: member.gain12h,
-      gain24h: member.gain24h,
-      avgGain: totalGain / Math.max(1, hours)
-    });
 
     return {
       id: member.id,
@@ -10525,40 +10927,10 @@ function leagueMemberGrowthSeries(payload, historyRows, members, options = {}) {
       totalGain,
       avgGain: totalGain / Math.max(1, hours),
       peakGain,
-      steadyPace: paceProfile.steady,
-      maxPace: paceProfile.maximum,
       activeMs: hasTrackedActivity ? activity.activeMs : null,
       downtimeMs: hasTrackedActivity ? activity.downtimeMs : null
     };
   });
-}
-
-function comparisonPaceProfile(item) {
-  const windowRates = [
-    [item?.gain24h, 24],
-    [item?.gain12h, 12],
-    [item?.gain6h, 6],
-    [item?.latestGain, 1]
-  ].map(([gainValue, hours]) => {
-    const gain = finiteNumber(gainValue);
-    return gain !== null && gain >= 0 ? gain / hours : null;
-  });
-  const steady = windowRates.find(rate => rate !== null)
-    ?? Math.max(0, finiteNumber(item?.avgGain) || 0);
-  const observedRates = [];
-  const points = Array.isArray(item?.points) ? item.points : [];
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const elapsedHours = (finiteNumber(current?.t) - finiteNumber(previous?.t)) / (60 * 60 * 1000);
-    if (!(elapsedHours >= 0.25 && elapsedHours <= 3)) continue;
-    const gain = Math.max(0, (finiteNumber(current?.value) || 0) - (finiteNumber(previous?.value) || 0));
-    observedRates.push(gain / elapsedHours);
-  }
-  return {
-    steady: Math.max(0, steady),
-    maximum: Math.max(0, steady, ...windowRates.filter(rate => rate !== null), ...observedRates)
-  };
 }
 
 function leagueDerivedGrowthSamples(member, currentAt, storedSamples = []) {
@@ -10837,7 +11209,7 @@ async function completeHistoryInteraction(interaction, env, state, ctx = null) {
       }
     }
 
-    const history = await loadHistoryCommandData(state.query, env);
+    const history = await loadHistoryCommandData(state.query, env, { view: state.view });
     const cacheId = historyCacheIdPart(state.cacheId) || historyCreateCacheId(history.user_id);
     await editOriginalInteraction(interaction, await renderHistoryMessage(history, {
       ownerId: state.ownerId,
@@ -10849,18 +11221,6 @@ async function completeHistoryInteraction(interaction, env, state, ctx = null) {
       env
     }));
 
-    // The first /history response already loaded both data sets. Warm the other
-    // image after sending the requested card so a view-button click only swaps
-    // a cached attachment instead of repeating every API and database lookup.
-    const warmView = HISTORY_VIEWS.find(candidate => candidate !== state.view);
-    if (ctx?.waitUntil && warmView) {
-      ctx.waitUntil(prepareHistoryRenderCache(history, {
-        env,
-        ownerId: state.ownerId,
-        cacheId,
-        view: warmView
-      }).catch(error => console.warn("history alternate-view cache warm failed", error?.message || String(error))));
-    }
   } catch (err) {
     await editOriginalInteraction(interaction, {
       content: `History lookup failed: ${err?.message || String(err)}`,
@@ -10980,7 +11340,7 @@ function parseHistoryCustomId(value) {
   return { ownerId, targetId, view, page, cacheId };
 }
 
-async function loadHistoryCommandData(query, env) {
+async function loadHistoryCommandData(query, env, options = {}) {
   let search = await fetchGlobalSearchPayload(query, env, { battleHistory: true });
   let globalPayload = search.payload?.row ? search.payload : null;
   let subject = globalPayload?.row ? {
@@ -11012,7 +11372,7 @@ async function loadHistoryCommandData(query, env) {
   }
 
   const scanClan = String(env.GLOBAL_SCAN_CLAN || env.CLAN_NAME || "c0ld").trim() || "c0ld";
-  const [battleList, trackedHistory, cwHistory, bigHistory, leagueHistory, staticProfile] = await Promise.all([
+  const [battleList, trackedHistory, retainedGlobalHistory, cwHistory, bigHistory, leagueHistory, staticProfile] = await Promise.all([
     fetchClanHistoryJson(env, "/api/battles", { clan: scanClan, limit: 60 }),
     fetchClanHistoryJson(env, "/api/history", {
       user_id: subject.userId,
@@ -11022,9 +11382,16 @@ async function loadHistoryCommandData(query, env) {
       limit: 50000,
       order: "asc"
     }),
+    fetchClanHistoryJson(env, "/api/global/battle-history", {
+      clan: scanClan,
+      user_id: subject.userId,
+      fresh: Date.now()
+    }),
     fetchClanHistoryJson(env, "/api/external-history", { user_id: subject.userId, source: "cw_bot", limit: 300 }),
     fetchClanHistoryJson(env, "/api/external-history", { user_id: subject.userId, source: "big_bot", limit: 300 }),
-    fetchLeagueHistoryJson(subject.userId, env),
+    options.view === "league"
+      ? fetchLeagueHistoryJson(subject.userId, env)
+      : Promise.resolve(null),
     fetchStaticHistoryProfile(subject.userId, env)
   ]);
 
@@ -11062,7 +11429,13 @@ async function loadHistoryCommandData(query, env) {
     };
     })).filter(Boolean);
 
-  const leaderboardRows = summarizeGlobalHistory(globalPayload);
+  const leaderboardRows = summarizeGlobalHistory({
+    row: globalPayload?.row || null,
+    battle_history: [
+      ...(Array.isArray(globalPayload?.battle_history) ? globalPayload.battle_history : []),
+      ...(Array.isArray(retainedGlobalHistory?.rows) ? retainedGlobalHistory.rows : [])
+    ]
+  });
   const clanMap = new Map();
   for (const row of liveClanRows) mergeClanHistoryRecord(clanMap, row);
   for (const row of staticClanHistoryRows(staticProfile, scanClan)) mergeClanHistoryRecord(clanMap, row);
@@ -11078,10 +11451,10 @@ async function loadHistoryCommandData(query, env) {
     });
   }
 
-  const leagueRows = attachLeagueGlobalHistoryRows(mergeHistorySummaryRows(
+  const leagueRows = sortLeagueHistoryRecords(attachLeagueGlobalHistoryRows(mergeHistorySummaryRows(
     normalizeLeagueHistoryRows(leagueHistory?.rows),
     normalizeLeagueHistoryRows(staticProfile?.league_summaries)
-  ), normalizeLeagueGlobalHistoryRows(leagueHistory?.leaderboard_rows));
+  ), normalizeLeagueGlobalHistoryRows(leagueHistory?.leaderboard_rows)));
   const avatarUrl = absoluteProfileAssetUrl(subject.avatarUrl, env)
     || absoluteProfileAssetUrl(staticProfile?.avatar_url, env)
     || await searchAvatarUrl({
@@ -11096,7 +11469,8 @@ async function loadHistoryCommandData(query, env) {
     avatar_url: avatarUrl || null,
     clan: sortClanHistoryRecords([...clanMap.values()]),
     league: leagueRows,
-    league_unavailable: leagueHistory === null && leagueRows.length === 0
+    league_loaded: options.view === "league",
+    league_unavailable: options.view === "league" && leagueHistory === null && leagueRows.length === 0
   };
 }
 
@@ -11189,15 +11563,18 @@ async function fetchClanHistoryJson(env, path, params = {}) {
 
 async function fetchLeagueHistoryJson(userId, env) {
   const defaultBase = "https://yamo-league-api-worker.opal-dde.workers.dev";
+  const serviceBase = "https://yamo-league-api-worker.service";
   const bases = [...new Set([String(env.LEAGUE_API_BASE || "").trim(), defaultBase].filter(Boolean))];
-  const limits = [2000, 500];
+  // The profile endpoint separately reads permanent ended-period finals. Five
+  // hundred interval rows are enough for the active period without making a
+  // simple history-card lookup scan several days of redundant observations.
+  const limits = [500];
   const binding = env.LEAGUE_API_WORKER;
   const targets = [];
   if (binding && typeof binding.fetch === "function") {
-    targets.push({ type: "binding", base: defaultBase });
+    targets.push({ type: "binding", base: serviceBase });
   }
   targets.push(...bases.map(base => ({ type: "public", base })));
-  let emptyPayload = null;
 
   for (const target of targets) {
     for (const limit of limits) {
@@ -11217,19 +11594,24 @@ async function fetchLeagueHistoryJson(userId, env) {
             headers,
             cf: { cacheTtl: 0, cacheEverything: false }
           })
-      ).catch(() => null);
+      ).catch(err => {
+        console.warn("League history request failed", target.type, target.base, err?.message || String(err));
+        return null;
+      });
       if (!res) continue;
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok || payload.ok === false) continue;
+      if (!res.ok || payload.ok === false) {
+        console.warn("League history request rejected", target.type, target.base, res.status, payload?.error || payload?.message || "unknown error");
+        continue;
+      }
       const normalized = {
         ...payload,
         rows: leagueHistoryPayloadRows(payload)
       };
-      if (normalized.rows.length) return normalized;
-      emptyPayload ||= normalized;
+      return normalized;
     }
   }
-  return emptyPayload;
+  return null;
 }
 
 function leagueHistoryPayloadRows(payload) {
@@ -11318,11 +11700,11 @@ function cleanExternalHistoryField(value, labels = []) {
 }
 
 function summarizeGlobalHistory(payload) {
-  if (!payload?.row) return [];
-  const current = payload.row;
+  if (!payload) return [];
+  const current = payload.row || null;
   const rows = [
     ...(Array.isArray(payload.battle_history) ? payload.battle_history : []),
-    current
+    ...(current ? [current] : [])
   ];
   const groups = new Map();
 
@@ -11338,6 +11720,7 @@ function summarizeGlobalHistory(payload) {
       battle_key: String(row.battle_key || identity).trim() || null,
       clan_name: row.source_clan || row.clan_name || null,
       global_rank: finiteHistoryNumber(row.global_rank),
+      global_rank_estimated: row.global_rank_estimated === true,
       total_global_players: finiteHistoryNumber(row.total_global_players),
       points: finiteHistoryNumber(row.global_points ?? row.points ?? row.clan_points),
       fetched_at: row.fetched_at || row.updated_at || null
@@ -11397,7 +11780,9 @@ function normalizeLeagueHistoryRows(rows) {
       global_rank: finiteHistoryNumber(row.global_rank),
       total_global_players: finiteHistoryNumber(row.total_global_players ?? row.total_ranked),
       points: finiteHistoryNumber(row.final_points ?? row.points ?? row.highest_points),
-      final_snapshot_at: row.final_snapshot_at || row.period_end_at || row.fetched_at || null
+      final_snapshot_at: row.final_snapshot_at || row.period_end_at || row.fetched_at || null,
+      period_start_at: row.period_start_at || row.first_snapshot_at || null,
+      period_end_at: row.period_end_at || row.final_snapshot_at || null
     };
   }).filter(row => row.key && !isSyntheticLeagueHistoryRow(row) && (row.league_rank !== null || row.global_rank !== null || row.points !== null));
 }
@@ -12352,6 +12737,13 @@ async function buildCachedHistoryMessage(state, env) {
   if (ownerId && ownerId !== state.ownerId) return null;
   if (!targetId) return null;
 
+  // The initial Clan view deliberately skips the League API. Hydrate only the
+  // missing League half of that cached result, and share the work when a user
+  // presses the same button repeatedly before the first request finishes.
+  if (view === "league" && history?.league_loaded !== true) {
+    return hydrateCachedLeagueHistoryMessage(state, env, cacheId, targetId, history);
+  }
+
   let bytes = cachedBytes;
   if (!bytes?.byteLength && history?.user_id) {
     bytes = await renderHistoryCardPng(history, view, env);
@@ -12371,6 +12763,63 @@ async function buildCachedHistoryMessage(state, env) {
       cacheId
     })
   });
+}
+
+function sortLeagueHistoryRecords(rows) {
+  return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
+    const leftTime = Math.max(
+      historyDateMs(left?.period_end_at),
+      historyDateMs(left?.final_snapshot_at),
+      historyDateMs(left?.period_start_at)
+    );
+    const rightTime = Math.max(
+      historyDateMs(right?.period_end_at),
+      historyDateMs(right?.final_snapshot_at),
+      historyDateMs(right?.period_start_at)
+    );
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return String(left?.name || "").localeCompare(String(right?.name || ""));
+  });
+}
+
+async function hydrateCachedLeagueHistoryMessage(state, env, cacheId, targetId, history) {
+  const hydrationKey = `${cacheId}:league`;
+  const existing = historyLeagueHydrationsInFlight.get(hydrationKey);
+  if (existing) return existing;
+
+  const hydration = (async () => {
+    const leagueHistory = await fetchLeagueHistoryJson(history.user_id || targetId, env);
+    const existingRows = Array.isArray(history.league) ? history.league : [];
+    const leagueRows = sortLeagueHistoryRecords(attachLeagueGlobalHistoryRows(mergeHistorySummaryRows(
+      normalizeLeagueHistoryRows(leagueHistory?.rows),
+      existingRows
+    ), normalizeLeagueGlobalHistoryRows(leagueHistory?.leaderboard_rows)));
+    const hydrated = {
+      ...history,
+      league: leagueRows,
+      league_loaded: true,
+      league_unavailable: leagueHistory === null && leagueRows.length === 0
+    };
+
+    await historyPutCachedJson(env, "data", cacheId, hydrated);
+    const bytes = await renderHistoryCardPng(hydrated, "league", env);
+    await historyPutCachedBytes(env, "image", cacheId, "league", bytes, "image/png");
+    return historyImageMessage({
+      filename: `c0ld-history-${targetId}-league.png`,
+      bytes,
+      components: historyComponents({
+        ownerId: state.ownerId,
+        targetId,
+        view: "league",
+        page: state.page || 0,
+        totalPages: 1,
+        cacheId
+      })
+    });
+  })().finally(() => historyLeagueHydrationsInFlight.delete(hydrationKey));
+
+  historyLeagueHydrationsInFlight.set(hydrationKey, hydration);
+  return hydration;
 }
 
 function historyImageMessage({ filename, bytes, components }) {
@@ -12407,12 +12856,9 @@ async function prepareHistoryRenderCache(history, options = {}) {
   // parallel made an unrelated view failure collapse /history to plain text.
   const candidate = HISTORY_VIEWS.includes(options.view) ? options.view : "clan";
   {
-    const existing = await historyGetCachedBytes(env, "image", cacheId, candidate);
-    if (existing?.byteLength) {
-      rendered.set(candidate, existing);
-      return rendered;
-    }
-
+    // This path follows a fresh data load. Re-render it even if an older image
+    // exists under the same interaction cache ID (for example, a placeholder
+    // produced before the League view was loaded).
     const bytes = await renderHistoryCardPng(history, candidate, env);
     rendered.set(candidate, bytes);
     await historyPutCachedBytes(env, "image", cacheId, candidate, bytes, "image/png");
@@ -12921,7 +13367,7 @@ function historyModernRecordParts(row, view) {
       title: row.name || "Unknown Battle",
       tag: historyCardText(String(row.clan_name || "Unknown").toUpperCase(), 10),
       tagTone: [76, 211, 132, 255],
-      rank: historyCardRank(row.global_rank, row.total_global_players),
+      rank: historyCardRank(row.global_rank, row.total_global_players, row.global_rank_estimated),
       points: historyCardPointLabel(row.points)
     };
   }
@@ -12929,7 +13375,7 @@ function historyModernRecordParts(row, view) {
     title: row.name || "Unknown Event",
     tag: "Global",
     tagTone: [52, 225, 239, 255],
-    rank: historyCardRank(row.global_rank, row.total_global_players),
+    rank: historyCardRank(row.global_rank, row.total_global_players, row.global_rank_estimated),
     points: historyCardPointLabel(row.points)
   };
 }
@@ -13279,11 +13725,11 @@ function drawCombinedHistoryRow(canvas, fonts, row, view, x, y, width, color, ac
     canvas.fillRect(x + 17, y + 35, 3, 17, accent);
     canvas.drawFontText(fonts.bold, clanName, x + 29, y + 33, 12, color.white, 54);
     canvas.fillRect(x + 91, y + 35, 1, 17, color.line);
-    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPointLabel(row.points)}`;
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players, row.global_rank_estimated)}  |  ${historyCardPointLabel(row.points)}`;
     canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 103, y + 33, 13, color.muted, width - 116);
     return;
   } else {
-    details = `Global ${historyCardRank(row.global_rank, row.total_global_players)}  |  ${historyCardPointLabel(row.points)}`;
+    details = `Global ${historyCardRank(row.global_rank, row.total_global_players, row.global_rank_estimated)}  |  ${historyCardPointLabel(row.points)}`;
   }
   canvas.fillRect(x + 17, y + 42, 5, 5, accent);
   canvas.drawFontText(fonts.regular, historyCardText(details, 100), x + 30, y + 33, 13, color.muted, width - 43);
@@ -13340,8 +13786,8 @@ function bestHistoryGlobalPerformance(history) {
   }, null);
 }
 
-function historyCardRank(value, total) {
-  return positiveInteger(value) ? historyRank(value, total) : "N/A";
+function historyCardRank(value, total, estimated = false) {
+  return positiveInteger(value) ? `${estimated ? "~" : ""}${historyRank(value, total)}` : "N/A";
 }
 
 function historyCardPoints(value) {

@@ -1053,7 +1053,12 @@ async function handleCurrent(request, env) {
     league_points: toNumber(latest.league_points) || 0,
     league_icon: latest.league_icon || null,
     member_capacity: latest.member_capacity ?? null,
-    league_rank: storedLeagueRank ?? liveLeagueRank,
+    // For a normal current lookup, the exact BIG Games leaderboard search is
+    // newer than the periodically stored Top-Leagues manifest. Keep the stored
+    // rank only as the fallback (and as the sole source for historical slots).
+    league_rank: hourlySlotMs === null
+      ? (liveLeagueRank ?? storedLeagueRank)
+      : storedLeagueRank,
     source: "ps99-league-api-worker",
     snapshot_retention: "permanent",
     rows: publicRows
@@ -1156,6 +1161,32 @@ async function handleSoloLeaderboard(request, env) {
       const directRow = directApi ? normalizeSoloLeaguePlayer(leaguePlayerFromResponse(directApi)) : null;
       if (directRow?.user_id && directRow.league_name && !isLeaguePubliclyHidden(env, directRow.league_name)) {
         rowsByUser.set(String(directRow.user_id), { ...directRow, rank: null, source: "big-games-direct-player" });
+      }
+    }
+
+    // BIG Games' direct player endpoint only covers its rolling Top-500
+    // contributor sample. A valid League member can therefore disappear from
+    // search after changing Leagues or joining after the last full player-pool
+    // sweep. Re-check the player's recently known League rosters live before
+    // concluding that the player is not participating in the current event.
+    if (directUserId && !rowsByUser.has(String(directUserId))) {
+      const recoveredRow = await recoverSoloLeaguePlayerFromKnownLocations(env, runKey, directUserId)
+        .catch(err => {
+          console.warn("known League location recovery unavailable", err?.message || String(err));
+          return null;
+        });
+      if (recoveredRow?.user_id && recoveredRow.league_name && !isLeaguePubliclyHidden(env, recoveredRow.league_name)) {
+        const estimatedRank = await estimatePublishedLeaguePlayerRank(
+          env,
+          runKey,
+          recoveredRow.points,
+          publishedPool.total_players
+        ).catch(() => null);
+        rowsByUser.set(String(recoveredRow.user_id), {
+          ...recoveredRow,
+          rank: toNumber(estimatedRank?.rank),
+          rank_is_estimated: Boolean(estimatedRank?.rank)
+        });
       }
     }
 
@@ -1332,11 +1363,134 @@ async function fetchPublishedLeaguePlayerPoolSearchRows(env, runKey, query) {
       source: "published-top-league-roster-player-pool"
     };
   });
-  const metadata = normalizeRawLeague(rows[0]?.raw_league);
+  // Completion belongs to the pool as a whole, not to whether this particular
+  // user matched it. Reading rank 1 keeps total-player/rank metadata available
+  // for live-recovered players that are newer than the snapshot.
+  let metadataRow = rows[0] || null;
+  if (!metadataRow) {
+    const metadataRows = await selectLeagueCurrentRows(env, {
+      select: "snapshot_id,fetched_at,rank,raw_league",
+      league_run_key: `eq.${runKey}`,
+      league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+      rank: "eq.1",
+      limit: "1"
+    });
+    metadataRow = metadataRows[0] || null;
+  }
+  const metadata = normalizeRawLeague(metadataRow?.raw_league);
   return {
-    completed: rows.length > 0,
+    completed: Boolean(metadataRow),
     total_players: toNumber(metadata.pool_total_players),
     rows: normalized
+  };
+}
+
+async function recoverSoloLeaguePlayerFromKnownLocations(
+  env,
+  runKey,
+  userId,
+  loadLocationRows = fetchStoredLeaguePlayerLocationRows,
+  fetchLeagueDetail = (leagueNameValue) => fetchLeagueApi(leagueNameValue, { env })
+) {
+  const id = toNumber(userId);
+  if (!id) return null;
+  const storedRows = await loadLocationRows(env, runKey, id);
+  const leagueNames = knownLeagueNamesFromStoredPlayerRows(storedRows);
+
+  for (const leagueNameValue of leagueNames.slice(0, 8)) {
+    const api = await fetchLeagueDetail(leagueNameValue).catch(() => null);
+    if (!api) continue;
+    const league = api.data || api;
+    const summary = summarizeLeague(league, leagueNameValue);
+    const member = normalizeLeagueRows(league).find(row => toNumber(row.user_id) === id);
+    if (!member || !summary.league_name) continue;
+    return {
+      rank: null,
+      rank_is_estimated: false,
+      user_id: id,
+      username: String(member.display_name || `user_${id}`).trim(),
+      display_name: String(member.display_name || `user_${id}`).trim(),
+      league_name: summary.league_name,
+      league_id: summary.league_id,
+      league_icon: summary.league_icon,
+      points: toNumber(member.points) || 0,
+      total_points: toNumber(member.points) || 0,
+      fetched_at: new Date().toISOString(),
+      source: "live-known-league-roster"
+    };
+  }
+  return null;
+}
+
+async function fetchStoredLeaguePlayerLocationRows(env, runKey, userId) {
+  requireSupabase(env);
+  const currentSelect = "fetched_at,updated_at,league_run_key,league_name,league_id,user_id,display_name,raw_member,raw_league";
+  const snapshotSelect = "fetched_at,league_run_key,league_name,league_id,user_id,display_name,raw_member,raw_league";
+  const [currentRows, snapshotRows] = await Promise.all([
+    selectLeagueCurrentRows(env, {
+      select: currentSelect,
+      user_id: `eq.${userId}`,
+      order: "updated_at.desc",
+      limit: "50"
+    }).catch(() => []),
+    supabaseSelect(env, SNAPSHOT_TABLE, {
+      select: snapshotSelect,
+      user_id: `eq.${userId}`,
+      order: "fetched_at.desc",
+      limit: "100"
+    }).catch(() => [])
+  ]);
+  return [...currentRows, ...snapshotRows].sort((a, b) => {
+    const aCurrent = String(a.league_run_key || "") === String(runKey || "") ? 1 : 0;
+    const bCurrent = String(b.league_run_key || "") === String(runKey || "") ? 1 : 0;
+    return bCurrent - aCurrent || new Date(b.updated_at || b.fetched_at || 0) - new Date(a.updated_at || a.fetched_at || 0);
+  });
+}
+
+function knownLeagueNamesFromStoredPlayerRows(rows) {
+  const names = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    const rawMember = normalizeRawLeague(row.raw_member);
+    const rawLeague = normalizeRawLeague(row.raw_league);
+    const storedName = isAggregateLeagueListName(row.league_name) ? null : row.league_name;
+    const candidates = [
+      rawMember.source_league_name,
+      rawLeague.Name,
+      rawLeague.name,
+      storedName
+    ];
+    for (const value of candidates) {
+      const name = String(value || "").trim();
+      const normalized = key(name);
+      if (!name || !normalized || seen.has(normalized) || isAggregateLeagueListName(name)) continue;
+      seen.add(normalized);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+async function estimatePublishedLeaguePlayerRank(env, runKey, points, totalPlayers = null) {
+  const score = toNumber(points);
+  if (score === null || score < 0) return null;
+  const rows = await selectLeagueCurrentRows(env, {
+    select: "rank,points,fetched_at",
+    league_run_key: `eq.${runKey}`,
+    league_name: `eq.${LEAGUE_PLAYER_POOL_NAME}`,
+    points: `gte.${score}`,
+    order: "points.asc,rank.desc",
+    limit: "1"
+  });
+  const nearestAbove = rows[0] || null;
+  const total = toNumber(totalPlayers);
+  const rank = nearestAbove
+    ? (toNumber(nearestAbove.rank) || 0) + ((toNumber(nearestAbove.points) || 0) > score ? 1 : 0)
+    : 1;
+  return {
+    rank: total ? clamp(rank, 1, total + 1) : Math.max(1, rank),
+    rank_is_estimated: true,
+    fetched_at: nearestAbove?.fetched_at || null
   };
 }
 
@@ -2835,7 +2989,7 @@ async function handleHistory(request, env) {
   const limit = clamp(Number(url.searchParams.get("limit") || 5000), 1, 50000);
   const hoursParam = url.searchParams.get("hours");
   const params = {
-    select: "snapshot_id,fetched_at,league_run_key,league_name,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
+    select: "snapshot_id,fetched_at,league_run_key,league_name,league_points,rank,user_id,display_name,points,last_contribution_at,permission_level,role,join_time",
     league_run_key: `eq.${runKey}`,
     league_name: `eq.${requested}`,
     order: "fetched_at.desc,rank.asc",

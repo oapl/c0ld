@@ -15,6 +15,7 @@ const GLOBAL_RANK_HISTORY_TABLE = "c0ld_global_rank_history";
 const USER_LOOKUP_CACHE_TABLE = "c0ld_user_lookup_cache";
 const EXTERNAL_PLAYER_HISTORY_TABLE = "c0ld_external_player_history";
 const CW_BOT_HISTORY_TABLE = "c0ld_cwbot_history_imports";
+const BATTLE_PLAYER_FINALS_TABLE = "c0ld_battle_player_finals";
 const CLAN_ACTIVITY_ROSTER_TABLE = "c0ld_clan_activity_roster_snapshots";
 const CLAN_ACTIVITY_CURRENT_TABLE = "c0ld_clan_activity_current";
 const CLAN_ACTIVITY_EVENTS_TABLE = "c0ld_clan_activity_events";
@@ -360,6 +361,8 @@ export default {
         response = await handleOfflineBloxlinkLookup(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/global/search") {
         response = await handleGlobalSearch(request, env);
+      } else if (request.method === "GET" && url.pathname === "/api/global/battle-history") {
+        response = await handleRetainedGlobalBattleHistory(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history/cwbot/missing") {
         response = await handleMissingCwBotImports(request, env);
       } else if (request.method === "GET" && url.pathname === "/api/external-history") {
@@ -4128,6 +4131,22 @@ async function attachRetainedGlobalBattleHistory(env, result, runClan, includeBa
   };
 }
 
+async function handleRetainedGlobalBattleHistory(request, env) {
+  requireSupabase(env);
+  const url = new URL(request.url);
+  const userId = Math.trunc(toNumber(url.searchParams.get("user_id")) || 0);
+  if (!(userId > 0)) throw httpError(400, "A numeric user_id is required.");
+  const clan = String(url.searchParams.get("clan") || clanName(env)).trim() || clanName(env);
+  const rows = await loadRetainedGlobalBattleHistory(env, clan, userId);
+  return cacheJson({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    user_id: userId,
+    clan_name: clan,
+    rows
+  }, env, 30);
+}
+
 async function loadRetainedGlobalBattleHistory(env, clan, userId) {
   let rows;
   try {
@@ -4197,7 +4216,157 @@ async function loadRetainedGlobalBattleHistory(env, clan, userId) {
     }
   }
 
-  return [...byBattle.values()];
+  return supplementMissingRetainedGlobalRanks(env, clan, userId, [...byBattle.values()]);
+}
+
+async function supplementMissingRetainedGlobalRanks(env, clan, userId, rows) {
+  return Promise.all((rows || []).map(async row => {
+    if (toNumber(row.global_rank) > 0) return row;
+
+    const battleKeyValue = String(row.battle_key || "").trim();
+    const points = toNumber(row.global_points ?? row.clan_points);
+    if (!battleKeyValue || points === null || !(toNumber(userId) > 0)) return row;
+
+    const finalRuns = await supabaseSelect(env, GLOBAL_RANK_RUNS_TABLE, {
+      select: "run_key,battle_key,total_global_players,candidate_player_count,finished_at,updated_at,started_at,status",
+      battle_key: `eq.${battleKeyValue}`,
+      status: "in.(ok,complete,completed)",
+      order: "finished_at.desc.nullslast,updated_at.desc,started_at.desc",
+      limit: "20"
+    }).catch(() => []);
+    const finalRun = finalRuns.find(run => run?.run_key && (
+      toNumber(run.total_global_players) > 0 || toNumber(run.candidate_player_count) > 0
+    )) || null;
+    if (finalRun?.run_key) {
+      const candidateCount = await supabaseCount(env, GLOBAL_RANK_CANDIDATES_TABLE, {
+        // A run key identifies one battle already. Older retained candidate rows can
+        // have a null or legacy battle_key, so filtering by it hides an otherwise
+        // complete final distribution (notably LunarBattle2026).
+        run_key: `eq.${finalRun.run_key}`
+      }).catch(() => 0);
+      if (candidateCount > 0) {
+        const rank = await resolveGlobalCandidateRank(env, finalRun.run_key, {
+          user_id: userId,
+          points,
+          // Rank against the entire battle-specific run. Do not reintroduce the
+          // optional row-level battle_key filter for retained legacy candidates.
+          battle_key: ""
+        }).catch(() => null);
+        if (rank > 0) {
+          return {
+            ...row,
+            run_key: finalRun.run_key,
+            global_rank: rank,
+            global_points: points,
+            total_global_players: toNumber(finalRun.total_global_players) ||
+              toNumber(finalRun.candidate_player_count) || candidateCount,
+            found: true,
+            global_rank_estimated: false,
+            global_rank_recovered_from: "final_candidate_distribution"
+          };
+        }
+      }
+    }
+
+    // Raw global candidates are temporary and may have been pruned after the
+    // completed run metadata was retained. The permanent final archive keeps
+    // that battle's ranked distribution. A participant does not need their own
+    // archived global row: their observed points can still be placed exactly
+    // against every archived global candidate.
+    const archivedRank = await resolveArchivedFinalDistributionRank(
+      env,
+      battleKeyValue,
+      userId,
+      points
+    ).catch(() => null);
+    if (archivedRank?.rank > 0) {
+      return {
+        ...row,
+        global_rank: archivedRank.rank,
+        global_points: points,
+        total_global_players: archivedRank.totalGlobalPlayers || toNumber(row.total_global_players),
+        found: true,
+        global_rank_estimated: false,
+        global_rank_recovered_from: "archived_final_distribution"
+      };
+    }
+
+    const estimate = await estimateArchivedGlobalRankFromAnchors(env, battleKeyValue, points).catch(() => null);
+    if (!estimate?.rank) return row;
+    return {
+      ...row,
+      global_rank: estimate.rank,
+      global_points: points,
+      total_global_players: estimate.totalGlobalPlayers || toNumber(row.total_global_players),
+      found: true,
+      global_rank_estimated: true,
+      global_rank_recovered_from: "neighboring_archived_rank_anchors"
+    };
+  }));
+}
+
+async function resolveArchivedFinalDistributionRank(env, battleKeyValue, userId, points) {
+  if (!battleKeyValue || !(toNumber(userId) > 0) || toNumber(points) === null) return null;
+
+  const base = {
+    battle_key: `eq.${battleKeyValue}`,
+    source_kind: "eq.global_candidate",
+    global_points: "not.is.null"
+  };
+  const [totalGlobalPlayers, higherCount, tiedBeforeCount] = await Promise.all([
+    supabaseCount(env, BATTLE_PLAYER_FINALS_TABLE, base, "user_id"),
+    supabaseCount(env, BATTLE_PLAYER_FINALS_TABLE, {
+      ...base,
+      global_points: `gt.${points}`
+    }, "user_id"),
+    supabaseCount(env, BATTLE_PLAYER_FINALS_TABLE, {
+      ...base,
+      global_points: `eq.${points}`,
+      user_id: `lt.${userId}`
+    }, "user_id")
+  ]);
+  if (!(totalGlobalPlayers > 0)) return null;
+  return {
+    rank: higherCount + tiedBeforeCount + 1,
+    totalGlobalPlayers
+  };
+}
+
+async function estimateArchivedGlobalRankFromAnchors(env, battleKeyValue, points) {
+  const anchors = await supabaseSelect(env, BATTLE_PLAYER_FINALS_TABLE, {
+    select: "user_id,global_rank,global_points,clan_points,total_global_players",
+    battle_key: `eq.${battleKeyValue}`,
+    global_rank: "not.is.null",
+    order: "global_points.desc.nullslast,clan_points.desc.nullslast",
+    limit: "2500"
+  });
+  const normalized = anchors
+    .map(anchor => ({
+      rank: toNumber(anchor.global_rank),
+      points: toNumber(anchor.global_points ?? anchor.clan_points),
+      total: toNumber(anchor.total_global_players)
+    }))
+    .filter(anchor => anchor.rank > 0 && anchor.points !== null)
+    .sort((a, b) => b.points - a.points || a.rank - b.rank);
+  return interpolateArchivedGlobalRank(normalized, points);
+}
+
+function interpolateArchivedGlobalRank(normalized, points) {
+  if (!Array.isArray(normalized) || normalized.length < 2 || toNumber(points) === null) return null;
+
+  const above = normalized
+    .filter(anchor => anchor.points >= points)
+    .sort((a, b) => a.points - b.points || b.rank - a.rank)[0] || null;
+  const below = normalized
+    .filter(anchor => anchor.points <= points)
+    .sort((a, b) => b.points - a.points || a.rank - b.rank)[0] || null;
+  if (!above || !below || above.points === below.points || below.rank < above.rank) return null;
+
+  const progress = clamp((above.points - points) / (above.points - below.points), 0, 1);
+  return {
+    rank: Math.max(1, Math.round(above.rank + (below.rank - above.rank) * progress)),
+    totalGlobalPlayers: above.total || below.total || null
+  };
 }
 
 async function fetchLeagueScheduledCollectionState(env) {
